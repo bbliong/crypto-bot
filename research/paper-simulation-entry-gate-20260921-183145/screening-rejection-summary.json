@@ -1,0 +1,9 @@
+{
+  "observedAt": 1789992104028,
+  "rejectedTokens": 804,
+  "failedChecks": {
+    "age": 206,
+    "liquidityUsd": 743,
+    "holders": 619
+  }
+}

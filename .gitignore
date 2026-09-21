@@ -1,0 +1,7 @@
+node_modules/
+profiles/
+data/
+reports/
+.env
+config/local.yaml
+*.log

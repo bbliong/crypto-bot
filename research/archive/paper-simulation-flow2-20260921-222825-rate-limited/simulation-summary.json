@@ -1,0 +1,17 @@
+{
+  "observedAt": 1790004579154,
+  "positionsOpened": 0,
+  "positionsClosed": 0,
+  "openAtEnd": 0,
+  "totalStakeUsd": 0,
+  "totalPnlUsd": 0,
+  "profitable": 0,
+  "losing": 0,
+  "breakEven": 0,
+  "exitsByReason": {},
+  "assumptions": {
+    "feeUsd": 0,
+    "slippagePercent": 0,
+    "note": "Paper simulation only; it does not represent executable net proceeds."
+  }
+}

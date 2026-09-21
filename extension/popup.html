@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="id"><meta charset="utf-8"><title>GMGN Listener</title>
+<style>body{font:14px system-ui;width:330px;padding:14px;background:#151a23;color:#edf2f7}input,button{box-sizing:border-box;width:100%;padding:9px;margin:6px 0;border-radius:6px;border:1px solid #627080}button{cursor:pointer;background:#a7ebcb;color:#10251c}#status{white-space:pre-wrap;font-size:12px}label{display:block;margin-top:8px}</style>
+<h3>Dengarkan tab GMGN terbuka</h3>
+<p>Buka tab GMGN yang ingin dipantau, lalu klik Mulai. Tidak ada reload atau browser baru.</p>
+<label>Endpoint lokal<input id="endpoint" value="http://127.0.0.1:17891"></label>
+<label>Kode koneksi dari terminal<input id="token" type="password" autocomplete="off"></label>
+<button id="start">Mulai pada tab GMGN aktif</button>
+<button id="stop">Hentikan listener</button>
+<pre id="status">Belum terhubung</pre>
+<script type="module" src="popup.js"></script></html>

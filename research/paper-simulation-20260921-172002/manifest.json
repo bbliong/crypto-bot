@@ -1,0 +1,33 @@
+{
+  "runId": "2026-09-21T10-20-04-518Z",
+  "startedAt": "2026-09-21T10:20:04.520Z",
+  "purpose": "Research-only collector with paper buy/sell simulation. No Fomo navigation or trading.",
+  "workers": 5,
+  "detailSeconds": 600,
+  "stopLossPercent": 20,
+  "simulation": {
+    "stakeUsd": 0.25,
+    "targetPercent": 40,
+    "trailingStartPercent": 20,
+    "trailingDrawdownPercent": 10,
+    "stopLossPercent": 20,
+    "sellPressure": {
+      "windowSeconds": 5,
+      "minimumTrades": 10,
+      "minimumUniqueSellers": 3,
+      "minimumSellSharePercent": 70,
+      "minimumPriceReturnPercent": -5,
+      "consecutiveWindows": 2
+    },
+    "feeUsd": 0,
+    "slippagePercent": 0
+  },
+  "feedRules": {
+    "minimumAgeSeconds": 0,
+    "maximumAgeSeconds": 900,
+    "minimumHolders": 8,
+    "minimumLiquidityUsd": 6000,
+    "maximumLiquidityUsd": 15000,
+    "maximumTop10Percent": 30
+  }
+}

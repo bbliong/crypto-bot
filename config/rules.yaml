@@ -1,0 +1,82 @@
+# Hypotheses from the supplied design, not validated trading recommendations.
+mode: manual
+# Phase 1: only verified GMGN WebSocket fields.  Phase 2 restores the on-chain
+# checks after an RPC/indexer extractor is configured.
+phase: 1
+feedUrl: https://gmgn.ai/?chain=sol
+tokenUrlTemplate: https://gmgn.ai/sol/token/{mint}
+gmgnCookiesFile: gmgn-cookies.json
+fomoCookiesFile: fomo-cookies.json
+browserChannel: chrome
+headless: false
+# Dedicated Playwright profile cloned from Chrome Profile 12
+# (aria.tele01@gmail.com). It retains the account session without locking the
+# everyday Chrome user-data directory.
+browserUserDataDir: C:/Projects/Crypto/profiles/aria-tele01
+browserProfileDirectory: Profile 12
+workers: 1
+queueCapacity: 100
+workerTimeoutMs: 12000
+# A Phase-1 token that reaches ENTRY_READY holds the only detail tab here.
+activeMonitorSeconds: 300
+evidenceMaxAgeMs: 15000
+candidateTtlMs: 60000
+minimumAgeSeconds: 0
+maximumAgeSeconds: 900
+minimumHolders: 20
+minimumLiquidityUsd: 6000
+maximumLiquidityUsd: 15000
+minimumBuys: 40
+maximumSellBuyRatio: 0.40
+maximumRisePercent: 250
+maximumDrawdownPercent: 25
+maximumTop5Percent: 25
+maximumTop10Percent: 30
+maximumSinglePercent: 8
+maximumBundledPercent: 12
+maximumSameSlotWallets: 5
+maximumSharedFunderWallets: 5
+maximumClusterPercent: 15
+maximumDeveloperPercent: 5
+maximumDeveloperSoldPercent: 10
+# User-provided token URL; manual mode uses a Fomo tab in the current Chrome.
+fomoUrlTemplate: https://fomo.family/tokens/solana/{mint}
+# Optional read-only Solana RPC URL is read from SOLANA_RPC_URL (never logged).
+# Verified from Playwright WebSocket probe: public_broadcast.signal contains a
+# public Solana mint and live fast-gate values. Fractional ratios are scaled to %.
+# It is discovery only; missing deep evidence remains UNKNOWN and cannot open Fomo.
+mappings:
+  - channel: public_broadcast
+    recordsPath: data
+    eventPath: et
+    eventValue: signal
+    chainPath: ed.c
+    chainValue: sol
+    mintPath: ed.d.a
+    metadata:
+      name: ed.d.nm
+      symbol: ed.d.s
+      imageUrl: ed.d.l
+    fields:
+      createdAt: {path: ed.d.ct, unit: seconds}
+      holders: {path: ed.d.hd}
+      liquidityUsd: {path: ed.d.lq}
+      marketCapUsd: {path: ed.d.mc}
+      buys: {path: ed.d.b1m}
+      sells: {path: ed.d.s1m}
+      top10Percent: {path: ed.d.t10, scale: 100}
+  # This channel is received only after the selected token detail page opens.
+  # It refreshes buy/sell counters while the feed remains the source of the
+  # initial holder, liquidity, age, and concentration screen.
+  - channel: token_stat
+    recordsPath: data
+    chainPath: n
+    chainValue: sol
+    mintPath: a
+    fields:
+      buys: {path: b1m}
+      sells: {path: s1m}
+      priceUsd: {path: p}
+      price1mUsd: {path: p1m}
+      price5mUsd: {path: p5m}
+      price1hUsd: {path: p1h}

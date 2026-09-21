@@ -1,0 +1,19 @@
+# EXAMPLE ONLY, NOT an assertion about GMGN's current wire schema.
+# Copy and adapt to rules.yaml after inspecting an actual token-bearing frame.
+mappings:
+  - channel: REPLACE_WITH_OBSERVED_CHANNEL
+    recordsPath: data
+    chainPath: chain
+    chainValue: sol
+    mintPath: mint
+    fields:
+      createdAt: {path: created_at, unit: seconds}
+      holders: {path: holder_count}
+      priceUsd: {path: price_usd}
+      liquidityUsd: {path: liquidity_usd}
+      buys: {path: buys}
+      sells: {path: sells}
+      risePercent: {path: rise_percent}
+# Deep fields require complete coverage and verified semantics, not partial lists.
+# Percent fields use 0..100 units; fractional data needs scale: 100.
+# Available fields and required completeness flags are described in README.md.

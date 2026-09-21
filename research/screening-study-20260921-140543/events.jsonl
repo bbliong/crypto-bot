@@ -1,0 +1,8 @@
+{"type":"DETAIL_STARTED","worker":1,"mint":"85Mxt7AiQxhGvf8XNk4BzshVkk4HaZH5nKzgD4Gdpump","startedAt":1789974431954}
+{"type":"STOP_LOSS_REACHED","mint":"85Mxt7AiQxhGvf8XNk4BzshVkk4HaZH5nKzgD4Gdpump","observedAt":1789974451071,"openingPriceUsd":0.000012362311,"currentPriceUsd":0.0000087022254,"drawdownPercent":29.60680733561873,"thresholdPercent":20}
+{"type":"DETAIL_STARTED","worker":5,"mint":"7fXhwJoiDZtjkfxEQT9eRiqP3dfbwkcywSKn5u4Ypump","startedAt":1789974631123}
+{"type":"STOP_LOSS_REACHED","mint":"7fXhwJoiDZtjkfxEQT9eRiqP3dfbwkcywSKn5u4Ypump","observedAt":1789974654265,"openingPriceUsd":0.00001787354,"currentPriceUsd":0.000014267219,"drawdownPercent":20.1768703905326,"thresholdPercent":20}
+{"type":"DETAIL_STARTED","worker":1,"mint":"FMNE4nsJHE2FF4LHGmZYsDgA375AAY1mg2TSaa4V2eXw","startedAt":1789974667321}
+{"type":"STOP_LOSS_REACHED","mint":"FMNE4nsJHE2FF4LHGmZYsDgA375AAY1mg2TSaa4V2eXw","observedAt":1789974685974,"openingPriceUsd":0.0010890265,"currentPriceUsd":0.00069463333,"drawdownPercent":36.215204129559744,"thresholdPercent":20}
+{"type":"DETAIL_STARTED","worker":5,"mint":"C2wTU6mxqivopmtMwYiDmUa3XGaLWB9jXLsYuJTyu4XX","startedAt":1789974696484}
+{"type":"DETAIL_STARTED","worker":1,"mint":"GLFvGpev9p4Bz8zvVsyg94mMC98VR9qqxhASjTG2whks","startedAt":1789974768484}

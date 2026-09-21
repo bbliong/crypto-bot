@@ -1,0 +1,9 @@
+{
+  "minimumAgeSeconds": 0,
+  "startedAt": "2026-09-21T14:25:24.2720468+07:00",
+  "errorLog": "C:\\Projects\\Crypto\\research\\screening-study-20260921-142524.error.log",
+  "processId": 30932,
+  "consoleLog": "C:\\Projects\\Crypto\\research\\screening-study-20260921-142524.console.log",
+  "collectsRejectedYoungScreens": true,
+  "minimumHolders": 8
+}

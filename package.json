@@ -1,0 +1,29 @@
+{
+  "name": "gmgn-websocket-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "probe": "node scripts/run.mjs probe",
+    "start": "node scripts/run.mjs start",
+    "research": "node scripts/run.mjs research",
+    "trade-ui": "node scripts/run.mjs trade-ui",
+    "replay": "node scripts/run.mjs replay",
+    "dashboard:data": "node scripts/run.mjs dashboard:data",
+    "dashboard:serve": "node scripts/serve-dashboard.mjs",
+    "test": "node scripts/run.mjs test",
+    "typecheck": "node scripts/run.mjs typecheck"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

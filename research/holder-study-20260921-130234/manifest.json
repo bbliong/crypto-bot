@@ -1,0 +1,16 @@
+{
+  "runId": "2026-09-21T06-02-34-720Z",
+  "startedAt": "2026-09-21T06:02:34.720Z",
+  "purpose": "Research-only collector. No Fomo navigation or trading.",
+  "workers": 5,
+  "detailSeconds": 600,
+  "stopLossPercent": 20,
+  "feedRules": {
+    "minimumAgeSeconds": 60,
+    "maximumAgeSeconds": 900,
+    "minimumHolders": 40,
+    "minimumLiquidityUsd": 6000,
+    "maximumLiquidityUsd": 15000,
+    "maximumTop10Percent": 30
+  }
+}

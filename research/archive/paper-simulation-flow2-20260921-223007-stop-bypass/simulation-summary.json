@@ -1,0 +1,21 @@
+{
+  "observedAt": 1790005183373,
+  "positionsOpened": 4,
+  "positionsClosed": 4,
+  "openAtEnd": 0,
+  "totalStakeUsd": 1,
+  "totalPnlUsd": 0.08295475239148112,
+  "profitable": 3,
+  "losing": 1,
+  "breakEven": 0,
+  "exitsByReason": {
+    "TRAILING_10": 2,
+    "OBSERVATION_END": 1,
+    "TARGET_40": 1
+  },
+  "assumptions": {
+    "feeUsd": 0,
+    "slippagePercent": 0,
+    "note": "Paper simulation only; it does not represent executable net proceeds."
+  }
+}

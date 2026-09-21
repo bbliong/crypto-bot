@@ -1,0 +1,8 @@
+{
+  "minimumAgeSeconds": 20,
+  "errorLog": "C:\\Projects\\Crypto\\research\\screening-study-20260921-134213.error.log",
+  "consoleLog": "C:\\Projects\\Crypto\\research\\screening-study-20260921-134213.console.log",
+  "collectsRejectedScreens": true,
+  "processId": 14344,
+  "startedAt": "2026-09-21T13:42:13.2413799+07:00"
+}

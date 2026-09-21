@@ -1,0 +1,323 @@
+{
+  "generatedAt": "2026-09-20T17:52:22.547Z",
+  "summary": {
+    "total": 1,
+    "entryReady": 0,
+    "reject": 1,
+    "watch": 0,
+    "averageValid": 43,
+    "matchedRules": 3,
+    "totalRules": 7
+  },
+  "selection": {
+    "mint": "HhhCh5xeyqrub5VYgdk2ZCKVuA2qfgnRxUMkUKYW1eNj",
+    "until": 1789927009328,
+    "stage": "DETAIL_INSPECT"
+  },
+  "selectedToken": {
+    "mint": "HhhCh5xeyqrub5VYgdk2ZCKVuA2qfgnRxUMkUKYW1eNj",
+    "firstSeenAt": 1789926513245,
+    "updatedAt": 1789926728459,
+    "name": "Tyler Raw Fund",
+    "symbol": "TYLER",
+    "imageUrl": "https://gmgn.ai/external-res/6f92c8b6b57c1dd2d9f910ff05550d78_v2.webp",
+    "status": "REJECT",
+    "validPercent": 43,
+    "totalRules": 7,
+    "pass": 3,
+    "warn": 0,
+    "fail": 1,
+    "unknown": 3,
+    "holders": 206,
+    "liquidityUsd": 6699.9301128738,
+    "marketCapUsd": 1024964,
+    "buys": 324,
+    "sells": 454,
+    "top10Percent": 1.7000000000000002,
+    "buyObserved": 226,
+    "sellObserved": 277,
+    "buyAmount": 4779.798755257256,
+    "sellAmount": 11388.877222077004,
+    "traderCount": 136,
+    "holderDistribution": {
+      "top5Percent": null,
+      "top10Percent": 1.7000000000000002,
+      "singlePercent": null,
+      "bundledPercent": null
+    },
+    "latestTrade": {
+      "side": "buy",
+      "occurredAt": 1789926728000,
+      "priceUsd": 0.00012680076639238377,
+      "amount": 16.58317716488,
+      "actorAddress": null
+    },
+    "recentTrades": [
+      {
+        "side": "buy",
+        "occurredAt": 1789926728000,
+        "priceUsd": 0.00012680076639238377,
+        "actorAddress": null
+      },
+      {
+        "side": "buy",
+        "occurredAt": 1789926728000,
+        "priceUsd": 0.00012552396125432275,
+        "actorAddress": null
+      },
+      {
+        "side": "sell",
+        "occurredAt": 1789926728000,
+        "priceUsd": 0.00012598000516800032,
+        "actorAddress": null
+      },
+      {
+        "side": "sell",
+        "occurredAt": 1789926728000,
+        "priceUsd": 0.00012809354373355104,
+        "actorAddress": null
+      },
+      {
+        "side": "buy",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.0001264713838810034,
+        "actorAddress": "H91pjZryx6WAszZBhAUTHiKTrKam99dyZjMzBMHUx6QB"
+      },
+      {
+        "side": "buy",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.00012355897123637703,
+        "actorAddress": "DJEhvjrxG3UqYRFrhpaPAZGcXFtueFTupYoT3MwDEStm"
+      },
+      {
+        "side": "sell",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.00012342458207651347,
+        "actorAddress": "FVKsoUqAjhFFRyDaTbvx9Uat8prhSEUpb6eKqUcUs9ut"
+      },
+      {
+        "side": "sell",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.00012602193940677674,
+        "actorAddress": "HPrcwHKtAPcLkBKd898dpC5ir7cCDppdoNmCrLP5X1DU"
+      },
+      {
+        "side": "sell",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.00012998506762552483,
+        "actorAddress": null
+      },
+      {
+        "side": "buy",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.0001284371471645687,
+        "actorAddress": null
+      },
+      {
+        "side": "sell",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.00012828189386943103,
+        "actorAddress": null
+      },
+      {
+        "side": "buy",
+        "occurredAt": 1789926727000,
+        "priceUsd": 0.00012842332505141584,
+        "actorAddress": null
+      }
+    ],
+    "holderChange": 206,
+    "liquidityChange": 6699.9301128738,
+    "checks": [
+      {
+        "name": "age",
+        "status": "PASS",
+        "detail": "217.5 seconds; range 60–900"
+      },
+      {
+        "name": "holders",
+        "status": "UNKNOWN",
+        "detail": "Missing or stale evidence"
+      },
+      {
+        "name": "liquidityUsd",
+        "status": "UNKNOWN",
+        "detail": "Missing or stale evidence"
+      },
+      {
+        "name": "buys",
+        "status": "PASS",
+        "detail": "324; minimum 40"
+      },
+      {
+        "name": "sellBuyRatio",
+        "status": "FAIL",
+        "detail": "454/324"
+      },
+      {
+        "name": "top10Percent",
+        "status": "UNKNOWN",
+        "detail": "Missing or stale evidence"
+      },
+      {
+        "name": "drawdownPercent",
+        "status": "PASS",
+        "detail": "14.77%; maximum 25"
+      }
+    ]
+  },
+  "tokens": [
+    {
+      "mint": "HhhCh5xeyqrub5VYgdk2ZCKVuA2qfgnRxUMkUKYW1eNj",
+      "firstSeenAt": 1789926513245,
+      "updatedAt": 1789926728459,
+      "name": "Tyler Raw Fund",
+      "symbol": "TYLER",
+      "imageUrl": "https://gmgn.ai/external-res/6f92c8b6b57c1dd2d9f910ff05550d78_v2.webp",
+      "status": "REJECT",
+      "validPercent": 43,
+      "totalRules": 7,
+      "pass": 3,
+      "warn": 0,
+      "fail": 1,
+      "unknown": 3,
+      "holders": 206,
+      "liquidityUsd": 6699.9301128738,
+      "marketCapUsd": 1024964,
+      "buys": 324,
+      "sells": 454,
+      "top10Percent": 1.7000000000000002,
+      "buyObserved": 226,
+      "sellObserved": 277,
+      "buyAmount": 4779.798755257256,
+      "sellAmount": 11388.877222077004,
+      "traderCount": 136,
+      "holderDistribution": {
+        "top5Percent": null,
+        "top10Percent": 1.7000000000000002,
+        "singlePercent": null,
+        "bundledPercent": null
+      },
+      "latestTrade": {
+        "side": "buy",
+        "occurredAt": 1789926728000,
+        "priceUsd": 0.00012680076639238377,
+        "amount": 16.58317716488,
+        "actorAddress": null
+      },
+      "recentTrades": [
+        {
+          "side": "buy",
+          "occurredAt": 1789926728000,
+          "priceUsd": 0.00012680076639238377,
+          "actorAddress": null
+        },
+        {
+          "side": "buy",
+          "occurredAt": 1789926728000,
+          "priceUsd": 0.00012552396125432275,
+          "actorAddress": null
+        },
+        {
+          "side": "sell",
+          "occurredAt": 1789926728000,
+          "priceUsd": 0.00012598000516800032,
+          "actorAddress": null
+        },
+        {
+          "side": "sell",
+          "occurredAt": 1789926728000,
+          "priceUsd": 0.00012809354373355104,
+          "actorAddress": null
+        },
+        {
+          "side": "buy",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.0001264713838810034,
+          "actorAddress": "H91pjZryx6WAszZBhAUTHiKTrKam99dyZjMzBMHUx6QB"
+        },
+        {
+          "side": "buy",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.00012355897123637703,
+          "actorAddress": "DJEhvjrxG3UqYRFrhpaPAZGcXFtueFTupYoT3MwDEStm"
+        },
+        {
+          "side": "sell",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.00012342458207651347,
+          "actorAddress": "FVKsoUqAjhFFRyDaTbvx9Uat8prhSEUpb6eKqUcUs9ut"
+        },
+        {
+          "side": "sell",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.00012602193940677674,
+          "actorAddress": "HPrcwHKtAPcLkBKd898dpC5ir7cCDppdoNmCrLP5X1DU"
+        },
+        {
+          "side": "sell",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.00012998506762552483,
+          "actorAddress": null
+        },
+        {
+          "side": "buy",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.0001284371471645687,
+          "actorAddress": null
+        },
+        {
+          "side": "sell",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.00012828189386943103,
+          "actorAddress": null
+        },
+        {
+          "side": "buy",
+          "occurredAt": 1789926727000,
+          "priceUsd": 0.00012842332505141584,
+          "actorAddress": null
+        }
+      ],
+      "holderChange": 206,
+      "liquidityChange": 6699.9301128738,
+      "checks": [
+        {
+          "name": "age",
+          "status": "PASS",
+          "detail": "217.5 seconds; range 60–900"
+        },
+        {
+          "name": "holders",
+          "status": "UNKNOWN",
+          "detail": "Missing or stale evidence"
+        },
+        {
+          "name": "liquidityUsd",
+          "status": "UNKNOWN",
+          "detail": "Missing or stale evidence"
+        },
+        {
+          "name": "buys",
+          "status": "PASS",
+          "detail": "324; minimum 40"
+        },
+        {
+          "name": "sellBuyRatio",
+          "status": "FAIL",
+          "detail": "454/324"
+        },
+        {
+          "name": "top10Percent",
+          "status": "UNKNOWN",
+          "detail": "Missing or stale evidence"
+        },
+        {
+          "name": "drawdownPercent",
+          "status": "PASS",
+          "detail": "14.77%; maximum 25"
+        }
+      ]
+    }
+  ]
+}
