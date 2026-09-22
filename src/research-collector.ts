@@ -9,10 +9,10 @@ import { attachCapture } from './capture.js';
 import { at, parseCandidates, parseTokenMetadata, validMint } from './parser.js';
 import { CandidateQueue } from './queue.js';
 import { evaluate } from './risk.js';
-import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type HolderDistributionDecision, type McapCandle, type ObservationDumpDecision, type ObservationDumpReason, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
+import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type HolderDistributionDecision, type McapCandle, type ObservationDumpDecision, type ObservationDumpReason, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
-import type { Candidate } from './model.js';
+import type { Candidate, Config } from './model.js';
 import { MOMENTUM_RULES, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 
 const { values } = parseArgs({ options: {
@@ -33,15 +33,36 @@ const { values } = parseArgs({ options: {
   topHolderDumpMinPercent: { type: 'string' },
   config: { type: 'string', default: 'config/rules.yaml' },
 } });
-const config = loadConfig(values.config);
+const loadedConfig = loadConfig(values.config);
+if (!['legacy', 'flow-3', 'momentum-v2'].includes(values.strategy!)) throw new Error('Unknown research strategy');
+const momentumV2 = values.strategy === 'momentum-v2';
+const flow3 = values.strategy === 'flow-3';
+const FLOW3_RULES = {
+  version: 'flow-3',
+  entry: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, minimumTrades20s: 5, buyUsdAtLeastSellUsd: true },
+  candles: { minimumCompletedCandles: 3, largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20, maximumConsecutiveRedCandles: 2 },
+  exits: { targetPercent: 40, hardStopPercent: 20, trailingStartPercent: 20, trailingDrawdownPercent: 10, sellPressureWindows: 2 },
+  feed: { minimumHolders: 20, minimumLiquidityUsd: 6_000, maximumLiquidityUsd: 15_000, maximumTop10Percent: 30 },
+  stakeUsd: 0.25,
+} as const;
+// Flow-3 replays the recorded 2026-09-21 paper experiment.  It intentionally
+// fixes the feed thresholds so an unrelated YAML tuning run cannot silently
+// change the research cohort.
+const config: Config = flow3 ? {
+  ...loadedConfig,
+  minimumAgeSeconds: 0,
+  maximumAgeSeconds: 900,
+  minimumHolders: 20,
+  minimumLiquidityUsd: 6_000,
+  maximumLiquidityUsd: 15_000,
+  maximumTop10Percent: 30,
+} : loadedConfig;
 const runSeconds = Number(values.seconds), detailSeconds = Number(values.detailSeconds);
 const workers = Number(values.workers), stopLossPercent = Number(values.stopLossPercent);
 const exitHoldSeconds = Number(values.exitHoldSeconds);
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
-if (!['legacy', 'momentum-v2'].includes(values.strategy!)) throw new Error('Unknown research strategy');
-const momentumV2 = values.strategy === 'momentum-v2';
-if (momentumV2 && autoBuyEnabled) throw new Error('momentum-v2 is a paper research strategy; set autoBuy=false before testing it.');
+if ((momentumV2 || flow3) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
 const topHolderDumpMinPercent = values.topHolderDumpMinPercent !== undefined ? Number(values.topHolderDumpMinPercent) : (config.topHolderDumpMinPercent ?? 1.5);
 
 // Stake configuration: supports USD (--stake 1, --stakeUsd 5) or direct SOL (--sol 0.005, --buySol 0.01)
@@ -50,7 +71,8 @@ const simulationStakeSol = directSolArg !== undefined
   ? Number(directSolArg)
   : (config.simulationStakeSol ?? null);
 
-const rawStakeUsd = values.stake ?? values.stakeUsd ?? values.amount ?? values.simulationStakeUsd ?? (config.simulationStakeUsd !== undefined ? String(config.simulationStakeUsd) : '0.25');
+const rawStakeUsd = values.stake ?? values.stakeUsd ?? values.amount ?? values.simulationStakeUsd
+  ?? (flow3 ? '0.25' : config.simulationStakeUsd !== undefined ? String(config.simulationStakeUsd) : '0.25');
 const simulationStakeUsd = Number(rawStakeUsd);
 
 if (![runSeconds, detailSeconds, workers, stopLossPercent, simulationStakeUsd, exitHoldSeconds].every(Number.isFinite) || runSeconds <= 0 || detailSeconds <= 0 || !Number.isInteger(workers) || workers < 1 || workers > 5 || stopLossPercent <= 0 || stopLossPercent >= 100 || simulationStakeUsd <= 0 || exitHoldSeconds < 0 || exitHoldSeconds > 300 || (simulationStakeSol !== null && (!Number.isFinite(simulationStakeSol) || simulationStakeSol <= 0)) || (maxPaperBuys !== null && (!Number.isInteger(maxPaperBuys) || maxPaperBuys < 1))) throw new Error('Invalid research options');
@@ -1001,7 +1023,13 @@ async function worker(index: number, deadline: number) {
             || earlyCandleRising.allowed);
 
           const momentumEntry = momentumV2 ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken) : null;
-          const buyAllowed = entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed && (momentumEntry?.allowed ?? true);
+          // Flow-3 uses the historical entry contract: stable live price,
+          // safe candle history, and net-positive 20-second buy flow.  Holder
+          // distribution and the later blind-protection gate were not part of
+          // that experiment, so retaining them would not reproduce its cohort.
+          const buyAllowed = flow3
+            ? entry.stable && candleAllowed && flowAllowed
+            : entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed && (momentumEntry?.allowed ?? true);
 
           if (buyAllowed && (maxPaperBuys === null || paperBuyCount < maxPaperBuys)) {
             paperBuyCount++;
@@ -1039,7 +1067,7 @@ async function worker(index: number, deadline: number) {
             if (!entryCandleClose || entryCandleClose <= 0) entryCandleClose = null;
             writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: now, entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
               entryGate: { momentum: momentumEntry, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
-            if (values.prepareTradeUi && !momentumV2) {
+            if (values.prepareTradeUi && !momentumV2 && !flow3) {
               await prepareBuyPanel(page, mint, index, now).catch(error => {
                 write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
               });
@@ -1065,11 +1093,11 @@ async function worker(index: number, deadline: number) {
           } else if (momentumEntry && !momentumEntry.allowed && now - lastMomentumBlockAt >= 5_000) {
             lastMomentumBlockAt = now;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: momentumEntry.reasons.join(', '), momentum: momentumEntry });
-          } else if (!blindProtection.allowed && !blindProtectionBlockRecorded) {
+          } else if (!flow3 && !blindProtection.allowed && !blindProtectionBlockRecorded) {
             blindProtectionBlockRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: blindProtection.reason, holderStatus: blindProtection.holderStatus, holderCount: blindProtection.holderCount, isYoungToken, candleDecision, earlyCandleRising, singleCandleOverride, note: 'Blind Protection: DILARANG BUY pada token umur muda (candle 1-2) karena API holder terkena 429 atau top holder belum terverifikasi.' });
             console.log(`[blind-protection-blocked] ${candidate?.metadata?.symbol ?? mint} ${blindProtection.reason} (status=${blindProtection.holderStatus}, holders=${blindProtection.holderCount})`);
-          } else if (!holderDistribution.allowed && !holderDistributionBlockRecorded) {
+          } else if (!flow3 && !holderDistribution.allowed && !holderDistributionBlockRecorded) {
             holderDistributionBlockRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: holderDistribution.reason, action: holderDistribution.action, holderCount: holderDistribution.holderCount, top1Percent: holderDistribution.top1Percent, top5Percent: holderDistribution.top5Percent, note: `Holder Distribution: ${holderDistribution.reason}` });
           } else if (!candleAllowed && !candleBlockRecorded) {
@@ -1098,8 +1126,8 @@ async function worker(index: number, deadline: number) {
             // Kumpulkan alasan buy belum terjadi
             const blockReasons: string[] = [];
             if (!candleAllowed) blockReasons.push('CANDLE:' + (candleDecision?.reason ?? candleEntryFlow?.reason ?? 'UNKNOWN'));
-            if (!blindProtection.allowed) blockReasons.push('BLIND_PROTECTION:' + blindProtection.reason);
-            if (!holderDistribution.allowed) blockReasons.push('HOLDER_DIST:' + holderDistribution.reason + (holderDistribution.action ? ':' + holderDistribution.action : ''));
+            if (!flow3 && !blindProtection.allowed) blockReasons.push('BLIND_PROTECTION:' + blindProtection.reason);
+            if (!flow3 && !holderDistribution.allowed) blockReasons.push('HOLDER_DIST:' + holderDistribution.reason + (holderDistribution.action ? ':' + holderDistribution.action : ''));
             if (!entry.stable) blockReasons.push('ENTRY:' + (entry.reason ?? 'UNSTABLE'));
             if (!flowAllowed) blockReasons.push('FLOW:INSUFFICIENT_BUY_PRESSURE');
             if (momentumEntry && !momentumEntry.allowed) blockReasons.push(...momentumEntry.reasons);
@@ -1136,9 +1164,12 @@ async function worker(index: number, deadline: number) {
               note: 'Paper hold: profit is at least +40%, holder growth is significant for two updates, and price rose at least 2% in 5 seconds.' });
             console.log('[sim-hold]', candidate?.metadata?.symbol ?? mint, 'HOLDER_GROWTH_MOMENTUM');
           }
-          const decision = assessSimulation(simulation, price, trades5s, { suppressSellPressure: now < recoveryHoldUntil, deferTargetForHolderMomentum: targetMomentumHold, suppressHardStop: true });
+          const decision = flow3
+            ? assessFlow3Simulation(simulation, price, trades5s, { suppressSellPressure: now < recoveryHoldUntil, deferTargetForHolderMomentum: targetMomentumHold })
+            : assessSimulation(simulation, price, trades5s, { suppressSellPressure: now < recoveryHoldUntil, deferTargetForHolderMomentum: targetMomentumHold, suppressHardStop: true });
           let exitReason = decision.exitReason;
           let hardStopValidation: Record<string, unknown> | null = null;
+          if (!flow3) {
           const hardStopThreshold = simulation.entryPriceUsd * 0.8;
           if (price <= hardStopThreshold + 1e-12) {
             if (!hardStopPendingAt) {
@@ -1234,10 +1265,11 @@ async function worker(index: number, deadline: number) {
             }
           }
           if (!exitReason && returnPercent >= 40 && sustainedHolderGrowth && (priceMomentum5s ?? 0) < 0.5) exitReason = 'TARGET_40_HOLDER_FLAT';
+          }
           if (exitReason) {
             simulationExit = exitReason;
             const result = writeSimulationExit(simulation, mint, now, price, exitReason, candidate?.metadata ?? null, { ...decision, holderCount, holderGrowthStreak, priceMomentum5s, recoveryHoldActive: now < recoveryHoldUntil, stopValidation: hardStopValidation });
-            if (values.prepareTradeUi) {
+            if (values.prepareTradeUi && !flow3) {
               await prepareSellPanel(page, mint, index, now, exitReason).catch(error => {
                 write('events.jsonl', { type: 'SELL_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), reason: exitReason, message: error instanceof Error ? error.message : 'unknown' });
               });
@@ -1336,8 +1368,8 @@ async function worker(index: number, deadline: number) {
 }
 async function main() {
   writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled,
-    rules: momentumV2 ? MOMENTUM_RULES : null, note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, tradePreparation: { enabled: values.prepareTradeUi, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthPercent: 10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, holderGrowthMomentum: { minimumConsecutiveGrowthUpdates: 2, minimumPriceMomentum5sPercent: 2, flatPriceMomentum5sBelowPercent: 0.5 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
+    rules: momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null, note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
   console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds, simulationStakeSol !== null ? ('stakeSol=' + simulationStakeSol) : ('stakeUsd=$' + simulationStakeUsd));

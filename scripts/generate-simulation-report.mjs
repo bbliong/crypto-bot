@@ -311,6 +311,10 @@ if (strategy?.strategy === 'momentum-v2') {
   html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Rumus momentum v2</h2><div class="rule">Entry: return harga 5 detik +0.25% hingga +20%, regresi log-harga positif, buy share ≥60%, minimal 3 pembeli, pembeli terbesar ≤50%. Token muda memerlukan dua interval pertumbuhan holder ≥10% dan ≥5 holder.</div><div class="rule">Exit diperiksa pada trade socket baru: stop −20% dengan konfirmasi trade berbeda, penjualan holder signifikan, profit lock dan trailing 4–8%. Target +40% dapat ditahan bila momentum serta holder kuat, dengan batas +50%. Harga loncat tetap dicatat sesuai tick yang tersedia.</div><p><a href="/momentum-replay.html">Lihat perbandingan replay dan keterbatasannya</a></p></main>`);
   html = html.replace('Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar', 'Token dibeli secara simulasi setelah screening, candle, holder, dan momentum v2 lolos; nominal');
 }
+if (strategy?.strategy === 'flow-3') {
+  html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Aturan flow-3</h2><div class="rule">Screening tetap memakai umur 0–900 detik, holder minimal 20, likuiditas $6.000–$15.000, dan Top-10 maksimal 30%. Entry hanya memerlukan harga detail yang stabil, candle 1 menit aman, serta minimal 5 trade dalam 20 detik dengan USD buy ≥ USD sell.</div><div class="rule">Exit flow-3: target +40%, stop −20%, trailing 10% setelah puncak minimal +20%, atau sell pressure dua window. Tidak memakai gate holder-distribution, blind-protection, target dinamis, maupun exit developer/whale dari strategi yang lebih baru.</div></main>`);
+  html = html.replace('Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar', 'Token dibeli simulasi setelah gate flow-3 lolos; nominal');
+}
 writeFileSync(join(folder, 'simulation-report.html'), html);
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/paper-simulation-report.html', html);

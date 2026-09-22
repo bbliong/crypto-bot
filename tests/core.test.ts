@@ -11,7 +11,7 @@ import { CandidateQueue } from '../src/queue.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
-import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
+import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
 
 const mint = 'FDW1Et4FS6sYLjByZNNvB8ZzwZ4eh9HG2snB97Jzpump';
@@ -121,6 +121,16 @@ test('paper simulation exits at target, trailing loss, hard stop, and persistent
   const trailing=openSimulation(mint,now,10); assessSimulation(trailing,13,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0}); assert.equal(assessSimulation(trailing,11.5,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0}).exitReason,'TRAILING_10');
   const stopped=openSimulation(mint,now,10); assert.equal(assessSimulation(stopped,8,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0}).exitReason,'STOP_LOSS_20');
   const pressure=openSimulation(mint,now,10), window={buys:3,sells:8,buyUsd:1,sellUsd:9,uniqueSellers:3,windowStart:0}; assert.equal(assessSimulation(pressure,9.4,window).exitReason,null); assert.equal(assessSimulation(pressure,9.4,window).exitReason,null); assert.equal(assessSimulation(pressure,9.4,{...window,windowStart:5000}).exitReason,'SELL_PRESSURE');
+});
+test('flow-3 keeps only its documented target, stop, trailing, and sell-pressure exits',()=>{
+  const noTieredExit=openSimulation(mint,now,10);
+  assessFlow3Simulation(noTieredExit,12.5,{buys:3,sells:1,buyUsd:10,sellUsd:1,uniqueSellers:1});
+  assert.equal(assessFlow3Simulation(noTieredExit,11.7,{buys:2,sells:2,buyUsd:10,sellUsd:10,uniqueSellers:1}).exitReason,null);
+  const trailing=openSimulation(mint,now,10);
+  assessFlow3Simulation(trailing,12.1,{buys:1,sells:1,buyUsd:1,sellUsd:1,uniqueSellers:1});
+  assert.equal(assessFlow3Simulation(trailing,10.8,{buys:1,sells:1,buyUsd:1,sellUsd:1,uniqueSellers:1}).exitReason,'TRAILING_10');
+  const stopped=openSimulation(mint,now,10);
+  assert.equal(assessFlow3Simulation(stopped,8,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0}).exitReason,'STOP_LOSS_20');
 });
 test('simulation exit reason accepts DEV_DUMP_EXIT and TOP_HOLDER_DUMP',()=>{
   const reasons: SimulationExitReason[] = ['DEV_DUMP_EXIT', 'TOP_HOLDER_DUMP', 'MOMENTUM_EXHAUSTION_5S', 'PROFIT_STAGNATION_10S'];
@@ -380,5 +390,3 @@ test('auto close monitoring aborts observation early when token dumps heavily (e
   assert.equal(healthy.shouldAbort, false);
   assert.equal(healthy.reason, null);
 });
-
-

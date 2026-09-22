@@ -342,6 +342,35 @@ export function assessSimulation(position: SimulationPosition, currentPriceUsd: 
   return { returnPercent, peakReturnPercent, drawdownFromPeakPercent, sellSharePercent, pressureWindow, exitReason };
 }
 
+/**
+ * Exit model used by the archived flow-3 experiment.  It deliberately keeps
+ * only the exits documented in that run: +40% target, -20% stop, 10% trailing
+ * from a +20% peak, and two completed sell-pressure windows.  Later dynamic
+ * targets and holder/whale exits belong to newer strategies.
+ */
+export function assessFlow3Simulation(position: SimulationPosition, currentPriceUsd: number, recent: TradeWindow, guards: SimulationGuards = {}): SimulationDecision {
+  if (!(currentPriceUsd > 0)) throw new Error('Simulation requires a positive current price');
+  position.peakPriceUsd = Math.max(position.peakPriceUsd, currentPriceUsd);
+  const returnPercent = (currentPriceUsd / position.entryPriceUsd - 1) * 100;
+  const peakReturnPercent = (position.peakPriceUsd / position.entryPriceUsd - 1) * 100;
+  const drawdownFromPeakPercent = (position.peakPriceUsd - currentPriceUsd) / position.peakPriceUsd * 100;
+  const totalUsd = recent.buyUsd + recent.sellUsd;
+  const sellSharePercent = totalUsd > 0 ? recent.sellUsd / totalUsd * 100 : null;
+  const pressureWindow = recent.buys + recent.sells >= 10 && recent.uniqueSellers >= 3
+    && (sellSharePercent ?? 0) >= 70 && returnPercent <= -5;
+  const newPressureWindow = recent.windowStart === undefined || recent.windowStart !== position.lastPressureWindowStart;
+  if (newPressureWindow) {
+    position.pressureWindows = pressureWindow ? position.pressureWindows + 1 : 0;
+    if (recent.windowStart !== undefined) position.lastPressureWindowStart = recent.windowStart;
+  }
+  const targetReached = currentPriceUsd >= position.entryPriceUsd * 1.4 - 1e-12;
+  const exitReason: SimulationExitReason | null = targetReached && !guards.deferTargetForHolderMomentum ? 'TARGET_40'
+    : !guards.suppressHardStop && currentPriceUsd <= position.entryPriceUsd * 0.8 + 1e-12 ? 'STOP_LOSS_20'
+    : peakReturnPercent >= 20 && drawdownFromPeakPercent >= 10 ? 'TRAILING_10'
+    : !guards.suppressSellPressure && position.pressureWindows >= 2 ? 'SELL_PRESSURE' : null;
+  return { returnPercent, peakReturnPercent, drawdownFromPeakPercent, sellSharePercent, pressureWindow, exitReason };
+}
+
 export function closeSimulation(position: SimulationPosition, exitPriceUsd: number) {
   const grossProceedsUsd = position.quantity * exitPriceUsd;
   const pnlUsd = grossProceedsUsd - position.stakeUsd;
