@@ -17,6 +17,19 @@ export class CandidateQueue {
     return mint;
   }
   done(mint: string) { this.active.delete(mint); }
+  remove(mint: string): boolean {
+    const deleted = this.pending.delete(mint);
+    this.active.delete(mint);
+    return deleted;
+  }
+  getPendingMints(now = Date.now()): string[] {
+    this.prune(now);
+    return [...this.pending.keys()].reverse();
+  }
+  getPendingCount(now = Date.now()): number {
+    this.prune(now);
+    return this.pending.size;
+  }
   private prune(now: number) {
     for (const [mint, time] of this.pending) if (now - time > this.ttlMs) this.pending.delete(mint);
   }

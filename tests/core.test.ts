@@ -435,3 +435,50 @@ test('tab manager enforces 5-tab limit, monitors active tabs, preserves closed h
   assert.equal(tm.canOpen(), false);
   assert.equal(tm.getClosedHistory().length, 0); // removed from closed history
 });
+
+test('1-tab mode: tab manager enforces 1-tab limit, records metrics, and queue takes newest candidate', () => {
+  const tm = new TabManager(1);
+  assert.equal(tm.getMaxTabs(), 1);
+  assert.equal(tm.canOpen(), true);
+
+  assert.ok(tm.openTab('mintA', 'TKA', 'https://gmgn.ai/sol/token/mintA', 'Token A', 1000));
+  assert.equal(tm.getActiveCount(), 1);
+  assert.equal(tm.canOpen(), false);
+
+  // Second tab cannot open concurrently
+  assert.equal(tm.openTab('mintB', 'TKB', 'https://gmgn.ai/sol/token/mintB', 'Token B', 1000), false);
+
+  // Update token metrics & holder distribution
+  tm.updateTokenMetrics('mintA', {
+    top10Percent: 22.5,
+    developerPercent: 0,
+    marketCapUsd: 150000,
+    liquidityUsd: 35000,
+  });
+  const active = tm.getActiveTabs()[0];
+  assert.equal(active.top10Percent, 22.5);
+  assert.equal(active.retailPercent, 77.5);
+
+  // Record trades and check buyRatioPercent
+  tm.recordTrade('mintA', { side: 'buy', amountUsd: 750, priceUsd: 0.0001, occurredAt: 1050 });
+  tm.recordTrade('mintA', { side: 'sell', amountUsd: 250, priceUsd: 0.0001, occurredAt: 1100 });
+  assert.equal(active.buyRatioPercent, 75);
+  assert.equal(active.netFlowUsd, 500);
+
+  // Queue takes newest candidate
+  const q = new CandidateQueue(10, 60000);
+  const now = 100000;
+  q.push('token1', now);
+  q.push('token2', now + 10);
+  q.push('token3', now + 20); // newest / last inserted
+  assert.equal(q.take(now + 20), 'token3');
+
+  // Close active tab
+  const closed = tm.closeTab('mintA', 1500);
+  assert.ok(closed);
+  assert.equal(closed.top10Percent, 22.5);
+  assert.equal(closed.buyRatioPercent, 75);
+  assert.equal(tm.getActiveCount(), 0);
+  assert.equal(tm.canOpen(), true);
+});
+
