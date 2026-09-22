@@ -1,4 +1,4 @@
-export type SimulationExitReason = 'TARGET_40' | 'TARGET_40_HOLDER_FLAT' | 'TRAILING_10' | 'STOP_LOSS_20' | 'SELL_PRESSURE' | 'OBSERVATION_END';
+export type SimulationExitReason = 'TARGET_40' | 'TARGET_40_HOLDER_FLAT' | 'TARGET_DYNAMIC' | 'TRAILING_10' | 'STOP_LOSS_20' | 'SELL_PRESSURE' | 'PROFIT_STAGNATION_10S' | 'MOMENTUM_EXHAUSTION_5S' | 'DEV_DUMP_EXIT' | 'TOP_HOLDER_DUMP' | 'OBSERVATION_END';
 
 export interface SimulationPosition {
   mint: string;
@@ -80,6 +80,52 @@ export interface SingleCandleHolderOverrideDecision {
   reason: 'SINGLE_CANDLE_HOLDER_GROWTH_OK' | 'NOT_SINGLE_CANDLE' | 'HOLDERS_NOT_ABOVE_100' | 'HOLDER_GROWTH_NOT_SIGNIFICANT_OR_FRESH';
 }
 
+export interface BlindProtectionDecision {
+  allowed: boolean;
+  reason: 'HOLDERS_VERIFIED' | 'BLIND_PROTECTION_HOLDERS_429' | 'BLIND_PROTECTION_NO_HOLDERS' | 'MATURE_TOKEN_EXEMPT';
+  holderStatus: number | null;
+  holderCount: number;
+}
+
+export interface EarlyCandleRisingDecision {
+  allowed: boolean;
+  reason: 'NOT_EARLY_CANDLE' | 'CANDLE_NOT_RISING' | 'CURRENT_CANDLE_DROP' | 'INSUFFICIENT_HOLDERS' | 'EARLY_CANDLE_RISING_OK';
+  returnPercent: number | null;
+}
+
+/**
+ * Newly launched tokens with only 1 or 2 candles can be allowed if the candle
+ * data is actively rising (green candle, return >= 0%, no dump) and the token has
+ * at least the minimum required holders (default: 20). Realtime price stability and
+ * trade flow gates in the collector still apply.
+ */
+export function assessEarlyCandleRising(
+  candles: McapCandle[],
+  candleDecision: CandleHistoryDecision | null,
+  candleEntryFlow: CandleEntryFlowDecision | null,
+  holderCount: number | null,
+  minHolders = 20,
+): EarlyCandleRisingDecision {
+  const isEarly = candleDecision?.reason === 'SINGLE_CANDLE_ONLY' || candleDecision?.reason === 'INSUFFICIENT_CANDLES';
+  if (!isEarly) return { allowed: false, reason: 'NOT_EARLY_CANDLE', returnPercent: null };
+  if (candleEntryFlow?.reason === 'CURRENT_CANDLE_DROP') {
+    return { allowed: false, reason: 'CURRENT_CANDLE_DROP', returnPercent: candleEntryFlow.currentCandleReturnPercent };
+  }
+  if (!candles || candles.length === 0) return { allowed: false, reason: 'CANDLE_NOT_RISING', returnPercent: null };
+  const latest = candles.at(-1)!;
+  const returnPercent = latest.open > 0 ? ((latest.close / latest.open) - 1) * 100 : 0;
+  if (latest.close < latest.open || returnPercent < 0) {
+    return { allowed: false, reason: 'CANDLE_NOT_RISING', returnPercent };
+  }
+  if (candles.length === 2 && latest.close < candles[0]!.open) {
+    return { allowed: false, reason: 'CANDLE_NOT_RISING', returnPercent };
+  }
+  if (holderCount === null || holderCount < minHolders) {
+    return { allowed: false, reason: 'INSUFFICIENT_HOLDERS', returnPercent };
+  }
+  return { allowed: true, reason: 'EARLY_CANDLE_RISING_OK', returnPercent };
+}
+
 /**
  * A very early launch has no meaningful candle history yet. It may enter only
  * when a fresh GMGN token-stat sample proves broadening demand: more than 100
@@ -95,6 +141,29 @@ export function assessSingleCandleHolderOverride(
   if (holderCount === null || holderCount <= 100) return { allowed: false, reason: 'HOLDERS_NOT_ABOVE_100' };
   if (!hasFreshSignificantHolderGrowth) return { allowed: false, reason: 'HOLDER_GROWTH_NOT_SIGNIFICANT_OR_FRESH' };
   return { allowed: true, reason: 'SINGLE_CANDLE_HOLDER_GROWTH_OK' };
+}
+
+/**
+ * Safety Rule: Blind Protection
+ * For young tokens (candle 1-2 / relying on early candle rising or single candle override),
+ * buying without verified Top Holders and Developer data is a blind risk.
+ * If the holder API returned 429 or returned 0 holders, buying is FORBIDDEN.
+ */
+export function assessBlindProtection(
+  isYoungToken: boolean,
+  holderStatus: number | null,
+  holderCount: number,
+): BlindProtectionDecision {
+  if (!isYoungToken) {
+    return { allowed: true, reason: 'MATURE_TOKEN_EXEMPT', holderStatus, holderCount };
+  }
+  if (holderStatus === 429) {
+    return { allowed: false, reason: 'BLIND_PROTECTION_HOLDERS_429', holderStatus, holderCount };
+  }
+  if (holderCount <= 0 || holderStatus !== 200) {
+    return { allowed: false, reason: 'BLIND_PROTECTION_NO_HOLDERS', holderStatus, holderCount };
+  }
+  return { allowed: true, reason: 'HOLDERS_VERIFIED', holderStatus, holderCount };
 }
 
 /**
@@ -149,7 +218,9 @@ export function assessEntryStability(samples: PriceSample[]): EntryStability {
     if (samples[index]!.priceUsd < samples[index - 1]!.priceUsd) consecutiveDeclines++;
     else break;
   }
-  const falling = consecutiveDeclines >= 2 || momentum5sPercent < -2;
+  // Require an actual noticeable drop (momentum <= -3%, or consecutive declines with momentum <= -2%).
+  // Micro-sells or tiny noise dips when overall momentum is flat or positive should not block entry.
+  const falling = momentum5sPercent <= -3 || (consecutiveDeclines >= 2 && momentum5sPercent <= -2);
   if (distinctPriceCount < 2) return { stable: false, reason: 'INSUFFICIENT_PRICE_CONFIRMATION', momentum5sPercent, consecutiveDeclines, distinctPriceCount };
   return { stable: !falling, reason: falling ? 'CONTINUING_PRICE_DROP' : 'STABLE_OR_RECOVERING', momentum5sPercent, consecutiveDeclines, distinctPriceCount };
 }

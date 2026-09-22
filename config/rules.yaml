@@ -19,11 +19,26 @@ queueCapacity: 100
 workerTimeoutMs: 12000
 # A Phase-1 token that reaches ENTRY_READY holds the only detail tab here.
 activeMonitorSeconds: 300
+# Jumlah modal beli per transaksi dalam USD (contoh: 0.25, 1.0, 5.0) atau gunakan simulationStakeSol (contoh: 0.005)
+# Nilai ini juga bisa dioverride via CLI: --stake 1 atau --sol 0.005
+simulationStakeUsd: 1.0
+# Take profit instan saat harga stagnan/tidak naik selama 10 detik dan sudah untung >= +3%
+profitStagnationPercent: 3
+profitStagnationSeconds: 10
+# Toggle transaksi asli di GMGN via Playwright:
+# false = simulasi paper trading penuh TETAP AKTIF (Playwright TIDAK mengklik tombol Buy/Sell asli, saldo wallet aman)
+# true = transaksi asli AKTIF (Playwright mengklik tombol Buy dan Sell asli di web GMGN)
+# Bisa juga di-override via CLI flag: --autoBuy atau --autoBuy true
+autoBuy: false
+# Batas persentase kepemilikan Top Holder untuk auto-sell darurat jika holder tersebut menjual (dalam %)
+topHolderDumpMinPercent: 1.5
 evidenceMaxAgeMs: 15000
 candidateTtlMs: 60000
 minimumAgeSeconds: 0
 maximumAgeSeconds: 900
 minimumHolders: 20
+# Khusus token baru yang hanya memiliki 1 atau 2 candle, holder wajib minimal 60
+earlyCandleMinimumHolders: 60
 minimumLiquidityUsd: 6000
 maximumLiquidityUsd: 15000
 minimumBuys: 40

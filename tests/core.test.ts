@@ -11,7 +11,7 @@ import { CandidateQueue } from '../src/queue.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
-import { assessCandleHistory, assessEntryStability, assessSimulation, assessSingleCandleHolderOverride, openSimulation } from '../src/research-simulation.js';
+import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
 
 const mint = 'FDW1Et4FS6sYLjByZNNvB8ZzwZ4eh9HG2snB97Jzpump';
@@ -122,6 +122,11 @@ test('paper simulation exits at target, trailing loss, hard stop, and persistent
   const stopped=openSimulation(mint,now,10); assert.equal(assessSimulation(stopped,8,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0}).exitReason,'STOP_LOSS_20');
   const pressure=openSimulation(mint,now,10), window={buys:3,sells:8,buyUsd:1,sellUsd:9,uniqueSellers:3,windowStart:0}; assert.equal(assessSimulation(pressure,9.4,window).exitReason,null); assert.equal(assessSimulation(pressure,9.4,window).exitReason,null); assert.equal(assessSimulation(pressure,9.4,{...window,windowStart:5000}).exitReason,'SELL_PRESSURE');
 });
+test('simulation exit reason accepts DEV_DUMP_EXIT and TOP_HOLDER_DUMP',()=>{
+  const reasons: SimulationExitReason[] = ['DEV_DUMP_EXIT', 'TOP_HOLDER_DUMP', 'MOMENTUM_EXHAUSTION_5S', 'PROFIT_STAGNATION_10S'];
+  assert.equal(reasons.includes('DEV_DUMP_EXIT'), true);
+  assert.equal(reasons.includes('TOP_HOLDER_DUMP'), true);
+});
 test('paper simulation can defer a +40% target for holder momentum while preserving hard stop',()=>{
   const position=openSimulation(mint,now,10);
   assert.equal(assessSimulation(position,14,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0},{deferTargetForHolderMomentum:true}).exitReason,null);
@@ -143,6 +148,19 @@ test('candle history blocks a pump that already dumped and three red candles',()
   assert.equal(assessSingleCandleHolderOverride(one, 150, false).reason, 'HOLDER_GROWTH_NOT_SIGNIFICANT_OR_FRESH');
   assert.equal(assessCandleHistory([{time:1,open:10,close:11,high:11,low:10,volume:1},{time:2,open:11,close:12,high:12,low:11,volume:1}]).allowed,false);
   assert.equal(assessCandleHistory([{time:1,open:10,close:14,high:14,low:10,volume:1},{time:2,open:14,close:8,high:14,low:8,volume:1},{time:3,open:8,close:9,high:9,low:8,volume:1}]).reason,'SHARP_CANDLE_CRASH');
+  // Single rising candle with sufficient holders is allowed
+  const greenCandle = [{time:1,open:10,close:12,high:12,low:10,volume:1}];
+  assert.equal(assessEarlyCandleRising(greenCandle, one, null, 25, 20).allowed, true);
+  assert.equal(assessEarlyCandleRising(greenCandle, one, null, 25, 20).reason, 'EARLY_CANDLE_RISING_OK');
+  // Single red candle is blocked
+  const redCandle = [{time:1,open:10,close:9,high:10,low:8,volume:1}];
+  assert.equal(assessEarlyCandleRising(redCandle, one, null, 25, 20).allowed, false);
+  assert.equal(assessEarlyCandleRising(redCandle, one, null, 25, 20).reason, 'CANDLE_NOT_RISING');
+  // Single candle with drop flow is blocked
+  assert.equal(assessEarlyCandleRising(greenCandle, one, { allowed: false, reason: 'CURRENT_CANDLE_DROP', completedCandles: 0, currentCandleReturnPercent: -6 }, 25, 20).allowed, false);
+  // Single candle with low holders is blocked
+  assert.equal(assessEarlyCandleRising(greenCandle, one, null, 15, 20).allowed, false);
+  assert.equal(assessEarlyCandleRising(greenCandle, one, null, 15, 20).reason, 'INSUFFICIENT_HOLDERS');
 });
 test('Playwright adapter ignores other sockets and handles reconnect, binary JSON, malformed frames',()=>{
   const page=new EventEmitter(); const captured:unknown[]=[];const payloads:unknown[]=[];
@@ -169,3 +187,25 @@ test('token activity parser retains only verified buy/sell facts',()=>{
   assert.match(withActor?.actorHash ?? '', /^[a-f0-9]{16}$/);
   assert.equal(withActor?.actorAddress, '11111111111111111111111111111111');
 });
+test('blind protection blocks young tokens when holder API hits 429 or is unverified', () => {
+  // Young token with 429 status is strictly blocked
+  assert.equal(assessBlindProtection(true, 429, 0).allowed, false);
+  assert.equal(assessBlindProtection(true, 429, 0).reason, 'BLIND_PROTECTION_HOLDERS_429');
+
+  // Young token with 0 holders is blocked
+  assert.equal(assessBlindProtection(true, 200, 0).allowed, false);
+  assert.equal(assessBlindProtection(true, 200, 0).reason, 'BLIND_PROTECTION_NO_HOLDERS');
+
+  // Young token with non-200 status (e.g. 500 or null) is blocked
+  assert.equal(assessBlindProtection(true, null, 0).allowed, false);
+  assert.equal(assessBlindProtection(true, null, 0).reason, 'BLIND_PROTECTION_NO_HOLDERS');
+
+  // Young token with verified holders (status 200, count > 0) is allowed
+  assert.equal(assessBlindProtection(true, 200, 48).allowed, true);
+  assert.equal(assessBlindProtection(true, 200, 48).reason, 'HOLDERS_VERIFIED');
+
+  // Mature token (candle 3+) is exempt
+  assert.equal(assessBlindProtection(false, 429, 0).allowed, true);
+  assert.equal(assessBlindProtection(false, 429, 0).reason, 'MATURE_TOKEN_EXEMPT');
+});
+

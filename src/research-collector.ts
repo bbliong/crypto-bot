@@ -9,34 +9,55 @@ import { attachCapture } from './capture.js';
 import { at, parseCandidates, parseTokenMetadata, validMint } from './parser.js';
 import { CandidateQueue } from './queue.js';
 import { evaluate } from './risk.js';
-import { assessCandleEntryFlow, assessCandleHistory, assessEntryStability, assessSimulation, closeSimulation, openSimulation, type McapCandle, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
+import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type McapCandle, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
-import { amountInput, applyExecutionSettings, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
+import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate } from './model.js';
 
 const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '1800' }, detailSeconds: { type: 'string', default: '600' },
   workers: { type: 'string', default: '5' }, stopLossPercent: { type: 'string', default: '20' },
-  simulationStakeUsd: { type: 'string', default: '0.25' },
+  simulationStakeUsd: { type: 'string' },
+  stake: { type: 'string' },
+  stakeUsd: { type: 'string' },
+  amount: { type: 'string' },
+  sol: { type: 'string' },
+  buySol: { type: 'string' },
   profileDir: { type: 'string', default: 'profiles/research-aria-tele01' },
   profileName: { type: 'string', default: 'Profile 12' }, output: { type: 'string' },
   prepareTradeUi: { type: 'boolean', default: true }, enableExtensions: { type: 'boolean', default: true },
-  exitHoldSeconds: { type: 'string', default: '20' }, maxPaperBuys: { type: 'string' },
+  exitHoldSeconds: { type: 'string', default: '20' }, maxPaperBuys: { type: 'string' }, maxBuys: { type: 'string' },
+  autoBuy: { type: 'boolean' },
+  topHolderDumpMinPercent: { type: 'string' },
   config: { type: 'string', default: 'config/rules.yaml' },
 } });
 const config = loadConfig(values.config);
 const runSeconds = Number(values.seconds), detailSeconds = Number(values.detailSeconds);
 const workers = Number(values.workers), stopLossPercent = Number(values.stopLossPercent);
-const simulationStakeUsd = Number(values.simulationStakeUsd);
 const exitHoldSeconds = Number(values.exitHoldSeconds);
-const maxPaperBuys = values.maxPaperBuys === undefined ? null : Number(values.maxPaperBuys);
-if (![runSeconds, detailSeconds, workers, stopLossPercent, simulationStakeUsd, exitHoldSeconds].every(Number.isFinite) || runSeconds <= 0 || detailSeconds <= 0 || !Number.isInteger(workers) || workers < 1 || workers > 5 || stopLossPercent <= 0 || stopLossPercent >= 100 || simulationStakeUsd <= 0 || exitHoldSeconds < 0 || exitHoldSeconds > 300 || (maxPaperBuys !== null && (!Number.isInteger(maxPaperBuys) || maxPaperBuys < 1))) throw new Error('Invalid research options');
+const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
+const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
+const topHolderDumpMinPercent = values.topHolderDumpMinPercent !== undefined ? Number(values.topHolderDumpMinPercent) : (config.topHolderDumpMinPercent ?? 1.5);
+
+// Stake configuration: supports USD (--stake 1, --stakeUsd 5) or direct SOL (--sol 0.005, --buySol 0.01)
+const directSolArg = values.sol ?? values.buySol;
+const simulationStakeSol = directSolArg !== undefined
+  ? Number(directSolArg)
+  : (config.simulationStakeSol ?? null);
+
+const rawStakeUsd = values.stake ?? values.stakeUsd ?? values.amount ?? values.simulationStakeUsd ?? (config.simulationStakeUsd !== undefined ? String(config.simulationStakeUsd) : '0.25');
+const simulationStakeUsd = Number(rawStakeUsd);
+
+if (![runSeconds, detailSeconds, workers, stopLossPercent, simulationStakeUsd, exitHoldSeconds].every(Number.isFinite) || runSeconds <= 0 || detailSeconds <= 0 || !Number.isInteger(workers) || workers < 1 || workers > 5 || stopLossPercent <= 0 || stopLossPercent >= 100 || simulationStakeUsd <= 0 || exitHoldSeconds < 0 || exitHoldSeconds > 300 || (simulationStakeSol !== null && (!Number.isFinite(simulationStakeSol) || simulationStakeSol <= 0)) || (maxPaperBuys !== null && (!Number.isInteger(maxPaperBuys) || maxPaperBuys < 1))) throw new Error('Invalid research options');
 if (!existsSync(values.profileDir)) throw new Error('Research profile tidak ditemukan: ' + values.profileDir);
 
 type Primitive = string | number | boolean | null;
-type Trade = { mint: string; wallet: string | null; side: 'buy' | 'sell'; occurredAt: number; observedAt: number; priceUsd: number | null; amount: number | null; signature: string | null; raw: Record<string, Primitive> };
+type Trade = { mint: string; wallet: string | null; side: 'buy' | 'sell'; occurredAt: number; observedAt: number; priceUsd: number | null; amount: number | null; amountUsd?: number | null; signature: string | null; raw: Record<string, Primitive> };
 type Holder = { mint: string; wallet: string; observedAt: number; raw: Record<string, string | number | boolean | null> };
 type DeveloperHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; raw: Record<string, Primitive> };
+type TrackedHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; isDev: boolean; walletTagV2?: string; raw: Record<string, Primitive> };
+type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
+const holderApiStatus = new Map<string, HolderApiStatus>();
 type SimulatedEvent = { type: 'SIMULATED_BUY' | 'SIMULATED_SELL' | 'SIMULATION_HOLD'; pnlUsd?: number; reason?: string };
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const output = values.output || join('research', runId);
@@ -49,8 +70,12 @@ const reportRelevantEventTypes = new Set([
   'SIMULATION_BUY_BLOCKED',
   'BUY_PREPARED',
   'BUY_PREPARATION_ERROR',
+  'BUY_BUTTON_CLICKED',
+  'BUY_CLICK_ERROR',
   'SELL_PREPARED',
   'SELL_PREPARATION_ERROR',
+  'SELL_BUTTON_CLICKED',
+  'SELL_CLICK_ERROR',
   'DETAIL_SLOT_RELEASED_AFTER_SELL_HOLD',
 ]);
 function refreshLatestReport(): Promise<void> {
@@ -196,16 +221,32 @@ async function refreshTokenStat(page: Page, mint: string, observedAt: number) {
 function numberFrom(record: Record<string, unknown>, keys: string[]) {
   return keys.map(key => Number(record[key])).find(value => Number.isFinite(value)) ?? null;
 }
-async function refreshDeveloperHolders(page: Page, mint: string, observedAt: number) {
-  // This is the same endpoint GMGN calls after its DEV quick-tag is selected.
-  // It is fetched inside the visible Chrome session, so no copied cookie is used.
-  const response = await page.evaluate(async ({ mint: tokenMint }) => {
-    const url = '/vas/api/v1/token_holders/sol/' + encodeURIComponent(tokenMint) + '?limit=100&cost=20&tag=dev&orderby=amount_percentage&direction=desc';
-    const result = await fetch(url, { credentials: 'include', headers: { accept: 'application/json, text/plain, */*' } });
-    const body: unknown = await result.json().catch(() => null);
-    return { status: result.status, body };
-  }, { mint }).catch(error => ({ status: 0, body: { error: error instanceof Error ? error.message : 'request failed' } }));
-  const root = response.body && typeof response.body === 'object' ? response.body as { data?: unknown } : {};
+const gmgnClientCache = {
+  deviceId: '2d9248c7-3137-4fc1-bae6-a9d70136d48e',
+  fpDid: 'aaa4fd49dbd9a8cb1b32059bd5b6b375',
+  clientId: 'gmgn_web_20260922-4775-0d0463e',
+  appVer: '20260922-4775-0d0463e',
+  tzName: 'Asia_Jakarta',
+  tzOffset: '25200',
+};
+
+function cacheGmgnNetworkParams(params: URLSearchParams) {
+  const did = params.get('device_id');
+  if (did) gmgnClientCache.deviceId = did;
+  const fp = params.get('fp_did');
+  if (fp) gmgnClientCache.fpDid = fp;
+  const cid = params.get('client_id');
+  if (cid) gmgnClientCache.clientId = cid;
+  const ver = params.get('app_ver');
+  if (ver) gmgnClientCache.appVer = ver;
+  const tz = params.get('tz_name');
+  if (tz) gmgnClientCache.tzName = tz;
+  const tzo = params.get('tz_offset');
+  if (tzo) gmgnClientCache.tzOffset = tzo;
+}
+
+function parseAndStoreDeveloperHolders(mint: string, body: unknown, observedAt: number, source: 'network_intercept' | 'replayed_xhr', status: number): DeveloperHolder[] {
+  const root = body && typeof body === 'object' ? body as { data?: unknown } : {};
   const data = root.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : {};
   const values = [data.list, data.holders, data.data].find(Array.isArray) as unknown[] | undefined;
   const found: DeveloperHolder[] = [];
@@ -215,7 +256,7 @@ async function refreshDeveloperHolders(page: Page, mint: string, observedAt: num
     const wallet = ['wallet_address', 'wallet', 'address', 'wa', 'owner_address'].map(key => item[key]).find(validMint);
     if (typeof wallet !== 'string') continue;
     const raw: Record<string, Primitive> = {};
-    for (const [key, value] of Object.entries(item)) if (value === null || typeof value === 'boolean' || typeof value === 'number' || (typeof value === 'string' && value.length <= 500)) raw[key] = value;
+    for (const [key, val] of Object.entries(item)) if (val === null || typeof val === 'boolean' || typeof val === 'number' || (typeof val === 'string' && val.length <= 500)) raw[key] = val;
     found.push({ mint, wallet, observedAt, amountPercentage: numberFrom(item, ['amount_percentage', 'percentage', 'percent', 'ownership_percentage']), amount: numberFrom(item, ['amount', 'balance', 'token_amount']), raw });
   }
   const previous = developerHolders.get(mint) ?? new Map<string, DeveloperHolder>();
@@ -231,15 +272,250 @@ async function refreshDeveloperHolders(page: Page, mint: string, observedAt: num
     write('developer-balance-changes.jsonl', { mint, observedAt, event: 'DEVELOPER_HOLDER_NOT_RETURNED', wallet: before.wallet, previousAmount: before.amount, previousAmountPercentage: before.amountPercentage, note: 'The DEV-tag holder endpoint no longer returned this wallet. It can indicate a full exit, but is retained as an observation rather than asserted as a sale until a matching trade is seen.' });
   }
   if (found.length) developerHolders.set(mint, map);
-  write('developer-holders.jsonl', { mint, observedAt, source: 'GMGN same-session /vas/api/v1/token_holders tag=dev', status: response.status, holders: found });
+  write('developer-holders.jsonl', { mint, observedAt, source: `GMGN ${source} /vas/api/v1/token_holders tag=dev`, status, holders: found });
+  return found;
+}
+
+function parseAndStoreTrackedHolders(mint: string, body: unknown, observedAt: number, source: 'network_intercept' | 'replayed_xhr', status: number): TrackedHolder[] {
+  const root = body && typeof body === 'object' ? body as { data?: unknown } : {};
+  const data = root.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : {};
+  const values = [data.list, data.holders, data.data].find(Array.isArray) as unknown[] | undefined;
+  const found: TrackedHolder[] = [];
+  for (const value of values ?? []) {
+    if (!value || typeof value !== 'object') continue;
+    const item = value as Record<string, unknown>;
+    const wallet = ['address', 'wallet_address', 'wallet', 'wa', 'owner_address'].map(key => item[key]).find(validMint);
+    if (typeof wallet !== 'string') continue;
+
+    const makerTags = Array.isArray(item.maker_token_tags) ? item.maker_token_tags.map(String) : [];
+    const tags = Array.isArray(item.tags) ? item.tags.map(String) : [];
+    const walletTagV2 = typeof item.wallet_tag_v2 === 'string' ? item.wallet_tag_v2 : '';
+    const isDev = makerTags.some(t => ['creator', 'dev_team', 'dev'].includes(t.toLowerCase()))
+      || tags.some(t => ['creator', 'dev_team', 'dev'].includes(t.toLowerCase()))
+      || walletTagV2.toLowerCase().includes('dev');
+
+    let pct = numberFrom(item, ['amount_percentage', 'percentage', 'percent', 'ownership_percentage']);
+    if (pct !== null && pct <= 1 && pct > 0) pct = pct * 100;
+
+    const raw: Record<string, Primitive> = {};
+    for (const [key, val] of Object.entries(item)) {
+      if (val === null || typeof val === 'boolean' || typeof val === 'number' || (typeof val === 'string' && val.length <= 500)) raw[key] = val;
+    }
+    found.push({
+      mint, wallet, observedAt, amountPercentage: pct,
+      amount: numberFrom(item, ['amount_cur', 'balance', 'amount', 'token_amount']),
+      isDev, walletTagV2, raw
+    });
+  }
+  const map = new Map<string, TrackedHolder>();
+  for (const holder of found) map.set(holder.wallet, holder);
+  if (found.length) trackedHolders.set(mint, map);
+  holderApiStatus.set(mint, { status, count: found.length, observedAt, source });
+  write('tracked-holders.jsonl', { mint, observedAt, status, count: found.length, source, holders: found });
+  console.log(`[tracked-holders-loaded] (${source}) ${mint} loaded ${found.length} holders (Devs: ${found.filter(h => h.isDev).length}, status=${status})`);
+  return found;
+}
+
+function attachHolderNetworkInspector(page: Page) {
+  page.on('response', async (res) => {
+    const url = res.url();
+    if (!url.includes('/vas/api/v1/token_holders/sol/')) return;
+    try {
+      const urlObj = new URL(url);
+      cacheGmgnNetworkParams(urlObj.searchParams);
+      const segments = urlObj.pathname.split('/');
+      const tokenMint = segments.at(-1) || '';
+      if (!validMint(tokenMint)) return;
+
+      const status = res.status();
+      const observedAt = Date.now();
+      if (status === 200) {
+        const body = await res.json().catch(() => null);
+        if (body && typeof body === 'object') {
+          const isDevTag = urlObj.searchParams.get('tag') === 'dev';
+          if (isDevTag) {
+            parseAndStoreDeveloperHolders(tokenMint, body, observedAt, 'network_intercept', 200);
+          } else {
+            parseAndStoreTrackedHolders(tokenMint, body, observedAt, 'network_intercept', 200);
+          }
+        }
+      } else {
+        holderApiStatus.set(tokenMint, { status, count: 0, observedAt, source: 'network_intercept' });
+        write('tracked-holders.jsonl', { mint: tokenMint, observedAt, status, count: 0, source: 'network_intercept', holders: [] });
+        console.log(`[network-holders-intercept] ${tokenMint} status=${status} from browser XHR`);
+      }
+    } catch {
+      // ignore passive inspection errors
+    }
+  });
+}
+
+async function refreshDeveloperHolders(page: Page, mint: string, observedAt: number) {
+  const response = await page.evaluate(async ({ mint: tokenMint, cachedParams }) => {
+    let deviceId = cachedParams.deviceId;
+    let fpDid = cachedParams.fpDid;
+    let clientId = cachedParams.clientId;
+    let appVer = cachedParams.appVer || '20260922-4775-0d0463e';
+
+    try {
+      const matchDid = document.cookie.match(/_did=([^;]+)/);
+      if (matchDid && matchDid[1]) {
+        deviceId = deviceId || matchDid[1];
+        fpDid = fpDid || matchDid[1];
+      }
+      const lsDeviceId = localStorage.getItem('device_id') || localStorage.getItem('gmgn_device_id');
+      if (lsDeviceId) deviceId = lsDeviceId;
+      const lsFp = localStorage.getItem('fp_did');
+      if (lsFp) fpDid = lsFp;
+      const lsClientId = localStorage.getItem('client_id');
+      if (lsClientId) clientId = lsClientId;
+    } catch {}
+
+    if (!deviceId) deviceId = '2d9248c7-3137-4fc1-bae6-a9d70136d48e';
+    if (!fpDid) fpDid = 'aaa4fd49dbd9a8cb1b32059bd5b6b375';
+    if (!clientId) clientId = `gmgn_web_${appVer}`;
+
+    const tabId = Math.random().toString(36).slice(2, 14);
+    let tzName = 'Asia_Jakarta';
+    try { tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia_Jakarta'; } catch {}
+    const tzOffset = String(-new Date().getTimezoneOffset() * 60 || 25200);
+
+    const query = new URLSearchParams({
+      device_id: deviceId,
+      tab_id: tabId,
+      fp_did: fpDid,
+      client_id: clientId,
+      from_app: 'gmgn',
+      app_ver: appVer,
+      tz_name: tzName,
+      tz_offset: tzOffset,
+      app_lang: 'en-US',
+      os: 'web',
+      worker: '0',
+      limit: '100',
+      cost: '20',
+      tag: 'dev',
+      orderby: 'amount_percentage',
+      direction: 'desc'
+    });
+
+    const url = '/vas/api/v1/token_holders/sol/' + encodeURIComponent(tokenMint) + '?' + query.toString();
+    const result = await fetch(url, {
+      credentials: 'include',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9',
+        'priority': 'u=1, i',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
+      }
+    });
+    const body: unknown = await result.json().catch(() => null);
+    return { status: result.status, body };
+  }, { mint, cachedParams: gmgnClientCache }).catch(error => ({
+    status: 0, body: { error: error instanceof Error ? error.message : 'request failed' }
+  }));
+
+  const found = parseAndStoreDeveloperHolders(mint, response.body, observedAt, 'replayed_xhr', response.status);
   return { status: response.status, holders: found };
 }
+
 async function maybeRefreshDeveloperHolders(page: Page, mint: string, observedAt: number) {
   if (Date.now() < nextDeveloperApiRequestAt) return { status: null, deferred: true };
   nextDeveloperApiRequestAt = Date.now() + 30_000;
   const response = await refreshDeveloperHolders(page, mint, observedAt);
   if (response.status === 429) nextDeveloperApiRequestAt = Date.now() + 60_000;
   return { status: response.status, deferred: false };
+}
+
+const trackedHolders = new Map<string, Map<string, TrackedHolder>>();
+
+async function refreshTrackedHolders(page: Page, mint: string, observedAt: number) {
+  const cachedStatus = holderApiStatus.get(mint);
+  const cachedHolders = trackedHolders.get(mint);
+  if (cachedStatus && cachedStatus.status === 200 && cachedHolders && cachedHolders.size > 0 && observedAt - cachedStatus.observedAt <= 20_000) {
+    return { status: 200, holders: [...cachedHolders.values()] };
+  }
+
+  const response = await page.evaluate(async ({ mint: tokenMint, cachedParams }) => {
+    let deviceId = cachedParams.deviceId;
+    let fpDid = cachedParams.fpDid;
+    let clientId = cachedParams.clientId;
+    let appVer = cachedParams.appVer || '20260922-4775-0d0463e';
+
+    try {
+      const matchDid = document.cookie.match(/_did=([^;]+)/);
+      if (matchDid && matchDid[1]) {
+        deviceId = deviceId || matchDid[1];
+        fpDid = fpDid || matchDid[1];
+      }
+      const lsDeviceId = localStorage.getItem('device_id') || localStorage.getItem('gmgn_device_id');
+      if (lsDeviceId) deviceId = lsDeviceId;
+      const lsFp = localStorage.getItem('fp_did');
+      if (lsFp) fpDid = lsFp;
+      const lsClientId = localStorage.getItem('client_id');
+      if (lsClientId) clientId = lsClientId;
+    } catch {}
+
+    if (!deviceId) deviceId = '2d9248c7-3137-4fc1-bae6-a9d70136d48e';
+    if (!fpDid) fpDid = 'aaa4fd49dbd9a8cb1b32059bd5b6b375';
+    if (!clientId) clientId = `gmgn_web_${appVer}`;
+
+    const tabId = Math.random().toString(36).slice(2, 14);
+    let tzName = 'Asia_Jakarta';
+    try { tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia_Jakarta'; } catch {}
+    const tzOffset = String(-new Date().getTimezoneOffset() * 60 || 25200);
+
+    const query = new URLSearchParams({
+      device_id: deviceId,
+      tab_id: tabId,
+      fp_did: fpDid,
+      client_id: clientId,
+      from_app: 'gmgn',
+      app_ver: appVer,
+      tz_name: tzName,
+      tz_offset: tzOffset,
+      app_lang: 'en-US',
+      os: 'web',
+      worker: '0',
+      limit: '100',
+      cost: '20',
+      orderby: 'amount_percentage',
+      direction: 'desc'
+    });
+
+    const url = '/vas/api/v1/token_holders/sol/' + encodeURIComponent(tokenMint) + '?' + query.toString();
+    const result = await fetch(url, {
+      credentials: 'include',
+      headers: {
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9',
+        'priority': 'u=1, i',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
+      }
+    });
+    const body: unknown = await result.json().catch(() => null);
+    return { status: result.status, body, extractedParams: { deviceId, fpDid, clientId, appVer, tzName, tzOffset } };
+  }, { mint, cachedParams: gmgnClientCache }).catch(error => ({
+    status: 0,
+    body: { error: error instanceof Error ? error.message : 'request failed' },
+    extractedParams: null
+  }));
+
+  if (response.extractedParams) {
+    if (response.extractedParams.deviceId) gmgnClientCache.deviceId = response.extractedParams.deviceId;
+    if (response.extractedParams.fpDid) gmgnClientCache.fpDid = response.extractedParams.fpDid;
+    if (response.extractedParams.clientId) gmgnClientCache.clientId = response.extractedParams.clientId;
+    if (response.extractedParams.appVer) gmgnClientCache.appVer = response.extractedParams.appVer;
+    if (response.extractedParams.tzName) gmgnClientCache.tzName = response.extractedParams.tzName;
+    if (response.extractedParams.tzOffset) gmgnClientCache.tzOffset = response.extractedParams.tzOffset;
+  }
+
+  const found = parseAndStoreTrackedHolders(mint, response.body, observedAt, 'replayed_xhr', response.status);
+  return { status: response.status, holders: found };
 }
 function developerMonitoring(mint: string) {
   const developerWallets = developerHolders.get(mint) ?? new Map<string, DeveloperHolder>();
@@ -254,7 +530,14 @@ function writeSimulationExit(position: SimulationPosition, mint: string, now: nu
   const result = closeSimulation(position, exitPriceUsd);
   writeSimulation({ type: 'SIMULATED_SELL', mint, observedAt: now, reason, entry: { openedAt: position.openedAt, priceUsd: position.entryPriceUsd, stakeUsd: position.stakeUsd, quantity: position.quantity },
     exit: { priceUsd: exitPriceUsd, grossProceedsUsd: result.grossProceedsUsd }, pnlUsd: result.pnlUsd, pnlPercent: result.pnlPercent,
-    decision, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only. Proceeds equal token quantity × observed GMGN price; no swap was submitted.' }, metadata });
+    decision, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation with GMGN UI Sell button click.' }, metadata });
+  if (maxPaperBuys !== null) {
+    const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
+    if (totalSells >= maxPaperBuys) {
+      console.log('[trial-complete]', `Target ${maxPaperBuys} buy dan ${totalSells} sell selesai.`);
+      setTimeout(() => stopping.abort(), 2_000);
+    }
+  }
   return result;
 }
 function captureTrades(payload: unknown, now: number, mint: string | undefined) {
@@ -273,10 +556,13 @@ function captureTrades(payload: unknown, now: number, mint: string | undefined) 
     // GMGN's activity payload exposes `m` as the maker/trader candidate. It
     // matches holder rows more reliably than the auxiliary `ad` field.
     const wallet = ['m', 'ad', 'wa', 'w', 'u', 'user', 'trader', 'wallet'].map(key => at(row, key)).find(validMint);
+    const rawAu = Number(at(row, 'au') ?? at(row, 'amount_usd') ?? at(row, 'vol'));
+    const amountUsd = Number.isFinite(rawAu) ? rawAu : null;
     const trade: Trade = { mint, side, signature, observedAt: now, occurredAt: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : now,
       wallet: typeof wallet === 'string' ? wallet : null,
       priceUsd: Number.isFinite(Number(at(row, 'pu'))) ? Number(at(row, 'pu')) : null,
-      amount: Number.isFinite(Number(at(row, 'au'))) ? Number(at(row, 'au')) : null, raw };
+      amount: Number.isFinite(Number(at(row, 'au'))) ? Number(at(row, 'au')) : null,
+      amountUsd, raw };
     list.push(trade); trades.set(mint, list); write('trades.jsonl', trade);
     const developer = trade.wallet ? developerHolders.get(mint)?.get(trade.wallet) : undefined;
     if (developer) write('developer-activity.jsonl', { mint, observedAt: now, event: trade.side === 'sell' ? 'DEVELOPER_SELL_OBSERVED' : 'DEVELOPER_BUY_OBSERVED', trade, developer: { wallet: developer.wallet, amountPercentage: developer.amountPercentage, amount: developer.amount, observedAt: developer.observedAt } });
@@ -372,14 +658,39 @@ async function currentSolUsd(page: Page) {
   solSpotCache = { usd, observedAt: Date.now() };
   return usd;
 }
+async function safelySetAmount(page: Page, solAmount: string) {
+  const input = await amountInput(page);
+  const current = (await input.inputValue()).trim();
+  if (current === solAmount) return;
+  await input.click({ clickCount: 3 });
+  await input.press('ControlOrMeta+a');
+  await input.press('Backspace');
+  await page.waitForTimeout(100);
+  await input.fill(solAmount);
+  const afterFill = (await input.inputValue()).trim();
+  if (afterFill !== solAmount) {
+    await input.evaluate((el: HTMLInputElement, val: string) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      if (setter) {
+        setter.call(el, val);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        el.value = val;
+      }
+    }, solAmount);
+  }
+}
 async function prepareBuyPanel(page: Page, mint: string, worker: number, observedAt: number) {
   if (!values.prepareTradeUi) return;
   await selectTradeSide(page, 'buy');
   await applyExecutionSettings(page, DEFAULT_EXECUTION_SETTINGS);
   const solUsdSpot = await currentSolUsd(page);
-  const solAmount = usdcToSol(String(simulationStakeUsd), solUsdSpot);
-  await (await amountInput(page)).fill(solAmount);
-  write('trade-preparation.jsonl', { type: 'BUY_PREPARED', mint, worker, observedAt, requestedUsdc: simulationStakeUsd, solAmount, solUsdSpot, executionSettings: DEFAULT_EXECUTION_SETTINGS,
+  const solAmount = simulationStakeSol !== null
+    ? simulationStakeSol.toFixed(3)
+    : usdcToSol(String(simulationStakeUsd), solUsdSpot);
+  await safelySetAmount(page, solAmount);
+  write('trade-preparation.jsonl', { type: 'BUY_PREPARED', mint, worker, observedAt, requestedUsdc: simulationStakeUsd, requestedSol: simulationStakeSol, solAmount, solUsdSpot, executionSettings: DEFAULT_EXECUTION_SETTINGS,
     note: 'The GMGN Buy field was filled only. No Buy button was clicked and no transaction was submitted.' });
 }
 async function prepareSellPanel(page: Page, mint: string, worker: number, observedAt: number, reason: SimulationExitReason) {
@@ -394,29 +705,75 @@ async function prepareSellPanel(page: Page, mint: string, worker: number, observ
 async function worker(index: number, deadline: number) {
   const page = await context!.newPage(); let activeMint: string | undefined;
   attach(page, false, () => activeMint);
+  attachHolderNetworkInspector(page);
   while (!stopping.signal.aborted && Date.now() < deadline) {
+    if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys) {
+      const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
+      if (openPositions <= 0) {
+        stopping.abort();
+        break;
+      }
+      await delay(500);
+      continue;
+    }
     const mint = queue.take();
     if (!mint) { await delay(200); continue; }
     activeMint = mint; const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1000); let openingPrice: number | null = null, stopLoss = false, simulation: SimulationPosition | null = null, simulationExit: SimulationExitReason | null = null;
     let lastHolderCount: number | null = null, lastHolderObservedAt = 0, holderGrowthStreak = 0, lastSignificantGrowthAt = 0, recoveryHoldUntil = 0, recoveryHoldForGrowthAt = 0, targetHoldForGrowthAt = 0;
-    const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, candleBlockRecorded = false, trialLimitRecorded = false;
+    let holderCount: number | null = typeof candidates.get(mint)?.fields.holders?.value === 'number' ? (candidates.get(mint)!.fields.holders!.value as number) : null;
+    const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastCandlePollAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, latestCandles: McapCandle[] = [], candleBlockRecorded = false, trialLimitRecorded = false, blindProtectionBlockRecorded = false;
     // A single socket trade can make a thin launch wick below the stop.  Keep
     // the breach pending until independent socket and candle evidence agree.
     let entryCandleClose: number | null = null, hardStopPendingAt = 0, hardStopDistinctTicks = 0, hardStopLastPriceObservedAt = 0;
+    let highestProfitPriceUsd = 0, lastProfitProgressAt = 0, dynamicTargetPercent = 30;
     write('events.jsonl', { type: 'DETAIL_STARTED', worker: index, mint, startedAt });
     console.log('[detail-start]', 'worker=' + index, mint);
     try {
       await page.goto(config.tokenUrlTemplate.replaceAll('{mint}', mint), { waitUntil: 'commit', timeout: config.workerTimeoutMs });
       await refreshTokenStat(page, mint, Date.now()); lastTokenStatAt = Date.now();
+      await refreshTrackedHolders(page, mint, Date.now()).catch(() => {});
       const candleResult = await fetchMcapCandles(page, mint);
+      latestCandles = candleResult.candles;
       candleDecision = assessCandleHistory(candleResult.candles);
       candleEntryFlow = assessCandleEntryFlow(candleResult.candles);
       entryCandleClose = candleResult.candles.at(-1)?.close ?? null;
-      write('mcap-candles.jsonl', { mint, observedAt: Date.now(), source: 'GMGN same-session /api/v1/token_mcap_candles', resolution: '1m', status: candleResult.status, candles: candleResult.candles, decision: candleDecision, entryFlow: candleEntryFlow });
-      if (!candleDecision.allowed || !candleEntryFlow.allowed) console.log('[candle-buy-blocked]', mint, candleDecision.reason, candleEntryFlow.reason);
+      lastCandlePollAt = Date.now();
+      const earlyMinHolders = config.earlyCandleMinimumHolders ?? 60;
+      const initialEarlyRising = assessEarlyCandleRising(candleResult.candles, candleDecision, candleEntryFlow, holderCount, earlyMinHolders);
+      write('mcap-candles.jsonl', { mint, observedAt: Date.now(), source: 'GMGN same-session /api/v1/token_mcap_candles', resolution: '1m', status: candleResult.status, candles: candleResult.candles, decision: candleDecision, entryFlow: candleEntryFlow, earlyRising: initialEarlyRising });
+      if ((!candleDecision.allowed || !candleEntryFlow.allowed) && !initialEarlyRising.allowed) {
+        console.log('[candle-buy-blocked]', mint, candleDecision.reason, candleEntryFlow.reason);
+      } else if (initialEarlyRising.allowed) {
+        console.log('[early-candle-rising-ok]', mint, 'return=' + (initialEarlyRising.returnPercent?.toFixed(1) ?? '0') + '%');
+      }
+      if (values.prepareTradeUi) {
+        await prepareBuyPanel(page, mint, index, Date.now()).catch(error => {
+          write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+        });
+      }
       while (!stopping.signal.aborted && Date.now() < stopAt) {
         const now = Date.now();
         if (now - lastTokenStatAt >= 5_000) { await refreshTokenStat(page, mint, now); lastTokenStatAt = Date.now(); }
+        if (now - lastCandlePollAt >= 3_000) {
+          const freshCandleResult = await fetchMcapCandles(page, mint);
+          lastCandlePollAt = Date.now();
+          if (freshCandleResult.status === 200 && freshCandleResult.candles.length) {
+            latestCandles = freshCandleResult.candles;
+            const prevAllowed = (candleDecision?.allowed ?? false) && (candleEntryFlow?.allowed ?? false);
+            candleDecision = assessCandleHistory(freshCandleResult.candles);
+            candleEntryFlow = assessCandleEntryFlow(freshCandleResult.candles);
+            if (!simulation) {
+              entryCandleClose = freshCandleResult.candles.at(-1)?.close ?? null;
+            }
+            const freshEarlyRising = assessEarlyCandleRising(freshCandleResult.candles, candleDecision, candleEntryFlow, holderCount, earlyMinHolders);
+            if (!prevAllowed && ((candleDecision.allowed && candleEntryFlow.allowed) || freshEarlyRising.allowed)) {
+              console.log('[candle-unblocked]', mint, 'candles=' + freshCandleResult.candles.length, freshEarlyRising.allowed ? '(early-rising)' : '');
+            }
+            write('mcap-candles.jsonl', { mint, observedAt: Date.now(), source: 'GMGN same-session /api/v1/token_mcap_candles', resolution: '1m', status: freshCandleResult.status, candles: freshCandleResult.candles, decision: candleDecision, entryFlow: candleEntryFlow, earlyRising: freshEarlyRising });
+          } else if (freshCandleResult.status === 429) {
+            lastCandlePollAt = Date.now() + 2_000;
+          }
+        }
         if (simulation && now - lastDeveloperHoldersAt >= developerHolderPollMs) {
           const developerSnapshot = await maybeRefreshDeveloperHolders(page, mint, now);
           if (!developerSnapshot.deferred) {
@@ -424,7 +781,8 @@ async function worker(index: number, deadline: number) {
           }
         }
         const candidate = candidates.get(mint), price = num(candidate, 'priceUsd'), priceObservedAt = candidate?.fields.priceUsd?.observedAt ?? 0;
-        const holderField = candidate?.fields.holders, holderCount = typeof holderField?.value === 'number' ? holderField.value : null;
+        const holderField = candidate?.fields.holders;
+        if (typeof holderField?.value === 'number') holderCount = holderField.value;
         if (holderCount !== null && holderField && holderField.observedAt > lastHolderObservedAt) {
           if (lastHolderCount !== null) {
             const growth = holderCount - lastHolderCount, significant = lastHolderCount > 0 && growth >= 5 && growth / lastHolderCount >= 0.1;
@@ -442,9 +800,35 @@ async function worker(index: number, deadline: number) {
           const entry = assessEntryStability(priceSamples);
           const flow = entryTradeFlow(mint, now);
           const flowAllowed = flow.trades >= 5 && flow.buyUsd >= flow.sellUsd;
-          if (entry.stable && candleDecision?.allowed && candleEntryFlow?.allowed && flowAllowed && (maxPaperBuys === null || paperBuyCount < maxPaperBuys)) {
+          const freshSignificantGrowth = lastSignificantGrowthAt > 0 && now - lastSignificantGrowthAt <= 5_000;
+          const singleCandleOverride = assessSingleCandleHolderOverride(candleDecision, holderCount, freshSignificantGrowth);
+          const earlyCandleRising = assessEarlyCandleRising(latestCandles, candleDecision, candleEntryFlow, holderCount, earlyMinHolders);
+
+          const candidateCreatedAt = candidate?.fields.createdAt?.value ? Number(candidate.fields.createdAt.value) : null;
+          const isYoungToken = (candleDecision?.reason === 'INSUFFICIENT_CANDLES' || candleDecision?.reason === 'SINGLE_CANDLE_ONLY')
+            || singleCandleOverride.allowed
+            || earlyCandleRising.allowed
+            || (candidateCreatedAt !== null ? (now - candidateCreatedAt <= 120_000) : false);
+
+          const tokenHoldersMap = trackedHolders.get(mint);
+          const currentHolderCount = tokenHoldersMap?.size ?? 0;
+          const currentHolderStatus = holderApiStatus.get(mint)?.status ?? null;
+          const blindProtection = assessBlindProtection(isYoungToken, currentHolderStatus, currentHolderCount);
+
+          const candleAllowed = ((candleDecision?.allowed && candleEntryFlow?.allowed)
+            || singleCandleOverride.allowed
+            || earlyCandleRising.allowed)
+            && blindProtection.allowed;
+
+          if (entry.stable && candleAllowed && flowAllowed && (maxPaperBuys === null || paperBuyCount < maxPaperBuys)) {
             paperBuyCount++;
-            simulation = openSimulation(mint, now, price, simulationStakeUsd);
+            const effectiveStakeUsd = simulationStakeSol !== null
+              ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
+              : simulationStakeUsd;
+            simulation = openSimulation(mint, now, price, effectiveStakeUsd);
+            highestProfitPriceUsd = price;
+            lastProfitProgressAt = now;
+            dynamicTargetPercent = 30;
             const developerSnapshot = await maybeRefreshDeveloperHolders(page, mint, now);
             if (!developerSnapshot.deferred) {
               lastDeveloperHoldersAt = Date.now(); developerHolderPollMs = developerSnapshot.status === 429 ? 60_000 : 30_000;
@@ -454,19 +838,37 @@ async function worker(index: number, deadline: number) {
             // assuming a fixed token supply.
             if (!entryCandleClose || entryCandleClose <= 0) entryCandleClose = null;
             writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: now, entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
-              entryGate: { realtime: entry, candleHistory: candleDecision, candleEntryFlow, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only. No GMGN or Fomo buy was submitted.' } });
-            await prepareBuyPanel(page, mint, index, now).catch(error => {
-              write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
-            });
-            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'stake=$' + simulation.stakeUsd, 'price=' + price);
-          } else if (maxPaperBuys !== null && entry.stable && candleDecision?.allowed && candleEntryFlow?.allowed && flowAllowed && !trialLimitRecorded) {
+              entryGate: { realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
+            if (values.prepareTradeUi) {
+              await prepareBuyPanel(page, mint, index, now).catch(error => {
+                write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+              });
+              if (autoBuyEnabled) {
+                await clickTradeButton(page, 'buy').then(res => {
+                  write('events.jsonl', { type: 'BUY_BUTTON_CLICKED', mint, worker: index, observedAt: Date.now(), buttonText: res.buttonText });
+                  console.log('[buy-clicked]', candidate?.metadata?.symbol ?? mint, res.buttonText);
+                }).catch(error => {
+                  write('events.jsonl', { type: 'BUY_CLICK_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+                  console.log('[buy-click-error]', candidate?.metadata?.symbol ?? mint, error instanceof Error ? error.message : error);
+                });
+              } else {
+                write('events.jsonl', { type: 'BUY_BUTTON_CLICK_SKIPPED', mint, worker: index, observedAt: Date.now(), note: 'autoBuy is false; real Playwright buy button click skipped while paper simulation runs.' });
+                console.log('[paper-only]', candidate?.metadata?.symbol ?? mint, 'Simulated buy opened; real UI buy click skipped (autoBuy=false)');
+              }
+            }
+            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'stake=$' + simulation.stakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
+          } else if (maxPaperBuys !== null && entry.stable && candleAllowed && flowAllowed && !trialLimitRecorded) {
             trialLimitRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
               note: 'All entry gates passed, but the non-submitting paper-buy trial has already prepared its maximum number of candidates.' });
             console.log('[sim-buy-skipped]', candidate?.metadata?.symbol ?? mint, 'TRIAL_LIMIT=' + maxPaperBuys);
-          } else if ((!candleDecision?.allowed || !candleEntryFlow?.allowed) && !candleBlockRecorded) {
+          } else if (!blindProtection.allowed && !blindProtectionBlockRecorded) {
+            blindProtectionBlockRecorded = true;
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: blindProtection.reason, holderStatus: blindProtection.holderStatus, holderCount: blindProtection.holderCount, isYoungToken, candleDecision, earlyCandleRising, singleCandleOverride, note: 'Blind Protection: DILARANG BUY pada token umur muda (candle 1-2) karena API holder terkena 429 atau top holder belum terverifikasi.' });
+            console.log(`[blind-protection-blocked] ${candidate?.metadata?.symbol ?? mint} ${blindProtection.reason} (status=${blindProtection.holderStatus}, holders=${blindProtection.holderCount})`);
+          } else if (!candleAllowed && !candleBlockRecorded) {
             candleBlockRecorded = true;
-            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, candleDecision, candleEntryFlow, note: 'No paper buy: closed-candle count or current 1-minute candle is unsafe.' });
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, note: 'No paper buy: closed-candle count or current 1-minute candle is unsafe.' });
           } else if ((entry.reason === 'CONTINUING_PRICE_DROP' || entry.reason === 'INSUFFICIENT_PRICE_CONFIRMATION') && lastEntryBlockPriceAt !== priceObservedAt) {
             lastEntryBlockPriceAt = priceObservedAt;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, entryGate: entry, tradeFlow20s: flow, note: entry.reason === 'INSUFFICIENT_PRICE_CONFIRMATION' ? 'No paper buy: price ticks did not show a real recovery.' : 'No paper buy: detail price is still falling.' });
@@ -525,19 +927,104 @@ async function worker(index: number, deadline: number) {
             write('events.jsonl', { type: 'STOP_LOSS_CANCELLED', mint, worker: index, observedAt: now, socketPriceUsd: price, socketReturnPercent: returnPercent, note: 'Socket price recovered above the hard-stop threshold before confirmation.' });
             hardStopPendingAt = 0; hardStopDistinctTicks = 0; hardStopLastPriceObservedAt = 0;
           }
+          // DYNAMIC TARGET ADAPTATION:
+          // 1. Jika hijau terus, momentum 5s kuat (>= 2%), holder terus bertambah, dan transaksi buy ramai:
+          //    Naikkan target sedikit demi sedikit (+30% -> +40% -> +50% -> +60% dst.)
+          const strongMomentum5s = (priceMomentum5s ?? 0) >= 2;
+          const activeBuying5s = trades5s.buys >= 3 && trades5s.buyUsd >= trades5s.sellUsd;
+          if (returnPercent >= dynamicTargetPercent - 10 && strongMomentum5s && (freshSignificantGrowth || sustainedHolderGrowth) && activeBuying5s) {
+            const nextTarget = Math.max(dynamicTargetPercent + 10, Math.floor(returnPercent / 10) * 10 + 10);
+            if (nextTarget > dynamicTargetPercent) {
+              console.log('[sim-target-raised]', candidate?.metadata?.symbol ?? mint, `target=${dynamicTargetPercent}%->${nextTarget}%`, `return=+${returnPercent.toFixed(1)}%`);
+              dynamicTargetPercent = nextTarget;
+            }
+          }
+
+          // 2. TOP HOLDER, DEV & WHALE DUMP DETECTOR:
+          // Jika DEV, Top Holder (pemegang >= topHolderDumpMinPercent, default 1.5%), atau Whale sell (>= $150 / 5M tokens) menjual koin
+          // dan harga mulai melemah / minus (momentum 5s <= 0% atau return <= 0%), langsung auto-sell seketika!
+          const tokenHolders = trackedHolders.get(mint);
+          if (!exitReason) {
+            const recentSells = (trades.get(mint) ?? []).filter(t => t.occurredAt >= now - 5_000 && t.side === 'sell');
+            for (const sellTrade of recentSells) {
+              if (!sellTrade.wallet) continue;
+              const holder = tokenHolders?.get(sellTrade.wallet);
+              const isDevSell = holder ? holder.isDev : false;
+              const isTopHolderSell = holder ? ((holder.amountPercentage ?? 0) >= topHolderDumpMinPercent) : false;
+              const isWhaleSell = (sellTrade.amountUsd !== null && sellTrade.amountUsd !== undefined && sellTrade.amountUsd >= 150)
+                || (sellTrade.amount !== null && sellTrade.amount !== undefined && sellTrade.amount >= 5_000_000);
+
+              if (isDevSell || isTopHolderSell || isWhaleSell) {
+                const priceWeakening = (priceMomentum5s ?? 0) <= 0 || returnPercent <= 0;
+                if (priceWeakening) {
+                  exitReason = isDevSell ? 'DEV_DUMP_EXIT' : 'TOP_HOLDER_DUMP';
+                  const dumpDesc = isDevSell ? 'Developer' : isTopHolderSell ? `Top Holder owning >= ${topHolderDumpMinPercent}%` : `Whale sell ($${sellTrade.amountUsd ?? '?'})`;
+                  write('events.jsonl', { type: 'SIMULATION_DUMP_EXIT_TRIGGERED', mint, worker: index, observedAt: now, reason: exitReason, sellerWallet: sellTrade.wallet, isDev: isDevSell, isWhale: isWhaleSell, amountPercentage: holder?.amountPercentage ?? null, tradeUsd: sellTrade.amountUsd, priceMomentum5s, returnPercent, note: `Emergency exit: ${dumpDesc} sold during price decline.` });
+                  console.log(`[sim-dump-exit] ${candidate?.metadata?.symbol ?? mint} ${exitReason}! Wallet=${sellTrade.wallet.slice(0, 8)}... (${(holder?.amountPercentage ?? 0).toFixed(1)}% supply, Dev=${isDevSell}, Whale=${isWhaleSell}) sold $${sellTrade.amountUsd ?? '?'}, return=${returnPercent.toFixed(1)}%`);
+                  break;
+                }
+              }
+            }
+          }
+
+          // 3. Jika dalam 5 detik holder bertambah sedikit / berhenti naik dan transaksi tidak signifikan:
+          //    Turunkan target dan langsung jual jika sudah untung (>= 3%)
+          const slowingMomentum5s = (priceMomentum5s ?? 0) <= 0.5;
+          const weakTrades5s = trades5s.buys <= 2 || trades5s.sellUsd > trades5s.buyUsd;
+          const holderStalled5s = !freshSignificantGrowth;
+          if (!exitReason && returnPercent >= 3 && slowingMomentum5s && weakTrades5s && holderStalled5s && now - lastProfitProgressAt >= 5_000) {
+            exitReason = 'MOMENTUM_EXHAUSTION_5S';
+          }
+
+          // 3. Jika target dinamis tercapai:
+          if (!exitReason && returnPercent >= dynamicTargetPercent && !targetMomentumHold) {
+            exitReason = 'TARGET_DYNAMIC';
+          }
+
+          const minProfitStagnationPercent = config.profitStagnationPercent ?? 3;
+          const profitStagnationDurationMs = (config.profitStagnationSeconds ?? 10) * 1000;
+          if (returnPercent >= minProfitStagnationPercent) {
+            if (price > highestProfitPriceUsd + 1e-12) {
+              highestProfitPriceUsd = price;
+              lastProfitProgressAt = now;
+            } else if (!exitReason && now - lastProfitProgressAt >= profitStagnationDurationMs) {
+              exitReason = 'PROFIT_STAGNATION_10S';
+            }
+          }
           if (!exitReason && returnPercent >= 40 && sustainedHolderGrowth && (priceMomentum5s ?? 0) < 0.5) exitReason = 'TARGET_40_HOLDER_FLAT';
           if (exitReason) {
             simulationExit = exitReason;
             const result = writeSimulationExit(simulation, mint, now, price, exitReason, candidate?.metadata ?? null, { ...decision, holderCount, holderGrowthStreak, priceMomentum5s, recoveryHoldActive: now < recoveryHoldUntil, stopValidation: hardStopValidation });
-            await prepareSellPanel(page, mint, index, now, exitReason).catch(error => {
-              write('events.jsonl', { type: 'SELL_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), reason: exitReason, message: error instanceof Error ? error.message : 'unknown' });
-            });
+            if (values.prepareTradeUi) {
+              await prepareSellPanel(page, mint, index, now, exitReason).catch(error => {
+                write('events.jsonl', { type: 'SELL_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), reason: exitReason, message: error instanceof Error ? error.message : 'unknown' });
+              });
+              if (autoBuyEnabled) {
+                await clickTradeButton(page, 'sell').then(res => {
+                  write('events.jsonl', { type: 'SELL_BUTTON_CLICKED', mint, worker: index, observedAt: Date.now(), reason: exitReason, buttonText: res.buttonText });
+                  console.log('[sell-clicked]', candidate?.metadata?.symbol ?? mint, exitReason, res.buttonText);
+                }).catch(error => {
+                  write('events.jsonl', { type: 'SELL_CLICK_ERROR', mint, worker: index, observedAt: Date.now(), reason: exitReason, message: error instanceof Error ? error.message : 'unknown' });
+                  console.log('[sell-click-error]', candidate?.metadata?.symbol ?? mint, error instanceof Error ? error.message : error);
+                });
+              } else {
+                write('events.jsonl', { type: 'SELL_BUTTON_CLICK_SKIPPED', mint, worker: index, observedAt: Date.now(), reason: exitReason, note: 'autoBuy is false; real Playwright sell button click skipped while paper simulation exits.' });
+                console.log('[paper-only]', candidate?.metadata?.symbol ?? mint, 'Simulated sell recorded; real UI sell click skipped (autoBuy=false)');
+              }
+            }
             const releaseAt = Date.now() + exitHoldSeconds * 1000;
             write('events.jsonl', { type: 'SELL_PREPARED_HOLD', mint, worker: index, observedAt: now, reason: exitReason, holdSeconds: exitHoldSeconds, releaseAt,
-              note: 'Sell panel is prepared but no order is submitted. The detail slot remains open for the configured review hold, then advances to the next queued token.' });
+              note: 'Sell button clicked. The detail slot remains open for the configured review hold, then advances to the next queued token.' });
             console.log('[sim-sell]', candidate?.metadata?.symbol ?? mint, exitReason, 'pnl=$' + result.pnlUsd.toFixed(6), 'hold=' + exitHoldSeconds + 's');
             if (exitHoldSeconds > 0) await delay(exitHoldSeconds * 1000);
             write('events.jsonl', { type: 'DETAIL_SLOT_RELEASED_AFTER_SELL_HOLD', mint, worker: index, observedAt: Date.now(), reason: exitReason, holdSeconds: exitHoldSeconds });
+            if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys) {
+              const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
+              if (openPositions <= 0) {
+                console.log('[trial-complete]', `Target of ${maxPaperBuys} transactions completed.`);
+                stopping.abort();
+              }
+            }
             break;
           }
         }
@@ -558,12 +1045,21 @@ async function worker(index: number, deadline: number) {
         const closePrice = endPrice && candidate.fields.priceUsd && endedAt - candidate.fields.priceUsd.observedAt <= 10_000 ? endPrice : finalTick?.priceUsd;
         if (simulation && !simulationExit && closePrice) {
           simulationExit = 'OBSERVATION_END'; const result = writeSimulationExit(simulation, mint, endedAt, closePrice, simulationExit, candidate.metadata ?? null, { priceSource: finalTick?.priceUsd === closePrice ? 'last observed detail socket tick' : 'fresh candidate price', priceObservedAt: finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? null }); console.log('[sim-sell]', candidate.metadata?.symbol ?? mint, simulationExit, 'pnl=$' + result.pnlUsd.toFixed(6));
+          if (values.prepareTradeUi) {
+            await prepareSellPanel(page, mint, index, endedAt, simulationExit).catch(() => {});
+            if (autoBuyEnabled) {
+              await clickTradeButton(page, 'sell').catch(() => {});
+            }
+          }
         }
         const summary = { mint, worker: index, startedAt, endedAt, endedBecause: stopLoss ? 'STOP_LOSS_REACHED' : 'OBSERVATION_WINDOW', openingPriceUsd: openingPrice, metadata: candidate.metadata ?? null, fields: candidate.fields, report: evaluate(candidate, config), capturedTrades: (trades.get(mint) ?? []).length, capturedHolderWallets: holders.get(mint)?.size ?? 0, comparison: comparison(mint, endedAt), developerMonitoring: developerMonitoring(mint), wallets: walletBehavior(mint, candidate) };
         write('token-summary.jsonl', summary);
         console.log('[detail-complete]', 'worker=' + index, mint, 'trades=' + summary.capturedTrades, 'holders=' + summary.capturedHolderWallets, summary.endedBecause);
       }
-    } catch (error) { write('events.jsonl', { type: 'DETAIL_ERROR', worker: index, mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' }); }
+    } catch (error) {
+      write('events.jsonl', { type: 'DETAIL_ERROR', worker: index, mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+      console.log('[detail-error]', 'worker=' + index, mint, error instanceof Error ? error.message : error);
+    }
     finally {
       queue.done(mint); activeMint = undefined;
       // Keep visible Chrome tabs aligned with actual monitoring state. A worker
@@ -577,7 +1073,7 @@ async function main() {
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, tradePreparation: { enabled: values.prepareTradeUi, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthPercent: 10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, holderGrowthMomentum: { minimumConsecutiveGrowthUpdates: 2, minimumPriceMomentum5sPercent: 2, flatPriceMomentum5sBelowPercent: 0.5 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
-  console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds);
+  console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds, simulationStakeSol !== null ? ('stakeSol=' + simulationStakeSol) : ('stakeUsd=$' + simulationStakeUsd));
   const feed = context.pages()[0] ?? await context.newPage(); attach(feed, true, () => undefined);
   await feed.goto(config.feedUrl, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
   const deadline = Date.now() + runSeconds * 1000, timer = setTimeout(() => stopping.abort(), runSeconds * 1000);

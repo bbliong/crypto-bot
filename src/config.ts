@@ -18,6 +18,12 @@ export function loadConfig(path = 'config/rules.yaml'): Config {
   if (!Number.isInteger(c.workers) || c.workers > 4 || !Number.isInteger(c.queueCapacity)) throw new Error('workers: 1..4; queueCapacity: integer');
   if (c.minimumLiquidityUsd > c.maximumLiquidityUsd) throw new Error('minimumLiquidityUsd cannot exceed maximumLiquidityUsd');
   if (c.minimumAgeSeconds > c.maximumAgeSeconds) throw new Error('minimumAgeSeconds cannot exceed maximumAgeSeconds');
+  if (c.simulationStakeUsd !== undefined && (!Number.isFinite(c.simulationStakeUsd) || c.simulationStakeUsd <= 0)) throw new Error('Invalid simulationStakeUsd');
+  if (c.simulationStakeSol !== undefined && (!Number.isFinite(c.simulationStakeSol) || c.simulationStakeSol <= 0)) throw new Error('Invalid simulationStakeSol');
+  if (c.profitStagnationPercent !== undefined && (!Number.isFinite(c.profitStagnationPercent) || c.profitStagnationPercent <= 0)) throw new Error('Invalid profitStagnationPercent');
+  if (c.earlyCandleMinimumHolders !== undefined && (!Number.isFinite(c.earlyCandleMinimumHolders) || c.earlyCandleMinimumHolders <= 0)) throw new Error('Invalid earlyCandleMinimumHolders');
+  if (c.autoBuy !== undefined && typeof c.autoBuy !== 'boolean') throw new Error('Invalid autoBuy; must be boolean');
+  if (c.topHolderDumpMinPercent !== undefined && (!Number.isFinite(c.topHolderDumpMinPercent) || c.topHolderDumpMinPercent <= 0)) throw new Error('Invalid topHolderDumpMinPercent');
   if (typeof c.headless !== 'boolean' || typeof c.browserChannel !== 'string') throw new Error('Invalid browser configuration');
   if (c.browserUserDataDir !== undefined && typeof c.browserUserDataDir !== 'string') throw new Error('Invalid browserUserDataDir');
   if (c.browserProfileDirectory !== undefined && typeof c.browserProfileDirectory !== 'string') throw new Error('Invalid browserProfileDirectory');

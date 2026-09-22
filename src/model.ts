@@ -34,13 +34,21 @@ export interface Config {
   /** Existing Chrome user-data parent directory and profile folder to reuse. */
   browserUserDataDir?: string; browserProfileDirectory?: string; browserRemoteDebuggingPort?: number;
   browserChannel: string; headless: boolean; workers: number; queueCapacity: number;
-  workerTimeoutMs: number; activeMonitorSeconds: number; evidenceMaxAgeMs: number; candidateTtlMs: number;
+  workerTimeoutMs: number; activeMonitorSeconds: number;
+  profitStagnationPercent?: number;
+  profitStagnationSeconds?: number;
+  earlyCandleMinimumHolders?: number;
+  /** If true, Playwright clicks real Buy/Sell buttons on GMGN UI; if false (default), paper simulation runs fully without clicking real trade buttons. */
+  autoBuy?: boolean;
+  topHolderDumpMinPercent?: number;
+  evidenceMaxAgeMs: number; candidateTtlMs: number;
   minimumAgeSeconds: number; maximumAgeSeconds: number; minimumHolders: number; minimumLiquidityUsd: number; maximumLiquidityUsd: number;
   minimumBuys: number; maximumSellBuyRatio: number; maximumRisePercent: number;
   maximumDrawdownPercent: number; maximumTop5Percent: number; maximumTop10Percent: number;
   maximumSinglePercent: number; maximumBundledPercent: number; maximumSameSlotWallets: number;
   maximumSharedFunderWallets: number; maximumClusterPercent: number;
   maximumDeveloperPercent: number; maximumDeveloperSoldPercent: number;
+  simulationStakeUsd?: number; simulationStakeSol?: number;
   fomoUrlTemplate: string | null; mappings: Mapping[];
 }
 export interface Check { name: string; status: 'PASS' | 'WARN' | 'FAIL' | 'UNKNOWN'; detail: string }

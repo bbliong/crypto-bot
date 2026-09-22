@@ -69,15 +69,15 @@ export async function fetchSolUsdSpotInBrowser(page: Page): Promise<number> {
   return price;
 }
 
-export function usdcToSol(usdc: string, solUsdSpot: number): string {
+export function usdcToSol(usdc: string, solUsdSpot: number, decimals = 3): string {
   const requested = Number(usdc);
   if (!Number.isFinite(requested) || requested <= 0 || requested > 1_000_000) {
     throw new Error('USDC amount must be a positive finite number.');
   }
   if (!Number.isFinite(solUsdSpot) || solUsdSpot <= 0) throw new Error('SOL spot price must be positive.');
-  // USDC is treated as USD for this small prefill conversion. Keep sufficient
-  // precision so the GMGN SOL field receives the intended notional value.
-  return normalizeAmount((requested / solUsdSpot).toPrecision(12));
+  const sol = requested / solUsdSpot;
+  const formatted = Math.max(sol, 10 ** -decimals).toFixed(decimals);
+  return normalizeAmount(formatted);
 }
 
 async function waitForWindowCloseRequest(): Promise<void> {
@@ -94,23 +94,90 @@ async function visible(locator: Locator) { return locator.count().then(async cou
 
 export async function selectTradeSide(page: Page, side: TradeSide) {
   const switcher = page.locator('[data-sentry-component="Types"]');
+  await switcher.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
   const tab = switcher.getByText(sidePattern(side));
-  if (!await visible(tab)) throw new Error(`GMGN ${sideLabel(side)} tab was not found. Panel text: ${JSON.stringify(await switcher.allTextContents())}`);
-  await tab.click();
+  await tab.first().waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
+  if (!await visible(tab)) {
+    const fallbackTab = page.locator('[data-sentry-component="Types"] button, [data-sentry-component="Types"] div, div[role="tab"]').filter({ hasText: sidePattern(side) });
+    await fallbackTab.first().waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {});
+    if (await visible(fallbackTab)) {
+      await fallbackTab.first().click();
+      await page.waitForTimeout(200);
+      return;
+    }
+    throw new Error(`GMGN ${sideLabel(side)} tab was not found. Panel text: ${JSON.stringify(await switcher.allTextContents())}`);
+  }
+  await tab.first().click();
+  await page.waitForTimeout(200);
 }
 
 export async function amountInput(page: Page): Promise<Locator> {
   const switcher = page.locator('[data-sentry-component="Types"]');
+  await switcher.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
   const input = switcher.locator('xpath=following::input[@role="spinbutton"][1]');
-  if (!await visible(input)) throw new Error('GMGN trade amount input was not found.');
-  return input;
+  await input.first().waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
+  if (await visible(input)) return input.first();
+  const fallback = page.locator('input[role="spinbutton"]').first();
+  await fallback.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {});
+  if (await visible(fallback)) return fallback;
+  throw new Error('GMGN trade amount input was not found.');
 }
 
 export async function submitButton(page: Page, side: TradeSide): Promise<Locator> {
   const label = sideLabel(side);
-  const button = page.getByRole('button', { name: sidePattern(side) });
-  if (!await visible(button)) throw new Error(`GMGN ${label} order button was not found.`);
-  return button.first();
+  const colorClass = side === 'buy' ? 'bg-increase' : 'bg-decrease';
+
+  // 1. Direct Anchor: The main submit button is always the full-width action button below the amount input
+  try {
+    const input = await amountInput(page);
+    const followingSubmit = input.locator(`xpath=following::button[contains(@class, "w-full") or contains(@class, "${colorClass}")][1]`);
+    await followingSubmit.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {});
+    if (await visible(followingSubmit)) {
+      const isTab = await followingSubmit.evaluate(el => Boolean(el.closest('[data-sentry-component="Types"]'))).catch(() => false);
+      if (!isTab) return followingSubmit;
+    }
+  } catch {}
+
+  // 2. Selectors targeting the full-width submit button, strictly excluding the tab switcher
+  const candidateLocators = side === 'buy'
+    ? [
+        page.locator('button[class*="w-full"]:has([data-sentry-component="TradeDisplay"])'),
+        page.locator('button[class*="w-full"][class*="bg-increase"]'),
+        page.locator('button:has([data-sentry-component="TradeDisplay"])'),
+        page.locator('button[class*="!bg-increase-100"]'),
+        page.locator('button[class*="w-full"]').filter({ hasText: /(Beli|Buy)/i }),
+        page.locator('button').filter({ hasText: /(Beli|Buy)/i }),
+      ]
+    : [
+        page.locator('button[class*="w-full"]:has([data-sentry-component="TradeButtonText"])'),
+        page.locator('button[class*="w-full"][class*="bg-decrease"]'),
+        page.locator('button:has([data-sentry-component="TradeButtonText"])'),
+        page.locator('button[class*="!bg-decrease-100"]'),
+        page.locator('button[class*="w-full"]').filter({ hasText: /(Jual|Sell)/i }),
+        page.locator('button').filter({ hasText: /(Jual|Sell)/i }),
+      ];
+
+  for (const candidate of candidateLocators) {
+    const count = await candidate.count().catch(() => 0);
+    for (let index = 0; index < count; index++) {
+      const el = candidate.nth(index);
+      if (await el.isVisible().catch(() => false)) {
+        // Crucial: Make 100% sure it is NOT the tab switcher at the top
+        const isTab = await el.evaluate(element => Boolean(element.closest('[data-sentry-component="Types"]'))).catch(() => false);
+        if (!isTab) return el;
+      }
+    }
+  }
+  throw new Error(`GMGN ${label} order submit button was not found.`);
+}
+
+export async function clickTradeButton(page: Page, side: TradeSide): Promise<{ clicked: boolean; buttonText: string }> {
+  const btn = await submitButton(page, side);
+  await btn.waitFor({ state: 'visible', timeout: 5_000 });
+  const text = (await btn.textContent())?.trim() ?? '';
+  await page.waitForTimeout(200);
+  await btn.click({ timeout: 5_000, force: true });
+  return { clicked: true, buttonText: text };
 }
 
 export async function selectSellPercent(page: Page, percent: number): Promise<void> {
@@ -118,7 +185,9 @@ export async function selectSellPercent(page: Page, percent: number): Promise<vo
     throw new Error('--sell-percent must be an integer between 1 and 100.');
   }
   const switcher = page.locator('[data-sentry-component="Types"]');
+  await switcher.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
   const presets = switcher.locator(`xpath=following::*[normalize-space(.)="${percent}%"]`);
+  await presets.first().waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
   for (let index = 0; index < await presets.count(); index += 1) {
     const preset = presets.nth(index);
     if (await preset.isVisible().catch(() => false)) {
@@ -134,6 +203,7 @@ export async function applyExecutionSettings(page: Page, settings: ExecutionSett
   if (!await visible(slippage)) {
     const icon = page.locator('svg[data-icon="IconSlippage16pxRegular"]').first();
     const trigger = icon.locator('xpath=ancestor::div[contains(@class,"cursor-pointer")][1]');
+    await trigger.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
     if (!await visible(trigger)) throw new Error('GMGN execution-settings expander was not found.');
     await trigger.click();
     await slippage.waitFor({ state: 'visible', timeout: 10_000 });
@@ -143,6 +213,7 @@ export async function applyExecutionSettings(page: Page, settings: ExecutionSett
   const tip = page.locator('xpath=//span[starts-with(normalize-space(.), "Tip Fee")]/ancestor::div[contains(@class,"justify-between")][1]//input').first();
   const maxAutoPriority = page.locator('input[placeholder="0"]').first();
   const antiMevOff = page.locator('input.pi-radio-button-input[value="off"]').first();
+  await priority.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
   if (!await visible(priority) || !await visible(tip) || !await visible(maxAutoPriority) || await antiMevOff.count() === 0) {
     throw new Error('One or more GMGN execution-setting controls were not found.');
   }
