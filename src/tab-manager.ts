@@ -1,13 +1,43 @@
+export interface SlotTrade {
+  side: 'buy' | 'sell';
+  amountUsd: number;
+  priceUsd: number;
+  occurredAt: number;
+  wallet?: string;
+  isBigSell?: boolean;
+}
+
+export interface SlotAlert {
+  type: 'WHALE_SELL' | 'DEV_SELL' | 'HOLDER_DROP' | 'SELL_PRESSURE' | 'PRICE_CRASH';
+  level: 'DANGER' | 'WARNING';
+  title: string;
+  detail: string;
+  occurredAt: number;
+}
+
 export interface ActiveTabInfo {
   mint: string;
   symbol: string;
   name?: string;
   url: string;
   openedAt: number;
+  initialPriceUsd?: number;
   lastPriceUsd?: number;
+  peakPriceUsd?: number;
+  priceChangePercent?: number;
+  drawdownPercent?: number;
   holders?: number;
-  buys?: number;
-  sells?: number;
+  initialHolders?: number;
+  holderDelta?: number;
+  holderDeclineStreak?: number;
+  holderHistory?: { observedAt: number; count: number }[];
+  buysCount?: number;
+  sellsCount?: number;
+  buyUsd?: number;
+  sellUsd?: number;
+  recentTrades?: SlotTrade[];
+  alerts?: SlotAlert[];
+  hasWarning?: boolean;
 }
 
 export interface ClosedTabHistory {
@@ -21,6 +51,12 @@ export interface ClosedTabHistory {
   durationSeconds: number;
   lastPriceUsd?: number;
   holders?: number;
+}
+
+export interface SlotState {
+  slotNumber: number;
+  isEmpty: boolean;
+  tab?: ActiveTabInfo;
 }
 
 export class TabManager {
@@ -71,10 +107,23 @@ export class TabManager {
       name,
       url,
       openedAt,
+      initialPriceUsd: initialPrice,
       lastPriceUsd: initialPrice,
+      peakPriceUsd: initialPrice,
+      priceChangePercent: 0,
+      drawdownPercent: 0,
       holders,
-      buys: 0,
-      sells: 0,
+      initialHolders: holders,
+      holderDelta: 0,
+      holderDeclineStreak: 0,
+      holderHistory: holders ? [{ observedAt: openedAt, count: holders }] : [],
+      buysCount: 0,
+      sellsCount: 0,
+      buyUsd: 0,
+      sellUsd: 0,
+      recentTrades: [],
+      alerts: [],
+      hasWarning: false,
     });
     return true;
   }
@@ -83,6 +132,158 @@ export class TabManager {
     const current = this.activeTabs.get(mint);
     if (!current) return;
     Object.assign(current, updates);
+  }
+
+  recordTrade(
+    mint: string,
+    trade: {
+      side: 'buy' | 'sell';
+      amountUsd: number;
+      priceUsd: number;
+      occurredAt?: number;
+      wallet?: string;
+    }
+  ): void {
+    const tab = this.activeTabs.get(mint);
+    if (!tab) return;
+
+    const now = trade.occurredAt ?? Date.now();
+    tab.lastPriceUsd = trade.priceUsd;
+
+    if (!tab.initialPriceUsd && trade.priceUsd > 0) {
+      tab.initialPriceUsd = trade.priceUsd;
+    }
+    if (!tab.peakPriceUsd || trade.priceUsd > tab.peakPriceUsd) {
+      tab.peakPriceUsd = trade.priceUsd;
+    }
+    if (tab.initialPriceUsd && tab.initialPriceUsd > 0) {
+      tab.priceChangePercent = ((trade.priceUsd - tab.initialPriceUsd) / tab.initialPriceUsd) * 100;
+    }
+    if (tab.peakPriceUsd && tab.peakPriceUsd > 0) {
+      tab.drawdownPercent = ((trade.priceUsd - tab.peakPriceUsd) / tab.peakPriceUsd) * 100;
+    }
+
+    const isBigSell = trade.side === 'sell' && trade.amountUsd >= 80;
+    const slotTrade: SlotTrade = {
+      side: trade.side,
+      amountUsd: trade.amountUsd,
+      priceUsd: trade.priceUsd,
+      occurredAt: now,
+      wallet: trade.wallet,
+      isBigSell,
+    };
+
+    const tradesList = tab.recentTrades ?? [];
+    tradesList.unshift(slotTrade);
+    // Keep last 30 trades within 45 seconds
+    tab.recentTrades = tradesList.filter(t => now - t.occurredAt <= 45_000).slice(0, 30);
+
+    // Calculate flow statistics
+    let bCount = 0, sCount = 0, bUsd = 0, sUsd = 0;
+    for (const t of tab.recentTrades) {
+      if (t.side === 'buy') {
+        bCount++;
+        bUsd += t.amountUsd;
+      } else {
+        sCount++;
+        sUsd += t.amountUsd;
+      }
+    }
+    tab.buysCount = bCount;
+    tab.sellsCount = sCount;
+    tab.buyUsd = bUsd;
+    tab.sellUsd = sUsd;
+
+    // Check Whale / Big Sell alert
+    if (isBigSell) {
+      this.addAlert(mint, {
+        type: 'WHALE_SELL',
+        level: 'DANGER',
+        title: '🚨 PENJUALAN BESAR TERDETEKSI',
+        detail: `Whale menjual $${trade.amountUsd.toFixed(1)} pada harga $${trade.priceUsd.toFixed(8)}!`,
+        occurredAt: now,
+      });
+    }
+
+    // Check Heavy Sell Pressure alert
+    const totalUsd = bUsd + sUsd;
+    if (totalUsd > 100 && (bCount + sCount) >= 5) {
+      const sellRatio = sUsd / totalUsd;
+      if (sellRatio >= 0.70) {
+        this.addAlert(mint, {
+          type: 'SELL_PRESSURE',
+          level: 'DANGER',
+          title: '🚨 TEKANAN JUAL TINGGI',
+          detail: `Volume jual mencapai ${(sellRatio * 100).toFixed(0)}% ($${sUsd.toFixed(0)} jual vs $${bUsd.toFixed(0)} beli)!`,
+          occurredAt: now,
+        });
+      }
+    }
+
+    // Check Rapid Price Crash alert
+    if (tab.drawdownPercent !== undefined && tab.drawdownPercent <= -8.0) {
+      this.addAlert(mint, {
+        type: 'PRICE_CRASH',
+        level: 'DANGER',
+        title: '🚨 HARGA ANJLOK TAJAM',
+        detail: `Drawdown ${tab.drawdownPercent.toFixed(1)}% dari puncak ($${tab.peakPriceUsd?.toFixed(8)})! Segera SELL!`,
+        occurredAt: now,
+      });
+    }
+  }
+
+  recordHolderSample(mint: string, holderCount: number, observedAt = Date.now()): void {
+    const tab = this.activeTabs.get(mint);
+    if (!tab) return;
+
+    if (tab.holders !== undefined && tab.holders !== holderCount) {
+      const delta = holderCount - tab.holders;
+      tab.holderDelta = delta;
+      if (delta < 0) {
+        tab.holderDeclineStreak = (tab.holderDeclineStreak ?? 0) + 1;
+      } else if (delta > 0) {
+        tab.holderDeclineStreak = 0;
+      }
+    }
+
+    tab.holders = holderCount;
+    if (!tab.initialHolders) tab.initialHolders = holderCount;
+
+    const history = tab.holderHistory ?? [];
+    history.push({ observedAt, count: holderCount });
+    tab.holderHistory = history.filter(h => observedAt - h.observedAt <= 60_000);
+
+    // Check Holder Drop Streak Alert
+    if ((tab.holderDeclineStreak ?? 0) >= 2) {
+      this.addAlert(mint, {
+        type: 'HOLDER_DROP',
+        level: 'DANGER',
+        title: '🚨 HOLDER TURUN BERTURUT-TURUT',
+        detail: `Holder berkurang ${Math.abs(tab.holderDelta ?? 0)} (${tab.holderDeclineStreak}x berturut-turut)! Sinyal dump!`,
+        occurredAt: observedAt,
+      });
+    }
+  }
+
+  addAlert(mint: string, alert: SlotAlert): void {
+    const tab = this.activeTabs.get(mint);
+    if (!tab) return;
+    const alerts = tab.alerts ?? [];
+    // Deduplicate same alert within 15 seconds
+    const recentSame = alerts.find(a => a.type === alert.type && alert.occurredAt - a.occurredAt < 15_000);
+    if (!recentSame) {
+      alerts.unshift(alert);
+      tab.alerts = alerts.slice(0, 5);
+      tab.hasWarning = true;
+    }
+  }
+
+  clearOldAlerts(now = Date.now()): void {
+    for (const tab of this.activeTabs.values()) {
+      if (!tab.alerts?.length) continue;
+      tab.alerts = tab.alerts.filter(a => now - a.occurredAt <= 30_000);
+      tab.hasWarning = tab.alerts.length > 0;
+    }
   }
 
   closeTab(mint: string, closedAt = Date.now()): ClosedTabHistory | null {
@@ -139,11 +340,38 @@ export class TabManager {
     return { success: true, item };
   }
 
+  /**
+   * Returns exactly `maxTabs` (default 5) slots.
+   * If an active tab exists at index i, it populates that slot.
+   * Otherwise, it marks the slot as empty so the dashboard always has 5 active boxes.
+   */
+  getFiveSlots(): SlotState[] {
+    const activeList = this.getActiveTabs();
+    const slots: SlotState[] = [];
+    for (let i = 0; i < this.maxTabs; i++) {
+      if (i < activeList.length) {
+        slots.push({
+          slotNumber: i + 1,
+          isEmpty: false,
+          tab: activeList[i],
+        });
+      } else {
+        slots.push({
+          slotNumber: i + 1,
+          isEmpty: true,
+        });
+      }
+    }
+    return slots;
+  }
+
   getStatusSummary() {
+    this.clearOldAlerts();
     return {
       activeCount: this.activeTabs.size,
       maxTabs: this.maxTabs,
       availableSlots: Math.max(0, this.maxTabs - this.activeTabs.size),
+      slots: this.getFiveSlots(),
       activeTabs: this.getActiveTabs(),
       closedCount: this.closedHistory.length,
       closedHistory: this.closedHistory.slice(0, 20),
