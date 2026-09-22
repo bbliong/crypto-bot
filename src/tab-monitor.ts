@@ -43,6 +43,8 @@ let feedPage: Page | null = null;
 let dashboardPage: Page | null = null;
 let stopping = false;
 let activeServer: ReturnType<typeof createServer> | null = null;
+let userActivePage: Page | null = null;
+let isOpeningBackgroundTab = false;
 
 function num(candidate: Candidate | undefined, field: string): number | null {
   const value = candidate?.fields[field as keyof Candidate['fields']]?.value;
@@ -109,25 +111,25 @@ function writeDashboardReport(): void {
 
 async function safelySetAmount(page: Page, solAmount: string): Promise<void> {
   const input = await amountInput(page);
-  const current = (await input.inputValue()).trim();
+  const current = (await input.inputValue().catch(() => '')).trim();
   if (current === solAmount) return;
-  await input.click({ clickCount: 3 });
-  await input.press('ControlOrMeta+a');
-  await input.press('Backspace');
-  await page.waitForTimeout(100);
-  await input.fill(solAmount);
-  const afterFill = (await input.inputValue()).trim();
-  if (afterFill !== solAmount) {
-    await input.evaluate((el: HTMLInputElement, val: string) => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      if (setter) {
-        setter.call(el, val);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      } else {
-        el.value = val;
-      }
-    }, solAmount);
+
+  // Background-safe update using native HTMLInputElement property setter and events.
+  // This avoids clicking or firing keypresses that could interfere with active windows.
+  await input.evaluate((el: HTMLInputElement, val: string) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (setter) {
+      setter.call(el, val);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      el.value = val;
+    }
+  }, solAmount).catch(() => {});
+
+  const afterEval = (await input.inputValue().catch(() => '')).trim();
+  if (afterEval !== solAmount) {
+    await input.fill(solAmount).catch(() => {});
   }
 }
 
@@ -135,6 +137,75 @@ async function prepareBuyPanel(page: Page, solAmount: string, symbol: string): P
   await selectTradeSide(page, 'buy');
   await safelySetAmount(page, solAmount);
   console.log(`[ui-prep] 💰 ${symbol}: Panel Buy disiapkan dengan nominal ${solAmount} SOL. (Siap untuk manual buy).`);
+}
+
+async function getCurrentlyActivePage(): Promise<Page | null> {
+  if (userActivePage && !userActivePage.isClosed()) {
+    try {
+      const isVisible = await userActivePage.evaluate(() => document.visibilityState === 'visible' && !document.hidden).catch(() => false);
+      if (isVisible) return userActivePage;
+    } catch {}
+  }
+  if (context) {
+    const pages = context.pages();
+    for (let i = pages.length - 1; i >= 0; i--) {
+      const p = pages[i];
+      if (p.isClosed()) continue;
+      try {
+        const isVisible = await p.evaluate(() => document.visibilityState === 'visible' && !document.hidden).catch(() => false);
+        if (isVisible) {
+          userActivePage = p;
+          return p;
+        }
+      } catch {}
+    }
+  }
+  return userActivePage && !userActivePage.isClosed() ? userActivePage : null;
+}
+
+async function createBackgroundPage(targetUrl = 'about:blank'): Promise<Page> {
+  if (!context) throw new Error('Browser context not initialized');
+
+  const activePage = await getCurrentlyActivePage();
+  isOpeningBackgroundTab = true;
+
+  let newPage: Page | null = null;
+
+  try {
+    const sessionHost = (activePage && !activePage.isClosed())
+      ? activePage
+      : (feedPage && !feedPage.isClosed() ? feedPage : context.pages().find(p => !p.isClosed()));
+
+    if (sessionHost) {
+      const cdp = await context.newCDPSession(sessionHost);
+      const pagePromise = context.waitForEvent('page', { timeout: 10_000 });
+      try {
+        await cdp.send('Target.createTarget', {
+          url: targetUrl,
+          background: true,
+        });
+        newPage = await pagePromise;
+      } finally {
+        await cdp.detach().catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('[background-tab-warn] CDP Target.createTarget gagal, fallback ke context.newPage():', err instanceof Error ? err.message : err);
+  }
+
+  if (!newPage) {
+    newPage = await context.newPage();
+  }
+
+  // Restore focus to user's active tab if Chromium shifted focus
+  if (activePage && !activePage.isClosed() && activePage !== newPage) {
+    try {
+      await activePage.bringToFront();
+    } catch {}
+  }
+
+  isOpeningBackgroundTab = false;
+  return newPage;
 }
 
 async function openDetailTab(mint: string, candidate?: Candidate): Promise<boolean> {
@@ -148,8 +219,11 @@ async function openDetailTab(mint: string, candidate?: Candidate): Promise<boole
   const initialPrice = num(candidate, 'priceUsd') ?? undefined;
   const initialHolders = num(candidate, 'holders') ?? undefined;
 
+  // Remember the user's current active tab so focus is never lost
+  const activeBefore = await getCurrentlyActivePage();
+
   try {
-    const page = await context.newPage();
+    const page = await createBackgroundPage('about:blank');
     openPages.set(mint, page);
     tabManager.openTab(mint, symbol, url, name, Date.now(), initialPrice, initialHolders);
 
@@ -198,24 +272,32 @@ async function openDetailTab(mint: string, candidate?: Candidate): Promise<boole
       }
     });
 
-    console.log(`\n[tab-opened] 🌐 Tab baru dibuka: ${symbol} (${mint}). Tab aktif: ${tabManager.getActiveCount()}/${maxTabs}`);
+    console.log(`\n[tab-opened] 🌐 Tab baru dibuka di latar belakang (background): ${symbol} (${mint}). Tab aktif: ${tabManager.getActiveCount()}/${maxTabs}`);
     logStatus();
     writeDashboardReport();
 
-    // Navigate to the GMGN token page
+    // Navigate to the GMGN token page in the background
     await page.goto(url, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
 
-    // Pre-fill amount buy 0.01 SOL (tanpa klik submit) agar pengguna bisa langsung manual buy
+    // Pre-fill amount buy 0.01 SOL (tanpa klik submit) secara background-safe
     await page.waitForTimeout(1000);
     await prepareBuyPanel(page, buyAmountSol, symbol).catch(err => {
       console.warn(`[ui-prep-warn] ${symbol} tidak dapat mengisi nominal buy:`, err instanceof Error ? err.message : err);
     });
+
+    // Ensure user's active tab is still in front
+    if (activeBefore && !activeBefore.isClosed()) {
+      await activeBefore.bringToFront().catch(() => {});
+    }
 
     return true;
   } catch (error) {
     console.error(`[tab-open-error] Gagal membuka tab untuk ${mint}:`, error instanceof Error ? error.message : error);
     openPages.delete(mint);
     tabManager.closeTab(mint);
+    if (activeBefore && !activeBefore.isClosed()) {
+      await activeBefore.bringToFront().catch(() => {});
+    }
     return false;
   }
 }
@@ -236,8 +318,9 @@ async function processNextInQueue(): Promise<void> {
 
 async function focusTab(mint: string): Promise<boolean> {
   const page = openPages.get(mint);
-  if (!page) return false;
+  if (!page || page.isClosed()) return false;
   try {
+    userActivePage = page;
     await page.bringToFront();
     console.log(`[focus-tab] Tab ${mint} dibawa ke depan di browser Chrome.`);
     return true;
@@ -947,9 +1030,30 @@ async function main(): Promise<void> {
     ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined,
   });
 
+  // Track active tab focus so background tabs never steal focus
+  await context.exposeBinding('__tabActivated', ({ page }) => {
+    if (!isOpeningBackgroundTab && page) {
+      userActivePage = page;
+    }
+  }).catch(() => {});
+
+  await context.addInitScript(() => {
+    const notify = () => {
+      try {
+        (window as any).__tabActivated?.();
+      } catch {}
+    };
+    window.addEventListener('focus', notify, true);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') notify();
+    }, true);
+    window.addEventListener('pointerdown', notify, true);
+  }).catch(() => {});
+
   // Open the 5-box Socket Monitor Dashboard in a dedicated, clean dashboard window
   try {
     dashboardPage = await context.newPage();
+    userActivePage = dashboardPage;
     await dashboardPage.goto(dashboardUrl, { waitUntil: 'domcontentloaded' });
     console.log(`[dashboard-opened] 🖥️ Dashboard 5-Kotak Socket Monitor dibuka di browser: ${dashboardUrl}`);
   } catch (err) {
@@ -957,7 +1061,7 @@ async function main(): Promise<void> {
   }
 
   // Open feed page in tab 0
-  feedPage = context.pages()[0] ?? (await context.newPage());
+  feedPage = context.pages().find(p => p !== dashboardPage) ?? (await context.newPage());
   attachCapture(feedPage, () => {}, (payload, now, source) => {
     for (const metadata of parseTokenMetadata(payload)) {
       const known = candidates.get(metadata.mint);
