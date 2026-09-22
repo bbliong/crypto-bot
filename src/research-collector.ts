@@ -13,6 +13,7 @@ import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, asse
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate } from './model.js';
+import { MOMENTUM_RULES, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 
 const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '1800' }, detailSeconds: { type: 'string', default: '600' },
@@ -28,6 +29,7 @@ const { values } = parseArgs({ options: {
   prepareTradeUi: { type: 'boolean', default: true }, enableExtensions: { type: 'boolean', default: true },
   exitHoldSeconds: { type: 'string', default: '20' }, maxPaperBuys: { type: 'string' }, maxBuys: { type: 'string' },
   autoBuy: { type: 'boolean' },
+  strategy: { type: 'string', default: 'momentum-v2' },
   topHolderDumpMinPercent: { type: 'string' },
   config: { type: 'string', default: 'config/rules.yaml' },
 } });
@@ -37,6 +39,9 @@ const workers = Number(values.workers), stopLossPercent = Number(values.stopLoss
 const exitHoldSeconds = Number(values.exitHoldSeconds);
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
+if (!['legacy', 'momentum-v2'].includes(values.strategy!)) throw new Error('Unknown research strategy');
+const momentumV2 = values.strategy === 'momentum-v2';
+if (momentumV2 && autoBuyEnabled) throw new Error('momentum-v2 is a paper research strategy; set autoBuy=false before testing it.');
 const topHolderDumpMinPercent = values.topHolderDumpMinPercent !== undefined ? Number(values.topHolderDumpMinPercent) : (config.topHolderDumpMinPercent ?? 1.5);
 
 // Stake configuration: supports USD (--stake 1, --stakeUsd 5) or direct SOL (--sol 0.005, --buySol 0.01)
@@ -109,6 +114,13 @@ const writeSimulation = (event: SimulatedEvent & Record<string, unknown>) => { s
 const candidates = new Map<string, Candidate>(), trades = new Map<string, Trade[]>(), holders = new Map<string, Map<string, Holder>>();
 const developerHolders = new Map<string, Map<string, DeveloperHolder>>();
 const holderHistory = new Map<string, Map<string, Holder[]>>();
+const totalHolderSamples = new Map<string, HolderSample[]>();
+const momentumTape = new Map<string, TapeTrade[]>();
+const paperRiskListeners = new Map<string, (tick: TapeTrade) => void>();
+const ownerSnapshots = new Map<string, OwnerSample[]>();
+function ownerEvidence(mint: string): OwnerSample[] {
+  return ownerSnapshots.get(mint) ?? [];
+}
 const queue = new CandidateQueue(500, 10 * 60_000), inspected = new Set<string>(), lastHolderWrite = new Map<string, number>(), lastComparisonWrite = new Map<string, number>();
 const rejected = new Set<string>(), youngRejected = new Set<string>(), rejectionCounts = new Map<string, number>(), youngRejectionCounts = new Map<string, number>();
 const stopping = new AbortController();
@@ -225,9 +237,16 @@ async function refreshTokenStat(page: Page, mint: string, observedAt: number) {
   }, { mint }).catch(error => ({ status: 0, body: { error: error instanceof Error ? error.message : 'request failed' } }));
   const data = response.body && typeof response.body === 'object' ? (response.body as { data?: unknown }).data : null;
   const record = data && typeof data === 'object' ? data as Record<string, unknown> : {};
-  const holderCount = ['holder_count', 'holders', 'holder_num', 'holderCount'].map(key => Number(record[key])).find(value => Number.isFinite(value) && value >= 0) ?? null;
+  const holderCount = response.status === 200 ? ['holder_count', 'holders', 'holder_num', 'holderCount']
+    .filter(key => record[key] !== null && record[key] !== undefined && record[key] !== '')
+    .map(key => Number(record[key])).find(value => Number.isInteger(value) && value >= 0) ?? null : null;
+  // A response becomes evidence when it arrives, not when its request started.
+  observedAt = Date.now();
   write('token-stat.jsonl', { mint, observedAt, source: 'GMGN same-session /api/v1/token_stat', status: response.status, holderCount, availableFields: Object.keys(record).slice(0, 100) });
   if (holderCount !== null) {
+    const samples = totalHolderSamples.get(mint) ?? [];
+    if (!samples.length || observedAt > samples.at(-1)!.observedAt) samples.push({ observedAt, count: holderCount });
+    totalHolderSamples.set(mint, samples.slice(-12));
     const existing = candidates.get(mint);
     merge({ mint, firstSeenAt: existing?.firstSeenAt ?? observedAt, updatedAt: observedAt, fields: { holders: { value: holderCount, observedAt, source: 'GMGN token_stat API' } } });
   }
@@ -292,6 +311,7 @@ function parseAndStoreDeveloperHolders(mint: string, body: unknown, observedAt: 
 }
 
 function parseAndStoreTrackedHolders(mint: string, body: unknown, observedAt: number, source: 'network_intercept' | 'replayed_xhr', status: number): TrackedHolder[] {
+  observedAt = Date.now();
   const root = body && typeof body === 'object' ? body as { data?: unknown } : {};
   const data = root.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : {};
   const values = [data.list, data.holders, data.data].find(Array.isArray) as unknown[] | undefined;
@@ -325,6 +345,14 @@ function parseAndStoreTrackedHolders(mint: string, body: unknown, observedAt: nu
   const map = new Map<string, TrackedHolder>();
   for (const holder of found) map.set(holder.wallet, holder);
   if (found.length) trackedHolders.set(mint, map);
+  if (status === 200 && found.length) {
+    const snapshots = found.filter(h => h.raw.addr_type !== 2 && !h.raw.exchange && !h.walletTagV2?.toLowerCase().includes('lp')).map(h => ({
+      observedAt, wallet: h.wallet, balance: h.amount,
+      percent: h.raw.amount_percentage === null || h.raw.amount_percentage === undefined ? null : Number(h.raw.amount_percentage) * 100,
+      isDev: h.isDev,
+    }));
+    ownerSnapshots.set(mint, [...(ownerSnapshots.get(mint) ?? []).filter(h => observedAt - h.observedAt <= 60_000), ...snapshots]);
+  }
   holderApiStatus.set(mint, { status, count: found.length, observedAt, source });
   write('tracked-holders.jsonl', { mint, observedAt, status, count: found.length, source, holders: found });
   console.log(`[tracked-holders-loaded] (${source}) ${mint} loaded ${found.length} holders (Devs: ${found.filter(h => h.isDev).length}, status=${status})`);
@@ -545,7 +573,7 @@ function writeSimulationExit(position: SimulationPosition, mint: string, now: nu
   const result = closeSimulation(position, exitPriceUsd);
   writeSimulation({ type: 'SIMULATED_SELL', mint, observedAt: now, reason, entry: { openedAt: position.openedAt, priceUsd: position.entryPriceUsd, stakeUsd: position.stakeUsd, quantity: position.quantity },
     exit: { priceUsd: exitPriceUsd, grossProceedsUsd: result.grossProceedsUsd }, pnlUsd: result.pnlUsd, pnlPercent: result.pnlPercent,
-    decision, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation with GMGN UI Sell button click.' }, metadata });
+    decision, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper valuation at the observed signal price; this is not a confirmed swap fill.' }, metadata });
   if (maxPaperBuys !== null) {
     const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
     if (totalSells >= maxPaperBuys) {
@@ -579,6 +607,16 @@ function captureTrades(payload: unknown, now: number, mint: string | undefined) 
       amount: Number.isFinite(Number(at(row, 'au'))) ? Number(at(row, 'au')) : null,
       amountUsd, raw };
     list.push(trade); trades.set(mint, list); write('trades.jsonl', trade);
+    if (momentumV2) {
+      const rawTokens = trade.raw.ba;
+      const tick: TapeTrade = { id: signature ?? String(trade.raw.id ?? trade.raw.si ?? `${mint}:${trade.occurredAt}:${trade.wallet}:${trade.side}:${trade.priceUsd}:${rawTokens}`),
+        observedAt: now, occurredAt: trade.occurredAt, priceUsd: trade.priceUsd, side: trade.side, wallet: trade.wallet,
+        usd: trade.amountUsd ?? null, tokens: rawTokens === null || rawTokens === undefined ? null : Number(rawTokens) };
+      const tape = momentumTape.get(mint) ?? [];
+      tape.push(tick); momentumTape.set(mint, tape.filter(t => t.observedAt >= now - 15_000));
+      // Synchronous, exactly-once paper exit. UI/API awaits never suspend this listener.
+      paperRiskListeners.get(mint)?.(tick);
+    }
     if (trade.priceUsd !== null && trade.priceUsd > 0) {
       const candidate = candidates.get(mint);
       if (candidate) {
@@ -779,6 +817,9 @@ async function worker(index: number, deadline: number) {
     let holderCount: number | null = typeof candidates.get(mint)?.fields.holders?.value === 'number' ? (candidates.get(mint)!.fields.holders!.value as number) : null;
     const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastCandlePollAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, latestCandles: McapCandle[] = [], candleBlockRecorded = false, trialLimitRecorded = false, blindProtectionBlockRecorded = false, holderDistributionBlockRecorded = false, lastHolderDistributionLogAt = 0;
     let lastMonitoringSnapshotAt = 0;
+    let pendingMomentumExit: ReturnType<typeof assessMomentumExit> = null;
+    let lastMomentumBlockAt = 0;
+    let lastTrackedPollAt = Date.now(), trackedPollDelayMs = 21_000;
     // A single socket trade can make a thin launch wick below the stop.  Keep
     // the breach pending until independent socket and candle evidence agree.
     let entryCandleClose: number | null = null, hardStopPendingAt = 0, hardStopDistinctTicks = 0, hardStopLastPriceObservedAt = 0;
@@ -809,7 +850,11 @@ async function worker(index: number, deadline: number) {
         });
       }
       while (!stopping.signal.aborted && Date.now() < stopAt) {
-        const now = Date.now();
+        let now = Date.now();
+        if (momentumV2 && now - lastTrackedPollAt >= trackedPollDelayMs) {
+          const tracked = await refreshTrackedHolders(page, mint, now).catch(() => ({ status: 0 }));
+          lastTrackedPollAt = Date.now(); trackedPollDelayMs = tracked.status === 429 ? 60_000 : 21_000;
+        }
         if (now - lastTokenStatAt >= 5_000) { await refreshTokenStat(page, mint, now); lastTokenStatAt = Date.now(); }
         if (now - lastCandlePollAt >= 3_000) {
           const freshCandleResult = await fetchMcapCandles(page, mint);
@@ -837,7 +882,11 @@ async function worker(index: number, deadline: number) {
             lastDeveloperHoldersAt = Date.now(); developerHolderPollMs = developerSnapshot.status === 429 ? 60_000 : 30_000;
           }
         }
-        const candidate = candidates.get(mint), price = num(candidate, 'priceUsd'), priceObservedAt = candidate?.fields.priceUsd?.observedAt ?? 0;
+        now = Date.now();
+        const candidate = candidates.get(mint);
+        const lastMomentumTick = cleanTape(momentumTape.get(mint) ?? [], now).filter(t => t.priceUsd !== null && t.priceUsd > 0).at(-1);
+        const price = momentumV2 ? lastMomentumTick?.priceUsd ?? null : num(candidate, 'priceUsd');
+        const priceObservedAt = momentumV2 ? lastMomentumTick?.observedAt ?? 0 : candidate?.fields.priceUsd?.observedAt ?? 0;
         const holderField = candidate?.fields.holders;
         if (typeof holderField?.value === 'number') holderCount = holderField.value;
         if (holderCount !== null && holderField && holderField.observedAt > lastHolderObservedAt) {
@@ -904,7 +953,9 @@ async function worker(index: number, deadline: number) {
           const tokenHoldersMap = trackedHolders.get(mint);
           const currentHolderCount = tokenHoldersMap?.size ?? 0;
           const currentHolderStatus = holderApiStatus.get(mint)?.status ?? null;
-          const blindProtection = assessBlindProtection(isYoungToken, currentHolderStatus, currentHolderCount);
+          const ownerStatus = holderApiStatus.get(mint);
+          const verifiedStatus = momentumV2 && (!ownerStatus || now - ownerStatus.observedAt > MOMENTUM_RULES.holderEvidenceMaxAgeMs) ? null : currentHolderStatus;
+          const blindProtection = assessBlindProtection(momentumV2 || isYoungToken, verifiedStatus, currentHolderCount);
 
           // Calculate holder distribution metrics (Top 1, Top 5, Dev) excluding liquidity pool / bonding curve
           let top1Pct = 0, top5Pct = 0, devHoldingPct = 0;
@@ -949,7 +1000,8 @@ async function worker(index: number, deadline: number) {
             || singleCandleOverride.allowed
             || earlyCandleRising.allowed);
 
-          const buyAllowed = entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed;
+          const momentumEntry = momentumV2 ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken) : null;
+          const buyAllowed = entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed && (momentumEntry?.allowed ?? true);
 
           if (buyAllowed && (maxPaperBuys === null || paperBuyCount < maxPaperBuys)) {
             paperBuyCount++;
@@ -957,10 +1009,27 @@ async function worker(index: number, deadline: number) {
               ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
               : simulationStakeUsd;
             simulation = openSimulation(mint, now, price, effectiveStakeUsd);
+            if (momentumV2) {
+              const paperPosition = simulation;
+              const riskState = createMomentumPosition(now, price, lastMomentumTick?.occurredAt ?? now);
+              paperRiskListeners.set(mint, tick => {
+                const decision = assessMomentumExit(riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
+                if (!decision) return;
+                if (decision.reason || tick.observedAt - lastMonitoringSnapshotAt >= 5_000) {
+                  lastMonitoringSnapshotAt = tick.observedAt;
+                  write('momentum-decisions.jsonl', { mint, ...decision });
+                }
+                if (decision.reason) {
+                  simulationExit = decision.reason;
+                  pendingMomentumExit = decision;
+                  writeSimulationExit(paperPosition, mint, decision.observedAt, decision.priceUsd, decision.reason, candidate?.metadata ?? null, decision);
+                }
+              });
+            }
             highestProfitPriceUsd = price;
             lastProfitProgressAt = now;
             dynamicTargetPercent = 30;
-            const developerSnapshot = await maybeRefreshDeveloperHolders(page, mint, now);
+            const developerSnapshot = momentumV2 ? { deferred: true, status: null } : await maybeRefreshDeveloperHolders(page, mint, now);
             if (!developerSnapshot.deferred) {
               lastDeveloperHoldersAt = Date.now(); developerHolderPollMs = developerSnapshot.status === 429 ? 60_000 : 30_000;
             }
@@ -969,8 +1038,8 @@ async function worker(index: number, deadline: number) {
             // assuming a fixed token supply.
             if (!entryCandleClose || entryCandleClose <= 0) entryCandleClose = null;
             writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: now, entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
-              entryGate: { realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
-            if (values.prepareTradeUi) {
+              entryGate: { momentum: momentumEntry, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
+            if (values.prepareTradeUi && !momentumV2) {
               await prepareBuyPanel(page, mint, index, now).catch(error => {
                 write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
               });
@@ -993,6 +1062,9 @@ async function worker(index: number, deadline: number) {
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
               note: 'All entry gates passed, but the non-submitting paper-buy trial has already prepared its maximum number of candidates.' });
             console.log('[sim-buy-skipped]', candidate?.metadata?.symbol ?? mint, 'TRIAL_LIMIT=' + maxPaperBuys);
+          } else if (momentumEntry && !momentumEntry.allowed && now - lastMomentumBlockAt >= 5_000) {
+            lastMomentumBlockAt = now;
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: momentumEntry.reasons.join(', '), momentum: momentumEntry });
           } else if (!blindProtection.allowed && !blindProtectionBlockRecorded) {
             blindProtectionBlockRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: blindProtection.reason, holderStatus: blindProtection.holderStatus, holderCount: blindProtection.holderCount, isYoungToken, candleDecision, earlyCandleRising, singleCandleOverride, note: 'Blind Protection: DILARANG BUY pada token umur muda (candle 1-2) karena API holder terkena 429 atau top holder belum terverifikasi.' });
@@ -1030,12 +1102,21 @@ async function worker(index: number, deadline: number) {
             if (!holderDistribution.allowed) blockReasons.push('HOLDER_DIST:' + holderDistribution.reason + (holderDistribution.action ? ':' + holderDistribution.action : ''));
             if (!entry.stable) blockReasons.push('ENTRY:' + (entry.reason ?? 'UNSTABLE'));
             if (!flowAllowed) blockReasons.push('FLOW:INSUFFICIENT_BUY_PRESSURE');
+            if (momentumEntry && !momentumEntry.allowed) blockReasons.push(...momentumEntry.reasons);
             const snap: MonitoringSnapshot = { observedAt: now, holderCount, holderDelta, buys5s, sells5s, buyUsd5s, sellUsd5s, priceUsd: price ?? null, top10Holders: computeTop10Holders(mint), blockingReasons: blockReasons };
             prevSnaps.push(snap);
             monitoringSnapshots.set(mint, prevSnaps);
           }
         }
-        if (price && simulation && now - priceObservedAt <= 10_000) {
+        if (momentumV2 && pendingMomentumExit) {
+          const exit = pendingMomentumExit as NonNullable<ReturnType<typeof assessMomentumExit>>;
+          if (values.prepareTradeUi && exit.reason) await prepareSellPanel(page, mint, index, exit.observedAt, exit.reason).catch(error => {
+            write('events.jsonl', { type: 'SELL_PREPARATION_ERROR', mint, observedAt: Date.now(), message: String(error) });
+          });
+          if (exitHoldSeconds > 0) await delay(exitHoldSeconds * 1000);
+          break;
+        }
+        if (!momentumV2 && price && simulation && now - priceObservedAt <= 10_000) {
           const trades5s = recentTradeWindow(mint, now), returnPercent = (price / simulation.entryPriceUsd - 1) * 100;
           const freshSignificantGrowth = lastSignificantGrowthAt > 0 && now - lastSignificantGrowthAt <= 5_000;
           const recoveryEligible = returnPercent <= -10 && returnPercent > -20 && freshSignificantGrowth && trades5s.buyUsd >= trades5s.sellUsd;
@@ -1241,6 +1322,10 @@ async function worker(index: number, deadline: number) {
       console.log('[detail-error]', 'worker=' + index, mint, error instanceof Error ? error.message : error);
     }
     finally {
+      paperRiskListeners.delete(mint);
+      momentumTape.delete(mint);
+      totalHolderSamples.delete(mint);
+      ownerSnapshots.delete(mint);
       queue.done(mint); activeMint = undefined;
       // Keep visible Chrome tabs aligned with actual monitoring state. A worker
       // that has finished must not leave its old GMGN token detail on screen.
@@ -1250,6 +1335,8 @@ async function worker(index: number, deadline: number) {
   await page.close().catch(() => {});
 }
 async function main() {
+  writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled,
+    rules: momentumV2 ? MOMENTUM_RULES : null, note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, tradePreparation: { enabled: values.prepareTradeUi, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthPercent: 10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, holderGrowthMomentum: { minimumConsecutiveGrowthUpdates: 2, minimumPriceMomentum5sPercent: 2, flatPriceMomentum5sBelowPercent: 0.5 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });

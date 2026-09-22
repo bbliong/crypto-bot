@@ -14,6 +14,7 @@ const tokenSummaries = new Map(readLines('token-summary.jsonl').map(row => [row.
 const completedDetails = new Set(tokenSummaries.keys());
 const summary = readJson('simulation-summary.json');
 const manifest = readJson('manifest.json');
+const strategy = readJson('strategy.json');
 const buys = rows.filter(row => row.type === 'SIMULATED_BUY');
 const sells = rows.filter(row => row.type === 'SIMULATED_SELL');
 const holds = rows.filter(row => row.type === 'SIMULATION_HOLD');
@@ -46,6 +47,11 @@ const buyReason = row => {
   const age = fieldValue(screen, 'createdAt');
   const ageSeconds = Number.isFinite(age) ? Math.max(0, (screen.observedAt - age) / 1000) : null;
   const candle = row.entryGate?.candleHistory;
+  const momentum = row.entryGate?.momentum;
+  if (momentum?.allowed) {
+    const m = momentum.metrics;
+    return `Momentum v2: harga 5 detik ${pct(m.return5s)}, tren regresi ${pct(m.slope5s)}, buy share ${pct(m.buyShare * 100)}, ${m.buyers} pembeli unik, pembeli terbesar ${pct(m.topBuyerShare * 100)}. Holder ${momentum.holders?.count ?? '—'}; pertumbuhan dua snapshot: ${momentum.holders?.sustained ? 'terkonfirmasi' : 'tidak / tidak wajib untuk token matang'}. Screening, candle, serta distribusi holder juga lolos.`;
+  }
   const override = row.entryGate?.singleCandleHolderOverride;
   const growth = row.entryGate?.significantHolderGrowth;
   const overrideText = override?.allowed ? ` Pengecualian satu candle: holder ${f(growth?.current, 0)}; naik ${f(growth?.absolute, 0)} (${pct(growth?.percent)}) dalam pembaruan token-stat terakhir.` : '';
@@ -53,6 +59,14 @@ const buyReason = row => {
   return `Lolos screening: umur ${ageSeconds === null ? '—' : f(ageSeconds, 0) + ' dtk'}, holder ${f(fieldValue(screen, 'holders'), 0)}, likuiditas ${usd(fieldValue(screen, 'liquidityUsd'))}, Top-10 ${pct(fieldValue(screen, 'top10Percent'))}.${candleText}`;
 };
 const sellReason = row => ({
+  V2_HARD_STOP: 'Stop v2: minimal dua trade berbeda mengonfirmasi harga turun ≥20%.',
+  V2_CONFIRMED_CRASH: 'Crash v2: penurunan ≥25% dikonfirmasi trade berbeda; harga exit memakai tick yang tersedia.',
+  V2_MAJOR_HOLDER_SELL: 'Penjualan signifikan oleh dev/top holder, atau whale yang mendominasi arus jual.',
+  V2_PROFIT_LOCK: 'Batas pengamanan profit tersentuh; hasil tetap mengikuti harga tick, termasuk bila melompati batas.',
+  V2_TARGET_40: 'Target +40% tercapai; momentum dan holder tidak cukup kuat untuk menunda exit.',
+  V2_TARGET_50: 'Batas target +50% tercapai.',
+  V2_MOMENTUM_FADE: 'Profit ≥3%, tren 5 detik melemah, sell mendominasi, holder tidak tumbuh signifikan.',
+  V2_SELL_PRESSURE: 'Posisi ≤−8% dengan tren turun dan tekanan jual lintas beberapa wallet.',
   TARGET_40: 'Target dasar: harga mencapai +40% dari harga beli.',
   TARGET_40_HOLDER_FLAT: 'Sudah +40%; laju holder mulai melandai saat momentum berkurang.',
   TARGET_DYNAMIC: 'Target dinamis tercapai sesuai kenaikan momentum dan pembeli aktif.',
@@ -113,7 +127,7 @@ const blockedTable = waitingForPriceRows + blocked.slice().reverse().map(row => 
     ? `Token dump terdeteksi (${esc(dumpEvent.details ?? dumpEvent.reason)}). Worker dilepas lebih awal.`
     : candle
     ? `Buy diblok: riwayat candle 1 menit belum aman (${candle.reason}).`
-    : 'Tidak ada buy simulasi selama harga masih turun.';
+    : row.reason ? `Belum buy: ${row.reason}` : 'Tidak ada buy simulasi selama harga masih turun.';
   const momentumText = dumpEvent && dumpEvent.drawdownPercent !== null
     ? `-${f(dumpEvent.drawdownPercent, 1)}%`
     : candle
@@ -293,6 +307,10 @@ for (const row of detailStartedByMint.values()) {
   };
 }
 html = html.replace('</html>', `<script>window.__preview=${JSON.stringify(preview).replace(/</g, '\\u003c')};</script></html>`);
+if (strategy?.strategy === 'momentum-v2') {
+  html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Rumus momentum v2</h2><div class="rule">Entry: return harga 5 detik +0.25% hingga +20%, regresi log-harga positif, buy share ≥60%, minimal 3 pembeli, pembeli terbesar ≤50%. Token muda memerlukan dua interval pertumbuhan holder ≥10% dan ≥5 holder.</div><div class="rule">Exit diperiksa pada trade socket baru: stop −20% dengan konfirmasi trade berbeda, penjualan holder signifikan, profit lock dan trailing 4–8%. Target +40% dapat ditahan bila momentum serta holder kuat, dengan batas +50%. Harga loncat tetap dicatat sesuai tick yang tersedia.</div><p><a href="/momentum-replay.html">Lihat perbandingan replay dan keterbatasannya</a></p></main>`);
+  html = html.replace('Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar', 'Token dibeli secara simulasi setelah screening, candle, holder, dan momentum v2 lolos; nominal');
+}
 writeFileSync(join(folder, 'simulation-report.html'), html);
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/paper-simulation-report.html', html);

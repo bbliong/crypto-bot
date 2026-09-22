@@ -10,6 +10,7 @@
     "probe": "node scripts/run.mjs probe",
     "start": "node scripts/run.mjs start",
     "research": "node scripts/run.mjs research",
+    "momentum:replay": "node scripts/run.mjs momentum:replay",
     "research:trial": "node scripts/run.mjs research --maxBuys 2",
     "trade-ui": "node scripts/run.mjs trade-ui",
     "replay": "node scripts/run.mjs replay",
