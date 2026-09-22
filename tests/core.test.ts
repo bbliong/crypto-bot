@@ -11,7 +11,7 @@ import { CandidateQueue } from '../src/queue.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
-import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
+import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
 
 const mint = 'FDW1Et4FS6sYLjByZNNvB8ZzwZ4eh9HG2snB97Jzpump';
@@ -208,4 +208,177 @@ test('blind protection blocks young tokens when holder API hits 429 or is unveri
   assert.equal(assessBlindProtection(false, 429, 0).allowed, true);
   assert.equal(assessBlindProtection(false, 429, 0).reason, 'MATURE_TOKEN_EXEMPT');
 });
+
+test('tiered holder distribution gate checks 20-39 holders for strict balance and allows >= 40 holders with standard limits', () => {
+  // Below 20 holders is strictly rejected
+  const under20 = assessHolderDistribution(18, 5, 15, 0);
+  assert.equal(under20.allowed, false);
+  assert.equal(under20.action, 'REJECT');
+  assert.equal(under20.reason, 'HOLDERS_BELOW_20');
+
+  // Range 20-39: Dominated by single wallet (Top 1 > 10%) triggers WAIT_FOR_DILUTION ("Nanti Dulu")
+  const earlyDominatedTop1 = assessHolderDistribution(25, 15.5, 30.0, 0);
+  assert.equal(earlyDominatedTop1.allowed, false);
+  assert.equal(earlyDominatedTop1.action, 'WAIT_FOR_DILUTION');
+  assert.ok(earlyDominatedTop1.reason.includes('EARLY_HOLDERS_DOMINATED'));
+
+  // Range 20-39: Dominated by Top 5 (> 32%) triggers WAIT_FOR_DILUTION
+  const earlyDominatedTop5 = assessHolderDistribution(28, 8.0, 38.5, 0);
+  assert.equal(earlyDominatedTop5.allowed, false);
+  assert.equal(earlyDominatedTop5.action, 'WAIT_FOR_DILUTION');
+
+  // Range 20-39: Dominated by dev (> 2%) triggers WAIT_FOR_DILUTION
+  const earlyDevDominated = assessHolderDistribution(30, 8.0, 25.0, 3.5);
+  assert.equal(earlyDevDominated.allowed, false);
+  assert.equal(earlyDevDominated.action, 'WAIT_FOR_DILUTION');
+
+  // Range 20-39: Highly balanced/merata is ALLOWED to buy early
+  const earlyBalanced = assessHolderDistribution(32, 7.5, 22.0, 0.5);
+  assert.equal(earlyBalanced.allowed, true);
+  assert.equal(earlyBalanced.action, 'BUY');
+  assert.equal(earlyBalanced.reason, 'EARLY_DISTRIBUTION_BALANCED');
+
+  // Range >= 40: Standard limits applied, concentrated supply (Top 1 > 20%) is rejected
+  const matureConcentratedTop1 = assessHolderDistribution(55, 25.0, 48.0, 0);
+  assert.equal(matureConcentratedTop1.allowed, false);
+  assert.equal(matureConcentratedTop1.action, 'REJECT');
+  assert.ok(matureConcentratedTop1.reason.includes('CONCENTRATED_SUPPLY'));
+
+  // Range >= 40: Concentrated Top 5 (> 50%) is rejected
+  const matureConcentratedTop5 = assessHolderDistribution(60, 15.0, 55.0, 0);
+  assert.equal(matureConcentratedTop5.allowed, false);
+  assert.equal(matureConcentratedTop5.action, 'REJECT');
+
+  // Range >= 40: Healthy established distribution is allowed to buy
+  const matureHealthy = assessHolderDistribution(75, 12.0, 35.0, 1.0);
+  assert.equal(matureHealthy.allowed, true);
+  assert.equal(matureHealthy.action, 'BUY');
+  assert.equal(matureHealthy.reason, 'ESTABLISHED_DISTRIBUTION_OK');
+});
+
+test('simulation exit triggers breakeven guard, tiered trailing stop, and early cut loss', () => {
+  const pos = openSimulation(mint, now, 1.0, 100);
+
+  // 1. Breakeven guard: Reached peak +6%, then drops down to +0.4% -> triggers BREAKEVEN_GUARD
+  assessSimulation(pos, 1.06, { buys: 5, sells: 2, buyUsd: 100, sellUsd: 20, uniqueSellers: 1 });
+  const breakevenDecision = assessSimulation(pos, 1.004, { buys: 2, sells: 2, buyUsd: 20, sellUsd: 20, uniqueSellers: 1 });
+  assert.equal(breakevenDecision.exitReason, 'BREAKEVEN_GUARD');
+
+  // 2. Tiered trailing stop: Peak +25%, draws down 6.5% -> triggers TRAILING_TIERED
+  const pos2 = openSimulation(mint, now, 1.0, 100);
+  assessSimulation(pos2, 1.25, { buys: 10, sells: 1, buyUsd: 500, sellUsd: 10, uniqueSellers: 1 });
+  // Price draws down by 6.5% from 1.25 -> 1.25 * (1 - 0.065) = 1.16875
+  const tieredDecision = assessSimulation(pos2, 1.168, { buys: 2, sells: 2, buyUsd: 20, sellUsd: 20, uniqueSellers: 1 });
+  assert.equal(tieredDecision.exitReason, 'TRAILING_TIERED');
+
+  // 3. Early cut loss: Price drops to -8.5% with sell pressure -> triggers EARLY_CUT_LOSS
+  const pos3 = openSimulation(mint, now, 1.0, 100);
+  const earlyCutDecision = assessSimulation(pos3, 0.915, { buys: 10, sells: 15, buyUsd: 20, sellUsd: 100, uniqueSellers: 4, windowStart: 100 });
+  assert.equal(earlyCutDecision.exitReason, 'EARLY_CUT_LOSS');
+});
+
+test('auto close monitoring aborts observation early when token dumps heavily (e.g. locus scenario)', () => {
+  // 1. Locus scenario: Live 1m candle crashed -52.25%
+  const locusCandleDump = assessObservationDump({
+    currentPriceUsd: 0.00000391,
+    openingPriceUsd: 0.00000391,
+    peakPriceUsd: 0.00001025,
+    candleEntryFlow: {
+      allowed: false,
+      reason: 'INSUFFICIENT_COMPLETED_CANDLES',
+      completedCandles: 1,
+      currentCandleReturnPercent: -52.25,
+    },
+    sampleCount: 3,
+    tradesCount: 20,
+  });
+  assert.equal(locusCandleDump.shouldAbort, true);
+  assert.equal(locusCandleDump.reason, 'CANDLE_DUMP');
+  assert.equal(locusCandleDump.drawdownPercent, 52.25);
+
+  // 2. Price drop from peak: Price drops from $0.000010 to $0.0000065 (-35% from peak)
+  const peakDrop = assessObservationDump({
+    currentPriceUsd: 0.0000065,
+    openingPriceUsd: 0.000008,
+    peakPriceUsd: 0.000010,
+    sampleCount: 5,
+    tradesCount: 15,
+  });
+  assert.equal(peakDrop.shouldAbort, true);
+  assert.equal(peakDrop.reason, 'PRICE_DROP_FROM_PEAK');
+  assert.equal(peakDrop.drawdownPercent, 35);
+
+  // 3. Price drop from opening price: Dropped 22% below open
+  const openDrop = assessObservationDump({
+    currentPriceUsd: 0.0000078,
+    openingPriceUsd: 0.000010,
+    peakPriceUsd: 0.000010,
+    stopLossPercent: 20,
+    sampleCount: 4,
+    tradesCount: 10,
+  });
+  assert.equal(openDrop.shouldAbort, true);
+  assert.equal(openDrop.reason, 'PRICE_DROP_FROM_OPEN');
+  assert.equal(openDrop.drawdownPercent, 22);
+
+  // 4. Pump then dump candle history
+  const pumpDump = assessObservationDump({
+    currentPriceUsd: 0.000008,
+    openingPriceUsd: 0.000008,
+    peakPriceUsd: 0.000008,
+    candleDecision: {
+      allowed: false,
+      reason: 'PUMP_THEN_DUMP',
+      peakToLastDrawdownPercent: -45.0,
+      consecutiveRedCandles: 2,
+      largestGreenCandlePercent: 120,
+      largestRedCandlePercent: -25,
+    },
+  });
+  assert.equal(pumpDump.shouldAbort, true);
+  assert.equal(pumpDump.reason, 'PUMP_THEN_DUMP');
+
+  // 5. Heavy sell avalanche: 20 trades, sellUsd 1500 vs buyUsd 100 (buyShare 6%)
+  const avalanche = assessObservationDump({
+    currentPriceUsd: 0.000009,
+    openingPriceUsd: 0.000010,
+    peakPriceUsd: 0.000010,
+    tradeFlow: {
+      trades: 20,
+      buys: 2,
+      sells: 18,
+      buyUsd: 100,
+      sellUsd: 1500,
+      buySharePercent: 6.25,
+    },
+  });
+  assert.equal(avalanche.shouldAbort, true);
+  assert.equal(avalanche.reason, 'HEAVY_SELL_AVALANCHE');
+
+  // 6. Healthy rising token should NOT abort
+  const healthy = assessObservationDump({
+    currentPriceUsd: 0.000011,
+    openingPriceUsd: 0.000010,
+    peakPriceUsd: 0.0000112,
+    candleEntryFlow: {
+      allowed: true,
+      reason: 'CANDLE_ENTRY_FLOW_OK',
+      completedCandles: 3,
+      currentCandleReturnPercent: 8.5,
+    },
+    tradeFlow: {
+      trades: 15,
+      buys: 10,
+      sells: 5,
+      buyUsd: 800,
+      sellUsd: 300,
+      buySharePercent: 72.7,
+    },
+    sampleCount: 5,
+    tradesCount: 15,
+  });
+  assert.equal(healthy.shouldAbort, false);
+  assert.equal(healthy.reason, null);
+});
+
 

@@ -1,4 +1,4 @@
-export type SimulationExitReason = 'TARGET_40' | 'TARGET_40_HOLDER_FLAT' | 'TARGET_DYNAMIC' | 'TRAILING_10' | 'STOP_LOSS_20' | 'SELL_PRESSURE' | 'PROFIT_STAGNATION_10S' | 'MOMENTUM_EXHAUSTION_5S' | 'DEV_DUMP_EXIT' | 'TOP_HOLDER_DUMP' | 'OBSERVATION_END';
+export type SimulationExitReason = 'TARGET_40' | 'TARGET_40_HOLDER_FLAT' | 'TARGET_DYNAMIC' | 'TRAILING_10' | 'TRAILING_TIERED' | 'BREAKEVEN_GUARD' | 'EARLY_CUT_LOSS' | 'STOP_LOSS_20' | 'SELL_PRESSURE' | 'PROFIT_STAGNATION_10S' | 'PROFIT_STAGNATION_25S' | 'MOMENTUM_EXHAUSTION_5S' | 'DEV_DUMP_EXIT' | 'TOP_HOLDER_DUMP' | 'OBSERVATION_END';
 
 export interface SimulationPosition {
   mint: string;
@@ -166,6 +166,89 @@ export function assessBlindProtection(
   return { allowed: true, reason: 'HOLDERS_VERIFIED', holderStatus, holderCount };
 }
 
+export interface HolderDistributionDecision {
+  allowed: boolean;
+  action: 'BUY' | 'WAIT_FOR_DILUTION' | 'REJECT';
+  reason: string;
+  holderCount: number;
+  top1Percent: number;
+  top5Percent: number;
+  devPercent: number;
+}
+
+/**
+ * Tiered Holder Distribution Gate:
+ * Range 1 (20 - 39 holders): Very early. Must be highly balanced/decentralized (Top 1 <= 10%, Top 5 <= 32%, Dev <= 2%).
+ *   If dominated, returns action: 'WAIT_FOR_DILUTION' ("Nanti Dulu"), continuing observation.
+ * Range 2 (>= 40 holders): Established holder base. Standard thresholds (Top 1 <= 20%, Top 5 <= 50%, Dev <= 5%).
+ *   If concentrated, returns action: 'REJECT'.
+ */
+export function assessHolderDistribution(
+  holderCount: number,
+  top1Percent: number,
+  top5Percent: number,
+  devPercent = 0
+): HolderDistributionDecision {
+  if (holderCount < 20) {
+    return {
+      allowed: false,
+      action: 'REJECT',
+      reason: 'HOLDERS_BELOW_20',
+      holderCount,
+      top1Percent,
+      top5Percent,
+      devPercent,
+    };
+  }
+
+  // RANGE 1: 20 - 39 HOLDER (Wajib Sangat Merata)
+  if (holderCount < 40) {
+    if (top1Percent > 10 || top5Percent > 32 || devPercent > 2) {
+      return {
+        allowed: false,
+        action: 'WAIT_FOR_DILUTION',
+        reason: `EARLY_HOLDERS_DOMINATED (Top1: ${top1Percent.toFixed(1)}%, Top5: ${top5Percent.toFixed(1)}%, Dev: ${devPercent.toFixed(1)}%)`,
+        holderCount,
+        top1Percent,
+        top5Percent,
+        devPercent,
+      };
+    }
+    return {
+      allowed: true,
+      action: 'BUY',
+      reason: 'EARLY_DISTRIBUTION_BALANCED',
+      holderCount,
+      top1Percent,
+      top5Percent,
+      devPercent,
+    };
+  }
+
+  // RANGE 2: >= 40 HOLDER (Standar)
+  if (top1Percent > 20 || top5Percent > 50 || devPercent > 5) {
+    return {
+      allowed: false,
+      action: 'REJECT',
+      reason: `CONCENTRATED_SUPPLY (Top1: ${top1Percent.toFixed(1)}%, Top5: ${top5Percent.toFixed(1)}%, Dev: ${devPercent.toFixed(1)}%)`,
+      holderCount,
+      top1Percent,
+      top5Percent,
+      devPercent,
+    };
+  }
+
+  return {
+    allowed: true,
+    action: 'BUY',
+    reason: 'ESTABLISHED_DISTRIBUTION_OK',
+    holderCount,
+    top1Percent,
+    top5Percent,
+    devPercent,
+  };
+}
+
 /**
  * Historical candles are useful only after their minute has closed.  The
  * current candle is treated separately so a fresh down-candle cannot satisfy
@@ -250,7 +333,11 @@ export function assessSimulation(position: SimulationPosition, currentPriceUsd: 
   const targetReached = currentPriceUsd >= position.entryPriceUsd * 1.4 - 1e-12;
   const exitReason: SimulationExitReason | null = targetReached && !guards.deferTargetForHolderMomentum ? 'TARGET_40'
     : !guards.suppressHardStop && currentPriceUsd <= position.entryPriceUsd * 0.8 + 1e-12 ? 'STOP_LOSS_20'
+    : peakReturnPercent >= 5 && returnPercent <= 0.5 ? 'BREAKEVEN_GUARD'
     : peakReturnPercent >= 20 && drawdownFromPeakPercent >= 10 ? 'TRAILING_10'
+    : peakReturnPercent >= 20 && drawdownFromPeakPercent >= 6 ? 'TRAILING_TIERED'
+    : peakReturnPercent >= 10 && drawdownFromPeakPercent >= 8 ? 'TRAILING_TIERED'
+    : returnPercent <= -8 && position.pressureWindows >= 1 ? 'EARLY_CUT_LOSS'
     : !guards.suppressSellPressure && position.pressureWindows >= 2 ? 'SELL_PRESSURE' : null;
   return { returnPercent, peakReturnPercent, drawdownFromPeakPercent, sellSharePercent, pressureWindow, exitReason };
 }
@@ -260,3 +347,129 @@ export function closeSimulation(position: SimulationPosition, exitPriceUsd: numb
   const pnlUsd = grossProceedsUsd - position.stakeUsd;
   return { grossProceedsUsd, pnlUsd, pnlPercent: pnlUsd / position.stakeUsd * 100 };
 }
+
+export type ObservationDumpReason =
+  | 'PRICE_DROP_FROM_OPEN'
+  | 'PRICE_DROP_FROM_PEAK'
+  | 'CANDLE_DUMP'
+  | 'PUMP_THEN_DUMP'
+  | 'THREE_RED_CANDLES_DUMP'
+  | 'HEAVY_SELL_AVALANCHE';
+
+export interface ObservationDumpDecision {
+  shouldAbort: boolean;
+  reason: ObservationDumpReason | null;
+  drawdownPercent: number | null;
+  details: string | null;
+}
+
+/**
+ * Auto-close detail monitoring for unbought tokens when a severe dump occurs.
+ * Prevents workers from being stuck for 10 minutes observing dead/crashing tokens.
+ */
+export function assessObservationDump(params: {
+  currentPriceUsd: number | null;
+  openingPriceUsd: number | null;
+  peakPriceUsd: number | null;
+  stopLossPercent?: number;
+  candleDecision?: CandleHistoryDecision | null;
+  candleEntryFlow?: CandleEntryFlowDecision | null;
+  tradeFlow?: { trades: number; buys: number; sells: number; buyUsd: number; sellUsd: number; buySharePercent: number | null } | null;
+  sampleCount?: number;
+  tradesCount?: number;
+}): ObservationDumpDecision {
+  const {
+    currentPriceUsd,
+    openingPriceUsd,
+    peakPriceUsd,
+    stopLossPercent = 20,
+    candleDecision,
+    candleEntryFlow,
+    tradeFlow,
+    sampleCount = 0,
+    tradesCount = 0,
+  } = params;
+
+  // 1. Current live 1-minute candle severe crash (e.g. 1m candle crashed >= 25%, like locus at -52%)
+  if (candleEntryFlow && typeof candleEntryFlow.currentCandleReturnPercent === 'number' && candleEntryFlow.currentCandleReturnPercent <= -25) {
+    const drop = Math.abs(candleEntryFlow.currentCandleReturnPercent);
+    return {
+      shouldAbort: true,
+      reason: 'CANDLE_DUMP',
+      drawdownPercent: drop,
+      details: `Candle 1m live dump parah: -${drop.toFixed(1)}%`,
+    };
+  }
+
+  // 2. Candle history pump then dump or sharp candle crash
+  if (candleDecision) {
+    if (candleDecision.reason === 'PUMP_THEN_DUMP') {
+      const drop = candleDecision.peakToLastDrawdownPercent ? Math.abs(candleDecision.peakToLastDrawdownPercent) : null;
+      return {
+        shouldAbort: true,
+        reason: 'PUMP_THEN_DUMP',
+        drawdownPercent: drop,
+        details: `Pola pump-then-dump terkonfirmasi pada candle (drawdown -${drop?.toFixed(1) ?? '—'}%)`,
+      };
+    }
+    if (candleDecision.reason === 'SHARP_CANDLE_CRASH') {
+      const drop = candleDecision.largestRedCandlePercent ? Math.abs(candleDecision.largestRedCandlePercent) : null;
+      return {
+        shouldAbort: true,
+        reason: 'CANDLE_DUMP',
+        drawdownPercent: drop,
+        details: `Crash candle tajam: -${drop?.toFixed(1) ?? '—'}%`,
+      };
+    }
+    if (candleDecision.consecutiveRedCandles >= 3 && candleDecision.peakToLastDrawdownPercent !== null && candleDecision.peakToLastDrawdownPercent <= -25) {
+      const drop = Math.abs(candleDecision.peakToLastDrawdownPercent);
+      return {
+        shouldAbort: true,
+        reason: 'THREE_RED_CANDLES_DUMP',
+        drawdownPercent: drop,
+        details: `3 candle merah berturut-turut dengan penurunan total -${drop.toFixed(1)}%`,
+      };
+    }
+  }
+
+  // 3. Price drop from opening price >= stopLossPercent (default 20%)
+  if (currentPriceUsd && openingPriceUsd && openingPriceUsd > 0 && (sampleCount >= 2 || tradesCount >= 3)) {
+    const rawOpenDrawdown = (1 - currentPriceUsd / openingPriceUsd) * 100;
+    const openDrawdown = Number(rawOpenDrawdown.toFixed(2));
+    if (openDrawdown >= stopLossPercent) {
+      return {
+        shouldAbort: true,
+        reason: 'PRICE_DROP_FROM_OPEN',
+        drawdownPercent: openDrawdown,
+        details: `Harga anjlok -${openDrawdown.toFixed(1)}% dari harga awal observasi ($${openingPriceUsd} -> $${currentPriceUsd})`,
+      };
+    }
+  }
+
+  // 4. Price drop from peak observed price >= 25%
+  if (currentPriceUsd && peakPriceUsd && peakPriceUsd > 0 && (sampleCount >= 2 || tradesCount >= 3)) {
+    const rawPeakDrawdown = (1 - currentPriceUsd / peakPriceUsd) * 100;
+    const peakDrawdown = Number(rawPeakDrawdown.toFixed(2));
+    if (peakDrawdown >= 25) {
+      return {
+        shouldAbort: true,
+        reason: 'PRICE_DROP_FROM_PEAK',
+        drawdownPercent: peakDrawdown,
+        details: `Harga anjlok -${peakDrawdown.toFixed(1)}% dari harga puncak observasi ($${peakPriceUsd} -> $${currentPriceUsd})`,
+      };
+    }
+  }
+
+  // 5. Heavy sell avalanche (overwhelming sell flow with price failing to recover)
+  if (tradeFlow && tradeFlow.trades >= 15 && tradeFlow.sellUsd >= 500 && (tradeFlow.buySharePercent ?? 0) <= 15 && tradeFlow.sellUsd >= tradeFlow.buyUsd * 4) {
+    return {
+      shouldAbort: true,
+      reason: 'HEAVY_SELL_AVALANCHE',
+      drawdownPercent: null,
+      details: `Arus dump masif: ${tradeFlow.sells} sell ($${tradeFlow.sellUsd.toFixed(0)}) vs ${tradeFlow.buys} buy ($${tradeFlow.buyUsd.toFixed(0)})`,
+    };
+  }
+
+  return { shouldAbort: false, reason: null, drawdownPercent: null, details: null };
+}
+

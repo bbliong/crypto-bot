@@ -37,17 +37,17 @@ candidateTtlMs: 60000
 minimumAgeSeconds: 0
 maximumAgeSeconds: 900
 minimumHolders: 20
-# Khusus token baru yang hanya memiliki 1 atau 2 candle, holder wajib minimal 60
-earlyCandleMinimumHolders: 60
+# Token baru candle 1-2: baseline 40 holders jika standar, atau 20-39 holders jika suplai sangat merata (Top 1 <= 10%, Top 5 <= 32%)
+earlyCandleMinimumHolders: 40
 minimumLiquidityUsd: 6000
 maximumLiquidityUsd: 15000
 minimumBuys: 40
 maximumSellBuyRatio: 0.40
 maximumRisePercent: 250
 maximumDrawdownPercent: 25
-maximumTop5Percent: 25
+maximumTop5Percent: 50
 maximumTop10Percent: 30
-maximumSinglePercent: 8
+maximumSinglePercent: 20
 maximumBundledPercent: 12
 maximumSameSlotWallets: 5
 maximumSharedFunderWallets: 5

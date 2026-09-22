@@ -9,7 +9,7 @@ import { attachCapture } from './capture.js';
 import { at, parseCandidates, parseTokenMetadata, validMint } from './parser.js';
 import { CandidateQueue } from './queue.js';
 import { evaluate } from './risk.js';
-import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type McapCandle, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
+import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type HolderDistributionDecision, type McapCandle, type ObservationDumpDecision, type ObservationDumpReason, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate } from './model.js';
@@ -67,6 +67,7 @@ let reportRefreshRunning = false;
 let reportRefreshQueued = false;
 const reportRelevantEventTypes = new Set([
   'DETAIL_STARTED',
+  'OBSERVATION_ABORTED_DUMP',
   'SIMULATION_BUY_BLOCKED',
   'BUY_PREPARED',
   'BUY_PREPARATION_ERROR',
@@ -117,6 +118,20 @@ let paperBuyCount = 0;
 // DEV-tag data is supplementary. Reserve one request globally so five detail
 // workers never burst the endpoint and trigger a session-wide 429.
 let nextDeveloperApiRequestAt = 0;
+
+type MonitoringSnapshot = {
+  observedAt: number;
+  holderCount: number | null;
+  holderDelta: number | null;          // selisih dari snapshot sebelumnya
+  buys5s: number;                      // jumlah buy dalam 5 detik terakhir
+  sells5s: number;                     // jumlah sell dalam 5 detik terakhir
+  buyUsd5s: number;                    // volume buy USD dalam 5 detik terakhir
+  sellUsd5s: number;                   // volume sell USD dalam 5 detik terakhir
+  priceUsd: number | null;
+  top10Holders: { wallet: string; pct: number; isDev: boolean }[];
+  blockingReasons: string[];           // alasan buy belum terjadi saat snapshot ini
+};
+const monitoringSnapshots = new Map<string, MonitoringSnapshot[]>();
 
 function merge(update: Candidate) {
   const candidate = candidates.get(update.mint) ?? { mint: update.mint, firstSeenAt: update.firstSeenAt, updatedAt: update.updatedAt, fields: {} };
@@ -564,6 +579,12 @@ function captureTrades(payload: unknown, now: number, mint: string | undefined) 
       amount: Number.isFinite(Number(at(row, 'au'))) ? Number(at(row, 'au')) : null,
       amountUsd, raw };
     list.push(trade); trades.set(mint, list); write('trades.jsonl', trade);
+    if (trade.priceUsd !== null && trade.priceUsd > 0) {
+      const candidate = candidates.get(mint);
+      if (candidate) {
+        candidate.fields.priceUsd = { value: trade.priceUsd, observedAt: now, source: 'token_activity' };
+      }
+    }
     const developer = trade.wallet ? developerHolders.get(mint)?.get(trade.wallet) : undefined;
     if (developer) write('developer-activity.jsonl', { mint, observedAt: now, event: trade.side === 'sell' ? 'DEVELOPER_SELL_OBSERVED' : 'DEVELOPER_BUY_OBSERVED', trade, developer: { wallet: developer.wallet, amountPercentage: developer.amountPercentage, amount: developer.amount, observedAt: developer.observedAt } });
   }
@@ -616,6 +637,33 @@ function recordRejectedScreen(candidate: Candidate, now: number) {
   }
   console.log('[screen-rejected]', candidate.metadata?.symbol ?? candidate.mint, failures.map(check => check.name + ':' + check.status).join(','));
 }
+function computeTop10Holders(mint: string): { wallet: string; pct: number; isDev: boolean }[] {
+  const tokenHoldersMap = trackedHolders.get(mint);
+  if (tokenHoldersMap && tokenHoldersMap.size > 0) {
+    const userHolders = Array.from(tokenHoldersMap.values())
+      .filter(h => h.raw?.addr_type !== 2 && !h.raw?.exchange && !h.walletTagV2?.toLowerCase().includes('lp'))
+      .sort((a, b) => (b.amountPercentage ?? 0) - (a.amountPercentage ?? 0))
+      .slice(0, 10);
+    return userHolders.map(h => ({ wallet: h.wallet, pct: h.amountPercentage ?? 0, isDev: h.isDev }));
+  }
+  // Fallback: estimasi dari trades jika belum ada holder data
+  const candidate = candidates.get(mint);
+  const marketCap = num(candidate, 'marketCapUsd'), price = num(candidate, 'priceUsd');
+  const estimatedSupply = marketCap && price && price > 0 ? marketCap / price : null;
+  if (!estimatedSupply) return [];
+  const netTokens = new Map<string, number>();
+  for (const tr of trades.get(mint) ?? []) {
+    const ba = Number(tr.raw?.ba ?? 0);
+    const cur = netTokens.get(tr.wallet ?? '') ?? 0;
+    if (tr.side === 'buy') netTokens.set(tr.wallet ?? '', cur + ba);
+    else netTokens.set(tr.wallet ?? '', Math.max(0, cur - ba));
+  }
+  const sorted = Array.from(netTokens.entries()).filter(([, v]) => v > 0).sort(([, a], [, b]) => b - a).slice(0, 10);
+  const totalCirc = sorted.reduce((acc, [, v]) => acc + v, 0);
+  if (!totalCirc) return [];
+  return sorted.map(([wallet, bal]) => ({ wallet, pct: bal / totalCirc * 100, isDev: false }));
+}
+
 function walletBehavior(mint: string, candidate: Candidate) {
   const observed = new Map<string, { wallet: string; buys: number[]; sells: number[] }>();
   for (const trade of trades.get(mint) ?? []) {
@@ -719,9 +767,18 @@ async function worker(index: number, deadline: number) {
     const mint = queue.take();
     if (!mint) { await delay(200); continue; }
     activeMint = mint; const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1000); let openingPrice: number | null = null, stopLoss = false, simulation: SimulationPosition | null = null, simulationExit: SimulationExitReason | null = null;
+    let peakObservedPrice = 0, observationAbortedDump: ObservationDumpDecision | null = null;
+    const initialTrades = trades.get(mint) ?? [];
+    if (initialTrades.length) {
+      const firstP = initialTrades.find(t => t.priceUsd !== null && t.priceUsd > 0)?.priceUsd;
+      if (firstP) { openingPrice = firstP; peakObservedPrice = Math.max(peakObservedPrice, firstP); }
+      const maxP = Math.max(0, ...initialTrades.map(t => t.priceUsd ?? 0));
+      if (maxP > 0) peakObservedPrice = Math.max(peakObservedPrice, maxP);
+    }
     let lastHolderCount: number | null = null, lastHolderObservedAt = 0, holderGrowthStreak = 0, lastSignificantGrowthAt = 0, recoveryHoldUntil = 0, recoveryHoldForGrowthAt = 0, targetHoldForGrowthAt = 0;
     let holderCount: number | null = typeof candidates.get(mint)?.fields.holders?.value === 'number' ? (candidates.get(mint)!.fields.holders!.value as number) : null;
-    const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastCandlePollAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, latestCandles: McapCandle[] = [], candleBlockRecorded = false, trialLimitRecorded = false, blindProtectionBlockRecorded = false;
+    const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastCandlePollAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, latestCandles: McapCandle[] = [], candleBlockRecorded = false, trialLimitRecorded = false, blindProtectionBlockRecorded = false, holderDistributionBlockRecorded = false, lastHolderDistributionLogAt = 0;
+    let lastMonitoringSnapshotAt = 0;
     // A single socket trade can make a thin launch wick below the stop.  Keep
     // the breach pending until independent socket and candle evidence agree.
     let entryCandleClose: number | null = null, hardStopPendingAt = 0, hardStopDistinctTicks = 0, hardStopLastPriceObservedAt = 0;
@@ -796,6 +853,40 @@ async function worker(index: number, deadline: number) {
           while (priceSamples.length && priceSamples[0]!.observedAt < priceObservedAt - 10_000) priceSamples.shift();
         }
         if (price && openingPrice === null) openingPrice = price;
+        if (price) peakObservedPrice = Math.max(peakObservedPrice, price);
+        if (!simulation) {
+          const flow = entryTradeFlow(mint, now);
+          const dumpAssessment = assessObservationDump({
+            currentPriceUsd: price,
+            openingPriceUsd: openingPrice,
+            peakPriceUsd: peakObservedPrice > 0 ? peakObservedPrice : null,
+            stopLossPercent,
+            candleDecision,
+            candleEntryFlow,
+            tradeFlow: flow,
+            sampleCount: priceSamples.length,
+            tradesCount: (trades.get(mint) ?? []).length,
+          });
+          if (dumpAssessment.shouldAbort) {
+            observationAbortedDump = dumpAssessment;
+            stopLoss = true;
+            write('events.jsonl', {
+              type: 'OBSERVATION_ABORTED_DUMP',
+              mint,
+              worker: index,
+              observedAt: now,
+              reason: dumpAssessment.reason,
+              drawdownPercent: dumpAssessment.drawdownPercent,
+              details: dumpAssessment.details,
+              openingPriceUsd: openingPrice,
+              currentPriceUsd: price,
+              peakPriceUsd: peakObservedPrice,
+              note: 'Auto close monitoring: Token terdeteksi dump parah saat diobservasi (belum dibeli). Slot worker dilepas lebih awal.'
+            });
+            console.log('[observation-aborted-dump]', candidate?.metadata?.symbol ?? mint, dumpAssessment.reason, dumpAssessment.details);
+            break;
+          }
+        }
         if (price && !simulation && now - priceObservedAt <= 10_000) {
           const entry = assessEntryStability(priceSamples);
           const flow = entryTradeFlow(mint, now);
@@ -815,12 +906,52 @@ async function worker(index: number, deadline: number) {
           const currentHolderStatus = holderApiStatus.get(mint)?.status ?? null;
           const blindProtection = assessBlindProtection(isYoungToken, currentHolderStatus, currentHolderCount);
 
+          // Calculate holder distribution metrics (Top 1, Top 5, Dev) excluding liquidity pool / bonding curve
+          let top1Pct = 0, top5Pct = 0, devHoldingPct = 0;
+          if (tokenHoldersMap && tokenHoldersMap.size > 0) {
+            const userHolders = Array.from(tokenHoldersMap.values())
+              .filter(h => h.raw?.addr_type !== 2 && !h.raw?.exchange && !h.walletTagV2?.toLowerCase().includes('lp'));
+            const sortedHolders = userHolders.sort((a, b) => (b.amountPercentage ?? 0) - (a.amountPercentage ?? 0));
+            top1Pct = sortedHolders[0]?.amountPercentage ?? 0;
+            top5Pct = sortedHolders.slice(0, 5).reduce((acc, h) => acc + (h.amountPercentage ?? 0), 0);
+            devHoldingPct = userHolders.filter(h => h.isDev).reduce((acc, h) => acc + (h.amountPercentage ?? 0), 0);
+          } else {
+            const tokenTrades = trades.get(mint) ?? [];
+            if (tokenTrades.length > 0) {
+              const netTokens = new Map<string, number>();
+              for (const tr of tokenTrades) {
+                const ba = Number(tr.raw?.ba ?? 0);
+                const cur = netTokens.get(tr.wallet ?? '') ?? 0;
+                if (tr.side === 'buy') netTokens.set(tr.wallet ?? '', cur + ba);
+                else netTokens.set(tr.wallet ?? '', Math.max(0, cur - ba));
+              }
+              const active = Array.from(netTokens.values()).filter(v => v > 0).sort((a, b) => b - a);
+              const totalCirc = active.reduce((acc, v) => acc + v, 0);
+              if (totalCirc > 0) {
+                top1Pct = (active[0] ?? 0) / totalCirc * 100;
+                top5Pct = active.slice(0, 5).reduce((acc, v) => acc + v, 0) / totalCirc * 100;
+              }
+            }
+          }
+
+          const effectiveHolderCount = Math.max(holderCount ?? 0, currentHolderCount);
+          const holderDistribution = assessHolderDistribution(effectiveHolderCount, top1Pct, top5Pct, devHoldingPct);
+
+          if (!simulation && !holderDistribution.allowed && holderDistribution.action === 'WAIT_FOR_DILUTION' && now - lastHolderDistributionLogAt >= 10_000) {
+            lastHolderDistributionLogAt = now;
+            console.log('[holder-wait-dilution]', candidate?.metadata?.symbol ?? mint, holderDistribution.reason);
+          } else if (!simulation && !holderDistribution.allowed && holderDistribution.action === 'REJECT' && now - lastHolderDistributionLogAt >= 10_000) {
+            lastHolderDistributionLogAt = now;
+            console.log('[holder-rejected-dominated]', candidate?.metadata?.symbol ?? mint, holderDistribution.reason);
+          }
+
           const candleAllowed = ((candleDecision?.allowed && candleEntryFlow?.allowed)
             || singleCandleOverride.allowed
-            || earlyCandleRising.allowed)
-            && blindProtection.allowed;
+            || earlyCandleRising.allowed);
 
-          if (entry.stable && candleAllowed && flowAllowed && (maxPaperBuys === null || paperBuyCount < maxPaperBuys)) {
+          const buyAllowed = entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed;
+
+          if (buyAllowed && (maxPaperBuys === null || paperBuyCount < maxPaperBuys)) {
             paperBuyCount++;
             const effectiveStakeUsd = simulationStakeSol !== null
               ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
@@ -838,7 +969,7 @@ async function worker(index: number, deadline: number) {
             // assuming a fixed token supply.
             if (!entryCandleClose || entryCandleClose <= 0) entryCandleClose = null;
             writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: now, entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
-              entryGate: { realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
+              entryGate: { realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
             if (values.prepareTradeUi) {
               await prepareBuyPanel(page, mint, index, now).catch(error => {
                 write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
@@ -857,7 +988,7 @@ async function worker(index: number, deadline: number) {
               }
             }
             console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'stake=$' + simulation.stakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
-          } else if (maxPaperBuys !== null && entry.stable && candleAllowed && flowAllowed && !trialLimitRecorded) {
+          } else if (maxPaperBuys !== null && buyAllowed && !trialLimitRecorded) {
             trialLimitRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
               note: 'All entry gates passed, but the non-submitting paper-buy trial has already prepared its maximum number of candidates.' });
@@ -866,6 +997,9 @@ async function worker(index: number, deadline: number) {
             blindProtectionBlockRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: blindProtection.reason, holderStatus: blindProtection.holderStatus, holderCount: blindProtection.holderCount, isYoungToken, candleDecision, earlyCandleRising, singleCandleOverride, note: 'Blind Protection: DILARANG BUY pada token umur muda (candle 1-2) karena API holder terkena 429 atau top holder belum terverifikasi.' });
             console.log(`[blind-protection-blocked] ${candidate?.metadata?.symbol ?? mint} ${blindProtection.reason} (status=${blindProtection.holderStatus}, holders=${blindProtection.holderCount})`);
+          } else if (!holderDistribution.allowed && !holderDistributionBlockRecorded) {
+            holderDistributionBlockRecorded = true;
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: holderDistribution.reason, action: holderDistribution.action, holderCount: holderDistribution.holderCount, top1Percent: holderDistribution.top1Percent, top5Percent: holderDistribution.top5Percent, note: `Holder Distribution: ${holderDistribution.reason}` });
           } else if (!candleAllowed && !candleBlockRecorded) {
             candleBlockRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, note: 'No paper buy: closed-candle count or current 1-minute candle is unsafe.' });
@@ -876,6 +1010,29 @@ async function worker(index: number, deadline: number) {
           } else if (!flowAllowed && lastEntryBlockPriceAt !== priceObservedAt) {
             lastEntryBlockPriceAt = priceObservedAt;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, tradeFlow20s: flow, note: 'No paper buy: the last 20 seconds lack at least 5 trades with buy USD at least sell USD.' });
+          }
+
+          // Rekam snapshot monitoring setiap 5 detik selagi belum beli
+          if (now - lastMonitoringSnapshotAt >= 5_000) {
+            lastMonitoringSnapshotAt = now;
+            const prevSnaps = monitoringSnapshots.get(mint) ?? [];
+            const prevSnap = prevSnaps.at(-1);
+            const holderDelta = prevSnap?.holderCount != null && holderCount != null ? holderCount - prevSnap.holderCount : null;
+            const tokenTrades5s = (trades.get(mint) ?? []).filter(t => t.occurredAt >= now - 5_000 && t.occurredAt <= now);
+            const buys5s = tokenTrades5s.filter(t => t.side === 'buy').length;
+            const sells5s = tokenTrades5s.filter(t => t.side === 'sell').length;
+            const buyUsd5s = tokenTrades5s.filter(t => t.side === 'buy').reduce((s, t) => s + (t.amount ?? 0), 0);
+            const sellUsd5s = tokenTrades5s.filter(t => t.side === 'sell').reduce((s, t) => s + (t.amount ?? 0), 0);
+            // Kumpulkan alasan buy belum terjadi
+            const blockReasons: string[] = [];
+            if (!candleAllowed) blockReasons.push('CANDLE:' + (candleDecision?.reason ?? candleEntryFlow?.reason ?? 'UNKNOWN'));
+            if (!blindProtection.allowed) blockReasons.push('BLIND_PROTECTION:' + blindProtection.reason);
+            if (!holderDistribution.allowed) blockReasons.push('HOLDER_DIST:' + holderDistribution.reason + (holderDistribution.action ? ':' + holderDistribution.action : ''));
+            if (!entry.stable) blockReasons.push('ENTRY:' + (entry.reason ?? 'UNSTABLE'));
+            if (!flowAllowed) blockReasons.push('FLOW:INSUFFICIENT_BUY_PRESSURE');
+            const snap: MonitoringSnapshot = { observedAt: now, holderCount, holderDelta, buys5s, sells5s, buyUsd5s, sellUsd5s, priceUsd: price ?? null, top10Holders: computeTop10Holders(mint), blockingReasons: blockReasons };
+            prevSnaps.push(snap);
+            monitoringSnapshots.set(mint, prevSnaps);
           }
         }
         if (price && simulation && now - priceObservedAt <= 10_000) {
@@ -942,10 +1099,10 @@ async function worker(index: number, deadline: number) {
 
           // 2. TOP HOLDER, DEV & WHALE DUMP DETECTOR:
           // Jika DEV, Top Holder (pemegang >= topHolderDumpMinPercent, default 1.5%), atau Whale sell (>= $150 / 5M tokens) menjual koin
-          // dan harga mulai melemah / minus (momentum 5s <= 0% atau return <= 0%), langsung auto-sell seketika!
+          // SETELAH posisi dibuka (t.occurredAt >= simulation.openedAt), dan harga mulai melemah / minus, langsung auto-sell seketika!
           const tokenHolders = trackedHolders.get(mint);
           if (!exitReason) {
-            const recentSells = (trades.get(mint) ?? []).filter(t => t.occurredAt >= now - 5_000 && t.side === 'sell');
+            const recentSells = (trades.get(mint) ?? []).filter(t => t.occurredAt >= simulation!.openedAt && t.occurredAt >= now - 5_000 && t.side === 'sell');
             for (const sellTrade of recentSells) {
               if (!sellTrade.wallet) continue;
               const holder = tokenHolders?.get(sellTrade.wallet);
@@ -955,7 +1112,8 @@ async function worker(index: number, deadline: number) {
                 || (sellTrade.amount !== null && sellTrade.amount !== undefined && sellTrade.amount >= 5_000_000);
 
               if (isDevSell || isTopHolderSell || isWhaleSell) {
-                const priceWeakening = (priceMomentum5s ?? 0) <= 0 || returnPercent <= 0;
+                // Dev sell is dangerous: exit if dev sells after buy. For top holder/whale, exit if price weakens (return < -1% or momentum < -0.5%).
+                const priceWeakening = isDevSell ? (returnPercent <= 0 || (priceMomentum5s ?? 0) <= 0) : (returnPercent < -1.0 || (priceMomentum5s !== null && priceMomentum5s < -0.5));
                 if (priceWeakening) {
                   exitReason = isDevSell ? 'DEV_DUMP_EXIT' : 'TOP_HOLDER_DUMP';
                   const dumpDesc = isDevSell ? 'Developer' : isTopHolderSell ? `Top Holder owning >= ${topHolderDumpMinPercent}%` : `Whale sell ($${sellTrade.amountUsd ?? '?'})`;
@@ -987,8 +1145,11 @@ async function worker(index: number, deadline: number) {
             if (price > highestProfitPriceUsd + 1e-12) {
               highestProfitPriceUsd = price;
               lastProfitProgressAt = now;
-            } else if (!exitReason && now - lastProfitProgressAt >= profitStagnationDurationMs) {
-              exitReason = 'PROFIT_STAGNATION_10S';
+            } else if (!exitReason) {
+              const requiredStagnationMs = returnPercent >= 10 ? 25_000 : profitStagnationDurationMs;
+              if (now - lastProfitProgressAt >= requiredStagnationMs) {
+                exitReason = returnPercent >= 10 ? 'PROFIT_STAGNATION_25S' : 'PROFIT_STAGNATION_10S';
+              }
             }
           }
           if (!exitReason && returnPercent >= 40 && sustainedHolderGrowth && (priceMomentum5s ?? 0) < 0.5) exitReason = 'TARGET_40_HOLDER_FLAT';
@@ -1052,7 +1213,26 @@ async function worker(index: number, deadline: number) {
             }
           }
         }
-        const summary = { mint, worker: index, startedAt, endedAt, endedBecause: stopLoss ? 'STOP_LOSS_REACHED' : 'OBSERVATION_WINDOW', openingPriceUsd: openingPrice, metadata: candidate.metadata ?? null, fields: candidate.fields, report: evaluate(candidate, config), capturedTrades: (trades.get(mint) ?? []).length, capturedHolderWallets: holders.get(mint)?.size ?? 0, comparison: comparison(mint, endedAt), developerMonitoring: developerMonitoring(mint), wallets: walletBehavior(mint, candidate) };
+        const summary = {
+          mint,
+          worker: index,
+          startedAt,
+          detailStartedAt: startedAt,
+          endedAt,
+          endedBecause: observationAbortedDump ? 'OBSERVATION_ABORTED_DUMP' : stopLoss ? 'STOP_LOSS_REACHED' : 'OBSERVATION_WINDOW',
+          dumpDetails: observationAbortedDump ? { reason: observationAbortedDump.reason, details: observationAbortedDump.details, drawdownPercent: observationAbortedDump.drawdownPercent } : null,
+          openingPriceUsd: openingPrice,
+          metadata: candidate.metadata ?? null,
+          fields: candidate.fields,
+          report: evaluate(candidate, config),
+          capturedTrades: (trades.get(mint) ?? []).length,
+          capturedHolderWallets: holders.get(mint)?.size ?? 0,
+          comparison: comparison(mint, endedAt),
+          developerMonitoring: developerMonitoring(mint),
+          wallets: walletBehavior(mint, candidate),
+          monitoringTimeline: monitoringSnapshots.get(mint) ?? [],
+        };
+        monitoringSnapshots.delete(mint);
         write('token-summary.jsonl', summary);
         console.log('[detail-complete]', 'worker=' + index, mint, 'trades=' + summary.capturedTrades, 'holders=' + summary.capturedHolderWallets, summary.endedBecause);
       }
