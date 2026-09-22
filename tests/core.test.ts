@@ -8,6 +8,7 @@ import { parseCandidates, decodeFrame, describeFrame, validMint } from '../src/p
 import { evaluate } from '../src/risk.js';
 import { Store } from '../src/store.js';
 import { CandidateQueue } from '../src/queue.js';
+import { TabManager } from '../src/tab-manager.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
@@ -389,4 +390,48 @@ test('auto close monitoring aborts observation early when token dumps heavily (e
   });
   assert.equal(healthy.shouldAbort, false);
   assert.equal(healthy.reason, null);
+});
+
+test('tab manager enforces 5-tab limit, monitors active tabs, preserves closed history, and supports reopen', () => {
+  const tm = new TabManager(5);
+  assert.equal(tm.getActiveCount(), 0);
+  assert.equal(tm.canOpen(), true);
+
+  // Open 5 tabs
+  assert.ok(tm.openTab('mint1', 'TK1', 'https://gmgn.ai/sol/token/mint1', 'Token 1', 1000));
+  assert.ok(tm.openTab('mint2', 'TK2', 'https://gmgn.ai/sol/token/mint2', 'Token 2', 1000));
+  assert.ok(tm.openTab('mint3', 'TK3', 'https://gmgn.ai/sol/token/mint3', 'Token 3', 1000));
+  assert.ok(tm.openTab('mint4', 'TK4', 'https://gmgn.ai/sol/token/mint4', 'Token 4', 1000));
+  assert.ok(tm.openTab('mint5', 'TK5', 'https://gmgn.ai/sol/token/mint5', 'Token 5', 1000));
+
+  assert.equal(tm.getActiveCount(), 5);
+  assert.equal(tm.canOpen(), false);
+
+  // 6th tab cannot open
+  assert.equal(tm.openTab('mint6', 'TK6', 'https://gmgn.ai/sol/token/mint6', 'Token 6', 1000), false);
+
+  // Close tab mint2
+  const closed = tm.closeTab('mint2', 1000 + 45000);
+  assert.ok(closed);
+  assert.equal(closed.mint, 'mint2');
+  assert.equal(closed.symbol, 'TK2');
+  assert.equal(closed.durationSeconds, 45);
+  assert.equal(closed.index, 1);
+
+  // Now active count is 4, slot is free
+  assert.equal(tm.getActiveCount(), 4);
+  assert.equal(tm.canOpen(), true);
+
+  // Closed history contains mint2
+  const history = tm.getClosedHistory();
+  assert.equal(history.length, 1);
+  assert.equal(history[0].symbol, 'TK2');
+
+  // Reopen by index #1
+  const reopenResult = tm.reopenTab(1, 2000);
+  assert.equal(reopenResult.success, true);
+  assert.equal(reopenResult.item?.symbol, 'TK2');
+  assert.equal(tm.getActiveCount(), 5);
+  assert.equal(tm.canOpen(), false);
+  assert.equal(tm.getClosedHistory().length, 0); // removed from closed history
 });
