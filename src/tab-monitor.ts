@@ -8,6 +8,7 @@ import { parseCandidates, parseTokenMetadata, validMint } from './parser.js';
 import { CandidateQueue } from './queue.js';
 import { evaluate } from './risk.js';
 import { TabManager, type ActiveTabInfo, type ClosedTabHistory } from './tab-manager.js';
+import { selectTradeSide, amountInput } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
 
 const { values } = parseArgs({
@@ -17,12 +18,16 @@ const { values } = parseArgs({
     profileDir: { type: 'string', default: 'profiles/research-aria-tele01' },
     profileName: { type: 'string', default: 'Profile 12' },
     enableExtensions: { type: 'boolean', default: true },
+    amount: { type: 'string', default: '0.01' },
+    buyAmount: { type: 'string' },
+    sol: { type: 'string' },
     seconds: { type: 'string' },
   },
 });
 
 const config: Config = loadConfig(values.config);
 const maxTabs = Math.max(1, Math.min(20, Number(values.maxTabs) || 5));
+const buyAmountSol = values.buyAmount ?? values.sol ?? values.amount ?? '0.01';
 const tabManager = new TabManager(maxTabs);
 const queue = new CandidateQueue(config.queueCapacity, config.candidateTtlMs);
 
@@ -256,6 +261,36 @@ function esc(s: unknown): string {
   }[c] || c));
 }
 
+async function safelySetAmount(page: Page, solAmount: string): Promise<void> {
+  const input = await amountInput(page);
+  const current = (await input.inputValue()).trim();
+  if (current === solAmount) return;
+  await input.click({ clickCount: 3 });
+  await input.press('ControlOrMeta+a');
+  await input.press('Backspace');
+  await page.waitForTimeout(100);
+  await input.fill(solAmount);
+  const afterFill = (await input.inputValue()).trim();
+  if (afterFill !== solAmount) {
+    await input.evaluate((el: HTMLInputElement, val: string) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      if (setter) {
+        setter.call(el, val);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        el.value = val;
+      }
+    }, solAmount);
+  }
+}
+
+async function prepareBuyPanel(page: Page, solAmount: string, symbol: string): Promise<void> {
+  await selectTradeSide(page, 'buy');
+  await safelySetAmount(page, solAmount);
+  console.log(`[ui-prep] 💰 ${symbol}: Panel Buy disiapkan dengan nominal ${solAmount} SOL. (Siap untuk manual buy).`);
+}
+
 async function openDetailTab(mint: string, candidate?: Candidate): Promise<boolean> {
   if (!context) return false;
   if (!tabManager.canOpen()) return false;
@@ -311,6 +346,13 @@ async function openDetailTab(mint: string, candidate?: Candidate): Promise<boole
 
     // Navigate to the GMGN token page
     await page.goto(url, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
+
+    // Pre-fill amount buy 0.01 SOL (tanpa klik submit) agar pengguna bisa langsung manual buy
+    await page.waitForTimeout(1000);
+    await prepareBuyPanel(page, buyAmountSol, symbol).catch(err => {
+      console.warn(`[ui-prep-warn] ${symbol} tidak dapat mengisi nominal buy:`, err instanceof Error ? err.message : err);
+    });
+
     return true;
   } catch (error) {
     console.error(`[tab-open-error] Gagal membuka tab untuk ${mint}:`, error instanceof Error ? error.message : error);
