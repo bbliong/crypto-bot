@@ -40,7 +40,7 @@ const flow3 = values.strategy === 'flow-3';
 const FLOW3_RULES = {
   version: 'flow-3',
   entry: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, minimumTrades20s: 5, buyUsdAtLeastSellUsd: true },
-  candles: { minimumCompletedCandles: 3, largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20, maximumConsecutiveRedCandles: 2 },
+  candles: { minimumCompletedCandles: 2, allowTwoCandleHistory: true, largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20, maximumConsecutiveRedCandles: 2 },
   exits: { targetPercent: 40, hardStopPercent: 20, trailingStartPercent: 20, trailingDrawdownPercent: 10, sellPressureWindows: 2 },
   feed: { minimumHolders: 20, minimumLiquidityUsd: 6_000, maximumLiquidityUsd: 15_000, maximumTop10Percent: 30 },
   stakeUsd: 0.25,
@@ -1018,7 +1018,12 @@ async function worker(index: number, deadline: number) {
             console.log('[holder-rejected-dominated]', candidate?.metadata?.symbol ?? mint, holderDistribution.reason);
           }
 
-          const candleAllowed = ((candleDecision?.allowed && candleEntryFlow?.allowed)
+          // Flow-3 temporarily allows a two-candle history.  A live red candle
+          // still blocks entry, while a one-candle launch remains insufficient.
+          const flow3TwoCandleGrace = flow3
+            && candleDecision?.reason === 'INSUFFICIENT_CANDLES'
+            && candleEntryFlow?.reason !== 'CURRENT_CANDLE_DROP';
+          const candleAllowed = flow3TwoCandleGrace || ((candleDecision?.allowed && candleEntryFlow?.allowed)
             || singleCandleOverride.allowed
             || earlyCandleRising.allowed);
 
