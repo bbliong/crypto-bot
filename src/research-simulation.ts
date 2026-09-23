@@ -308,6 +308,22 @@ export function assessEntryStability(samples: PriceSample[]): EntryStability {
   return { stable: !falling, reason: falling ? 'CONTINUING_PRICE_DROP' : 'STABLE_OR_RECOVERING', momentum5sPercent, consecutiveDeclines, distinctPriceCount };
 }
 
+/** Exact entry stability thresholds from the archived flow-3 run. */
+export function assessFlow3EntryStability(samples: PriceSample[]): EntryStability {
+  if (samples.length < 3) return { stable: false, reason: 'INSUFFICIENT_PRICE_DATA', momentum5sPercent: null, consecutiveDeclines: 0, distinctPriceCount: new Set(samples.map(sample => sample.priceUsd)).size };
+  const distinctPriceCount = new Set(samples.map(sample => sample.priceUsd)).size;
+  const baseline = samples[0]!.priceUsd, latest = samples.at(-1)!.priceUsd;
+  const momentum5sPercent = (latest / baseline - 1) * 100;
+  let consecutiveDeclines = 0;
+  for (let index = samples.length - 1; index > 0; index--) {
+    if (samples[index]!.priceUsd < samples[index - 1]!.priceUsd) consecutiveDeclines++;
+    else break;
+  }
+  const falling = momentum5sPercent <= -2 || consecutiveDeclines >= 2;
+  if (distinctPriceCount < 2) return { stable: false, reason: 'INSUFFICIENT_PRICE_CONFIRMATION', momentum5sPercent, consecutiveDeclines, distinctPriceCount };
+  return { stable: !falling, reason: falling ? 'CONTINUING_PRICE_DROP' : 'STABLE_OR_RECOVERING', momentum5sPercent, consecutiveDeclines, distinctPriceCount };
+}
+
 export function openSimulation(mint: string, openedAt: number, entryPriceUsd: number, stakeUsd = 0.25): SimulationPosition {
   if (!(entryPriceUsd > 0) || !(stakeUsd > 0)) throw new Error('Simulation requires a positive price and stake');
   return { mint, openedAt, entryPriceUsd, stakeUsd, quantity: stakeUsd / entryPriceUsd, peakPriceUsd: entryPriceUsd, pressureWindows: 0, lastPressureWindowStart: null };

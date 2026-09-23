@@ -9,7 +9,7 @@ import { attachCapture } from './capture.js';
 import { at, parseCandidates, parseTokenMetadata, validMint } from './parser.js';
 import { CandidateQueue } from './queue.js';
 import { evaluate } from './risk.js';
-import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type HolderDistributionDecision, type McapCandle, type ObservationDumpDecision, type ObservationDumpReason, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
+import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3EntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, closeSimulation, openSimulation, type BlindProtectionDecision, type HolderDistributionDecision, type McapCandle, type ObservationDumpDecision, type ObservationDumpReason, type SimulationPosition, type SimulationExitReason } from './research-simulation.js';
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
@@ -959,7 +959,7 @@ async function worker(index: number, deadline: number) {
           }
         }
         if (price && !simulation && now - priceObservedAt <= 10_000) {
-          const entry = assessEntryStability(priceSamples);
+          const entry = flow3 ? assessFlow3EntryStability(priceSamples) : assessEntryStability(priceSamples);
           const flow = entryTradeFlow(mint, now);
           const flowAllowed = flow.trades >= 5 && flow.buyUsd >= flow.sellUsd;
           const freshSignificantGrowth = lastSignificantGrowthAt > 0 && now - lastSignificantGrowthAt <= 5_000;

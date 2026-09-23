@@ -12,7 +12,7 @@ import { TabManager } from '../src/tab-manager.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
-import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
+import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3EntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
 
 const mint = 'FDW1Et4FS6sYLjByZNNvB8ZzwZ4eh9HG2snB97Jzpump';
@@ -132,6 +132,11 @@ test('flow-3 keeps only its documented target, stop, trailing, and sell-pressure
   assert.equal(assessFlow3Simulation(trailing,10.8,{buys:1,sells:1,buyUsd:1,sellUsd:1,uniqueSellers:1}).exitReason,'TRAILING_10');
   const stopped=openSimulation(mint,now,10);
   assert.equal(assessFlow3Simulation(stopped,8,{buys:0,sells:0,buyUsd:0,sellUsd:0,uniqueSellers:0}).exitReason,'STOP_LOSS_20');
+});
+test('flow-3 blocks a 2% drop or two consecutive declines at entry',()=>{
+  const now=Date.now();
+  assert.equal(assessFlow3EntryStability([{observedAt:now-4000,priceUsd:1},{observedAt:now-2000,priceUsd:0.995},{observedAt:now,priceUsd:0.979}]).reason,'CONTINUING_PRICE_DROP');
+  assert.equal(assessFlow3EntryStability([{observedAt:now-4000,priceUsd:1},{observedAt:now-2000,priceUsd:0.999},{observedAt:now,priceUsd:0.998}]).reason,'CONTINUING_PRICE_DROP');
 });
 test('simulation exit reason accepts DEV_DUMP_EXIT and TOP_HOLDER_DUMP',()=>{
   const reasons: SimulationExitReason[] = ['DEV_DUMP_EXIT', 'TOP_HOLDER_DUMP', 'MOMENTUM_EXHAUSTION_5S', 'PROFIT_STAGNATION_10S'];
@@ -481,4 +486,3 @@ test('1-tab mode: tab manager enforces 1-tab limit, records metrics, and queue t
   assert.equal(tm.getActiveCount(), 0);
   assert.equal(tm.canOpen(), true);
 });
-
