@@ -18,8 +18,8 @@ import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.j
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 
 const { values } = parseArgs({ options: {
-  seconds: { type: 'string', default: '1800' }, detailSeconds: { type: 'string', default: '600' },
-  workers: { type: 'string', default: '5' }, stopLossPercent: { type: 'string', default: '20' },
+  seconds: { type: 'string', default: '0' }, detailSeconds: { type: 'string', default: '600' },
+  workers: { type: 'string', default: '3' }, stopLossPercent: { type: 'string', default: '20' },
   simulationStakeUsd: { type: 'string' },
   stake: { type: 'string' },
   stakeUsd: { type: 'string' },
@@ -79,7 +79,7 @@ const rawStakeUsd = values.stake ?? values.stakeUsd ?? values.amount ?? values.s
 const simulationStakeUsd = Number(rawStakeUsd);
 if (pumpBand && simulationStakeSol !== null) throw new Error('pump-band paper simulation uses a USDC stake; omit --sol/--buySol');
 
-if (![runSeconds, detailSeconds, workers, stopLossPercent, simulationStakeUsd, exitHoldSeconds].every(Number.isFinite) || runSeconds <= 0 || detailSeconds <= 0 || !Number.isInteger(workers) || workers < 1 || workers > 5 || stopLossPercent <= 0 || stopLossPercent >= 100 || simulationStakeUsd <= 0 || exitHoldSeconds < 0 || exitHoldSeconds > 300 || (simulationStakeSol !== null && (!Number.isFinite(simulationStakeSol) || simulationStakeSol <= 0)) || (maxPaperBuys !== null && (!Number.isInteger(maxPaperBuys) || maxPaperBuys < 1))) throw new Error('Invalid research options');
+if (![runSeconds, detailSeconds, workers, stopLossPercent, simulationStakeUsd, exitHoldSeconds].every(Number.isFinite) || runSeconds < 0 || detailSeconds <= 0 || !Number.isInteger(workers) || workers < 1 || workers > 3 || stopLossPercent <= 0 || stopLossPercent >= 100 || simulationStakeUsd <= 0 || exitHoldSeconds < 0 || exitHoldSeconds > 300 || (simulationStakeSol !== null && (!Number.isFinite(simulationStakeSol) || simulationStakeSol <= 0)) || (maxPaperBuys !== null && (!Number.isInteger(maxPaperBuys) || maxPaperBuys < 1))) throw new Error('Invalid research options');
 if (!existsSync(values.profileDir)) throw new Error('Research profile tidak ditemukan: ' + values.profileDir);
 
 type Primitive = string | number | boolean | null;
@@ -1560,6 +1560,7 @@ async function worker(index: number, deadline: number) {
 }
 async function main() {
   writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled,
+    runSeconds: runSeconds === 0 ? null : runSeconds,
     rules: pumpBand ? { ...PUMP_BAND_RULES, observationSeconds: detailSeconds, simulationStakeUsdc: simulationStakeUsd, maximumExitPriceAgeMs: 5_000,
       entry: 'first fresh token_activity pu after detail opened', exit: '20% fall from observed price peak or observation window end' }
       : momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null,
@@ -1587,13 +1588,18 @@ async function main() {
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
+  context.on('close', () => stopping.abort());
+  process.once('SIGINT', () => stopping.abort());
+  process.once('SIGTERM', () => stopping.abort());
   console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds, simulationStakeSol !== null ? ('stakeSol=' + simulationStakeSol) : ('stakeUsd=$' + simulationStakeUsd));
   const feed = context.pages()[0] ?? await context.newPage(); attach(feed, true, () => undefined);
   await feed.goto(config.feedUrl, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
-  const deadline = Date.now() + runSeconds * 1000, timer = setTimeout(() => stopping.abort(), runSeconds * 1000);
+  const deadline = runSeconds === 0 ? Number.POSITIVE_INFINITY : Date.now() + runSeconds * 1000;
+  const timer = runSeconds === 0 ? null : setTimeout(() => stopping.abort(), runSeconds * 1000);
   await Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline)));
   await Promise.allSettled([...pendingPaperOrders]);
-  clearTimeout(timer); const simulated = simulatedEvents;
+  if (timer) clearTimeout(timer);
+  const simulated = simulatedEvents;
   const sells = simulated.filter(row => row.type === 'SIMULATED_SELL'), pnl = sells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0);
   writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), positionsOpened: simulated.filter(row => row.type === 'SIMULATED_BUY').length, positionsClosed: sells.length, openAtEnd: simulated.filter(row => row.type === 'SIMULATED_BUY').length - sells.length, totalStakeUsd: simulated.filter(row => row.type === 'SIMULATED_BUY').length * simulationStakeUsd, totalPnlUsd: pnl, profitable: sells.filter(row => (row.pnlUsd ?? 0) > 0).length, losing: sells.filter(row => (row.pnlUsd ?? 0) < 0).length, breakEven: sells.filter(row => row.pnlUsd === 0).length, exitsByReason: Object.fromEntries(sells.reduce((map, row) => map.set(row.reason ?? 'UNKNOWN', (map.get(row.reason ?? 'UNKNOWN') ?? 0) + 1), new Map<string, number>())), assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));
   if (reportRefreshTimer) clearTimeout(reportRefreshTimer);
