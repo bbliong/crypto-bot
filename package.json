@@ -12,6 +12,7 @@
     "research": "node scripts/run.mjs research",
     "monitor": "node scripts/run.mjs monitor",
     "research:flow3": "node scripts/run.mjs research --strategy flow-3",
+    "research:pump-band": "node scripts/run.mjs pump-research",
     "momentum:replay": "node scripts/run.mjs momentum:replay",
     "research:trial": "node scripts/run.mjs research --maxBuys 2",
     "trade-ui": "node scripts/run.mjs trade-ui",

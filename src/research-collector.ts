@@ -14,6 +14,7 @@ import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
 import { MOMENTUM_RULES, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 
 const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '1800' }, detailSeconds: { type: 'string', default: '600' },
@@ -34,9 +35,10 @@ const { values } = parseArgs({ options: {
   config: { type: 'string', default: 'config/rules.yaml' },
 } });
 const loadedConfig = loadConfig(values.config);
-if (!['legacy', 'flow-3', 'momentum-v2'].includes(values.strategy!)) throw new Error('Unknown research strategy');
+if (!['legacy', 'flow-3', 'momentum-v2', 'pump-band'].includes(values.strategy!)) throw new Error('Unknown research strategy');
 const momentumV2 = values.strategy === 'momentum-v2';
 const flow3 = values.strategy === 'flow-3';
+const pumpBand = values.strategy === 'pump-band';
 const FLOW3_RULES = {
   version: 'flow-3',
   entry: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, minimumTrades20s: 5, buyUsdAtLeastSellUsd: true },
@@ -57,12 +59,12 @@ const config: Config = flow3 ? {
   maximumLiquidityUsd: 15_000,
   maximumTop10Percent: 30,
 } : loadedConfig;
-const runSeconds = Number(values.seconds), detailSeconds = Number(values.detailSeconds);
+const runSeconds = Number(values.seconds), detailSeconds = Number(pumpBand && values.detailSeconds === '600' ? '20' : values.detailSeconds);
 const workers = Number(values.workers), stopLossPercent = Number(values.stopLossPercent);
 const exitHoldSeconds = Number(values.exitHoldSeconds);
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
-if ((momentumV2 || flow3) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
+if ((momentumV2 || flow3 || pumpBand) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
 const topHolderDumpMinPercent = values.topHolderDumpMinPercent !== undefined ? Number(values.topHolderDumpMinPercent) : (config.topHolderDumpMinPercent ?? 1.5);
 
 // Stake configuration: supports USD (--stake 1, --stakeUsd 5) or direct SOL (--sol 0.005, --buySol 0.01)
@@ -72,8 +74,9 @@ const simulationStakeSol = directSolArg !== undefined
   : (config.simulationStakeSol ?? null);
 
 const rawStakeUsd = values.stake ?? values.stakeUsd ?? values.amount ?? values.simulationStakeUsd
-  ?? (flow3 ? '0.25' : config.simulationStakeUsd !== undefined ? String(config.simulationStakeUsd) : '0.25');
+  ?? (flow3 || pumpBand ? '0.25' : config.simulationStakeUsd !== undefined ? String(config.simulationStakeUsd) : '0.25');
 const simulationStakeUsd = Number(rawStakeUsd);
+if (pumpBand && simulationStakeSol !== null) throw new Error('pump-band paper simulation uses a USDC stake; omit --sol/--buySol');
 
 if (![runSeconds, detailSeconds, workers, stopLossPercent, simulationStakeUsd, exitHoldSeconds].every(Number.isFinite) || runSeconds <= 0 || detailSeconds <= 0 || !Number.isInteger(workers) || workers < 1 || workers > 5 || stopLossPercent <= 0 || stopLossPercent >= 100 || simulationStakeUsd <= 0 || exitHoldSeconds < 0 || exitHoldSeconds > 300 || (simulationStakeSol !== null && (!Number.isFinite(simulationStakeSol) || simulationStakeSol <= 0)) || (maxPaperBuys !== null && (!Number.isInteger(maxPaperBuys) || maxPaperBuys < 1))) throw new Error('Invalid research options');
 if (!existsSync(values.profileDir)) throw new Error('Research profile tidak ditemukan: ' + values.profileDir);
@@ -82,7 +85,7 @@ type Primitive = string | number | boolean | null;
 type Trade = { mint: string; wallet: string | null; side: 'buy' | 'sell'; occurredAt: number; observedAt: number; priceUsd: number | null; amount: number | null; amountUsd?: number | null; signature: string | null; raw: Record<string, Primitive> };
 type Holder = { mint: string; wallet: string; observedAt: number; raw: Record<string, string | number | boolean | null> };
 type DeveloperHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; raw: Record<string, Primitive> };
-type TrackedHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; isDev: boolean; walletTagV2?: string; raw: Record<string, Primitive> };
+type TrackedHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; isDev: boolean; devEvidence: string[]; walletTagV2?: string; raw: Record<string, Primitive> };
 type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
 const holderApiStatus = new Map<string, HolderApiStatus>();
 type SimulatedEvent = { type: 'SIMULATED_BUY' | 'SIMULATED_SELL' | 'SIMULATION_HOLD'; pnlUsd?: number; reason?: string };
@@ -144,6 +147,8 @@ function ownerEvidence(mint: string): OwnerSample[] {
   return ownerSnapshots.get(mint) ?? [];
 }
 const queue = new CandidateQueue(500, 10 * 60_000), inspected = new Set<string>(), lastHolderWrite = new Map<string, number>(), lastComparisonWrite = new Map<string, number>();
+const pumpConsidered = new Set<string>();
+const pumpSlots: { state: 'idle' | 'assigned' | 'active'; mint: string | null }[] = Array.from({ length: workers }, () => ({ state: 'idle', mint: null }));
 const rejected = new Set<string>(), youngRejected = new Set<string>(), rejectionCounts = new Map<string, number>(), youngRejectionCounts = new Map<string, number>();
 const stopping = new AbortController();
 let context: BrowserContext | undefined, received = 0, sockets = 0;
@@ -347,9 +352,9 @@ function parseAndStoreTrackedHolders(mint: string, body: unknown, observedAt: nu
     const makerTags = Array.isArray(item.maker_token_tags) ? item.maker_token_tags.map(String) : [];
     const tags = Array.isArray(item.tags) ? item.tags.map(String) : [];
     const walletTagV2 = typeof item.wallet_tag_v2 === 'string' ? item.wallet_tag_v2 : '';
-    const isDev = makerTags.some(t => ['creator', 'dev_team', 'dev'].includes(t.toLowerCase()))
-      || tags.some(t => ['creator', 'dev_team', 'dev'].includes(t.toLowerCase()))
-      || walletTagV2.toLowerCase().includes('dev');
+    const devEvidence = [...makerTags, ...tags].filter(t => ['creator', 'dev_team', 'dev'].includes(t.toLowerCase()));
+    if (walletTagV2.toLowerCase().includes('dev')) devEvidence.push(walletTagV2);
+    const isDev = devEvidence.length > 0;
 
     let pct = numberFrom(item, ['amount_percentage', 'percentage', 'percent', 'ownership_percentage']);
     if (pct !== null && pct <= 1 && pct > 0) pct = pct * 100;
@@ -361,7 +366,7 @@ function parseAndStoreTrackedHolders(mint: string, body: unknown, observedAt: nu
     found.push({
       mint, wallet, observedAt, amountPercentage: pct,
       amount: numberFrom(item, ['amount_cur', 'balance', 'amount', 'token_amount']),
-      isDev, walletTagV2, raw
+      isDev, devEvidence, walletTagV2, raw
     });
   }
   const map = new Map<string, TrackedHolder>();
@@ -749,6 +754,22 @@ function attach(page: Page, feed: boolean, active: () => string | undefined) {
     for (const update of parseCandidates(payload, config.mappings, now, source)) {
       if (!feed && update.mint !== mint) continue;
       const candidate = merge(update);
+      if (feed && pumpBand) {
+        const marketCapUsd = num(candidate, 'marketCapUsd');
+        if (!isInPumpBand(marketCapUsd) || pumpConsidered.has(candidate.mint)) continue;
+        pumpConsidered.add(candidate.mint);
+        const slotIndex = pumpSlots.findIndex(slot => slot.state === 'idle');
+        if (slotIndex < 0 || (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys)) {
+          write('events.jsonl', { type: 'PUMP_BAND_SKIPPED_NO_SLOT', mint: candidate.mint, observedAt: now, marketCapUsd });
+          continue;
+        }
+        const slot = pumpSlots[slotIndex]!;
+        slot.state = 'assigned'; slot.mint = candidate.mint;
+        inspected.add(candidate.mint);
+        write('screened-tokens.jsonl', { observedAt: now, mint: candidate.mint, metadata: candidate.metadata ?? null, fields: candidate.fields, strategy: 'pump-band', worker: slotIndex + 1 });
+        console.log('[pump-band-assigned]', 'slot=' + (slotIndex + 1), candidate.metadata?.symbol ?? candidate.mint, '$' + marketCapUsd?.toFixed(2));
+        continue;
+      }
       if (feed && !inspected.has(candidate.mint)) {
         if (passesInitialScreen(candidate, now)) {
           inspected.add(candidate.mint); queue.push(candidate.mint, now);
@@ -810,7 +831,130 @@ async function prepareSellPanel(page: Page, mint: string, worker: number, observ
   write('trade-preparation.jsonl', { type: 'SELL_PREPARED', mint, worker, observedAt, reason, sellPercent: 100, preparedAmount, executionSettings: DEFAULT_EXECUTION_SETTINGS,
     note: 'The GMGN Sell 100% preset was selected only. No Sell button was clicked and no transaction was submitted.' });
 }
+async function pumpBandWorker(index: number, deadline: number) {
+  const slot = pumpSlots[index - 1]!;
+  const page = await context!.newPage();
+  let activeMint: string | undefined;
+  attach(page, false, () => activeMint);
+  attachHolderNetworkInspector(page);
+  try {
+    while (!stopping.signal.aborted && Date.now() < deadline) {
+      if (slot.state !== 'assigned' || !slot.mint) { await delay(100); continue; }
+      const mint = slot.mint;
+      slot.state = 'active'; activeMint = mint;
+      const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1_000);
+      const initialMarketCapUsd = num(candidates.get(mint), 'marketCapUsd');
+      let position: SimulationPosition | null = null;
+      let exitReason: SimulationExitReason | null = null;
+      let lastTick: Trade | null = null;
+      let peakPriceUsd = 0, processedTrades = 0, lastTokenStatAt = 0, lastMonitoringSnapshotAt = 0;
+      let tokenStatInFlight: Promise<unknown> | null = null;
+      write('events.jsonl', { type: 'DETAIL_STARTED', mint, worker: index, startedAt, strategy: 'pump-band', initialMarketCapUsd });
+      console.log('[pump-band-detail]', 'slot=' + index, candidates.get(mint)?.metadata?.symbol ?? mint);
+      try {
+        await page.goto(config.tokenUrlTemplate.replaceAll('{mint}', mint), { waitUntil: 'commit', timeout: config.workerTimeoutMs });
+        while (!stopping.signal.aborted && Date.now() < stopAt) {
+          const now = Date.now();
+          if (!tokenStatInFlight && now - lastTokenStatAt >= PUMP_BAND_RULES.holderPollMs) {
+            lastTokenStatAt = now;
+            tokenStatInFlight = refreshTokenStat(page, mint, now).catch(() => {}).finally(() => { tokenStatInFlight = null; });
+          }
+          if (now - lastMonitoringSnapshotAt >= PUMP_BAND_RULES.holderPollMs) {
+            lastMonitoringSnapshotAt = now;
+            const previous = monitoringSnapshots.get(mint) ?? [];
+            const holderCount = num(candidates.get(mint), 'holders');
+            const recent = (trades.get(mint) ?? []).filter(trade => trade.observedAt >= now - PUMP_BAND_RULES.flowWindowMs);
+            const buys = recent.filter(trade => trade.side === 'buy');
+            const sells = recent.filter(trade => trade.side === 'sell');
+            previous.push({ observedAt: now, holderCount,
+              holderDelta: holderCount !== null && previous.length && previous.at(-1)!.holderCount !== null ? holderCount - previous.at(-1)!.holderCount! : null,
+              buys5s: buys.length, sells5s: sells.length,
+              buyUsd5s: buys.reduce((sum, trade) => sum + (trade.amountUsd ?? 0), 0),
+              sellUsd5s: sells.reduce((sum, trade) => sum + (trade.amountUsd ?? 0), 0),
+              priceUsd: lastTick?.priceUsd ?? null, top10Holders: computeTop10Holders(mint), blockingReasons: [] });
+            monitoringSnapshots.set(mint, previous);
+          }
+          const observed = trades.get(mint) ?? [];
+          for (; processedTrades < observed.length; processedTrades++) {
+            const frameObservedAt = observed[processedTrades]!.observedAt;
+            const frame: Trade[] = [];
+            while (processedTrades < observed.length && observed[processedTrades]!.observedAt === frameObservedAt) {
+              frame.push(observed[processedTrades]!);
+              processedTrades++;
+            }
+            processedTrades--; // The for-loop advances to the first trade in the next frame.
+            const tick = latestPricedTradeInFrame(frame.filter(trade => trade.observedAt >= startedAt
+              && trade.observedAt <= stopAt && trade.occurredAt >= startedAt - 2_000));
+            if (!tick) continue;
+            if (!position) {
+              if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys) continue;
+              position = openSimulation(mint, tick.observedAt, tick.priceUsd, simulationStakeUsd);
+              paperBuyCount++;
+              peakPriceUsd = tick.priceUsd;
+              writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: tick.observedAt, entryPriceUsd: tick.priceUsd,
+                stakeUsd: position.stakeUsd, quantity: position.quantity, metadata: candidates.get(mint)?.metadata ?? null,
+                entryGate: { strategy: 'pump-band', initialMarketCapUsd, rangeUsd: [PUMP_BAND_RULES.minimumMarketCapUsd, PUMP_BAND_RULES.maximumMarketCapUsd],
+                  detailOpenedAt: startedAt, priceSource: 'fresh token_activity pu', priceLatencyMs: tick.observedAt - startedAt },
+                assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper buy on first fresh observed transaction price; no GMGN trade button clicked.' } });
+              console.log('[sim-buy]', candidates.get(mint)?.metadata?.symbol ?? mint, 'price=' + tick.priceUsd);
+            }
+            lastTick = tick;
+            // A buy cannot be followed by a paper sell inside the same
+            // received frame (or the same millisecond of received frames).
+            if (tick.observedAt <= position.openedAt) continue;
+            peakPriceUsd = Math.max(peakPriceUsd, tick.priceUsd);
+            const drawdownPercent = (tick.priceUsd / peakPriceUsd - 1) * 100;
+            if (drawdownPercent <= -PUMP_BAND_RULES.dumpFromPeakPercent) {
+              exitReason = 'PUMP_DUMP_20';
+              writeSimulationExit(position, mint, tick.observedAt, tick.priceUsd, exitReason, candidates.get(mint)?.metadata ?? null,
+                { priceSource: 'fresh token_activity pu', priceObservedAt: tick.observedAt, peakPriceUsd, drawdownPercent });
+              console.log('[sim-sell]', candidates.get(mint)?.metadata?.symbol ?? mint, exitReason, drawdownPercent.toFixed(2) + '%');
+              break;
+            }
+          }
+          if (exitReason) break;
+          await delay(100);
+        }
+        const endedAt = Date.now();
+        if (position && !exitReason) {
+          const priceAgeMs = lastTick ? endedAt - lastTick.observedAt : null;
+          if (lastTick && priceAgeMs !== null && priceAgeMs <= 5_000) {
+            exitReason = 'PUMP_OBSERVATION_END';
+            writeSimulationExit(position, mint, endedAt, lastTick.priceUsd!, exitReason, candidates.get(mint)?.metadata ?? null,
+              { priceSource: 'last token_activity pu at or before exit', priceObservedAt: lastTick.observedAt, priceAgeMs, peakPriceUsd });
+            console.log('[sim-sell]', candidates.get(mint)?.metadata?.symbol ?? mint, exitReason, 'priceAgeMs=' + priceAgeMs);
+          } else {
+            write('events.jsonl', { type: 'SIMULATION_EXIT_UNPRICED', mint, worker: index, observedAt: endedAt, lastPriceObservedAt: lastTick?.observedAt ?? null,
+              priceAgeMs, note: 'No fresh transaction price within five seconds of the exit signal; PnL is not assigned.' });
+          }
+        }
+        if (!position) write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: endedAt,
+          reason: 'NO_FRESH_PU_TICK', note: 'Detail opened but no fresh transaction-price tick arrived during observation.' });
+        const candidate = candidates.get(mint);
+        write('token-summary.jsonl', { mint, worker: index, startedAt, detailStartedAt: startedAt, endedAt,
+          endedBecause: exitReason ?? (position ? 'EXIT_UNPRICED' : 'NO_FRESH_PU_TICK'), strategy: 'pump-band', initialMarketCapUsd,
+          openingPriceUsd: position?.entryPriceUsd ?? null, finalPriceUsd: exitReason ? lastTick?.priceUsd ?? null : null,
+          peakPriceUsd: peakPriceUsd || null, capturedTrades: (trades.get(mint) ?? []).length,
+          capturedHolderWallets: holders.get(mint)?.size ?? 0, metadata: candidate?.metadata ?? null, fields: candidate?.fields ?? {},
+          comparison: comparison(mint, endedAt), developerMonitoring: developerMonitoring(mint),
+          wallets: candidate ? walletBehavior(mint, candidate) : [], monitoringTimeline: monitoringSnapshots.get(mint) ?? [] });
+        monitoringSnapshots.delete(mint);
+        scheduleReportRefresh();
+      } catch (error) {
+        write('events.jsonl', { type: 'DETAIL_ERROR', worker: index, mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+        console.log('[detail-error]', 'worker=' + index, mint, error instanceof Error ? error.message : error);
+      } finally {
+        activeMint = undefined;
+        await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
+        slot.state = 'idle'; slot.mint = null;
+      }
+    }
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
 async function worker(index: number, deadline: number) {
+  if (pumpBand) return pumpBandWorker(index, deadline);
   const page = await context!.newPage(); let activeMint: string | undefined;
   attach(page, false, () => activeMint);
   attachHolderNetworkInspector(page);
@@ -1373,7 +1517,18 @@ async function worker(index: number, deadline: number) {
 }
 async function main() {
   writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled,
-    rules: momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null, note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
+    rules: pumpBand ? { ...PUMP_BAND_RULES, observationSeconds: detailSeconds, simulationStakeUsdc: simulationStakeUsd, maximumExitPriceAgeMs: 5_000,
+      entry: 'first fresh token_activity pu after detail opened', exit: '20% fall from observed price peak or observation window end' }
+      : momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null,
+    note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
+  if (pumpBand) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: 'pump-band', startedAt: new Date().toISOString(),
+    purpose: 'Playwright paper buy/sell test of the pump-band rules. No real GMGN trade controls are used.', workers, detailSeconds,
+    scheduling: 'No queue. Only a fresh eligible token with an empty detail slot is assigned.',
+    feedRules: { minimumMarketCapUsd: PUMP_BAND_RULES.minimumMarketCapUsd, maximumMarketCapUsd: PUMP_BAND_RULES.maximumMarketCapUsd },
+    simulation: { stakeUsd: simulationStakeUsd, buyPrice: 'first fresh transaction pu after detail open',
+      sellSignal: '20% drawdown from observed pu peak or observation window end', maximumExitPriceAgeMs: 5_000,
+      feeUsd: 0, slippagePercent: 0, maxPaperBuys }, tradePreparation: { enabled: false, autoBuyEnabled: false } }, null, 2));
+  else
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });

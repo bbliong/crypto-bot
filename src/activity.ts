@@ -29,7 +29,9 @@ export function parseTokenActivities(payload: unknown, observedAt: number): Toke
     const occurredAt = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : observedAt;
     const rawPrice = Number(at(record, 'pu'));
     const rawAmount = Number(at(record, 'au'));
-    const actor = at(record, 'ad');
+    // GMGN's `m` identifies the trader in token activity. `ad` is an
+    // auxiliary address and is only a fallback when `m` is unavailable.
+    const actor = [at(record, 'm'), at(record, 'ad')].find(validMint);
     result.push({ mint, side, occurredAt, observedAt,
       ...(Number.isFinite(rawPrice) && rawPrice >= 0 ? { priceUsd: rawPrice } : {}),
       ...(Number.isFinite(rawAmount) && rawAmount >= 0 ? { amount: rawAmount } : {}),

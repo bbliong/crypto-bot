@@ -12,6 +12,7 @@ import { TabManager } from '../src/tab-manager.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
+import { assessPumpBandDump, isInPumpBand, latestPricedTradeInFrame, pumpMilestones } from '../src/pump-band.js';
 import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3EntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
 
@@ -111,6 +112,28 @@ test('queue takes the newest pending token first',()=>{
   assert.equal(q.take(2),'newer');
   assert.equal(q.take(3),'older');
 });
+test('pump-band keeps only the $3k-$10k cohort and closes a 20% peak drawdown', () => {
+  assert.equal(isInPumpBand(3_000), true);
+  assert.equal(isInPumpBand(2_999), false);
+  assert.equal(isInPumpBand(10_000), true);
+  assert.equal(isInPumpBand(10_001), false);
+  assert.equal(assessPumpBandDump(3_000, 8_000, 6_300).dump, true);
+  assert.deepEqual(pumpMilestones([
+    { observedAt: 1_000, marketCapUsd: 3_000, priceUsd: null },
+    { observedAt: 3_000, marketCapUsd: 6_100, priceUsd: null },
+    { observedAt: 7_000, marketCapUsd: 10_100, priceUsd: null },
+  ], 1_000), { '6000': 2_000, '8000': 6_000, '10000': 6_000 });
+});
+test('pump-band uses only the latest price in a received activity frame', () => {
+  const latest = latestPricedTradeInFrame([
+    { occurredAt: 1000, priceUsd: 10 },
+    { occurredAt: 3000, priceUsd: 14 },
+    { occurredAt: 2000, priceUsd: 7 },
+    { occurredAt: 4000, priceUsd: null },
+  ]);
+  assert.equal(latest?.priceUsd, 14);
+  assert.equal(latest?.occurredAt, 3000);
+});
 test('exit target uses real fill and total executable net proceeds',()=>{
   const p={mint,kind:'manual' as const,filledAt:now-1000,quantity:10,fillPriceUsd:10,entryFeesUsd:2};
   assert.equal(assessExit(p,{mint,quantity:10,observedAt:now,netProceedsUsd:153},now).status,'TARGET_REACHED');
@@ -202,6 +225,10 @@ test('token activity parser retains only verified buy/sell facts',()=>{
   const withActor = parseTokenActivities({channel:'token_activity_info_all',data:[{n:'sol',a:mint,e:'sell',ad:'11111111111111111111111111111111'}]},now)[0];
   assert.match(withActor?.actorHash ?? '', /^[a-f0-9]{16}$/);
   assert.equal(withActor?.actorAddress, '11111111111111111111111111111111');
+  const withTraderAndAuxiliary = parseTokenActivities({channel:'token_activity_info_all',data:[{
+    n:'sol',a:mint,e:'buy',m:'11111111111111111111111111111111',ad:'So11111111111111111111111111111111111111112',
+  }]},now)[0];
+  assert.equal(withTraderAndAuxiliary?.actorAddress, '11111111111111111111111111111111');
 });
 test('blind protection blocks young tokens when holder API hits 429 or is unverified', () => {
   // Young token with 429 status is strictly blocked

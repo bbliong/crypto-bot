@@ -14,7 +14,7 @@ const args = command === 'typecheck' ? ['node_modules/typescript/bin/tsc', '--no
   : ['--import', 'tsx', ...(command === 'test' ? ['--test', ...readdirSync('tests').filter(f=>f.endsWith('.test.ts') && !f.startsWith('extension-')).map(f=>'tests/'+f)]
     : command === 'dashboard:data' ? ['scripts/dashboard-data.mjs']
     : command === 'momentum:replay' ? ['scripts/replay-momentum.ts']
-    : [command === 'monitor' ? 'src/tab-monitor.ts' : command === 'replay' ? 'src/replay.ts' : command === 'research' ? 'src/research-collector.ts' : command === 'trade-ui' ? 'src/gmgn-trade-ui.ts' : 'src/main.ts', ...(command === 'probe' ? ['--probe'] : [])])];
+    : [command === 'monitor' ? 'src/tab-monitor.ts' : command === 'replay' ? 'src/replay.ts' : command === 'research' ? 'src/research-collector.ts' : command === 'pump-research' ? 'src/pump-band-research.ts' : command === 'trade-ui' ? 'src/gmgn-trade-ui.ts' : 'src/main.ts', ...(command === 'probe' ? ['--probe'] : [])])];
 const result = spawnSync(runtime, [...args, ...process.argv.slice(3)], { stdio: 'inherit', windowsHide: true });
 if (result.error) console.error(result.error.message);
 process.exit(result.status ?? 1);
