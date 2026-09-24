@@ -13,6 +13,7 @@ import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
 import { paperOrderEvent, paperSignal } from '../src/paper-signal.js';
+import { ResearchHolderStore } from '../src/research-holder-store.js';
 import { assessPumpBandDump, isInPumpBand, latestPricedTradeInFrame, pumpMilestones } from '../src/pump-band.js';
 import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3EntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
@@ -134,6 +135,18 @@ test('pump-band uses only the latest price in a received activity frame', () => 
   ]);
   assert.equal(latest?.priceUsd, 14);
   assert.equal(latest?.occurredAt, 3000);
+});
+test('research holder store records every response but stores balances only when changed', () => {
+  const store = new ResearchHolderStore(':memory:');
+  const holder = { mint, wallet: '3TRJRbek5NNtc2zVJZpwN6kM97B8NrHRcMqJdXZYGQ4m', observedAt: 1_000,
+    amountPercentage: 12.5, amount: 125_000, isDev: false, devEvidence: [], walletTagV2: 'TOP1', raw: { balance: 125_000 } };
+  assert.equal(store.record(mint, 1_000, 200, 'network_intercept', [holder]).changed, true);
+  assert.equal(store.record(mint, 2_000, 200, 'replayed_xhr', [{ ...holder, observedAt: 2_000 }]).changed, false);
+  assert.equal(store.record(mint, 3_000, 200, 'network_intercept', [{ ...holder, observedAt: 3_000, amount: 100_000, raw: { balance: 100_000 } }]).changed, true);
+  assert.equal(store.recordSocket(mint, 1_000, [{ wallet: holder.wallet, raw: { b: 125_000 } }]).changed, true);
+  assert.equal(store.recordSocket(mint, 2_000, [{ wallet: holder.wallet, raw: { b: 125_000 } }]).changed, false);
+  assert.deepEqual(store.counts(), { observations: 3, snapshots: 2, balances: 2 });
+  store.close();
 });
 test('paper signal separates market, receipt, decision, and record clocks without implying a fill', () => {
   const signal = paperSignal({ side: 'BUY', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,

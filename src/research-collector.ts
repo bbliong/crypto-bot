@@ -16,6 +16,7 @@ import type { Candidate, Config } from './model.js';
 import { MOMENTUM_RULES, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
+import { ResearchHolderStore, type ResearchTrackedHolder } from './research-holder-store.js';
 
 const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '0' }, detailSeconds: { type: 'string', default: '600' },
@@ -86,13 +87,14 @@ type Primitive = string | number | boolean | null;
 type Trade = { mint: string; wallet: string | null; side: 'buy' | 'sell'; occurredAt: number; observedAt: number; priceUsd: number | null; amount: number | null; amountUsd?: number | null; signature: string | null; raw: Record<string, Primitive> };
 type Holder = { mint: string; wallet: string; observedAt: number; raw: Record<string, string | number | boolean | null> };
 type DeveloperHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; raw: Record<string, Primitive> };
-type TrackedHolder = { mint: string; wallet: string; observedAt: number; amountPercentage: number | null; amount: number | null; isDev: boolean; devEvidence: string[]; walletTagV2?: string; raw: Record<string, Primitive> };
+type TrackedHolder = ResearchTrackedHolder;
 type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
 const holderApiStatus = new Map<string, HolderApiStatus>();
 type SimulatedEvent = { type: 'SIMULATED_BUY' | 'SIMULATED_SELL' | 'SIMULATION_HOLD'; pnlUsd?: number; reason?: string };
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const output = values.output || join('research', runId);
 mkdirSync(output, { recursive: true });
+const holderStore = new ResearchHolderStore(join(output, 'research.sqlite'));
 let reportRefreshTimer: NodeJS.Timeout | undefined;
 let reportRefreshRunning = false;
 let reportRefreshQueued = false;
@@ -401,7 +403,8 @@ function parseAndStoreTrackedHolders(mint: string, body: unknown, observedAt: nu
     ownerSnapshots.set(mint, [...(ownerSnapshots.get(mint) ?? []).filter(h => observedAt - h.observedAt <= 60_000), ...snapshots]);
   }
   holderApiStatus.set(mint, { status, count: found.length, observedAt, source });
-  write('tracked-holders.jsonl', { mint, observedAt, status, count: found.length, source, holders: found });
+  const persisted = holderStore.record(mint, observedAt, status, source, found);
+  console.log(`[tracked-holders-sqlite] (${source}) ${mint} ${persisted.changed ? 'snapshot-changed' : 'snapshot-unchanged'}`);
   console.log(`[tracked-holders-loaded] (${source}) ${mint} loaded ${found.length} holders (Devs: ${found.filter(h => h.isDev).length}, status=${status})`);
   return found;
 }
@@ -431,7 +434,7 @@ function attachHolderNetworkInspector(page: Page) {
         }
       } else {
         holderApiStatus.set(tokenMint, { status, count: 0, observedAt, source: 'network_intercept' });
-        write('tracked-holders.jsonl', { mint: tokenMint, observedAt, status, count: 0, source: 'network_intercept', holders: [] });
+        holderStore.record(tokenMint, observedAt, status, 'network_intercept', []);
         console.log(`[network-holders-intercept] ${tokenMint} status=${status} from browser XHR`);
       }
     } catch {
@@ -695,7 +698,12 @@ function captureHolders(payload: unknown, now: number, mint: string | undefined)
       if (!history.length || history.at(-1)!.observedAt !== now) history.push(holder);
       byWallet.set(wallet, history); holderHistory.set(mint, byWallet);
     }
-    if (snapshot.length) { holders.set(mint, map); lastHolderWrite.set(mint, now); write('holder-snapshots.jsonl', { mint, observedAt: now, holders: snapshot }); writeComparison(mint, now); }
+    if (snapshot.length) {
+      holders.set(mint, map);
+      lastHolderWrite.set(mint, now);
+      holderStore.recordSocket(mint, now, snapshot.map(({ wallet, raw }) => ({ wallet, raw })));
+      writeComparison(mint, now);
+    }
   }
 }
 function passesInitialScreen(candidate: Candidate, now: number) {
@@ -1576,6 +1584,7 @@ async function main() {
       paperRecordedAt: 'local time the paper signal was written',
       actualOrderAt: null, actualFillAt: null,
     } } : {}),
+    storage: { holderSnapshots: 'research.sqlite (holder_api_observations + changed holder_snapshots + holder_balances)', legacyTrackedHoldersJsonl: false },
     note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
   if (pumpBand) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: 'pump-band', startedAt: new Date().toISOString(),
     purpose: 'Playwright paper buy/sell test of the pump-band rules. No real GMGN trade controls are used.', workers, detailSeconds,
@@ -1601,11 +1610,12 @@ async function main() {
   if (timer) clearTimeout(timer);
   const simulated = simulatedEvents;
   const sells = simulated.filter(row => row.type === 'SIMULATED_SELL'), pnl = sells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0);
-  writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), positionsOpened: simulated.filter(row => row.type === 'SIMULATED_BUY').length, positionsClosed: sells.length, openAtEnd: simulated.filter(row => row.type === 'SIMULATED_BUY').length - sells.length, totalStakeUsd: simulated.filter(row => row.type === 'SIMULATED_BUY').length * simulationStakeUsd, totalPnlUsd: pnl, profitable: sells.filter(row => (row.pnlUsd ?? 0) > 0).length, losing: sells.filter(row => (row.pnlUsd ?? 0) < 0).length, breakEven: sells.filter(row => row.pnlUsd === 0).length, exitsByReason: Object.fromEntries(sells.reduce((map, row) => map.set(row.reason ?? 'UNKNOWN', (map.get(row.reason ?? 'UNKNOWN') ?? 0) + 1), new Map<string, number>())), assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));
+  writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), positionsOpened: simulated.filter(row => row.type === 'SIMULATED_BUY').length, positionsClosed: sells.length, openAtEnd: simulated.filter(row => row.type === 'SIMULATED_BUY').length - sells.length, totalStakeUsd: simulated.filter(row => row.type === 'SIMULATED_BUY').length * simulationStakeUsd, totalPnlUsd: pnl, profitable: sells.filter(row => (row.pnlUsd ?? 0) > 0).length, losing: sells.filter(row => (row.pnlUsd ?? 0) < 0).length, breakEven: sells.filter(row => row.pnlUsd === 0).length, exitsByReason: Object.fromEntries(sells.reduce((map, row) => map.set(row.reason ?? 'UNKNOWN', (map.get(row.reason ?? 'UNKNOWN') ?? 0) + 1), new Map<string, number>())), holderStorage: { api: holderStore.counts(), socket: holderStore.socketCounts() }, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));
   if (reportRefreshTimer) clearTimeout(reportRefreshTimer);
   await refreshLatestReport();
   write('events.jsonl', { type: 'RUN_COMPLETE', observedAt: Date.now(), sockets, received, screened: inspected.size, rejected: rejected.size, rejectionCounts: Object.fromEntries(rejectionCounts), youngRejected: youngRejected.size, youngRejectionCounts: Object.fromEntries(youngRejectionCounts), simulation: { positionsClosed: sells.length, totalPnlUsd: pnl } });
   console.log('[research-complete]', 'sockets=' + sockets, 'frames=' + received, 'screened=' + inspected.size, 'rejected=' + rejected.size, 'youngRejected=' + youngRejected.size);
   await context.close();
+  holderStore.close();
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().catch(error => { holderStore.close(); console.error(error); process.exitCode = 1; });
