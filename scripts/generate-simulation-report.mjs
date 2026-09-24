@@ -238,50 +238,38 @@ function renderModalContent(mint,d){
     '<h3>\ud83c\udfc6 Distribusi top-10 holder (snapshot terakhir)</h3>'+buildTop10(d.monitoringTimeline)+
     '<p class="muted" style="margin-top:16px">Preview lokal dari data socket yang tersimpan. Gunakan tombol \u201cBuka GMGN penuh\u201d untuk detail live.</p>';
 }
-document.querySelectorAll('.token').forEach(button=>button.addEventListener('click',()=>{
+document.querySelectorAll('.token').forEach(button=>button.addEventListener('click',async()=>{
   const mint=button.dataset.mint,url='https://gmgn.ai/sol/token/'+encodeURIComponent(mint);
-  titleEl.textContent=(button.dataset.symbol||'Token')+' \u2014 data socket';
+  titleEl.textContent=(button.dataset.symbol||'Token')+' — data socket';
   openLink.href=url;
-  const d=window.__preview[mint]||{};
-  renderModalContent(mint,d);
+  preview.innerHTML='<p class="muted">Memuat detail…</p>';
   _activeMint=mint;
   modal.classList.add('open');
+  try{
+    const res=await fetch(previewBase+encodeURIComponent(mint)+'.json',{cache:'no-store'});
+    const d=res.ok?await res.json():{};
+    window.__preview[mint]=d;
+    if(_activeMint===mint) renderModalContent(mint,d);
+  }catch(e){preview.innerHTML='<p class="muted">Detail belum dapat dimuat. Coba tutup lalu buka lagi.</p>';console.warn('[preview-load-error]',e);}
 }));
 document.querySelector('#closeModal').addEventListener('click',()=>{_activeMint=null;closeModal()});
 modal.addEventListener('click',event=>{if(event.target===modal){_activeMint=null;closeModal()}});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){_activeMint=null;closeModal()}});
-// Auto-refresh: fetch data terbaru tanpa reload halaman sehingga modal tetap terbuka
+// Refresh hanya detail yang sedang dibuka, bukan seluruh report atau preview.
 function startRefreshCycle(){
   const fill=document.getElementById('refresh-fill');
   function resetBar(){if(fill){fill.style.transition='none';fill.style.width='0';requestAnimationFrame(()=>requestAnimationFrame(()=>{fill.style.transition='width 10s linear';fill.style.width='100%';}));}}
-  function kick(){
+  async function kick(){
     resetBar();
-    setTimeout(async()=>{
+    if(_activeMint&&modal.classList.contains('open')){
       try{
-        const res=await fetch(location.href,{cache:'no-store'});
-        const text=await res.text();
-        const marker='<script>window.'+'__preview=';
-        const idx=text.lastIndexOf(marker);
-        if(idx>-1){
-          const jsonStart=idx+marker.length;
-          const endMarker=';<'+'/script>';
-          const endIdx=text.indexOf(endMarker,jsonStart);
-          const raw=endIdx>-1?text.slice(jsonStart,endIdx):text.slice(jsonStart,text.lastIndexOf(';'));
-          const fresh=JSON.parse(raw);
-          // Update data in-place tanpa rebuild DOM utama
-          for(const k of Object.keys(fresh)) window.__preview[k]=fresh[k];
-          for(const k of Object.keys(window.__preview)) if(!(k in fresh)) delete window.__preview[k];
-          // Jika modal terbuka, perbarui isi modal dengan data terbaru
-          if(_activeMint&&modal.classList.contains('open')){
-            const d=window.__preview[_activeMint]||{};
-            renderModalContent(_activeMint,d);
-          }
-        }
+        const res=await fetch(previewBase+encodeURIComponent(_activeMint)+'.json',{cache:'no-store'});
+        if(res.ok){const fresh=await res.json();window.__preview[_activeMint]=fresh;renderModalContent(_activeMint,fresh);}
       }catch(e){console.warn('[refresh-error]',e);}
-      kick();
-    },10000);
+    }
+    setTimeout(kick,10000);
   }
-  kick();
+  setTimeout(kick,10000);
 }
 startRefreshCycle();
 </script></html>`;
@@ -338,7 +326,8 @@ for (const row of detailStartedByMint.values()) {
     monitoringTimeline: timeline,
   };
 }
-html = html.replace('</html>', `<script>window.__preview=${JSON.stringify(preview).replace(/</g, '\\u003c')};</script></html>`);
+const previewBase='/research-preview/'+encodeURIComponent(basename(folder))+'/';
+html = html.replace('<script>', `<script>window.__preview={};const previewBase='${previewBase}';`);
 if (strategy?.strategy === 'momentum-v2') {
   html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Rumus momentum v2</h2><div class="rule">Entry: return harga 5 detik +0.25% hingga +20%, regresi log-harga positif, buy share ≥60%, minimal 3 pembeli, pembeli terbesar ≤50%. Token muda memerlukan dua interval pertumbuhan holder ≥10% dan ≥5 holder.</div><div class="rule">Exit diperiksa pada trade socket baru: stop −20% dengan konfirmasi trade berbeda, penjualan holder signifikan, profit lock dan trailing 4–8%. Target +40% dapat ditahan bila momentum serta holder kuat, dengan batas +50%. Harga loncat tetap dicatat sesuai tick yang tersedia.</div><p><a href="/momentum-replay.html">Lihat perbandingan replay dan keterbatasannya</a></p></main>`);
   html = html.replace('Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar', 'Token dibeli secara simulasi setelah screening, candle, holder, dan momentum v2 lolos; nominal');
@@ -347,6 +336,9 @@ if (strategy?.strategy === 'flow-3') {
   html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Aturan flow-3</h2><div class="rule">Screening tetap memakai umur 0–900 detik, holder minimal 20, likuiditas $6.000–$15.000, dan Top-10 maksimal 30%. Entry memerlukan harga detail yang stabil serta minimal 5 trade dalam 20 detik dengan USD buy ≥ USD sell. Riwayat dua candle diperbolehkan, selama candle berjalan tidak turun.</div><div class="rule">Exit flow-3: target +40%, stop −20%, trailing 10% setelah puncak minimal +20%, atau sell pressure dua window. Tidak memakai gate holder-distribution, blind-protection, target dinamis, maupun exit developer/whale dari strategi yang lebih baru.</div></main>`);
   html = html.replace('Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar', 'Token dibeli simulasi setelah gate flow-3 lolos; nominal');
 }
+mkdirSync(join(folder, 'simulation-preview'), { recursive: true });
+for (const [mint, data] of Object.entries(preview)) writeFileSync(join(folder, 'simulation-preview', mint), JSON.stringify(data));
+writeFileSync(join(folder, 'simulation-preview.json'), JSON.stringify(preview));
 writeFileSync(join(folder, 'simulation-report.html'), html);
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/paper-simulation-report.html', html);

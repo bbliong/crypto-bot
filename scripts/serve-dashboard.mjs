@@ -43,6 +43,18 @@ const bindPort = Number(process.env.DASHBOARD_PORT ?? 4173);
 if (!Number.isInteger(bindPort) || bindPort < 1 || bindPort > 65535) throw new Error('DASHBOARD_PORT must be an integer from 1 to 65535');
 createServer(async (req, res) => {
   const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+  if (path.startsWith('/research-preview/')) {
+    const parts = path.slice('/research-preview/'.length).split('/');
+    if (parts.length === 1 && /^[A-Za-z0-9._-]+\.json$/.test(parts[0])) {
+      try { const data = await readFile(join(researchRoot, parts[0].slice(0, -5), 'simulation-preview.json')); res.writeHead(200, { 'content-type':'application/json; charset=utf-8', 'cache-control':'no-store' }).end(data); }
+      catch { res.writeHead(404).end('Research preview unavailable'); }
+      return;
+    }
+    if (parts.length !== 2 || !/^[A-Za-z0-9._-]+$/.test(parts[0]) || !/^[1-9A-HJ-NP-Za-km-z]+\.json$/.test(parts[1])) { res.writeHead(403).end(); return; }
+    try { const data = await readFile(join(researchRoot, parts[0], 'simulation-preview', parts[1].slice(0, -5))); res.writeHead(200, { 'content-type':'application/json; charset=utf-8', 'cache-control':'no-store' }).end(data); }
+    catch { res.writeHead(404).end('Research preview unavailable'); }
+    return;
+  }
   if (path === '/research-preview-data.json') {
     try { res.writeHead(200, { 'content-type':'application/json; charset=utf-8', 'cache-control':'no-store' }).end(JSON.stringify(await researchPreview())); }
     catch { res.writeHead(500).end('Research preview unavailable'); }
