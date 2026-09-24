@@ -1,5 +1,7 @@
 # GMGN — automasi Playwright
 
+Panduan menjalankan collector paper `momentum-v2` dan laporan port 4173 di VPS: [docs/deploy-vps.md](docs/deploy-vps.md).
+
 Monitor ini menjalankan Chrome headful melalui Playwright dan mendengarkan WebSocket GMGN sebelum navigasi feed. Tidak memakai ekstensi ataupun headless. Pada Phase 1, keputusan hanya memakai field WebSocket GMGN yang sudah dipetakan dan terverifikasi: umur token, holder, likuiditas, buy, sell, dan konsentrasi Top-10. Mode manual membuka Fomo pada tab Playwright yang sama setelah `ENTRY_READY`; tidak ada buy, sell, signing, atau transaksi otomatis.
 
 ## Jalankan
