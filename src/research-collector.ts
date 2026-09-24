@@ -14,6 +14,7 @@ import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
 import { MOMENTUM_RULES, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 
 const { values } = parseArgs({ options: {
@@ -141,6 +142,25 @@ const developerHolders = new Map<string, Map<string, DeveloperHolder>>();
 const holderHistory = new Map<string, Map<string, Holder[]>>();
 const totalHolderSamples = new Map<string, HolderSample[]>();
 const momentumTape = new Map<string, TapeTrade[]>();
+const pendingPaperOrders = new Set<Promise<void>>();
+function schedulePaperOrder(signal: PaperSignal): void {
+  const task = (async () => {
+    await delay(Math.max(0, signal.plannedOrderAt - Date.now()));
+    const simulatedOrderAt = Date.now();
+    const latestPrice = (momentumTape.get(signal.mint) ?? [])
+      .filter(tick => tick.priceUsd !== null && tick.priceUsd > 0 && tick.observedAt <= simulatedOrderAt)
+      .sort((a, b) => b.observedAt - a.observedAt)[0];
+    write('paper-orders.jsonl', paperOrderEvent(signal, simulatedOrderAt,
+      latestPrice?.priceUsd === null || latestPrice === undefined ? null
+        : { observedAt: latestPrice.observedAt, priceUsd: latestPrice.priceUsd }));
+    scheduleReportRefresh();
+  })();
+  pendingPaperOrders.add(task);
+  void task.then(() => pendingPaperOrders.delete(task), error => {
+    pendingPaperOrders.delete(task);
+    console.error('[paper-order-error]', signal.signalId, error);
+  });
+}
 const paperRiskListeners = new Map<string, (tick: TapeTrade) => void>();
 const ownerSnapshots = new Map<string, OwnerSample[]>();
 function ownerEvidence(mint: string): OwnerSample[] {
@@ -596,11 +616,12 @@ function developerMonitoring(mint: string) {
     firstDeveloperSellAt: sells.length ? Math.min(...sells.map(trade => trade.occurredAt)) : null,
     note: 'Developer activity is matched only when the GMGN activity wallet equals a wallet returned by the DEV-tag holder endpoint.' };
 }
-function writeSimulationExit(position: SimulationPosition, mint: string, now: number, exitPriceUsd: number, reason: SimulationExitReason, metadata: unknown, decision: Record<string, unknown> | null) {
+function writeSimulationExit(position: SimulationPosition, mint: string, now: number, exitPriceUsd: number, reason: SimulationExitReason, metadata: unknown, decision: Record<string, unknown> | null, timing?: PaperSignal) {
   const result = closeSimulation(position, exitPriceUsd);
   writeSimulation({ type: 'SIMULATED_SELL', mint, observedAt: now, reason, entry: { openedAt: position.openedAt, priceUsd: position.entryPriceUsd, stakeUsd: position.stakeUsd, quantity: position.quantity },
     exit: { priceUsd: exitPriceUsd, grossProceedsUsd: result.grossProceedsUsd }, pnlUsd: result.pnlUsd, pnlPercent: result.pnlPercent,
-    decision, assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper valuation at the observed signal price; this is not a confirmed swap fill.' }, metadata });
+    decision, ...(timing ? { timing, positionId: timing.positionId } : {}),
+    assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper valuation at the observed signal price; this is not a confirmed swap fill.' }, metadata });
   if (maxPaperBuys !== null) {
     const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
     if (totalSells >= maxPaperBuys) {
@@ -1185,10 +1206,21 @@ async function worker(index: number, deadline: number) {
             const effectiveStakeUsd = simulationStakeSol !== null
               ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
               : simulationStakeUsd;
-            simulation = openSimulation(mint, now, price, effectiveStakeUsd);
+            const entryDecisionAt = momentumV2 ? Date.now() : now;
+            simulation = openSimulation(mint, entryDecisionAt, price, effectiveStakeUsd);
+            const entrySignal = momentumV2 ? paperSignal({
+              side: 'BUY', runId, mint, positionId: `${mint}:${simulation.openedAt}`, worker: index,
+              reason: 'MOMENTUM_V2_ENTRY_PASSED', marketTradeAt: lastMomentumTick?.occurredAt ?? null,
+              priceReceivedAt: lastMomentumTick?.observedAt ?? priceObservedAt,
+              decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
+            }) : null;
+            if (entrySignal) {
+              write('trade-signals.jsonl', entrySignal);
+              schedulePaperOrder(entrySignal);
+            }
             if (momentumV2) {
               const paperPosition = simulation;
-              const riskState = createMomentumPosition(now, price, lastMomentumTick?.occurredAt ?? now);
+              const riskState = createMomentumPosition(entryDecisionAt, price, lastMomentumTick?.occurredAt ?? entryDecisionAt);
               paperRiskListeners.set(mint, tick => {
                 const decision = assessMomentumExit(riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
                 if (!decision) return;
@@ -1199,7 +1231,16 @@ async function worker(index: number, deadline: number) {
                 if (decision.reason) {
                   simulationExit = decision.reason;
                   pendingMomentumExit = decision;
-                  writeSimulationExit(paperPosition, mint, decision.observedAt, decision.priceUsd, decision.reason, candidate?.metadata ?? null, decision);
+                  const exitDecisionAt = Date.now();
+                  const exitSignal = paperSignal({
+                    side: 'SELL', runId, mint, positionId: `${mint}:${paperPosition.openedAt}`, worker: index,
+                    reason: decision.reason, marketTradeAt: tick.occurredAt,
+                    priceReceivedAt: tick.observedAt, decisionAt: exitDecisionAt,
+                    paperRecordedAt: Date.now(), priceUsd: decision.priceUsd,
+                  });
+                  write('trade-signals.jsonl', exitSignal);
+                  schedulePaperOrder(exitSignal);
+                  writeSimulationExit(paperPosition, mint, exitDecisionAt, decision.priceUsd, decision.reason, candidate?.metadata ?? null, decision, exitSignal);
                 }
               });
             }
@@ -1214,7 +1255,9 @@ async function worker(index: number, deadline: number) {
             // This lets the current candle confirm a later socket stop without
             // assuming a fixed token supply.
             if (!entryCandleClose || entryCandleClose <= 0) entryCandleClose = null;
-            writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: now, entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
+            writeSimulation({ type: 'SIMULATED_BUY', mint, worker: index, observedAt: entryDecisionAt,
+              ...(entrySignal ? { timing: entrySignal, positionId: entrySignal.positionId } : {}),
+              entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
               entryGate: { momentum: momentumEntry, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
             if (values.prepareTradeUi && !momentumV2 && !flow3) {
               await prepareBuyPanel(page, mint, index, now).catch(error => {
@@ -1520,6 +1563,18 @@ async function main() {
     rules: pumpBand ? { ...PUMP_BAND_RULES, observationSeconds: detailSeconds, simulationStakeUsdc: simulationStakeUsd, maximumExitPriceAgeMs: 5_000,
       entry: 'first fresh token_activity pu after detail opened', exit: '20% fall from observed price peak or observation window end' }
       : momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null,
+    ...(momentumV2 ? { timing: {
+      signalFile: 'trade-signals.jsonl',
+      paperOrderFile: 'paper-orders.jsonl',
+      plannedOrderAt: 'local target time 900 ms after decision',
+      orderDeadlineAt: 'local deadline 1000 ms after decision',
+      simulatedOrderAt: 'local time the delayed paper event was recorded; no GMGN request',
+      marketTradeAt: 'GMGN transaction timestamp, usually second precision',
+      priceReceivedAt: 'local WebSocket receipt time in milliseconds',
+      decisionAt: 'local time when all gates or exit rules passed',
+      paperRecordedAt: 'local time the paper signal was written',
+      actualOrderAt: null, actualFillAt: null,
+    } } : {}),
     note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
   if (pumpBand) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: 'pump-band', startedAt: new Date().toISOString(),
     purpose: 'Playwright paper buy/sell test of the pump-band rules. No real GMGN trade controls are used.', workers, detailSeconds,
@@ -1537,6 +1592,7 @@ async function main() {
   await feed.goto(config.feedUrl, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
   const deadline = Date.now() + runSeconds * 1000, timer = setTimeout(() => stopping.abort(), runSeconds * 1000);
   await Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline)));
+  await Promise.allSettled([...pendingPaperOrders]);
   clearTimeout(timer); const simulated = simulatedEvents;
   const sells = simulated.filter(row => row.type === 'SIMULATED_SELL'), pnl = sells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0);
   writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), positionsOpened: simulated.filter(row => row.type === 'SIMULATED_BUY').length, positionsClosed: sells.length, openAtEnd: simulated.filter(row => row.type === 'SIMULATED_BUY').length - sells.length, totalStakeUsd: simulated.filter(row => row.type === 'SIMULATED_BUY').length * simulationStakeUsd, totalPnlUsd: pnl, profitable: sells.filter(row => (row.pnlUsd ?? 0) > 0).length, losing: sells.filter(row => (row.pnlUsd ?? 0) < 0).length, breakEven: sells.filter(row => row.pnlUsd === 0).length, exitsByReason: Object.fromEntries(sells.reduce((map, row) => map.set(row.reason ?? 'UNKNOWN', (map.get(row.reason ?? 'UNKNOWN') ?? 0) + 1), new Map<string, number>())), assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));

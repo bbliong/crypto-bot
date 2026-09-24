@@ -12,6 +12,7 @@ import { TabManager } from '../src/tab-manager.js';
 import { assessExit } from '../src/positions.js';
 import { attachCapture } from '../src/capture.js';
 import { parseTokenActivities } from '../src/activity.js';
+import { paperOrderEvent, paperSignal } from '../src/paper-signal.js';
 import { assessPumpBandDump, isInPumpBand, latestPricedTradeInFrame, pumpMilestones } from '../src/pump-band.js';
 import { assessBlindProtection, assessCandleHistory, assessEarlyCandleRising, assessEntryStability, assessFlow3EntryStability, assessFlow3Simulation, assessHolderDistribution, assessObservationDump, assessSimulation, assessSingleCandleHolderOverride, openSimulation, type SimulationExitReason } from '../src/research-simulation.js';
 import type { Candidate, Field, Mapping } from '../src/model.js';
@@ -133,6 +134,36 @@ test('pump-band uses only the latest price in a received activity frame', () => 
   ]);
   assert.equal(latest?.priceUsd, 14);
   assert.equal(latest?.occurredAt, 3000);
+});
+test('paper signal separates market, receipt, decision, and record clocks without implying a fill', () => {
+  const signal = paperSignal({ side: 'BUY', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,
+    reason: 'MOMENTUM_V2_ENTRY_PASSED', marketTradeAt: 1_000, priceReceivedAt: 1_200,
+    decisionAt: 1_275, paperRecordedAt: 1_280, priceUsd: 0.000004 });
+  assert.equal(signal.priceAgeMsAtDecision, 75);
+  assert.equal(signal.signalId, `test-run:${mint}:1200:BUY`);
+  assert.equal(signal.sourceLagMs, 200);
+  assert.equal(signal.recordingLagMs, 5);
+  assert.equal(signal.plannedOrderAt, 2_175);
+  assert.equal(signal.orderDeadlineAt, 2_275);
+  assert.equal(signal.execution, 'PAPER_ONLY_NO_ORDER');
+  assert.equal(signal.actualFillAt, null);
+  assert.throws(() => paperSignal({ ...signal, priceReceivedAt: 1_300 }), /chronological/);
+});
+test('paper order records its actual timer time and misses the one-second deadline if late', () => {
+  const signal = paperSignal({ side: 'SELL', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,
+    reason: 'V2_TARGET_40', marketTradeAt: 1_000, priceReceivedAt: 1_200,
+    decisionAt: 1_275, paperRecordedAt: 1_280, priceUsd: 0.000004 });
+  const timely = paperOrderEvent(signal, 2_225, { observedAt: 2_000, priceUsd: 0.000005 });
+  assert.equal(timely.type, 'PAPER_ORDER_SIMULATED');
+  assert.equal(timely.delayMs, 950);
+  assert.equal(timely.observedPriceProxyUsd, 0.000005);
+  assert.equal(timely.actualOrderAt, null);
+  assert.equal(timely.actualFillAt, null);
+  const late = paperOrderEvent(signal, 2_276, { observedAt: 1_100, priceUsd: 0.000005 });
+  assert.equal(late.type, 'PAPER_ORDER_DEADLINE_MISSED');
+  assert.equal(late.withinOneSecond, false);
+  assert.equal(late.observedPriceProxyUsd, null);
+  assert.throws(() => paperOrderEvent(signal, 1_274), /precede/);
 });
 test('exit target uses real fill and total executable net proceeds',()=>{
   const p={mint,kind:'manual' as const,filledAt:now-1000,quantity:10,fillPriceUsd:10,entryFeesUsd:2};

@@ -7,6 +7,7 @@ const folder = resolve(run);
 const readJson = file => existsSync(join(folder, file)) ? JSON.parse(readFileSync(join(folder, file), 'utf8')) : null;
 const readLines = file => existsSync(join(folder, file)) ? readFileSync(join(folder, file), 'utf8').split(/\r?\n/).filter(Boolean).map(JSON.parse) : [];
 const rows = readLines('simulated-trades.jsonl');
+const paperOrdersBySignal = new Map(readLines('paper-orders.jsonl').map(row => [row.signalId, row]));
 const screened = new Map(readLines('screened-tokens.jsonl').map(row => [row.mint, row]));
 const activityRows = readLines('trades.jsonl');
 const events = readLines('events.jsonl');
@@ -19,6 +20,7 @@ const buys = rows.filter(row => row.type === 'SIMULATED_BUY');
 const sells = rows.filter(row => row.type === 'SIMULATED_SELL');
 const holds = rows.filter(row => row.type === 'SIMULATION_HOLD');
 const sellsByMint = new Map(sells.map(row => [row.mint, row]));
+const sellsByPosition = new Map(sells.filter(row => row.positionId).map(row => [row.positionId, row]));
 const blockedByMint = new Map();
 for (const row of events) if (row.type === 'SIMULATION_BUY_BLOCKED') blockedByMint.set(row.mint, row);
 const dumpAbortedByMint = new Map();
@@ -42,6 +44,20 @@ const usd = v => Number.isFinite(v) ? '$' + f(v, Math.abs(Number(v)) < 0.01 ? 10
 const pct = v => Number.isFinite(v) ? (v > 0 ? '+' : '') + f(v, 2) + '%' : '—';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const time = value => value ? new Date(value).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '—';
+const timeExact = value => value ? new Intl.DateTimeFormat('id-ID', {
+  timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: 'numeric',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false,
+}).format(new Date(value)) : '—';
+const signalTiming = row => {
+  if (!row?.timing) return '<small>Waktu sinyal terpisah belum dicatat pada run ini.</small>';
+  const signal = row.timing, order = paperOrdersBySignal.get(signal.signalId);
+  const orderText = signal.plannedOrderAt
+    ? `<br>Target order simulasi ${timeExact(signal.plannedOrderAt)} WIB · batas ${timeExact(signal.orderDeadlineAt)} WIB${order
+      ? `<br><b class="${order.withinOneSecond ? 'up' : 'down'}">Order simulasi ${timeExact(order.simulatedOrderAt)} WIB · ${f(order.delayMs, 0)} ms ${order.withinOneSecond ? '(≤1 dtk)' : '(melewati 1 dtk)'}</b>${order.observedPriceProxyUsd !== null ? `<br>Harga tick teramati saat order ${usd(order.observedPriceProxyUsd)} (${timeExact(order.observedPriceProxyAt)} WIB; bukan fill` : ''}`
+      : '<br>Menunggu waktu order simulasi'}`
+    : '';
+  return `<small>Sinyal ${timeExact(signal.decisionAt)} WIB<br>Trade pasar ${timeExact(signal.marketTradeAt)} WIB<br>WebSocket diterima ${timeExact(signal.priceReceivedAt)} WIB · usia harga ${f(signal.priceAgeMsAtDecision, 0)} ms<br>Paper dicatat ${timeExact(signal.paperRecordedAt)} WIB${orderText}</small>`;
+};
 const fieldValue = (row, name) => row?.fields?.[name]?.value;
 const buyReason = row => {
   if (strategy?.strategy === 'pump-band') {
@@ -92,10 +108,11 @@ const sellReason = row => ({
   PUMP_OBSERVATION_END: 'Pump-band: observasi 20 detik selesai; harga transaksi terakhir masih cukup segar untuk simulasi jual.',
 }[row?.reason] ?? `Alasan exit belum terpetakan (${row?.reason ?? 'UNKNOWN'}).`);
 const tradeTable = buys.slice().reverse().map(buy => {
-  const sell = sellsByMint.get(buy.mint), symbol = buy.metadata?.symbol || sell?.metadata?.symbol || 'Token';
+  const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
+  const symbol = buy.metadata?.symbol || sell?.metadata?.symbol || 'Token';
   const unpriced = unpricedByMint.get(buy.mint);
   const resultClass = sell ? (sell.pnlUsd > 0 ? 'up' : sell.pnlUsd < 0 ? 'down' : '') : '';
-  return `<tr><td><button class="token" data-mint="${esc(buy.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(buy.mint)}</span><small>Preview detail GMGN</small></button></td><td>${time(buy.observedAt)}<br>${usd(buy.stakeUsd)} @ ${usd(buy.entryPriceUsd)}</td><td>${esc(buyReason(buy))}</td><td>${sell ? `${time(sell.observedAt)}<br>${usd(sell.exit?.priceUsd)}` : unpriced ? `<span class="watch">Sesi selesai ${time(unpriced.observedAt)}</span>` : '<span class="watch">Masih dipantau</span>'}</td><td>${sell ? esc(sellReason(sell)) : unpriced ? 'Harga transaksi terakhir sudah lebih dari 5 detik; hasil jual tidak dihitung.' : 'Belum ada sinyal sell.'}</td><td class="${resultClass}">${sell ? `<b>${usd(sell.pnlUsd)}</b><br>${pct(sell.pnlPercent)}` : '—'}</td></tr>`;
+  return `<tr><td><button class="token" data-mint="${esc(buy.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(buy.mint)}</span><small>Preview detail GMGN</small></button></td><td>${timeExact(buy.observedAt)} WIB<br>${usd(buy.stakeUsd)} @ ${usd(buy.entryPriceUsd)}${strategy?.strategy === 'momentum-v2' ? signalTiming(buy) : ''}</td><td>${esc(buyReason(buy))}</td><td>${sell ? `${timeExact(sell.observedAt)} WIB<br>${usd(sell.exit?.priceUsd)}${strategy?.strategy === 'momentum-v2' ? signalTiming(sell) : ''}` : unpriced ? `<span class="watch">Sesi selesai ${time(unpriced.observedAt)}</span>` : '<span class="watch">Masih dipantau</span>'}</td><td>${sell ? esc(sellReason(sell)) : unpriced ? 'Harga transaksi terakhir sudah lebih dari 5 detik; hasil jual tidak dihitung.' : 'Belum ada sinyal sell.'}</td><td class="${resultClass}">${sell ? `<b>${usd(sell.pnlUsd)}</b><br>${pct(sell.pnlPercent)}` : '—'}</td></tr>`;
 }).join('');
 const blocked = [...blockedByMint.values()];
 for (const [mint, dumpRow] of dumpAbortedByMint) {
@@ -157,7 +174,7 @@ const totalPnl = sells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0);
 const open = buys.length - sells.length - unpricedByMint.size;
 const pumpBandNote = strategy?.strategy === 'pump-band'
   ? `Token fresh dalam market cap $3.000–$10.000 mendapat slot detail kosong. Buy simulasi $${f(manifest?.simulation?.stakeUsd ?? 0.25, 2)} dilakukan pada tick transaksi pu baru pertama. Sell simulasi terjadi saat harga turun 20% dari puncak, atau setelah 20 detik jika harga terakhir masih berumur paling lama 5 detik. Fee dan slippage belum dihitung. ${unpricedByMint.size} sesi selesai tanpa harga jual segar sehingga P/L-nya belum dinilai.`
-  : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.`;
+  : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.${strategy?.strategy === 'momentum-v2' ? ' Jam sinyal, trade pasar, WebSocket, dan order simulasi dicatat terpisah sampai milidetik. Target order simulasi 0,9 detik, batas 1 detik setelah sinyal. P/L tetap memakai tick pemicu; belum ada permintaan GMGN, fill, atau harga eksekusi nyata.' : ''}`;
 const pumpBandRulesHtml = strategy?.strategy === 'pump-band'
   ? '<h2>Arti sinyal sell</h2><div class="rule"><b>PUMP_DUMP_20</b>: harga transaksi pu turun sedikitnya 20% dari puncak yang tertangkap setelah buy.</div><div class="rule"><b>PUMP_OBSERVATION_END</b>: sesi 20 detik selesai dan harga transaksi terakhir masih segar. Harga yang lebih tua dari 5 detik tidak dipakai untuk menghitung hasil jual.</div>'
   : '<h2>Arti sinyal sell</h2><div class="rule"><b>Holder growth recovery</b> menahan posisi 10 detik saat harga −10% sampai sebelum −20%, holder total naik ≥10% dan ≥5, serta buy USD 5 detik ≥ sell USD. Stop −20% tetap berlaku.</div><div class="rule"><b>Target +40% dengan holder momentum</b> menunda sell hanya jika dua pembaruan holder signifikan datang berurutan dan harga masih naik ≥2% per 5 detik. Saat kenaikan melandai &lt;0,5% per 5 detik, exit memakai <code>TARGET_40_HOLDER_FLAT</code>.</div><div class="rule"><b>Sell pressure</b> memerlukan dua jendela socket 5-detik selesai berturut-turut: ≥10 trade, ≥3 penjual kandidat, sell USD share ≥70%, dan posisi sudah ≤−5%.</div><p class="muted">Sinyal hold holder tercatat: ' + holds.length + '. Aturan holder hanya aktif bila socket memberi angka total holder baru; daftar holder parsial tidak dipakai sebagai total.</p>';
