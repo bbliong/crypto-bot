@@ -11,7 +11,7 @@ if (major < 22 || (major === 22 && minor < 13)) {
 }
 const command = process.argv[2];
 const args = command === 'typecheck' ? ['node_modules/typescript/bin/tsc', '--noEmit']
-  : ['--import', 'tsx', ...(command === 'test' ? ['--test', ...readdirSync('tests').filter(f=>f.endsWith('.test.ts') && !f.startsWith('extension-')).map(f=>'tests/'+f)]
+  : ['--import', 'tsx', ...(command === 'test' ? ['--test', ...readdirSync('tests').filter(f=>(f.endsWith('.test.ts') || f.endsWith('.test.mjs')) && !f.startsWith('extension-')).map(f=>'tests/'+f)]
     : command === 'dashboard:data' ? ['scripts/dashboard-data.mjs']
     : command === 'momentum:replay' ? ['scripts/replay-momentum.ts']
     : [command === 'monitor' ? 'src/tab-monitor.ts' : command === 'replay' ? 'src/replay.ts' : command === 'research' ? 'src/research-collector.ts' : command === 'pump-research' ? 'src/pump-band-research.ts' : command === 'trade-ui' ? 'src/gmgn-trade-ui.ts' : 'src/main.ts', ...(command === 'probe' ? ['--probe'] : [])])];

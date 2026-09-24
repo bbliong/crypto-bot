@@ -38,6 +38,9 @@ async function runHistory() {
   }));
   return { generatedAt: Date.now(), runs: runs.filter(Boolean).sort((a, b) => b.changed - a.changed) };
 }
+const bindHost = process.env.DASHBOARD_HOST || '127.0.0.1';
+const bindPort = Number(process.env.DASHBOARD_PORT ?? 4173);
+if (!Number.isInteger(bindPort) || bindPort < 1 || bindPort > 65535) throw new Error('DASHBOARD_PORT must be an integer from 1 to 65535');
 createServer(async (req, res) => {
   const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
   if (path === '/research-preview-data.json') {
@@ -62,4 +65,4 @@ createServer(async (req, res) => {
   if (!target.startsWith(normalize(root))) { res.writeHead(403).end(); return; }
   try { const data = await readFile(target); res.writeHead(200, { 'content-type': types[extname(target)] ?? 'application/octet-stream', 'cache-control':'no-store' }).end(data); }
   catch { res.writeHead(404).end('Not found'); }
-}).listen(4173, '127.0.0.1', () => console.log('Dashboard: http://127.0.0.1:4173'));
+}).listen(bindPort, bindHost, () => console.log(`Dashboard: http://${bindHost}:${bindPort}`));
