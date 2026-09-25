@@ -1,6 +1,7 @@
 export type PaperSignal = {
   type: 'PAPER_TRADE_SIGNAL';
   side: 'BUY' | 'SELL';
+  paperLane: 'control' | 'r5-band';
   runId: string;
   mint: string;
   positionId: string;
@@ -30,6 +31,7 @@ export type PaperOrderEvent = {
   signalId: string;
   positionId: string;
   side: 'BUY' | 'SELL';
+  paperLane: 'control' | 'r5-band';
   mint: string;
   decisionAt: number;
   plannedOrderAt: number;
@@ -73,7 +75,7 @@ export function paperOrderEvent(signal: PaperSignal, simulatedOrderAt: number, p
     ? price : null;
   return {
     type: withinOneSecond ? 'PAPER_ORDER_SIMULATED' : 'PAPER_ORDER_DEADLINE_MISSED',
-    signalId: signal.signalId, positionId: signal.positionId, side: signal.side, mint: signal.mint,
+    signalId: signal.signalId, positionId: signal.positionId, side: signal.side, paperLane: signal.paperLane, mint: signal.mint,
     decisionAt: signal.decisionAt, plannedOrderAt: signal.plannedOrderAt,
     orderDeadlineAt: signal.orderDeadlineAt, simulatedOrderAt,
     delayMs: simulatedOrderAt - signal.decisionAt, withinOneSecond,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessMomentumEntry, assessMomentumExit, createMomentumPosition, holderGrowth, momentumMetrics, type TapeTrade } from '../src/momentum-strategy.js';
+import { assessMomentumEntry, assessMomentumExit, createMomentumPosition, holderGrowth, momentumMetrics, MOMENTUM_R5_BAND, type TapeTrade } from '../src/momentum-strategy.js';
 const tick = (at: number, price: number, extra: Partial<TapeTrade> = {}): TapeTrade => ({ id: String(at), observedAt: at, occurredAt: at, priceUsd: price, side: 'buy', wallet: `w${at % 3}`, usd: 20, tokens: 1, ...extra });
 const rising = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i));
 test('momentum measures five seconds, ignores future/out-of-order frames and one-tick history', () => {
@@ -21,6 +21,14 @@ test('entry rejects flat, single-wallet pumping and requires two distinct growin
   assert.equal(holderGrowth(hs, 17000).fresh, false);
   assert.ok(assessMomentumEntry(rising.map(t => ({ ...t, wallet: 'one' })), hs, 10000, false).reasons.includes('MOMENTUM_SINGLE_BUYER_DOMINANCE'));
   assert.ok(assessMomentumEntry(rising.map(t => ({ ...t, priceUsd: 100 })), hs, 10000, false).reasons.includes('MOMENTUM_NOT_RISING'));
+});
+test('R5-band lane keeps the base gates and waits for momentum from 5% through below 10%', () => {
+  const holders = [{ observedAt: 0, count: 100 }, { observedAt: 5000, count: 110 }, { observedAt: 10000, count: 121 }];
+  const slow = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i));
+  assert.ok(assessMomentumEntry(slow, holders, 10000, false).allowed);
+  assert.ok(assessMomentumEntry(slow, holders, 10000, false, MOMENTUM_R5_BAND).reasons.includes('MOMENTUM_R5_BELOW_BAND'));
+  const fast = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i * 3));
+  assert.ok(assessMomentumEntry(fast, holders, 10000, false, MOMENTUM_R5_BAND).reasons.includes('MOMENTUM_R5_ABOVE_BAND'));
 });
 test('hard stop needs distinct evidence; gap exits record actual price, never an invented -20% fill', () => {
   const p = createMomentumPosition(1000, 100), one = tick(2000, 79);

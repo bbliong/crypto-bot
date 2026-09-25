@@ -10,6 +10,10 @@ export const MOMENTUM_RULES = Object.freeze({
   minimumMajorSellUsd: 25, whaleSellUsd: 150, topHolderPercent: 1.5,
   holderEvidenceMaxAgeMs: 30_000, profitFloorPercent: 1,
 });
+export const MOMENTUM_R5_BAND = Object.freeze({
+  id: 'r5-band-5-to-10', minimumReturn5s: 5, maximumReturn5s: 10,
+});
+export type MomentumEntryBand = { id: string; minimumReturn5s: number; maximumReturn5s: number };
 export type TapeTrade = { id: string; observedAt: number; occurredAt: number; priceUsd: number | null;
   side: 'buy' | 'sell'; wallet: string | null; usd: number | null; tokens: number | null };
 export type HolderSample = { observedAt: number; count: number };
@@ -66,16 +70,18 @@ export function momentumMetrics(tape: TapeTrade[], now: number) {
     buyUsd, sellUsd, buyShare: buyUsd + sellUsd > 0 ? buyUsd / (buyUsd + sellUsd) : null,
     topBuyerShare: buyUsd > 0 ? Math.max(0, ...buyerVolumes.values()) / buyUsd : null };
 }
-export function assessMomentumEntry(tape: TapeTrade[], holders: HolderSample[], now: number, early: boolean) {
+export function assessMomentumEntry(tape: TapeTrade[], holders: HolderSample[], now: number, early: boolean, band?: MomentumEntryBand) {
   const m = momentumMetrics(tape, now), h = holderGrowth(holders, now), reasons: string[] = [];
   if (!m.ready) reasons.push('MOMENTUM_INSUFFICIENT_FRESH_HISTORY');
   if (m.return5s === null || m.return5s < MOMENTUM_RULES.minimumReturn5s || (m.slope5s ?? 0) <= 0) reasons.push('MOMENTUM_NOT_RISING');
   if ((m.return5s ?? 0) > MOMENTUM_RULES.maximumReturn5s) reasons.push('MOMENTUM_SPIKE_CHASING');
   if ((m.drawdown5s ?? Infinity) > MOMENTUM_RULES.maximumEntryDrawdown) reasons.push('MOMENTUM_PULLBACK');
+  if (band && (m.return5s === null || m.return5s < band.minimumReturn5s)) reasons.push('MOMENTUM_R5_BELOW_BAND');
+  if (band && m.return5s !== null && m.return5s >= band.maximumReturn5s) reasons.push('MOMENTUM_R5_ABOVE_BAND');
   if (m.trades < MOMENTUM_RULES.minimumTrades || m.buyers < MOMENTUM_RULES.minimumBuyers || (m.buyShare ?? 0) < MOMENTUM_RULES.minimumBuyShare) reasons.push('MOMENTUM_WEAK_BUY_FLOW');
   if (m.topBuyerShare === null || m.topBuyerShare > MOMENTUM_RULES.maximumBuyerShare) reasons.push('MOMENTUM_SINGLE_BUYER_DOMINANCE');
   if (early && !h.sustained) reasons.push('EARLY_HOLDERS_NEED_TWO_GROWING_SNAPSHOTS');
-  return { allowed: reasons.length === 0, reasons, metrics: m, holders: h, version: MOMENTUM_RULES.version };
+  return { allowed: reasons.length === 0, reasons, metrics: m, holders: h, version: MOMENTUM_RULES.version, band: band ?? null };
 }
 export type MomentumExitReason = 'V2_HARD_STOP' | 'V2_CONFIRMED_CRASH' | 'V2_MAJOR_HOLDER_SELL' | 'V2_PROFIT_LOCK' | 'V2_TARGET_40' | 'V2_TARGET_50' | 'V2_MOMENTUM_FADE' | 'V2_SELL_PRESSURE';
 export type MomentumPosition = { openedAt: number; entry: number; peak: number; lastId: string | null; entryEventAt: number; lastEventAt: number;

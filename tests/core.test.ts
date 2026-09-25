@@ -149,10 +149,11 @@ test('research holder store records every response but stores balances only when
   store.close();
 });
 test('paper signal separates market, receipt, decision, and record clocks without implying a fill', () => {
-  const signal = paperSignal({ side: 'BUY', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,
+  const signal = paperSignal({ side: 'BUY', paperLane: 'control', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,
     reason: 'MOMENTUM_V2_ENTRY_PASSED', marketTradeAt: 1_000, priceReceivedAt: 1_200,
     decisionAt: 1_275, paperRecordedAt: 1_280, priceUsd: 0.000004 });
   assert.equal(signal.priceAgeMsAtDecision, 75);
+  assert.equal(signal.paperLane, 'control');
   assert.equal(signal.signalId, `test-run:${mint}:1200:BUY`);
   assert.equal(signal.sourceLagMs, 200);
   assert.equal(signal.recordingLagMs, 5);
@@ -163,10 +164,11 @@ test('paper signal separates market, receipt, decision, and record clocks withou
   assert.throws(() => paperSignal({ ...signal, priceReceivedAt: 1_300 }), /chronological/);
 });
 test('paper order records its actual timer time and misses the one-second deadline if late', () => {
-  const signal = paperSignal({ side: 'SELL', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,
+  const signal = paperSignal({ side: 'SELL', paperLane: 'control', runId: 'test-run', mint, positionId: `${mint}:1200`, worker: 1,
     reason: 'V2_TARGET_40', marketTradeAt: 1_000, priceReceivedAt: 1_200,
     decisionAt: 1_275, paperRecordedAt: 1_280, priceUsd: 0.000004 });
   const timely = paperOrderEvent(signal, 2_225, { observedAt: 2_000, priceUsd: 0.000005 });
+  assert.equal(timely.paperLane, 'control');
   assert.equal(timely.type, 'PAPER_ORDER_SIMULATED');
   assert.equal(timely.delayMs, 950);
   assert.equal(timely.observedPriceProxyUsd, 0.000005);
