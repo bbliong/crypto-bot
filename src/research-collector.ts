@@ -1,6 +1,6 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { parseArgs } from 'node:util';
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -32,6 +32,13 @@ const { values } = parseArgs({ options: {
   prepareTradeUi: { type: 'boolean', default: true }, enableExtensions: { type: 'boolean', default: true },
   exitHoldSeconds: { type: 'string', default: '20' }, maxPaperBuys: { type: 'string' }, maxBuys: { type: 'string' },
   autoBuy: { type: 'boolean' },
+  orderCapture: { type: 'boolean', default: false },
+  orderCapturePayloads: { type: 'boolean', default: false },
+  simulateOrder: { type: 'boolean', default: false },
+  browserBuyPrompt: { type: 'boolean', default: false },
+  browserPromptTestSignal: { type: 'boolean', default: false },
+  orderOutcomeCapture: { type: 'boolean', default: false },
+  controlOnly: { type: 'boolean', default: false },
   strategy: { type: 'string', default: 'momentum-v2' },
   topHolderDumpMinPercent: { type: 'string' },
   config: { type: 'string', default: 'config/rules.yaml' },
@@ -39,6 +46,7 @@ const { values } = parseArgs({ options: {
 const loadedConfig = loadConfig(values.config);
 if (!['legacy', 'flow-3', 'momentum-v2', 'pump-band'].includes(values.strategy!)) throw new Error('Unknown research strategy');
 const momentumV2 = values.strategy === 'momentum-v2';
+const r5BandEnabled = momentumV2 && !values.controlOnly;
 const flow3 = values.strategy === 'flow-3';
 const pumpBand = values.strategy === 'pump-band';
 const FLOW3_RULES = {
@@ -67,6 +75,10 @@ const exitHoldSeconds = Number(values.exitHoldSeconds);
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
 if ((momentumV2 || flow3 || pumpBand) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
+if (values.orderCapture && !momentumV2) throw new Error('--orderCapture is only supported with --strategy momentum-v2.');
+if (values.simulateOrder && !momentumV2) throw new Error('--simulateOrder is only supported with --strategy momentum-v2.');
+if (values.browserBuyPrompt && !momentumV2) throw new Error('--browserBuyPrompt is only supported with --strategy momentum-v2.');
+if (values.browserPromptTestSignal && !values.browserBuyPrompt) throw new Error('--browserPromptTestSignal requires --browserBuyPrompt.');
 const topHolderDumpMinPercent = values.topHolderDumpMinPercent !== undefined ? Number(values.topHolderDumpMinPercent) : (config.topHolderDumpMinPercent ?? 1.5);
 
 // Stake configuration: supports USD (--stake 1, --stakeUsd 5) or direct SOL (--sol 0.005, --buySol 0.01)
@@ -150,6 +162,7 @@ const holderHistory = new Map<string, Map<string, Holder[]>>();
 const totalHolderSamples = new Map<string, HolderSample[]>();
 const momentumTape = new Map<string, TapeTrade[]>();
 const pendingPaperOrders = new Set<Promise<void>>();
+const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 function schedulePaperOrder(signal: PaperSignal): void {
   const task = (async () => {
     await delay(Math.max(0, signal.plannedOrderAt - Date.now()));
@@ -167,6 +180,278 @@ function schedulePaperOrder(signal: PaperSignal): void {
     pendingPaperOrders.delete(task);
     console.error('[paper-order-error]', signal.signalId, error);
   });
+}
+/** Produces a live-order request template without calling GMGN or a wallet. */
+function scheduleSimulatedOrder(signal: PaperSignal, stakeUsd: number): void {
+  if (!values.simulateOrder || signal.paperLane !== PAPER_LANES.control.id) return;
+  const task = (async () => {
+    await delay(Math.max(0, signal.plannedOrderAt - Date.now()));
+    const solUsd = solSpotCache?.usd ?? 150;
+    const estimatedBuyLamports = signal.side === 'BUY' && solUsd > 0
+      ? Math.floor(stakeUsd / solUsd * 1_000_000_000).toString()
+      : null;
+    const tokenIn = signal.side === 'BUY' ? WSOL_MINT : signal.mint;
+    const tokenOut = signal.side === 'BUY' ? signal.mint : WSOL_MINT;
+    write('simulated-order-intents.jsonl', {
+      type: 'SIMULATED_ORDER_INTENT', execution: 'DRY_RUN_NO_ROUTE_NO_SIGNATURE_NO_SUBMIT',
+      signalId: signal.signalId, positionId: signal.positionId, side: signal.side, mint: signal.mint,
+      reason: signal.reason, decisionAt: signal.decisionAt, simulatedAt: Date.now(), priceUsd: signal.priceUsd,
+      routeRequest: {
+        method: 'GET', endpoint: '/txproxy/v1/get_swap_route', tokenIn, tokenOut,
+        inputAmountBaseUnits: signal.side === 'BUY' ? estimatedBuyLamports : null,
+        inputAmountSource: signal.side === 'BUY' ? (solSpotCache ? 'stakeUsd / cached SOL-USD price' : 'stakeUsd / $150 simulation fallback') : 'full token balance must be read at execution time',
+        slippagePercent: DEFAULT_EXECUTION_SETTINGS.slippagePercent, feeSol: DEFAULT_EXECUTION_SETTINGS.tipFeeSol + DEFAULT_EXECUTION_SETTINGS.priorityFeeSol,
+      },
+      submitRequest: {
+        method: 'POST', endpoint: '/mrtapi/v2/swap_batch_order', chain: 'sol', tokenIn, tokenOut,
+        swapMode: 'ExactIn', inputAmountBaseUnits: signal.side === 'BUY' ? estimatedBuyLamports : null,
+        requiresFreshRoute: true, requiresWalletAddress: true, requiresLiveTxBuildInfo: true,
+      },
+      note: 'Dry-run intent only. No GMGN request, wallet signature, or on-chain transaction was sent.',
+    });
+  })();
+  pendingPaperOrders.add(task);
+  void task.then(() => pendingPaperOrders.delete(task), error => {
+    pendingPaperOrders.delete(task);
+    console.error('[simulated-order-intent-error]', signal.signalId, error);
+  });
+}
+let liveBrowserAuthorization: string | null = null;
+let orderOutcomeCaptureUntil = 0;
+function latestCapturedOrderSession(): { fromAddress: string; authorization: string } | null {
+  try {
+    const root = join(process.cwd(), 'research');
+    for (const entry of readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
+      const payloadFile = join(root, entry.name, 'order-api-payloads.jsonl');
+      if (!existsSync(payloadFile)) continue;
+      const lines = readFileSync(payloadFile, 'utf8').trim().split(/\r?\n/).reverse();
+      for (const line of lines) {
+        try {
+          const row = JSON.parse(line) as { type?: string; url?: string; bodyText?: string; headers?: Record<string, unknown> };
+          if (row.type !== 'ORDER_REQUEST_PAYLOAD' || !row.bodyText || !row.url?.includes('/mrtapi/v2/swap_batch_order')) continue;
+          const body = JSON.parse(row.bodyText) as { from_address?: unknown };
+          const authorization = row.headers?.authorization;
+          if (typeof body.from_address === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(body.from_address)
+            && (liveBrowserAuthorization || (typeof authorization === 'string' && authorization.length > 0))) {
+            return { fromAddress: body.from_address, authorization: liveBrowserAuthorization ?? authorization as string };
+          }
+        } catch { /* Ignore incomplete JSONL rows. */ }
+      }
+    }
+  } catch { /* A first-time browser session has no captured order yet. */ }
+  return null;
+}
+function isExpiredBrowserAuthorization(result: unknown): boolean {
+  const row = result as { status?: unknown; code?: unknown; message?: unknown } | null;
+  return (row?.status === 401 || row?.status === 403) && (row?.code === 40010100 || String(row?.message ?? '').toLowerCase().includes('token expired'));
+}
+async function refreshBrowserAuthorization(page: Page, previousAuthorization: string): Promise<boolean> {
+  try {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (liveBrowserAuthorization && liveBrowserAuthorization !== previousAuthorization) return true;
+      await delay(500);
+    }
+  } catch { /* The next signal can still use a later browser-session request. */ }
+  return Boolean(liveBrowserAuthorization && liveBrowserAuthorization !== previousAuthorization);
+}
+async function showBrowserOrderPrompt(page: Page, input: { side: 'BUY' | 'SELL'; mint: string; symbol: string; amountLine: string; expectedOut?: string | null }): Promise<boolean> {
+  // This is a page modal rather than window.confirm(): Chromium returns false
+  // immediately for confirmation dialogs invoked through automation.
+  await page.bringToFront();
+  // page.evaluate(expression, arg) does not call a string expression as a
+  // function. Embed the small, non-sensitive signal object and invoke the
+  // expression explicitly so the promise remains pending for the operator.
+  const promptValue = JSON.stringify(input).replace(/</g, '\\u003c');
+  return page.evaluate(`(() => {
+    const value = ${promptValue};
+    return new Promise((resolve) => {
+    const existing = document.getElementById('__momentum-v2-order-prompt');
+    if (existing) existing.remove();
+    const root = document.createElement('div');
+    root.id = '__momentum-v2-order-prompt';
+    root.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:rgba(2,8,18,.82);font:16px system-ui;color:#f8fbff';
+    const card = document.createElement('section');
+    card.style.cssText = 'width:min(520px,calc(100vw - 36px));padding:26px;border:2px solid #58b4ff;border-radius:16px;background:#0d1b2d;box-shadow:0 20px 70px #000';
+    const heading = document.createElement('h2');
+    heading.style.cssText = 'margin:0 0 16px;font-size:23px;color:#7fd0ff';
+    heading.textContent = 'Momentum V2: ' + value.side + ' siap';
+    const details = document.createElement('pre');
+    details.style.cssText = 'margin:0 0 18px;white-space:pre-wrap;font:14px ui-monospace,Consolas,monospace;line-height:1.55;color:#fff';
+    details.textContent = [
+      value.symbol,
+      value.mint,
+      '',
+      value.amountLine,
+      value.expectedOut ? 'Quote output: ' + value.expectedOut : '',
+      '',
+      'Route akan dibuat ulang tepat sebelum submit.'
+    ].filter(Boolean).join('\\n');
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:12px';
+    const submit = document.createElement('button');
+    submit.textContent = 'SUBMIT ' + value.side;
+    submit.style.cssText = 'flex:1;background:#17a36b;color:#fff;border:0;border-radius:9px;padding:13px;font-weight:800;font-size:15px;cursor:pointer';
+    const skip = document.createElement('button');
+    skip.textContent = 'LEWATI';
+    skip.style.cssText = 'background:#34475c;color:#fff;border:0;border-radius:9px;padding:13px 18px;font-weight:700;font-size:15px;cursor:pointer';
+    const finish = (approved, event) => {
+      if (!event.isTrusted) return;
+      root.remove();
+      resolve(approved);
+    };
+    submit.addEventListener('click', event => finish(true, event));
+    skip.addEventListener('click', event => finish(false, event));
+    actions.append(submit, skip);
+    card.append(heading, details, actions);
+    root.append(card);
+    document.body.append(root);
+    document.title = 'BUY confirmation | ' + document.title;
+    console.warn('[Momentum V2] Buy confirmation is waiting on this tab.');
+    });
+  })()`);
+}
+async function browserRoute(page: Page, input: { mint: string; fromAddress: string; inputLamports: string }) {
+  return page.evaluate(async value => {
+    const params = new URLSearchParams({ web_from_source: 'token_poll', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
+      token_in_address: 'So11111111111111111111111111111111111111112', token_out_address: value.mint, in_amount: value.inputLamports,
+      slippage: '15', is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
+    const response = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
+    const body = await response.json().catch(() => null);
+    return { status: response.status, body };
+  }, input);
+}
+function writeLiveRouteLedger(side: 'BUY' | 'SELL', routeData: any, input: { mint: string; inputAmount: string; tokenPriceUsd: number; solPriceUsd: number }) {
+  const quote = routeData?.quote ?? {};
+  const outputPriceUsd = side === 'BUY' ? input.tokenPriceUsd : input.solPriceUsd;
+  const outputDecimals = Number(quote.outDecimals ?? 0);
+  const platformFee = Number(quote.platformFee ?? 0);
+  const platformFeeUsd = outputDecimals >= 0 && Number.isFinite(platformFee) && Number.isFinite(outputPriceUsd)
+    ? platformFee / 10 ** outputDecimals * outputPriceUsd : null;
+  const routeFees = Array.isArray(quote.routePlan) ? quote.routePlan.map((item: any) => ({
+    label: item?.swapInfo?.label ?? null, feeAmountBaseUnits: item?.swapInfo?.feeAmount ?? null, feeMint: item?.swapInfo?.feeMint ?? null,
+  })) : [];
+  write('live-trade-ledger.jsonl', {
+    type: 'LIVE_ROUTE_QUOTE', side, mint: input.mint, observedAt: Date.now(), inputAmountBaseUnits: input.inputAmount,
+    amountInUsd: routeData?.amount_in_usd ?? null, amountOutUsd: routeData?.amount_out_usd ?? null,
+    quote: { inAmount: quote.inAmount ?? null, outAmount: quote.outAmount ?? null, inDecimals: quote.inDecimals ?? null, outDecimals: quote.outDecimals ?? null, otherAmountThreshold: quote.otherAmountThreshold ?? null, priceImpactPct: quote.priceImpactPct ?? null, exchange: routeData?.exchange ?? null },
+    fees: { platformFeeBaseUnits: quote.platformFee ?? null, platformFeeUsdEstimate: platformFeeUsd, routeFees, configuredFeeSol: 0.0002, configuredTipFeeSol: 0.0001, configuredPriorityFeeSol: 0.0001, prioritizationFeeLamports: routeData?.raw_tx?.prioritizationFeeLamports ?? null },
+    note: 'Route quote before submit. Fee values are estimates/configuration; final network fee must be read from the confirmed Solana transaction.',
+  });
+}
+async function submitBrowserBuy(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputLamports: string; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }) {
+  const route = await browserRoute(page, input);
+  const routeData = route.body?.data;
+  if (route.status !== 200 || route.body?.code !== 0 || !routeData?.quote) return { ok: false, stage: 'route', status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null };
+  write('events.jsonl', { type: 'BROWSER_BUY_PROMPT_OPENING', mint: input.mint, observedAt: Date.now(), pageUrl: page.url(), stakeUsd: Number(input.inputLamports) / 1_000_000_000 * input.solPriceUsd });
+  const approved = await showBrowserOrderPrompt(page, { side: 'BUY', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Nominal: $' + (Number(input.inputLamports) / 1_000_000_000 * input.solPriceUsd).toFixed(2), expectedOut: routeData.quote.outAmount ?? null });
+  if (!approved) return { ok: false, stage: 'operator_declined' };
+  const freshRoute = await browserRoute(page, input);
+  const fresh = freshRoute.body?.data;
+  if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
+  writeLiveRouteLedger('BUY', fresh, { mint: input.mint, inputAmount: input.inputLamports, tokenPriceUsd: input.tokenPriceUsd, solPriceUsd: input.solPriceUsd });
+  return page.evaluate(async ({ value, routeBody }) => {
+    const quote = routeBody.data.quote;
+    const swapInfo = quote.routePlan?.[0]?.swapInfo ?? {};
+    const now = Date.now();
+    const payload = {
+      is_auto_tip_fee: false, is_auto_priority_fee: false, max_auto_fee: '0.001', token_in_chain: 'sol', token_out_chain: 'sol',
+      from_address: value.fromAddress, token_in_address: 'So11111111111111111111111111111111111111112', token_out_address: value.mint,
+      is_anti_mev: false, token_in_price: String(value.solPriceUsd), token_out_price: String(value.tokenPriceUsd), chain: 'sol', retry_on_submit_failed: 0,
+      simulate_before_submit: false, input_token: 'So11111111111111111111111111111111111111112', output_token: value.mint, source: 'swap_web',
+      decimals: quote.outDecimals ?? 6, swap_mode: 'ExactIn', input_amount: value.inputLamports, market_cap: value.marketCapUsd ?? 0,
+      priority_gas_price: '0.0001', gas_price: '0.0001', auto_slippage: false, slippage: 15, fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001',
+      tx_build_info: { ok: true, fallback: false, error: { code: '', message: '', stage: 'browser_prompt_route', exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '' },
+        summary: { totalMs: Number(quote.timeTaken ?? 0) * 1000, method: 'browser_prompt_route', entryCount: Array.isArray(quote.routePlan) ? quote.routePlan.length : 0 },
+        traceFields: { query: { userId: value.fromAddress, tokenIn: { address: 'So11111111111111111111111111111111111111112', decimals: 9, price: value.solPriceUsd }, tokenOut: { address: value.mint, decimals: quote.outDecimals ?? 6, price: value.tokenPriceUsd }, swapMode: 'ExactIn', slippage: 15, mc: value.marketCapUsd ?? 0, isAntiMev: false, fee: 0.0002, exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '', tipFee: 0.0001, priorityFee: 0.0001, amountIn: value.inputLamports, legacy: true }, serverTimeMs: now }, client_click_at_ms: now, order_type: 'browser_prompt_submit', ws_status: 'Stable', ws_latency_ms: 0, ws_chain_stat_ts: now, ws_route_info_ts: now },
+    };
+    const response = await fetch('/mrtapi/v2/swap_batch_order', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: value.authorization }, body: JSON.stringify(payload) });
+    const body = await response.json().catch(() => null);
+    return { ok: response.ok && body?.code === 0, status: response.status, code: body?.code ?? null, message: body?.message ?? body?.msg ?? null, orderId: body?.data?.order_id ?? null, hash: body?.data?.hash ?? null, acquiredAmount: quote.outAmount ?? null, acquiredDecimals: quote.outDecimals ?? null };
+  }, { value: input, routeBody: freshRoute.body });
+}
+async function browserSellRoute(page: Page, input: { mint: string; fromAddress: string; inputAmount: string }) {
+  return page.evaluate(async value => {
+    const params = new URLSearchParams({ web_from_source: 'token_poll', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
+      token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', in_amount: value.inputAmount,
+      slippage: '15', is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
+    const response = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  }, input);
+}
+async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }) {
+  const route = await browserSellRoute(page, input);
+  const routeData = route.body?.data;
+  if (route.status !== 200 || route.body?.code !== 0 || !routeData?.quote) return { ok: false, stage: 'route', status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null };
+  write('events.jsonl', { type: 'BROWSER_SELL_PROMPT_OPENING', mint: input.mint, observedAt: Date.now(), pageUrl: page.url(), inputAmount: input.inputAmount });
+  const approved = await showBrowserOrderPrompt(page, { side: 'SELL', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Jual 100%: ' + input.inputAmount + ' base units', expectedOut: routeData.quote.outAmount ?? null });
+  if (!approved) return { ok: false, stage: 'operator_declined' };
+  const freshRoute = await browserSellRoute(page, input);
+  const fresh = freshRoute.body?.data;
+  if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
+  writeLiveRouteLedger('SELL', fresh, { mint: input.mint, inputAmount: input.inputAmount, tokenPriceUsd: input.tokenPriceUsd, solPriceUsd: input.solPriceUsd });
+  return page.evaluate(async ({ value, routeBody }) => {
+    const quote = routeBody.data.quote, swapInfo = quote.routePlan?.[0]?.swapInfo ?? {}, now = Date.now();
+    const payload = { is_auto_tip_fee: false, is_auto_priority_fee: false, max_auto_fee: '0.001', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
+      token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', is_anti_mev: false, token_in_price: String(value.tokenPriceUsd), token_out_price: String(value.solPriceUsd), chain: 'sol', retry_on_submit_failed: 0,
+      simulate_before_submit: false, input_token: value.mint, output_token: 'So11111111111111111111111111111111111111112', source: 'swap_web', decimals: value.tokenDecimals, swap_mode: 'ExactIn', input_amount: value.inputAmount, market_cap: value.marketCapUsd ?? 0,
+      priority_gas_price: '0.0001', gas_price: '0.0001', auto_slippage: false, slippage: 15, fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001',
+      tx_build_info: { ok: true, fallback: false, error: { code: '', message: '', stage: 'browser_prompt_sell_route', exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '' }, summary: { totalMs: Number(quote.timeTaken ?? 0) * 1000, method: 'browser_prompt_sell_route', entryCount: Array.isArray(quote.routePlan) ? quote.routePlan.length : 0 }, traceFields: { query: { userId: value.fromAddress, tokenIn: { address: value.mint, decimals: value.tokenDecimals, price: value.tokenPriceUsd }, tokenOut: { address: 'So11111111111111111111111111111111111111112', decimals: 9, price: value.solPriceUsd }, swapMode: 'ExactIn', slippage: 15, mc: value.marketCapUsd ?? 0, isAntiMev: false, fee: 0.0002, exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '', tipFee: 0.0001, priorityFee: 0.0001, amountIn: value.inputAmount, legacy: true }, serverTimeMs: now }, client_click_at_ms: now, order_type: 'browser_prompt_sell_submit', ws_status: 'Stable', ws_latency_ms: 0, ws_chain_stat_ts: now, ws_route_info_ts: now },
+    };
+    const response = await fetch('/mrtapi/v2/swap_batch_order', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: value.authorization }, body: JSON.stringify(payload) });
+    const body = await response.json().catch(() => null);
+    return { ok: response.ok && body?.code === 0, status: response.status, code: body?.code ?? null, message: body?.message ?? body?.msg ?? null, orderId: body?.data?.order_id ?? null, hash: body?.data?.hash ?? null };
+  }, { value: input, routeBody: freshRoute.body });
+}
+async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeUsd: number, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
+  if (!values.browserBuyPrompt || signal.paperLane !== PAPER_LANES.control.id) return;
+  const orderSession = latestCapturedOrderSession();
+  if (!orderSession) {
+    write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, observedAt: Date.now(), reason: 'NO_CAPTURED_ORDER_SESSION' });
+    return;
+  }
+  const solPriceUsd = await currentSolUsd(page);
+  const inputLamports = Math.floor(stakeUsd / solPriceUsd * 1_000_000_000).toString();
+  let result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd });
+  if (isExpiredBrowserAuthorization(result)) {
+    write('events.jsonl', { type: 'BROWSER_AUTH_REFRESHING', side: 'BUY', mint: signal.mint, observedAt: Date.now(), reason: 'TOKEN_EXPIRED' });
+    if (await refreshBrowserAuthorization(page, orderSession.authorization)) {
+      const refreshedSession = latestCapturedOrderSession();
+      if (refreshedSession) result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd });
+    }
+  }
+  if (result.ok && 'acquiredAmount' in result && typeof result.acquiredAmount === 'string' && typeof result.acquiredDecimals === 'number') {
+    liveBrowserPositions.set(signal.mint, { inputAmount: result.acquiredAmount, tokenDecimals: result.acquiredDecimals, confirmedAt: Date.now(), entryPriceUsd: tokenPriceUsd });
+  }
+  write('events.jsonl', { type: result.ok ? 'BROWSER_BUY_SUBMITTED' : 'BROWSER_BUY_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, stakeUsd, inputLamports, result });
+  console.log(result.ok ? '[browser-buy-submitted]' : '[browser-buy-not-submitted]', signal.mint, result);
+}
+const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number }>();
+const browserSellDeferredBeforeBuy = new Set<string>();
+async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
+  if (!values.browserBuyPrompt || signal.paperLane !== PAPER_LANES.control.id) return;
+  const position = liveBrowserPositions.get(signal.mint);
+  if (!position) {
+    write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CONFIRMED_BROWSER_BUY' });
+    return;
+  }
+  const orderSession = latestCapturedOrderSession();
+  if (!orderSession) {
+    write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CAPTURED_ORDER_SESSION' });
+    return;
+  }
+  const solPriceUsd = await currentSolUsd(page);
+  let result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd });
+  if (isExpiredBrowserAuthorization(result)) {
+    write('events.jsonl', { type: 'BROWSER_AUTH_REFRESHING', side: 'SELL', mint: signal.mint, observedAt: Date.now(), reason: 'TOKEN_EXPIRED' });
+    if (await refreshBrowserAuthorization(page, orderSession.authorization)) {
+      const refreshedSession = latestCapturedOrderSession();
+      if (refreshedSession) result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd });
+    }
+  }
+  if (result.ok) liveBrowserPositions.delete(signal.mint);
+  write('events.jsonl', { type: result.ok ? 'BROWSER_SELL_SUBMITTED' : 'BROWSER_SELL_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, inputAmount: position.inputAmount, result });
+  console.log(result.ok ? '[browser-sell-submitted]' : '[browser-sell-not-submitted]', signal.mint, result);
 }
 const paperRiskListeners = new Map<string, (tick: TapeTrade) => void>();
 const ownerSnapshots = new Map<string, OwnerSample[]>();
@@ -448,6 +733,118 @@ function attachHolderNetworkInspector(page: Page) {
   });
 }
 
+/** Records GMGN order endpoint metadata and, only when explicitly requested,
+ * the complete local request/response exchange for the order endpoint. */
+function attachOrderApiInspector(target: Page | BrowserContext) {
+  const isGmgnApiRequest = (request: import('playwright').Request) => {
+    try {
+      const url = new URL(request.url());
+      return /gmgn\.ai$/i.test(url.hostname) && ['fetch', 'xhr'].includes(request.resourceType());
+    } catch {
+      return false;
+    }
+  };
+  const isOrderEndpoint = (rawUrl: string) => {
+    try {
+      const url = new URL(rawUrl);
+      return /gmgn\.ai$/i.test(url.hostname)
+        && /\/(?:txproxy\/v1\/get_swap_route|defi\/router|api\/v\d+\/.*(?:swap|order|transaction)|.*\/(?:swap(?:[_-].*)?|order(?:[_-].*)?|transaction(?:[_-].*)?))\b/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  };
+  const isSolanaRpcSubmission = (request: import('playwright').Request) => {
+    if (request.method() !== 'POST' || !['fetch', 'xhr'].includes(request.resourceType())) return false;
+    const body = request.postData() ?? '';
+    return /"method"\s*:\s*"(?:sendTransaction|simulateTransaction|getSignatureStatuses)"/.test(body);
+  };
+  const safeEndpoint = (rawUrl: string) => {
+    const url = new URL(rawUrl);
+    return { origin: url.origin, path: url.pathname, queryKeys: [...url.searchParams.keys()].sort() };
+  };
+
+  target.on('request', request => {
+    const orderEndpoint = isOrderEndpoint(request.url());
+    const rpcSubmission = isSolanaRpcSubmission(request);
+    const gmgnApiRequest = isGmgnApiRequest(request);
+    if (!orderEndpoint && !rpcSubmission && (!values.orderCapture || !gmgnApiRequest) && (!values.browserBuyPrompt || !gmgnApiRequest)) return;
+    const headers = request.headers();
+    if (values.browserBuyPrompt && typeof headers.authorization === 'string' && headers.authorization.length > 0) liveBrowserAuthorization = headers.authorization;
+    if (values.orderOutcomeCapture && orderEndpoint && request.method() === 'POST') orderOutcomeCaptureUntil = Date.now() + 60_000;
+    const endpoint = safeEndpoint(request.url());
+    write('order-api-audit.jsonl', {
+      type: orderEndpoint ? 'ORDER_API_REQUEST' : rpcSubmission ? 'SOLANA_RPC_REQUEST' : 'GMGN_API_REQUEST', observedAt: Date.now(), method: request.method(), resourceType: request.resourceType(), ...endpoint,
+      contentType: headers['content-type'] ?? null,
+      hasBody: request.postDataBuffer() !== null,
+      note: 'Request values, headers, cookies, and body are intentionally redacted.',
+    });
+    if (values.orderCapturePayloads && (orderEndpoint || rpcSubmission)) {
+      const bodyBuffer = request.postDataBuffer();
+      write('order-api-payloads.jsonl', {
+        type: orderEndpoint ? 'ORDER_REQUEST_PAYLOAD' : 'SOLANA_RPC_REQUEST_PAYLOAD', observedAt: Date.now(), method: request.method(), resourceType: request.resourceType(),
+        url: request.url(), headers, contentType: headers['content-type'] ?? null, bodyText: request.postData() ?? null,
+        bodyBase64: bodyBuffer ? bodyBuffer.toString('base64') : null,
+        note: 'Complete local request capture explicitly enabled.',
+      });
+    }
+  });
+  target.on('response', async response => {
+    const request = response.request(), orderEndpoint = isOrderEndpoint(response.url()), rpcSubmission = isSolanaRpcSubmission(request);
+    const captureOutcome = values.orderOutcomeCapture && Date.now() <= orderOutcomeCaptureUntil && isGmgnApiRequest(request);
+    if (!orderEndpoint && !rpcSubmission && (!values.orderCapture || !isGmgnApiRequest(request)) && !captureOutcome) return;
+    const endpoint = safeEndpoint(response.url());
+    write('order-api-audit.jsonl', {
+      type: orderEndpoint ? 'ORDER_API_RESPONSE' : rpcSubmission ? 'SOLANA_RPC_RESPONSE' : 'GMGN_API_RESPONSE', observedAt: Date.now(), method: request.method(), resourceType: request.resourceType(), status: response.status(), ...endpoint,
+      contentType: response.headers()['content-type'] ?? null,
+      note: 'Response body is intentionally not recorded because it may contain an unsigned or signed transaction.',
+    });
+    if (values.orderCapturePayloads && (orderEndpoint || rpcSubmission)) {
+      try {
+        const bodyBuffer = await response.body();
+        const headers = response.headers();
+        write('order-api-payloads.jsonl', {
+          type: orderEndpoint ? 'ORDER_RESPONSE_PAYLOAD' : 'SOLANA_RPC_RESPONSE_PAYLOAD', observedAt: Date.now(), method: request.method(), resourceType: request.resourceType(),
+          url: response.url(), status: response.status(), headers, contentType: headers['content-type'] ?? null,
+          bodyText: bodyBuffer.toString('utf8'), bodyBase64: bodyBuffer.toString('base64'),
+          note: 'Complete local response capture explicitly enabled.',
+        });
+      } catch (error) {
+        write('order-api-payloads.jsonl', { type: 'ORDER_RESPONSE_PAYLOAD_ERROR', observedAt: Date.now(), method: request.method(), url: response.url(), status: response.status(), message: error instanceof Error ? error.message : 'unknown' });
+      }
+    }
+    if (captureOutcome) {
+      try {
+        const body = await response.body();
+        const headers = response.headers();
+        const bodyText = body.toString('utf8');
+        write('order-followup-responses.jsonl', {
+          type: 'ORDER_FOLLOWUP_RESPONSE', observedAt: Date.now(), method: request.method(), resourceType: request.resourceType(), status: response.status(),
+          url: response.url(), headers, contentType: headers['content-type'] ?? null,
+          bodyText, bodyBase64: body.toString('base64'),
+          note: 'Captured for local inspection after a browser Buy/Sell submit; may contain account, balance, and order data.',
+        });
+        if (new URL(response.url()).pathname.includes('/smartmoney/sol/walletstat/')) {
+          try {
+            const data = (JSON.parse(bodyText) as { data?: Record<string, unknown> }).data;
+            if (data) {
+              const buyCost = Number(data.history_bought_cost ?? 0), soldIncome = Number(data.history_sold_income ?? 0);
+              const grossPnlUsd = Number.isFinite(buyCost) && Number.isFinite(soldIncome) ? soldIncome - buyCost : null;
+              write('live-trade-ledger.jsonl', {
+                type: 'GMGN_WALLETSTAT_SNAPSHOT', observedAt: Date.now(), token: data.token_address ?? null, symbol: data.symbol ?? null,
+                balance: data.balance ?? null, historyBoughtCostUsd: data.history_bought_cost ?? null, historySoldIncomeUsd: data.history_sold_income ?? null,
+                grossPnlUsd, grossPnlPercent: buyCost > 0 && grossPnlUsd !== null ? grossPnlUsd / buyCost * 100 : null,
+                reportedRealizedProfitUsd: data.realized_profit ?? null, reportedRealizedPnlPercent: data.realized_profit_pnl ?? null,
+                reportedGasUsd: data.gas_usd ?? null, priceUsd: data.price ?? null,
+                note: 'Wallet-level response. Gross P/L is this response history_sold_income minus history_bought_cost; GMGN realized fields may include older activity for the same token.',
+              });
+            }
+          } catch { /* Ignore non-JSON or incomplete wallet-stat responses. */ }
+        }
+      } catch { /* Some responses are no longer available to Playwright. */ }
+    }
+  });
+}
+
 async function refreshDeveloperHolders(page: Page, mint: string, observedAt: number) {
   const response = await page.evaluate(async ({ mint: tokenMint, cachedParams }) => {
     let deviceId = cachedParams.deviceId;
@@ -630,7 +1027,7 @@ function writeSimulationExit(position: SimulationPosition, paperLane: PaperLane,
     exit: { priceUsd: exitPriceUsd, grossProceedsUsd: result.grossProceedsUsd }, pnlUsd: result.pnlUsd, pnlPercent: result.pnlPercent,
     decision, ...(timing ? { timing, positionId: timing.positionId } : {}),
     assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper valuation at the observed signal price; this is not a confirmed swap fill.' }, metadata });
-  if (maxPaperBuys !== null) {
+  if (maxPaperBuys !== null && !values.browserBuyPrompt) {
     const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL' && event.paperLane === PAPER_LANES.control.id).length;
     const openLanes = simulatedEvents.filter(event => event.type === 'SIMULATED_BUY').length - simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
     if (totalSells >= maxPaperBuys && openLanes === 0) {
@@ -846,24 +1243,36 @@ async function safelySetAmount(page: Page, solAmount: string) {
   }
 }
 async function prepareBuyPanel(page: Page, mint: string, worker: number, observedAt: number) {
-  if (!values.prepareTradeUi) return;
+  if (!values.prepareTradeUi || values.simulateOrder) return;
   await selectTradeSide(page, 'buy');
-  await applyExecutionSettings(page, DEFAULT_EXECUTION_SETTINGS);
+  let executionSettingsApplied = true;
+  try { await applyExecutionSettings(page, DEFAULT_EXECUTION_SETTINGS); }
+  catch (error) {
+    executionSettingsApplied = false;
+    write('events.jsonl', { type: 'BUY_EXECUTION_SETTINGS_WARNING', mint, worker, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+    console.log('[buy-settings-warning]', mint, error instanceof Error ? error.message : error);
+  }
   const solUsdSpot = await currentSolUsd(page);
   const solAmount = simulationStakeSol !== null
     ? simulationStakeSol.toFixed(3)
     : usdcToSol(String(simulationStakeUsd), solUsdSpot);
   await safelySetAmount(page, solAmount);
-  write('trade-preparation.jsonl', { type: 'BUY_PREPARED', mint, worker, observedAt, requestedUsdc: simulationStakeUsd, requestedSol: simulationStakeSol, solAmount, solUsdSpot, executionSettings: DEFAULT_EXECUTION_SETTINGS,
+  write('trade-preparation.jsonl', { type: 'BUY_PREPARED', mint, worker, observedAt, requestedUsdc: simulationStakeUsd, requestedSol: simulationStakeSol, solAmount, solUsdSpot, executionSettings: DEFAULT_EXECUTION_SETTINGS, executionSettingsApplied,
     note: 'The GMGN Buy field was filled only. No Buy button was clicked and no transaction was submitted.' });
 }
 async function prepareSellPanel(page: Page, mint: string, worker: number, observedAt: number, reason: SimulationExitReason) {
-  if (!values.prepareTradeUi) return;
+  if (!values.prepareTradeUi || values.simulateOrder) return;
   await selectTradeSide(page, 'sell');
-  await applyExecutionSettings(page, DEFAULT_EXECUTION_SETTINGS);
+  let executionSettingsApplied = true;
+  try { await applyExecutionSettings(page, DEFAULT_EXECUTION_SETTINGS); }
+  catch (error) {
+    executionSettingsApplied = false;
+    write('events.jsonl', { type: 'SELL_EXECUTION_SETTINGS_WARNING', mint, worker, observedAt: Date.now(), reason, message: error instanceof Error ? error.message : 'unknown' });
+    console.log('[sell-settings-warning]', mint, error instanceof Error ? error.message : error);
+  }
   await selectSellPercent(page, 100);
   const preparedAmount = await (await amountInput(page)).inputValue();
-  write('trade-preparation.jsonl', { type: 'SELL_PREPARED', mint, worker, observedAt, reason, sellPercent: 100, preparedAmount, executionSettings: DEFAULT_EXECUTION_SETTINGS,
+  write('trade-preparation.jsonl', { type: 'SELL_PREPARED', mint, worker, observedAt, reason, sellPercent: 100, preparedAmount, executionSettings: DEFAULT_EXECUTION_SETTINGS, executionSettingsApplied,
     note: 'The GMGN Sell 100% preset was selected only. No Sell button was clicked and no transaction was submitted.' });
 }
 async function pumpBandWorker(index: number, deadline: number) {
@@ -990,13 +1399,27 @@ async function pumpBandWorker(index: number, deadline: number) {
 }
 async function worker(index: number, deadline: number) {
   if (pumpBand) return pumpBandWorker(index, deadline);
-  const page = await context!.newPage(); let activeMint: string | undefined;
-  attach(page, false, () => activeMint);
-  attachHolderNetworkInspector(page);
+  // The initial page is the screening feed. Each worker gets its own detail
+  // tab, including the one-worker order-capture flow.
+  let activeMint: string | undefined;
+  const openDetailPage = async () => {
+    const next = await context!.newPage();
+    attach(next, false, () => activeMint);
+    attachHolderNetworkInspector(next);
+    // A replacement detail page must be visible to the operator immediately
+    // after they close the prior one.
+    await next.bringToFront().catch(() => {});
+    return next;
+  };
+  let page = await openDetailPage();
   while (!stopping.signal.aborted && Date.now() < deadline) {
+    if (page.isClosed()) page = await openDetailPage();
     if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys) {
       const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
       if (openPositions <= 0) {
+        // Keep the detail tab on the completed token so a manual order-capture
+        // session can inspect and submit its Sell before the operator stops it.
+        if (values.orderCapture || values.browserBuyPrompt) { await delay(500); continue; }
         stopping.abort();
         break;
       }
@@ -1005,7 +1428,7 @@ async function worker(index: number, deadline: number) {
     }
     const mint = queue.take();
     if (!mint) { await delay(200); continue; }
-    activeMint = mint; const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1000); let openingPrice: number | null = null, stopLoss = false, simulation: SimulationPosition | null = null, simulationExit: SimulationExitReason | null = null, r5BandSimulation: SimulationPosition | null = null, r5BandExit: SimulationExitReason | null = null;
+    activeMint = mint; const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1000); let openingPrice: number | null = null, stopLoss = false, operatorClosedDetail = false, simulation: SimulationPosition | null = null, simulationExit: SimulationExitReason | null = null, r5BandSimulation: SimulationPosition | null = null, r5BandExit: SimulationExitReason | null = null;
     let peakObservedPrice = 0, observationAbortedDump: ObservationDumpDecision | null = null;
     const initialTrades = trades.get(mint) ?? [];
     if (initialTrades.length) {
@@ -1046,12 +1469,27 @@ async function worker(index: number, deadline: number) {
       } else if (initialEarlyRising.allowed) {
         console.log('[early-candle-rising-ok]', mint, 'return=' + (initialEarlyRising.returnPercent?.toFixed(1) ?? '0') + '%');
       }
-      if (values.prepareTradeUi) {
+      // In the single-candidate order-capture flow, keep the operator's
+      // amount ready as soon as the detail page loads.  Momentum V2 still
+      // controls the paper-entry decision; this only fills the input and
+      // never submits an order.
+      const buyUiPreparedOnOpen = values.prepareTradeUi && (!momentumV2 || values.orderCapture);
+      if (buyUiPreparedOnOpen) {
         await prepareBuyPanel(page, mint, index, Date.now()).catch(error => {
           write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
         });
       }
       while (!stopping.signal.aborted && Date.now() < stopAt) {
+        // Closing the detail tab is the operator's explicit request to skip
+        // this candidate.  Do not continue observing from cached sockets for
+        // the remainder of the window.
+        if (page.isClosed()) {
+          operatorClosedDetail = true;
+          write('events.jsonl', { type: 'OPERATOR_RELEASED_DETAIL_SLOT', mint, worker: index, observedAt: Date.now(),
+            note: 'Detail tab was closed by the operator; the worker will create one replacement tab for the next candidate.' });
+          console.log('[operator-released-detail-slot]', mint);
+          break;
+        }
         let now = Date.now();
         if (momentumV2 && now - lastTrackedPollAt >= trackedPollDelayMs) {
           const tracked = await refreshTrackedHolders(page, mint, now).catch(() => ({ status: 0 }));
@@ -1208,7 +1646,7 @@ async function worker(index: number, deadline: number) {
             || earlyCandleRising.allowed);
 
           const momentumEntry = momentumV2 ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken) : null;
-          const r5BandEntry = momentumV2 ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken, MOMENTUM_R5_BAND) : null;
+          const r5BandEntry = r5BandEnabled ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken, MOMENTUM_R5_BAND) : null;
           // Flow-3 uses the historical entry contract: stable live price,
           // safe candle history, and net-positive 20-second buy flow.  Holder
           // distribution and the later blind-protection gate were not part of
@@ -1216,8 +1654,22 @@ async function worker(index: number, deadline: number) {
           const baseBuyAllowed = flow3
             ? entry.stable && candleAllowed && flowAllowed
             : entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed;
-          const controlBuyAllowed = baseBuyAllowed && (momentumEntry?.allowed ?? true);
-          const r5BandBuyAllowed = momentumV2 && baseBuyAllowed && (r5BandEntry?.allowed ?? false);
+          // Browser prompt testing intentionally uses only live, easily
+          // observable evidence. It never changes the regular V2 or paper
+          // simulation rules unless the explicit test flag is supplied.
+          const newestCandle = latestCandles.at(-1);
+          const candleRisingForPromptTest = Boolean(newestCandle && newestCandle.close > newestCandle.open);
+          const socketTrades5s = (trades.get(mint) ?? []).filter(t => t.occurredAt >= now - 5_000 && t.occurredAt <= now);
+          const socketBuys5s = socketTrades5s.filter(t => t.side === 'buy').length;
+          const socketSells5s = socketTrades5s.filter(t => t.side === 'sell').length;
+          const socketBuySurgeForPromptTest = socketBuys5s >= 3 && socketBuys5s > socketSells5s;
+          const browserPromptTestReason = values.browserPromptTestSignal
+            ? candleRisingForPromptTest ? 'BROWSER_TEST_CANDLE_UP'
+              : socketBuySurgeForPromptTest ? 'BROWSER_TEST_SOCKET_BUY_SURGE'
+                : null
+            : null;
+          const controlBuyAllowed = browserPromptTestReason !== null || (baseBuyAllowed && (momentumEntry?.allowed ?? true));
+          const r5BandBuyAllowed = r5BandEnabled && baseBuyAllowed && (r5BandEntry?.allowed ?? false);
           const canOpenControl = controlBuyAllowed && !simulation && (maxPaperBuys === null || paperBuyCount < maxPaperBuys);
           // The variant may enter later than control when R5 first reaches its
           // band. It never opens a browser trade control or changes control's
@@ -1230,15 +1682,18 @@ async function worker(index: number, deadline: number) {
               ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
               : simulationStakeUsd;
             const entryDecisionAt = momentumV2 ? Date.now() : now;
-            const openMomentumLane = (paperLane: PaperLane, entryGate: typeof momentumEntry) => {
+            const openMomentumLane = (paperLane: PaperLane, entryGate: typeof momentumEntry, entryReason?: string) => {
               const paperPosition = openSimulation(mint, entryDecisionAt, price, effectiveStakeUsd);
               const entrySignal = paperSignal({
                 side: 'BUY', paperLane, runId, mint, positionId: `${mint}:${paperPosition.openedAt}:${paperLane}`, worker: index,
-                reason: paperLane === PAPER_LANES.control.id ? 'MOMENTUM_V2_ENTRY_PASSED' : 'MOMENTUM_V2_R5_BAND_ENTRY_PASSED',
+                reason: entryReason ?? (paperLane === PAPER_LANES.control.id ? 'MOMENTUM_V2_ENTRY_PASSED' : 'MOMENTUM_V2_R5_BAND_ENTRY_PASSED'),
                 marketTradeAt: lastMomentumTick?.occurredAt ?? null, priceReceivedAt: lastMomentumTick?.observedAt ?? priceObservedAt,
                 decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
               });
-              write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal);
+              write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal); scheduleSimulatedOrder(entrySignal, paperPosition.stakeUsd);
+              void promptAndSubmitBrowserBuy(page, entrySignal, paperPosition.stakeUsd, price, num(candidate, 'marketCapUsd')).catch(error => {
+                write('events.jsonl', { type: 'BROWSER_BUY_ERROR', mint, observedAt: Date.now(), signalId: entrySignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+              });
               const riskState = createMomentumPosition(entryDecisionAt, price, lastMomentumTick?.occurredAt ?? entryDecisionAt);
               momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false });
               writeSimulation({ type: 'SIMULATED_BUY', paperLane, mint, worker: index, observedAt: entryDecisionAt, timing: entrySignal, positionId: entrySignal.positionId,
@@ -1248,11 +1703,27 @@ async function worker(index: number, deadline: number) {
               return paperPosition;
             };
             if (momentumV2) {
-              if (canOpenControl) { paperBuyCount++; simulation = openMomentumLane(PAPER_LANES.control.id, momentumEntry); }
+              if (canOpenControl) { paperBuyCount++; simulation = openMomentumLane(PAPER_LANES.control.id, momentumEntry, browserPromptTestReason ?? undefined); }
               if (canOpenR5Band) r5BandSimulation = openMomentumLane(PAPER_LANES.r5Band.id, r5BandEntry);
               if (!paperRiskListeners.has(mint)) paperRiskListeners.set(mint, tick => {
                 for (const [paperLane, state] of momentumLaneStates) {
                   if (state.closed) continue;
+                  if (values.browserBuyPrompt && paperLane === PAPER_LANES.control.id) {
+                    const livePosition = liveBrowserPositions.get(mint);
+                    if (!livePosition) {
+                      if (!browserSellDeferredBeforeBuy.has(mint)) {
+                        browserSellDeferredBeforeBuy.add(mint);
+                        write('events.jsonl', { type: 'BROWSER_SELL_DEFERRED', mint, observedAt: tick.observedAt, reason: 'WAITING_FOR_BROWSER_BUY_SUBMISSION' });
+                      }
+                      continue;
+                    }
+                    if (state.riskState.openedAt < livePosition.confirmedAt) {
+                      state.riskState = createMomentumPosition(livePosition.confirmedAt, livePosition.entryPriceUsd, tick.occurredAt);
+                      browserSellDeferredBeforeBuy.delete(mint);
+                      write('events.jsonl', { type: 'BROWSER_SELL_ARMED', mint, observedAt: tick.observedAt, buyConfirmedAt: livePosition.confirmedAt, entryPriceUsd: livePosition.entryPriceUsd });
+                      continue;
+                    }
+                  }
                   const decision = assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
                   if (!decision) continue;
                   if (decision.reason || tick.observedAt - lastMonitoringSnapshotAt >= 5_000) {
@@ -1267,7 +1738,10 @@ async function worker(index: number, deadline: number) {
                   const exitSignal = paperSignal({ side: 'SELL', paperLane, runId, mint, positionId: `${mint}:${state.position.openedAt}:${paperLane}`, worker: index,
                     reason: decision.reason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
                     decisionAt: exitDecisionAt, paperRecordedAt: Date.now(), priceUsd: decision.priceUsd });
-                  write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal);
+                  write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
+                  void promptAndSubmitBrowserSell(page, exitSignal, decision.priceUsd, num(candidates.get(mint), 'marketCapUsd')).catch(error => {
+                    write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+                  });
                   writeSimulationExit(state.position, paperLane, mint, exitDecisionAt, decision.priceUsd, decision.reason, candidates.get(mint)?.metadata ?? null, decision, exitSignal);
                 }
               });
@@ -1288,7 +1762,7 @@ async function worker(index: number, deadline: number) {
             if (!momentumV2 && simulation) writeSimulation({ type: 'SIMULATED_BUY', paperLane: PAPER_LANES.control.id, mint, worker: index, observedAt: entryDecisionAt,
               entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
               entryGate: { momentum: momentumEntry, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
-            if (values.prepareTradeUi && !momentumV2 && !flow3) {
+            if (values.prepareTradeUi && !buyUiPreparedOnOpen && !flow3 && !values.browserBuyPrompt) {
               await prepareBuyPanel(page, mint, index, now).catch(error => {
                 write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
               });
@@ -1519,7 +1993,7 @@ async function worker(index: number, deadline: number) {
             console.log('[sim-sell]', candidate?.metadata?.symbol ?? mint, exitReason, 'pnl=$' + result.pnlUsd.toFixed(6), 'hold=' + exitHoldSeconds + 's');
             if (exitHoldSeconds > 0) await delay(exitHoldSeconds * 1000);
             write('events.jsonl', { type: 'DETAIL_SLOT_RELEASED_AFTER_SELL_HOLD', mint, worker: index, observedAt: Date.now(), reason: exitReason, holdSeconds: exitHoldSeconds });
-            if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys) {
+            if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys && !values.browserBuyPrompt) {
               const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
               if (openPositions <= 0) {
                 console.log('[trial-complete]', `Target of ${maxPaperBuys} transactions completed.`);
@@ -1562,7 +2036,7 @@ async function worker(index: number, deadline: number) {
           startedAt,
           detailStartedAt: startedAt,
           endedAt,
-          endedBecause: observationAbortedDump ? 'OBSERVATION_ABORTED_DUMP' : stopLoss ? 'STOP_LOSS_REACHED' : 'OBSERVATION_WINDOW',
+          endedBecause: operatorClosedDetail ? 'OPERATOR_CLOSED_DETAIL' : observationAbortedDump ? 'OBSERVATION_ABORTED_DUMP' : stopLoss ? 'STOP_LOSS_REACHED' : 'OBSERVATION_WINDOW',
           dumpDetails: observationAbortedDump ? { reason: observationAbortedDump.reason, details: observationAbortedDump.details, drawdownPercent: observationAbortedDump.drawdownPercent } : null,
           openingPriceUsd: openingPrice,
           metadata: candidate.metadata ?? null,
@@ -1580,6 +2054,12 @@ async function worker(index: number, deadline: number) {
         console.log('[detail-complete]', 'worker=' + index, mint, 'trades=' + summary.capturedTrades, 'holders=' + summary.capturedHolderWallets, summary.endedBecause);
       }
     } catch (error) {
+      if (values.orderCapture && page.isClosed()) {
+        if (simulation && !simulationExit) paperBuyCount = Math.max(0, paperBuyCount - 1);
+        write('events.jsonl', { type: 'OPERATOR_SKIPPED_CANDIDATE', mint, worker: index, observedAt: Date.now(),
+          hadPaperEntry: !!simulation, note: 'Operator closed the detail tab. The worker will open a replacement detail tab and continue screening.' });
+        console.log('[operator-skipped-candidate]', mint);
+      }
       write('events.jsonl', { type: 'DETAIL_ERROR', worker: index, mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
       console.log('[detail-error]', 'worker=' + index, mint, error instanceof Error ? error.message : error);
     }
@@ -1589,9 +2069,22 @@ async function worker(index: number, deadline: number) {
       totalHolderSamples.delete(mint);
       ownerSnapshots.delete(mint);
       queue.done(mint); activeMint = undefined;
-      // Keep visible Chrome tabs aligned with actual monitoring state. A worker
-      // that has finished must not leave its old GMGN token detail on screen.
-      await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
+      // The operator owns the cadence in the one-tab capture flow.  Keep this
+      // exact token on screen after a dump, timeout, or rejected V2 signal;
+      // only closing the detail tab releases the worker to inspect a new one.
+      if (values.orderCapture && !page.isClosed() && !stopping.signal.aborted) {
+        write('events.jsonl', { type: 'DETAIL_AWAITING_OPERATOR_CLOSE', mint, worker: index, observedAt: Date.now(),
+          note: 'Detail tab stays on this token. Close it to release the worker to the next candidate.' });
+        console.log('[detail-awaiting-operator-close]', mint);
+        while (!stopping.signal.aborted && !page.isClosed()) await delay(250);
+        if (page.isClosed()) {
+          write('events.jsonl', { type: 'OPERATOR_RELEASED_DETAIL_SLOT', mint, worker: index, observedAt: Date.now(),
+            note: 'Detail tab was closed by the operator; the worker will create one replacement tab for the next candidate.' });
+        }
+      }
+      // In an order-capture session the completed token must remain visible for
+      // the operator's manual Sell. Ordinary research workers clear the tab.
+      if (!values.orderCapture && !page.isClosed()) await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
     }
   }
   await page.close().catch(() => {});
@@ -1604,7 +2097,7 @@ async function main() {
       : momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null,
     ...(momentumV2 ? { paperLanes: {
       [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: { minimumReturn5s: MOMENTUM_RULES.minimumReturn5s, maximumReturn5s: MOMENTUM_RULES.maximumReturn5s } },
-      [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND },
+      ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}),
     }, timing: {
       signalFile: 'trade-signals.jsonl',
       paperOrderFile: 'paper-orders.jsonl',
@@ -1631,6 +2124,7 @@ async function main() {
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
   context.on('close', () => stopping.abort());
+  attachOrderApiInspector(context);
   process.once('SIGINT', () => stopping.abort());
   process.once('SIGTERM', () => stopping.abort());
   console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds, simulationStakeSol !== null ? ('stakeSol=' + simulationStakeSol) : ('stakeUsd=$' + simulationStakeUsd));
