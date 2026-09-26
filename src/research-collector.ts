@@ -266,7 +266,36 @@ async function fetchWalletStat(page: Page, walletAddress: string, mint: string):
     }
   }, { walletAddress, mint }).catch(() => null);
 }
-function recordWalletStatSnapshot(data: Record<string, unknown>, stage: 'PRE_BUY' | 'POST_BUY' | 'POST_SELL' | 'PASSIVE_CAPTURE' = 'POST_BUY') {
+function parseBalanceToBaseUnits(balanceStr: string, decimals = 6): string {
+  if (!balanceStr || typeof balanceStr !== 'string') return '0';
+  const clean = balanceStr.trim().replace(/,/g, '');
+  if (!clean || clean === '0' || Number(clean) === 0) return '0';
+  const parts = clean.split('.');
+  const whole = parts[0] || '0';
+  const rawFrac = parts[1] || '';
+  const frac = rawFrac.slice(0, decimals).padEnd(decimals, '0');
+  const combined = (whole + frac).replace(/^0+/, '') || '0';
+  return combined;
+}
+const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number; walletBalanceDecimal?: string }>();
+const liveTokenBalances = new Map<string, { balanceBaseUnits: string; balanceDecimal: string; decimals: number; updatedAt: number }>();
+function recordWalletStatSnapshot(data: Record<string, unknown>, stage: 'PRE_BUY' | 'POST_BUY' | 'PRE_SELL' | 'RETRY_SELL' | 'POST_SELL' | 'PASSIVE_CAPTURE' = 'POST_BUY') {
+  if (typeof data.token_address === 'string' && typeof data.balance === 'string' && data.balance !== '' && data.balance !== '0') {
+    const decimals = typeof data.decimals === 'number' ? data.decimals : 6;
+    const baseUnits = parseBalanceToBaseUnits(data.balance, decimals);
+    if (baseUnits !== '0') {
+      liveTokenBalances.set(data.token_address, { balanceBaseUnits: baseUnits, balanceDecimal: data.balance, decimals, updatedAt: Date.now() });
+      const pos = liveBrowserPositions.get(data.token_address);
+      if (pos) {
+        pos.inputAmount = baseUnits;
+        pos.tokenDecimals = decimals;
+        pos.walletBalanceDecimal = data.balance;
+        if (typeof data.history_avg_cost === 'number' && data.history_avg_cost > 0) {
+          pos.entryPriceUsd = data.history_avg_cost;
+        }
+      }
+    }
+  }
   const buyCost = Number(data.history_bought_cost ?? 0), soldIncome = Number(data.history_sold_income ?? 0);
   const grossPnlUsd = Number.isFinite(buyCost) && Number.isFinite(soldIncome) ? soldIncome - buyCost : null;
   write('live-trade-ledger.jsonl', {
@@ -475,13 +504,19 @@ async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeU
   console.log(result.ok ? '[browser-buy-submitted]' : '[browser-buy-not-submitted]', signal.mint, result);
   if (result.ok && orderSession.fromAddress) {
     void (async () => {
-      await delay(2500);
-      const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
-      if (wsData) recordWalletStatSnapshot(wsData, 'POST_BUY');
+      for (const delayMs of [1200, 1500, 2000]) {
+        await delay(delayMs);
+        const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+        if (wsData) {
+          recordWalletStatSnapshot(wsData, 'POST_BUY');
+          if (typeof wsData.balance === 'string' && wsData.balance !== '0' && Number(wsData.balance) > 0) {
+            break;
+          }
+        }
+      }
     })();
   }
 }
-const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number }>();
 const browserSellDeferredBeforeBuy = new Set<string>();
 async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
   if (!browserTradingEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
@@ -495,8 +530,53 @@ async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, token
     write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CAPTURED_ORDER_SESSION' });
     return;
   }
+
+  // 1. Sync real token balance from walletstat before requesting sell route
+  const cachedBalance = liveTokenBalances.get(signal.mint);
+  if (cachedBalance && cachedBalance.balanceBaseUnits !== '0') {
+    position.inputAmount = cachedBalance.balanceBaseUnits;
+    position.tokenDecimals = cachedBalance.decimals;
+  }
+
+  try {
+    const freshWs = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+    if (freshWs) {
+      recordWalletStatSnapshot(freshWs, 'PRE_SELL');
+      if (typeof freshWs.balance === 'string' && freshWs.balance !== '0' && Number(freshWs.balance) > 0) {
+        const dec = typeof freshWs.decimals === 'number' ? freshWs.decimals : position.tokenDecimals;
+        const realBaseUnits = parseBalanceToBaseUnits(freshWs.balance, dec);
+        if (realBaseUnits !== '0') {
+          position.inputAmount = realBaseUnits;
+          position.tokenDecimals = dec;
+        }
+      }
+    }
+  } catch { /* Fallback to cached balance or initial estimate */ }
+
   const solPriceUsd = await currentSolUsd(page);
   let result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
+
+  // 2. Auto-retry if rejected due to token balance (40003701)
+  if (!result.ok && (result.code === 40003701 || String(result.message).toLowerCase().includes('balance is less than available balance'))) {
+    console.warn(`[browser-sell-balance-retry] Sinyal sell ${signal.mint} ditolak karena selisih saldo (${result.message}). Mengambil saldo riil ulang...`);
+    await delay(1200);
+    const retryWs = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+    if (retryWs) {
+      recordWalletStatSnapshot(retryWs, 'RETRY_SELL');
+      if (typeof retryWs.balance === 'string' && retryWs.balance !== '0' && Number(retryWs.balance) > 0) {
+        const dec = typeof retryWs.decimals === 'number' ? retryWs.decimals : position.tokenDecimals;
+        const correctedAmount = parseBalanceToBaseUnits(retryWs.balance, dec);
+        if (correctedAmount && correctedAmount !== '0' && correctedAmount !== position.inputAmount) {
+          console.warn(`[browser-sell-balance-retry] Mencoba sell ulang dengan saldo riil terkonfirmasi: ${retryWs.balance} (${correctedAmount} base units)`);
+          position.inputAmount = correctedAmount;
+          position.tokenDecimals = dec;
+          result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
+        }
+      }
+    }
+  }
+
+  // 3. Auto-refresh auth on expiration (401/403)
   if (isExpiredBrowserAuthorization(result)) {
     write('events.jsonl', { type: 'BROWSER_AUTH_REFRESHING', side: 'SELL', mint: signal.mint, observedAt: Date.now(), reason: 'TOKEN_EXPIRED' });
     if (await refreshBrowserAuthorization(page, orderSession.authorization)) {
@@ -504,7 +584,11 @@ async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, token
       if (refreshedSession) result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
     }
   }
-  if (result.ok) liveBrowserPositions.delete(signal.mint);
+
+  if (result.ok) {
+    liveBrowserPositions.delete(signal.mint);
+    liveTokenBalances.delete(signal.mint);
+  }
   write('events.jsonl', { type: result.ok ? 'BROWSER_SELL_SUBMITTED' : 'BROWSER_SELL_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, inputAmount: position.inputAmount, result });
   write('live-trade-ledger.jsonl', {
     type: 'LIVE_ORDER_SUBMITTED', side: 'SELL', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, observedAt: Date.now(),
