@@ -20,24 +20,91 @@ const liveLedger = readLines('live-trade-ledger.jsonl');
 const followupRows = readLines('order-followup-responses.jsonl');
 
 const liveOrdersByMint = new Map();
+const liveErrors = [];
+
 for (const row of liveLedger) {
   if (row.type === 'LIVE_ORDER_SUBMITTED' && row.mint) {
     const cur = liveOrdersByMint.get(row.mint) ?? {};
     if (row.side === 'BUY') cur.buy = row;
     if (row.side === 'SELL') cur.sell = row;
     liveOrdersByMint.set(row.mint, cur);
+    if (row.ok === false) {
+      liveErrors.push({
+        observedAt: row.observedAt,
+        side: row.side,
+        mint: row.mint,
+        status: row.status ?? null,
+        code: row.code ?? null,
+        message: row.message || 'Order ditolak oleh GMGN API',
+      });
+    }
   }
 }
 for (const row of events) {
   if (row.type === 'BROWSER_BUY_SUBMITTED' && row.mint) {
     const cur = liveOrdersByMint.get(row.mint) ?? {};
-    if (!cur.buy) cur.buy = { observedAt: row.observedAt, orderId: row.result?.orderId, hash: row.result?.hash, acquiredAmount: row.result?.acquiredAmount, stakeUsd: row.stakeUsd, ok: row.result?.ok };
+    if (!cur.buy) cur.buy = { observedAt: row.observedAt, orderId: row.result?.orderId, hash: row.result?.hash, acquiredAmount: row.result?.acquiredAmount, stakeUsd: row.stakeUsd, ok: row.result?.ok ?? true };
     liveOrdersByMint.set(row.mint, cur);
+  }
+  if (row.type === 'BROWSER_BUY_NOT_SUBMITTED' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (!cur.buy || !cur.buy.hash) {
+      cur.buy = { observedAt: row.observedAt, ok: false, status: row.result?.status, code: row.result?.code, message: row.result?.message ?? row.result?.msg, stakeUsd: row.stakeUsd };
+    }
+    liveOrdersByMint.set(row.mint, cur);
+    if (!liveErrors.some(e => e.mint === row.mint && e.side === 'BUY' && Math.abs(e.observedAt - row.observedAt) < 2000)) {
+      liveErrors.push({
+        observedAt: row.observedAt,
+        side: 'BUY',
+        mint: row.mint,
+        status: row.result?.status ?? null,
+        code: row.result?.code ?? null,
+        message: row.result?.message ?? row.result?.msg ?? 'Submit BUY ditolak oleh GMGN API',
+      });
+    }
   }
   if (row.type === 'BROWSER_SELL_SUBMITTED' && row.mint) {
     const cur = liveOrdersByMint.get(row.mint) ?? {};
-    if (!cur.sell) cur.sell = { observedAt: row.observedAt, orderId: row.result?.orderId, hash: row.result?.hash, inputAmount: row.inputAmount, ok: row.result?.ok };
+    if (!cur.sell) cur.sell = { observedAt: row.observedAt, orderId: row.result?.orderId, hash: row.result?.hash, inputAmount: row.inputAmount, ok: row.result?.ok ?? true };
     liveOrdersByMint.set(row.mint, cur);
+  }
+  if (row.type === 'BROWSER_SELL_NOT_SUBMITTED' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (!cur.sell || !cur.sell.hash) {
+      cur.sell = { observedAt: row.observedAt, ok: false, status: row.result?.status, code: row.result?.code, message: row.result?.message ?? row.result?.msg, inputAmount: row.inputAmount };
+    }
+    liveOrdersByMint.set(row.mint, cur);
+    if (!liveErrors.some(e => e.mint === row.mint && e.side === 'SELL' && Math.abs(e.observedAt - row.observedAt) < 2000)) {
+      liveErrors.push({
+        observedAt: row.observedAt,
+        side: 'SELL',
+        mint: row.mint,
+        status: row.result?.status ?? null,
+        code: row.result?.code ?? null,
+        message: row.result?.message ?? row.result?.msg ?? 'Submit SELL ditolak oleh GMGN API',
+      });
+    }
+  }
+  if (row.type === 'BROWSER_BUY_ERROR' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (!cur.buy) cur.buy = { observedAt: row.observedAt, ok: false, status: null, code: 'EXEC_ERROR', message: row.message };
+    liveOrdersByMint.set(row.mint, cur);
+    liveErrors.push({ observedAt: row.observedAt, side: 'BUY', mint: row.mint, status: null, code: 'EXEC_ERROR', message: row.message ?? 'Browser execution error saat BUY' });
+  }
+  if (row.type === 'BROWSER_SELL_ERROR' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (!cur.sell) cur.sell = { observedAt: row.observedAt, ok: false, status: null, code: 'EXEC_ERROR', message: row.message };
+    liveOrdersByMint.set(row.mint, cur);
+    liveErrors.push({ observedAt: row.observedAt, side: 'SELL', mint: row.mint, status: null, code: 'EXEC_ERROR', message: row.message ?? 'Browser execution error saat SELL' });
+  }
+  if (row.type === 'BROWSER_BUY_SKIPPED' && row.mint) {
+    liveErrors.push({ observedAt: row.observedAt, side: 'BUY', mint: row.mint, status: null, code: 'SKIPPED', message: row.reason === 'NO_CAPTURED_ORDER_SESSION' ? 'Sesi wallet / auth belum tertangkap pada profil browser' : (row.reason ?? 'Order dilewati') });
+  }
+  if (row.type === 'BROWSER_SELL_SKIPPED' && row.mint) {
+    liveErrors.push({ observedAt: row.observedAt, side: 'SELL', mint: row.mint, status: null, code: 'SKIPPED', message: row.reason === 'NO_CAPTURED_ORDER_SESSION' ? 'Sesi wallet / auth belum tertangkap pada profil browser' : (row.reason ?? 'Order dilewati') });
+  }
+  if (row.type === 'BROWSER_AUTH_REFRESHING') {
+    liveErrors.push({ observedAt: row.observedAt, side: row.side ?? 'AUTH', mint: row.mint, status: 401, code: 'TOKEN_EXPIRED', message: 'Sesi token GMGN kedaluwarsa (401/403). Tab browser dimuat ulang otomatis untuk perbarui sesi.' });
   }
 }
 
@@ -204,23 +271,40 @@ const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').sli
 
   if (liveBuy || ws) {
     const buyTimeStr = liveBuy?.observedAt ? `${timeExact(liveBuy.observedAt)} WIB<br>` : '';
-    const buyCost = ws?.historyBoughtCostUsd != null ? usd(ws.historyBoughtCostUsd) : (liveBuy?.stakeUsd ? usd(liveBuy.stakeUsd) : '—');
-    const buyAmount = ws?.historyBoughtAmount ? `<br><small class="muted">Vol: ${f(ws.historyBoughtAmount, 2)} unit</small>` : '';
-    const buyPrice = ws?.historyAvgCost ? `<br><small>Harga: ${usd(ws.historyAvgCost)}</small>` : '';
-    const buyTx = liveBuy?.hash ? `<br><a class="mono tx-link" href="https://solscan.io/tx/${esc(liveBuy.hash)}" target="_blank" rel="noopener">Tx: ${esc(liveBuy.hash.slice(0, 8))}…</a>` : (liveBuy?.orderId ? `<br><span class="mono">Order: ${esc(liveBuy.orderId.slice(0, 10))}…</span>` : '');
-    liveBuyCell = `${buyTimeStr}<b>Cost: ${buyCost}</b>${buyAmount}${buyPrice}${buyTx}`;
+    if (liveBuy && liveBuy.ok === false) {
+      const statusBadge = liveBuy.status ? ` <span style="background:#5c1d1d;color:#ff9999;padding:1px 5px;border-radius:4px;font-size:11px">HTTP ${esc(liveBuy.status)}</span>` : '';
+      const codeBadge = liveBuy.code ? `<br><small class="mono" style="color:#ffb3ba">Kode: ${esc(liveBuy.code)}</small>` : '';
+      const msgText = liveBuy.message ? `<br><small class="down" style="font-weight:600">Alasan: ${esc(liveBuy.message)}</small>` : '';
+      liveBuyCell = `${buyTimeStr}<b class="down">❌ Submit BUY Gagal${statusBadge}</b>${codeBadge}${msgText}`;
+    } else {
+      const buyCost = ws?.historyBoughtCostUsd != null ? usd(ws.historyBoughtCostUsd) : (liveBuy?.stakeUsd ? usd(liveBuy.stakeUsd) : '—');
+      const buyAmount = ws?.historyBoughtAmount ? `<br><small class="muted">Vol: ${f(ws.historyBoughtAmount, 2)} unit</small>` : '';
+      const buyPrice = ws?.historyAvgCost ? `<br><small>Harga: ${usd(ws.historyAvgCost)}</small>` : '';
+      const buyTx = liveBuy?.hash ? `<br><a class="mono tx-link" href="https://solscan.io/tx/${esc(liveBuy.hash)}" target="_blank" rel="noopener">Tx: ${esc(liveBuy.hash.slice(0, 8))}…</a>` : (liveBuy?.orderId ? `<br><span class="mono">Order: ${esc(liveBuy.orderId.slice(0, 10))}…</span>` : '');
+      liveBuyCell = `${buyTimeStr}<b>Cost: ${buyCost}</b>${buyAmount}${buyPrice}${buyTx}`;
+    }
 
-    if (liveSell || (ws && Number(ws.historySoldIncomeUsd) > 0)) {
+    if (liveSell && liveSell.ok === false) {
+      const sellTimeStr = liveSell?.observedAt ? `${timeExact(liveSell.observedAt)} WIB<br>` : '';
+      const statusBadge = liveSell.status ? ` <span style="background:#5c1d1d;color:#ff9999;padding:1px 5px;border-radius:4px;font-size:11px">HTTP ${esc(liveSell.status)}</span>` : '';
+      const codeBadge = liveSell.code ? `<br><small class="mono" style="color:#ffb3ba">Kode: ${esc(liveSell.code)}</small>` : '';
+      const msgText = liveSell.message ? `<br><small class="down" style="font-weight:600">Alasan: ${esc(liveSell.message)}</small>` : '';
+      liveSellCell = `${sellTimeStr}<b class="down">❌ Submit SELL Gagal${statusBadge}</b>${codeBadge}${msgText}`;
+    } else if (liveSell || (ws && Number(ws.historySoldIncomeUsd) > 0)) {
       const sellTimeStr = liveSell?.observedAt ? `${timeExact(liveSell.observedAt)} WIB<br>` : '';
       const soldIncome = ws?.historySoldIncomeUsd != null ? usd(ws.historySoldIncomeUsd) : '—';
       const sellPrice = ws?.avgSold ? `<br><small>Harga: ${usd(ws.avgSold)}</small>` : '';
       const sellTx = liveSell?.hash ? `<br><a class="mono tx-link" href="https://solscan.io/tx/${esc(liveSell.hash)}" target="_blank" rel="noopener">Tx: ${esc(liveSell.hash.slice(0, 8))}…</a>` : (liveSell?.orderId ? `<br><span class="mono">Order: ${esc(liveSell.orderId.slice(0, 10))}…</span>` : '');
       liveSellCell = `${sellTimeStr}<b>Income: ${soldIncome}</b>${sellPrice}${sellTx}`;
+    } else if (liveBuy && liveBuy.ok === false) {
+      liveSellCell = '<span class="muted">Batal (Buy gagal)</span>';
     } else {
       liveSellCell = '<span class="watch">Menunggu sell riil</span>';
     }
 
-    if (ws?.grossPnlUsd != null) {
+    if (liveBuy && liveBuy.ok === false) {
+      liveResultCell = '<span class="down" style="font-weight:700">Order tidak terisi</span>';
+    } else if (ws?.grossPnlUsd != null) {
       const livePnlClass = ws.grossPnlUsd > 0 ? 'up' : ws.grossPnlUsd < 0 ? 'down' : '';
       const balNote = ws.balance && ws.balance !== '0' ? `<br><small class="watch">Sisa saldo: ${f(ws.balance, 0)}</small>` : '';
       liveResultCell = `<b class="${livePnlClass}">${usd(ws.grossPnlUsd)}</b><br><span class="${livePnlClass}">${pct(ws.grossPnlPercent)}</span>${balNote}`;
@@ -355,16 +439,61 @@ const totalLivePnl = liveRealizedTrades.reduce((acc, w) => acc + (w.grossPnlUsd 
 const liveProfitCount = liveRealizedTrades.filter(w => (w.grossPnlUsd ?? 0) > 0).length;
 const liveLossCount = liveRealizedTrades.filter(w => (w.grossPnlUsd ?? 0) < 0).length;
 
-const gridCardsHtml = singleLaneMode && (liveOrdersByMint.size > 0 || liveRealizedTrades.length > 0)
+const gridCardsHtml = singleLaneMode
   ? `<div class="grid">
       <div class="card"><div class="label">Total Posisi</div><div class="value">${buys.length} <small style="font-size:14px;color:#9cafc5">(${sells.length} sell)</small></div></div>
       <div class="card"><div class="label">Masih Dipantau</div><div class="value watch">${open}</div></div>
       <div class="card"><div class="label">P/L Sinyal Simulasi</div><div class="value ${totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : ''}">${usd(totalPnl)}</div></div>
       <div class="card"><div class="label">P/L Riil Walletstat</div><div class="value ${totalLivePnl > 0 ? 'up' : totalLivePnl < 0 ? 'down' : ''}">${liveRealizedTrades.length ? usd(totalLivePnl) : '—'}</div></div>
       <div class="card"><div class="label">Selisih Real vs Sim</div><div class="value ${(totalLivePnl - totalPnl) >= 0 ? 'up' : 'down'}">${liveRealizedTrades.length ? usd(totalLivePnl - totalPnl) : '—'}</div></div>
-      <div class="card"><div class="label">Win Rate (Sim vs Riil)</div><div class="value">${sells.filter(r => r.pnlUsd > 0).length}/${sells.length} <small style="font-size:13px;color:#9cafc5">vs ${liveProfitCount}/${liveRealizedTrades.length}</small></div></div>
+      <div class="card"><div class="label">Kendala Submit Live</div><div class="value ${liveErrors.length > 0 ? 'down' : 'up'}">${liveErrors.length > 0 ? `${liveErrors.length} Error` : 'Aman (0)'}</div></div>
     </div>`
   : `<div class="grid"><div class="card"><div class="label">${allLanes ? 'Buy seluruh lane' : 'Simulasi buy'}</div><div class="value">${buys.length}</div></div><div class="card"><div class="label">${allLanes ? 'Sell seluruh lane' : 'Sudah sell'}</div><div class="value">${sells.length}</div></div><div class="card"><div class="label">${strategy?.strategy === 'pump-band' ? 'Harga keluar tak segar' : 'Masih dipantau'}</div><div class="value watch">${strategy?.strategy === 'pump-band' ? unpricedByMint.size : open}</div></div><div class="card"><div class="label">${allLanes ? 'Keuntungan seluruh lane' : 'Total keuntungan'}</div><div class="value up">${usd(profit)}</div></div><div class="card"><div class="label">${allLanes ? 'Kerugian seluruh lane' : 'Total kerugian'}</div><div class="value down">${usd(loss)}</div></div><div class="card"><div class="label">${allLanes ? 'P/L seluruh lane' : 'P/L total'}</div><div class="value ${totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : ''}">${usd(totalPnl)}</div></div></div>`;
+
+const liveErrorRows = liveErrors.slice().reverse().map(err => {
+  const screen = screened.get(err.mint);
+  const symbol = screen?.metadata?.symbol ?? (err.mint ? err.mint.slice(0, 8) : 'Umum');
+  const statusBadge = err.status ? `<span style="background:#5c1d1d;color:#ff9999;padding:2px 7px;border-radius:4px;font-weight:700;font-size:12px">HTTP ${esc(err.status)}</span>` : '<span class="muted">—</span>';
+  const codeBadge = err.code ? ` <code style="color:#ffb3ba;font-size:11px">${esc(err.code)}</code>` : '';
+  const sideBadge = err.side === 'BUY' ? '<b class="up">BUY</b>' : (err.side === 'SELL' ? '<b class="down">SELL</b>' : '<b>AUTH</b>');
+  const tokenCell = err.mint ? `<button class="token" data-mint="${esc(err.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono" style="font-size:11px">${esc(err.mint.slice(0, 10))}…</span></button>` : '—';
+  return `<tr>
+    <td style="white-space:nowrap">${timeExact(err.observedAt)} WIB</td>
+    <td>${sideBadge}</td>
+    <td>${tokenCell}</td>
+    <td>${statusBadge}${codeBadge}</td>
+    <td style="color:#ffc0c0">${esc(err.message)}</td>
+  </tr>`;
+}).join('');
+
+const liveErrorSectionHtml = liveErrors.length > 0
+  ? `<div style="background:#261215;border:1px solid #792828;border-left:4px solid #ff4d4f;border-radius:10px;padding:16px 20px;margin:20px 0">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:22px">⚠️</span>
+        <div>
+          <strong style="color:#ff7875;font-size:16px">Riwayat Kendala / Error Submit Live (${liveErrors.length})</strong>
+          <div class="muted" style="font-size:12px">Terdeteksi kendala saat submit order ke GMGN API (misal: HTTP 403 Forbidden, 401 token expired, slippage, dsb).</div>
+        </div>
+      </div>
+      <div class="scroll">
+        <table style="min-width:800px;font-size:13px">
+          <thead>
+            <tr>
+              <th style="background:#3a181c;padding:8px 10px">Waktu</th>
+              <th style="background:#3a181c;padding:8px 10px">Sisi</th>
+              <th style="background:#3a181c;padding:8px 10px">Token</th>
+              <th style="background:#3a181c;padding:8px 10px">Status / Kode</th>
+              <th style="background:#3a181c;padding:8px 10px">Detail Pesan GMGN API</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${liveErrorRows}
+          </tbody>
+        </table>
+      </div>
+    </div>`
+  : '';
+
 const pumpBandNote = strategy?.strategy === 'pump-band'
   ? `Token fresh dalam market cap $3.000–$10.000 mendapat slot detail kosong. Buy simulasi $${f(manifest?.simulation?.stakeUsd ?? 0.25, 2)} dilakukan pada tick transaksi pu baru pertama. Sell simulasi terjadi saat harga turun 20% dari puncak, atau setelah 20 detik jika harga terakhir masih berumur paling lama 5 detik. Fee dan slippage belum dihitung. ${unpricedByMint.size} sesi selesai tanpa harga jual segar sehingga P/L-nya belum dinilai.`
   : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.${strategy?.strategy === 'momentum-v2' && !singleLaneMode ? ' Kontrol V2 dan R5-band memakai data socket yang sama, tetapi posisi serta P/L dicatat per lane. Jam sinyal, trade pasar, WebSocket, dan order simulasi dicatat terpisah sampai milidetik. Target order simulasi 0,9 detik, batas 1 detik setelah sinyal. P/L tetap memakai tick pemicu; belum ada permintaan GMGN, fill, atau harga eksekusi nyata.' : ''}`;
@@ -375,7 +504,7 @@ const title = `Laporan simulasi — ${basename(folder)}`;
 const tagText = (singleLaneMode && (liveOrdersByMint.size > 0 || liveRealizedTrades.length > 0))
   ? 'GMGN LIVE TRADE & SIMULATION COMPARISON'
   : 'GMGN SOCKET · PAPER SIMULATION · BUKAN ORDER NYATA';
-let html = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#09111d;color:#e8eff8;font:15px/1.5 system-ui,Segoe UI,sans-serif}main{max-width:1500px;margin:auto;padding:30px}.tag{color:#6be1b2;font-weight:700;letter-spacing:1px;font-size:12px}.muted{color:#9cafc5}.note{background:#19273a;border-left:3px solid #7fb8ff;padding:14px 17px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card{padding:17px;background:#111e2e;border:1px solid #263950;border-radius:12px}.label{color:#9cafc5;font-size:13px}.value{font-size:23px;font-weight:700;margin-top:4px}.up{color:#62dfa8}.down{color:#ff9299}.watch{color:#ffce76;font-weight:700}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #263950}th{color:#a9c1df;background:#0d1827}.mono{font:11px ui-monospace,Consolas,monospace;color:#a9c1df;word-break:break-all}.tx-link{color:#58b4ff;text-decoration:none}.tx-link:hover{text-decoration:underline}.rule{background:#111e2e;border:1px solid #263950;border-radius:10px;padding:14px;margin:10px 0}.token{padding:0;border:0;background:transparent;color:#e8eff8;text-align:left;cursor:pointer}.token:hover b,.token:hover small{color:#6be1b2}.token small{display:block;color:#7fb8ff;margin-top:4px}.comparison-table th{padding:10px 12px;font-size:13px}.comparison-table td{padding:11px 12px;font-size:13px;border-right:1px solid #1a293c}.comparison-table tr:hover td{background:#132235}.modal{position:fixed;inset:0;z-index:10;background:#000b;display:none;place-items:center;padding:20px}.modal.open{display:grid}.dialog{width:min(1400px,96vw);height:min(860px,92vh);background:#111e2e;border:1px solid #426381;border-radius:14px;display:grid;grid-template-rows:auto 1fr;overflow:hidden;box-shadow:0 24px 80px #000}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#19273a}.modal-head strong{margin-right:auto}.modal-head a,.modal-head button{border:1px solid #49739a;border-radius:7px;background:#0e1a29;color:#e8eff8;padding:7px 10px;text-decoration:none;cursor:pointer}.modal iframe{display:none}.preview{overflow:auto;padding:24px}.preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview .card{min-height:62px}.preview h3{margin:20px 0 8px}.preview a{color:#7fb8ff}.tl-table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}.tl-table th{background:#0d1827;color:#a9c1df;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1}.tl-table td{padding:6px 10px;border-bottom:1px solid #1e2e40;vertical-align:top}.tl-table tr:hover td{background:#192a3d}.tl-scroll{max-height:280px;overflow:auto;border:1px solid #263950;border-radius:8px;margin-top:6px}.hbar{display:flex;align-items:center;gap:5px;font-size:12px;margin:2px 0}.hbar-fill{height:8px;border-radius:4px;background:#5b8ecc;flex-shrink:0}.hbar-fill.dev{background:#f5a623}.hbar-pct{color:#9cafc5;min-width:42px;text-align:right}.hbar-addr{font:10px ui-monospace,Consolas,monospace;color:#7d9bb7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}.delta-up{color:#62dfa8}.delta-down{color:#ff9299}.block-reason{font-size:11px;color:#ffce76;background:#1e2c10;border-radius:3px;padding:1px 5px;margin:1px 2px;display:inline-block}#refresh-bar{position:fixed;top:0;left:0;right:0;height:3px;background:#1e3a5a;z-index:20}#refresh-fill{height:100%;width:0;background:#6be1b2;transition:width 10s linear}@media(max-width:800px){main{padding:16px}.grid{grid-template-columns:1fr 1fr}.modal{padding:6px}.dialog{width:100%;height:96vh}.preview-grid{grid-template-columns:1fr 1fr}}</style><div id="refresh-bar"><div id="refresh-fill"></div></div><main><div class="tag">${tagText}</div><h1>${title}</h1><p class="muted">Laporan diperbarui setiap 10 detik. Data terakhir dibaca ${time(Date.now())} WIB; run mulai ${time(Date.parse(manifest?.startedAt ?? ''))} WIB.</p><div class="note">${pumpBandNote}</div>${gridCardsHtml}${transactionsHtml}${pumpBandRulesHtml}</main><div class="modal" id="tokenModal" role="dialog" aria-modal="true"><div class="dialog"><div class="modal-head"><strong id="modalTitle">Detail token</strong><a id="openGmgn" target="_blank" rel="noopener">Buka GMGN penuh</a><button id="closeModal">Tutup</button></div><section class="preview" id="localPreview"></section></div></div><script>
+let html = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#09111d;color:#e8eff8;font:15px/1.5 system-ui,Segoe UI,sans-serif}main{max-width:1500px;margin:auto;padding:30px}.tag{color:#6be1b2;font-weight:700;letter-spacing:1px;font-size:12px}.muted{color:#9cafc5}.note{background:#19273a;border-left:3px solid #7fb8ff;padding:14px 17px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card{padding:17px;background:#111e2e;border:1px solid #263950;border-radius:12px}.label{color:#9cafc5;font-size:13px}.value{font-size:23px;font-weight:700;margin-top:4px}.up{color:#62dfa8}.down{color:#ff9299}.watch{color:#ffce76;font-weight:700}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #263950}th{color:#a9c1df;background:#0d1827}.mono{font:11px ui-monospace,Consolas,monospace;color:#a9c1df;word-break:break-all}.tx-link{color:#58b4ff;text-decoration:none}.tx-link:hover{text-decoration:underline}.rule{background:#111e2e;border:1px solid #263950;border-radius:10px;padding:14px;margin:10px 0}.token{padding:0;border:0;background:transparent;color:#e8eff8;text-align:left;cursor:pointer}.token:hover b,.token:hover small{color:#6be1b2}.token small{display:block;color:#7fb8ff;margin-top:4px}.comparison-table th{padding:10px 12px;font-size:13px}.comparison-table td{padding:11px 12px;font-size:13px;border-right:1px solid #1a293c}.comparison-table tr:hover td{background:#132235}.modal{position:fixed;inset:0;z-index:10;background:#000b;display:none;place-items:center;padding:20px}.modal.open{display:grid}.dialog{width:min(1400px,96vw);height:min(860px,92vh);background:#111e2e;border:1px solid #426381;border-radius:14px;display:grid;grid-template-rows:auto 1fr;overflow:hidden;box-shadow:0 24px 80px #000}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#19273a}.modal-head strong{margin-right:auto}.modal-head a,.modal-head button{border:1px solid #49739a;border-radius:7px;background:#0e1a29;color:#e8eff8;padding:7px 10px;text-decoration:none;cursor:pointer}.modal iframe{display:none}.preview{overflow:auto;padding:24px}.preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview .card{min-height:62px}.preview h3{margin:20px 0 8px}.preview a{color:#7fb8ff}.tl-table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}.tl-table th{background:#0d1827;color:#a9c1df;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1}.tl-table td{padding:6px 10px;border-bottom:1px solid #1e2e40;vertical-align:top}.tl-table tr:hover td{background:#192a3d}.tl-scroll{max-height:280px;overflow:auto;border:1px solid #263950;border-radius:8px;margin-top:6px}.hbar{display:flex;align-items:center;gap:5px;font-size:12px;margin:2px 0}.hbar-fill{height:8px;border-radius:4px;background:#5b8ecc;flex-shrink:0}.hbar-fill.dev{background:#f5a623}.hbar-pct{color:#9cafc5;min-width:42px;text-align:right}.hbar-addr{font:10px ui-monospace,Consolas,monospace;color:#7d9bb7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}.delta-up{color:#62dfa8}.delta-down{color:#ff9299}.block-reason{font-size:11px;color:#ffce76;background:#1e2c10;border-radius:3px;padding:1px 5px;margin:1px 2px;display:inline-block}#refresh-bar{position:fixed;top:0;left:0;right:0;height:3px;background:#1e3a5a;z-index:20}#refresh-fill{height:100%;width:0;background:#6be1b2;transition:width 10s linear}@media(max-width:800px){main{padding:16px}.grid{grid-template-columns:1fr 1fr}.modal{padding:6px}.dialog{width:100%;height:96vh}.preview-grid{grid-template-columns:1fr 1fr}}</style><div id="refresh-bar"><div id="refresh-fill"></div></div><main><div class="tag">${tagText}</div><h1>${title}</h1><p class="muted">Laporan diperbarui setiap 10 detik. Data terakhir dibaca ${time(Date.now())} WIB; run mulai ${time(Date.parse(manifest?.startedAt ?? ''))} WIB.</p><div class="note">${pumpBandNote}</div>${gridCardsHtml}${liveErrorSectionHtml}${transactionsHtml}${pumpBandRulesHtml}</main><div class="modal" id="tokenModal" role="dialog" aria-modal="true"><div class="dialog"><div class="modal-head"><strong id="modalTitle">Detail token</strong><a id="openGmgn" target="_blank" rel="noopener">Buka GMGN penuh</a><button id="closeModal">Tutup</button></div><section class="preview" id="localPreview"></section></div></div><script>
 const modal=document.querySelector('#tokenModal'),titleEl=document.querySelector('#modalTitle'),openLink=document.querySelector('#openGmgn'),preview=document.querySelector('#localPreview');
 let _activeMint=null;
 function closeModal(){modal.classList.remove('open')}
