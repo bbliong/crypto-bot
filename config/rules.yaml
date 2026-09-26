@@ -21,7 +21,7 @@ workerTimeoutMs: 12000
 activeMonitorSeconds: 300
 # Jumlah modal beli per transaksi dalam USD (contoh: 0.25, 1.0, 5.0) atau gunakan simulationStakeSol (contoh: 0.005)
 # Nilai ini juga bisa dioverride via CLI: --stake 1 atau --sol 0.005
-simulationStakeUsd: 1.0
+simulationStakeUsd: 0.25
 # Take profit instan saat harga stagnan/tidak naik selama 10 detik dan sudah untung >= +3%
 profitStagnationPercent: 3
 profitStagnationSeconds: 10

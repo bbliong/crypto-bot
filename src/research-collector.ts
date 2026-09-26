@@ -37,6 +37,8 @@ const { values } = parseArgs({ options: {
   simulateOrder: { type: 'boolean', default: false },
   browserBuyPrompt: { type: 'boolean', default: false },
   browserPromptTestSignal: { type: 'boolean', default: false },
+  browserAutoTrade: { type: 'boolean', default: false },
+  browserBuyAuto: { type: 'boolean', default: false },
   orderOutcomeCapture: { type: 'boolean', default: false },
   controlOnly: { type: 'boolean', default: false },
   strategy: { type: 'string', default: 'momentum-v2' },
@@ -46,6 +48,13 @@ const { values } = parseArgs({ options: {
 const loadedConfig = loadConfig(values.config);
 if (!['legacy', 'flow-3', 'momentum-v2', 'pump-band'].includes(values.strategy!)) throw new Error('Unknown research strategy');
 const momentumV2 = values.strategy === 'momentum-v2';
+const browserAutoTrade = Boolean(values.browserAutoTrade || values.browserBuyAuto);
+const browserTradingEnabled = values.browserBuyPrompt || browserAutoTrade;
+if (browserAutoTrade && !momentumV2) throw new Error('--browserAutoTrade is only supported with --strategy momentum-v2.');
+if (browserAutoTrade) {
+  values.orderOutcomeCapture = true;
+  values.controlOnly = true;
+}
 const r5BandEnabled = momentumV2 && !values.controlOnly;
 const flow3 = values.strategy === 'flow-3';
 const pumpBand = values.strategy === 'pump-band';
@@ -217,8 +226,12 @@ function scheduleSimulatedOrder(signal: PaperSignal, stakeUsd: number): void {
   });
 }
 let liveBrowserAuthorization: string | null = null;
+let liveBrowserWalletAddress: string | null = null;
 let orderOutcomeCaptureUntil = 0;
 function latestCapturedOrderSession(): { fromAddress: string; authorization: string } | null {
+  if (liveBrowserWalletAddress && (liveBrowserAuthorization || browserAutoTrade)) {
+    return { fromAddress: liveBrowserWalletAddress, authorization: liveBrowserAuthorization ?? '' };
+  }
   try {
     const root = join(process.cwd(), 'research');
     for (const entry of readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
@@ -240,6 +253,31 @@ function latestCapturedOrderSession(): { fromAddress: string; authorization: str
     }
   } catch { /* A first-time browser session has no captured order yet. */ }
   return null;
+}
+async function fetchWalletStat(page: Page, walletAddress: string, mint: string): Promise<Record<string, unknown> | null> {
+  return page.evaluate(async ({ walletAddress, mint }) => {
+    try {
+      const res = await fetch(`/defi/quotation/v1/smartmoney/sol/walletstat/${walletAddress}?token_address=${encodeURIComponent(mint)}`, { credentials: 'include' });
+      if (!res.ok) return null;
+      const body = await res.json().catch(() => null);
+      return (body?.data as Record<string, unknown>) ?? null;
+    } catch {
+      return null;
+    }
+  }, { walletAddress, mint }).catch(() => null);
+}
+function recordWalletStatSnapshot(data: Record<string, unknown>, stage: 'PRE_BUY' | 'POST_BUY' | 'POST_SELL' | 'PASSIVE_CAPTURE' = 'POST_BUY') {
+  const buyCost = Number(data.history_bought_cost ?? 0), soldIncome = Number(data.history_sold_income ?? 0);
+  const grossPnlUsd = Number.isFinite(buyCost) && Number.isFinite(soldIncome) ? soldIncome - buyCost : null;
+  write('live-trade-ledger.jsonl', {
+    type: 'GMGN_WALLETSTAT_SNAPSHOT', stage, observedAt: Date.now(), token: data.token_address ?? null, symbol: data.symbol ?? null,
+    balance: data.balance ?? null, historyBoughtCostUsd: data.history_bought_cost ?? null, historyBoughtAmount: data.history_bought_amount ?? null,
+    historyAvgCost: data.history_avg_cost ?? null, historySoldIncomeUsd: data.history_sold_income ?? null, avgSold: data.avg_sold ?? null,
+    grossPnlUsd, grossPnlPercent: buyCost > 0 && grossPnlUsd !== null ? grossPnlUsd / buyCost * 100 : null,
+    reportedRealizedProfitUsd: data.realized_profit ?? null, reportedRealizedPnlPercent: data.realized_profit_pnl ?? null,
+    reportedGasUsd: data.gas_usd ?? null, priceUsd: data.price ?? null, trades: data.trades ?? null,
+    note: 'Wallet-level response. Gross P/L is this response history_sold_income minus history_bought_cost; GMGN realized fields may include older activity for the same token.',
+  });
 }
 function isExpiredBrowserAuthorization(result: unknown): boolean {
   const row = result as { status?: unknown; code?: unknown; message?: unknown } | null;
@@ -339,13 +377,15 @@ function writeLiveRouteLedger(side: 'BUY' | 'SELL', routeData: any, input: { min
     note: 'Route quote before submit. Fee values are estimates/configuration; final network fee must be read from the confirmed Solana transaction.',
   });
 }
-async function submitBrowserBuy(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputLamports: string; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }) {
+async function submitBrowserBuy(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputLamports: string; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }, skipPrompt = false) {
   const route = await browserRoute(page, input);
   const routeData = route.body?.data;
   if (route.status !== 200 || route.body?.code !== 0 || !routeData?.quote) return { ok: false, stage: 'route', status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null };
-  write('events.jsonl', { type: 'BROWSER_BUY_PROMPT_OPENING', mint: input.mint, observedAt: Date.now(), pageUrl: page.url(), stakeUsd: Number(input.inputLamports) / 1_000_000_000 * input.solPriceUsd });
-  const approved = await showBrowserOrderPrompt(page, { side: 'BUY', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Nominal: $' + (Number(input.inputLamports) / 1_000_000_000 * input.solPriceUsd).toFixed(2), expectedOut: routeData.quote.outAmount ?? null });
-  if (!approved) return { ok: false, stage: 'operator_declined' };
+  if (!skipPrompt) {
+    write('events.jsonl', { type: 'BROWSER_BUY_PROMPT_OPENING', mint: input.mint, observedAt: Date.now(), pageUrl: page.url(), stakeUsd: Number(input.inputLamports) / 1_000_000_000 * input.solPriceUsd });
+    const approved = await showBrowserOrderPrompt(page, { side: 'BUY', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Nominal: $' + (Number(input.inputLamports) / 1_000_000_000 * input.solPriceUsd).toFixed(2), expectedOut: routeData.quote.outAmount ?? null });
+    if (!approved) return { ok: false, stage: 'operator_declined' };
+  }
   const freshRoute = await browserRoute(page, input);
   const fresh = freshRoute.body?.data;
   if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
@@ -379,13 +419,15 @@ async function browserSellRoute(page: Page, input: { mint: string; fromAddress: 
     return { status: response.status, body: await response.json().catch(() => null) };
   }, input);
 }
-async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }) {
+async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }, skipPrompt = false) {
   const route = await browserSellRoute(page, input);
   const routeData = route.body?.data;
   if (route.status !== 200 || route.body?.code !== 0 || !routeData?.quote) return { ok: false, stage: 'route', status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null };
-  write('events.jsonl', { type: 'BROWSER_SELL_PROMPT_OPENING', mint: input.mint, observedAt: Date.now(), pageUrl: page.url(), inputAmount: input.inputAmount });
-  const approved = await showBrowserOrderPrompt(page, { side: 'SELL', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Jual 100%: ' + input.inputAmount + ' base units', expectedOut: routeData.quote.outAmount ?? null });
-  if (!approved) return { ok: false, stage: 'operator_declined' };
+  if (!skipPrompt) {
+    write('events.jsonl', { type: 'BROWSER_SELL_PROMPT_OPENING', mint: input.mint, observedAt: Date.now(), pageUrl: page.url(), inputAmount: input.inputAmount });
+    const approved = await showBrowserOrderPrompt(page, { side: 'SELL', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Jual 100%: ' + input.inputAmount + ' base units', expectedOut: routeData.quote.outAmount ?? null });
+    if (!approved) return { ok: false, stage: 'operator_declined' };
+  }
   const freshRoute = await browserSellRoute(page, input);
   const fresh = freshRoute.body?.data;
   if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
@@ -404,7 +446,7 @@ async function submitBrowserSell(page: Page, input: { mint: string; fromAddress:
   }, { value: input, routeBody: freshRoute.body });
 }
 async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeUsd: number, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
-  if (!values.browserBuyPrompt || signal.paperLane !== PAPER_LANES.control.id) return;
+  if (!browserTradingEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
   const orderSession = latestCapturedOrderSession();
   if (!orderSession) {
     write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, observedAt: Date.now(), reason: 'NO_CAPTURED_ORDER_SESSION' });
@@ -412,24 +454,37 @@ async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeU
   }
   const solPriceUsd = await currentSolUsd(page);
   const inputLamports = Math.floor(stakeUsd / solPriceUsd * 1_000_000_000).toString();
-  let result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd });
+  let result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
   if (isExpiredBrowserAuthorization(result)) {
     write('events.jsonl', { type: 'BROWSER_AUTH_REFRESHING', side: 'BUY', mint: signal.mint, observedAt: Date.now(), reason: 'TOKEN_EXPIRED' });
     if (await refreshBrowserAuthorization(page, orderSession.authorization)) {
       const refreshedSession = latestCapturedOrderSession();
-      if (refreshedSession) result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd });
+      if (refreshedSession) result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
     }
   }
   if (result.ok && 'acquiredAmount' in result && typeof result.acquiredAmount === 'string' && typeof result.acquiredDecimals === 'number') {
     liveBrowserPositions.set(signal.mint, { inputAmount: result.acquiredAmount, tokenDecimals: result.acquiredDecimals, confirmedAt: Date.now(), entryPriceUsd: tokenPriceUsd });
   }
   write('events.jsonl', { type: result.ok ? 'BROWSER_BUY_SUBMITTED' : 'BROWSER_BUY_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, stakeUsd, inputLamports, result });
+  write('live-trade-ledger.jsonl', {
+    type: 'LIVE_ORDER_SUBMITTED', side: 'BUY', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, observedAt: Date.now(),
+    orderId: (result as any).orderId ?? null, hash: (result as any).hash ?? null,
+    acquiredAmount: (result as any).acquiredAmount ?? null, acquiredDecimals: (result as any).acquiredDecimals ?? null,
+    ok: result.ok, status: result.status, code: result.code, message: result.message, stakeUsd, tokenPriceUsd,
+  });
   console.log(result.ok ? '[browser-buy-submitted]' : '[browser-buy-not-submitted]', signal.mint, result);
+  if (result.ok && orderSession.fromAddress) {
+    void (async () => {
+      await delay(2500);
+      const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+      if (wsData) recordWalletStatSnapshot(wsData, 'POST_BUY');
+    })();
+  }
 }
 const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number }>();
 const browserSellDeferredBeforeBuy = new Set<string>();
 async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
-  if (!values.browserBuyPrompt || signal.paperLane !== PAPER_LANES.control.id) return;
+  if (!browserTradingEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
   const position = liveBrowserPositions.get(signal.mint);
   if (!position) {
     write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CONFIRMED_BROWSER_BUY' });
@@ -441,17 +496,29 @@ async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, token
     return;
   }
   const solPriceUsd = await currentSolUsd(page);
-  let result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd });
+  let result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
   if (isExpiredBrowserAuthorization(result)) {
     write('events.jsonl', { type: 'BROWSER_AUTH_REFRESHING', side: 'SELL', mint: signal.mint, observedAt: Date.now(), reason: 'TOKEN_EXPIRED' });
     if (await refreshBrowserAuthorization(page, orderSession.authorization)) {
       const refreshedSession = latestCapturedOrderSession();
-      if (refreshedSession) result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd });
+      if (refreshedSession) result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: refreshedSession.fromAddress, authorization: refreshedSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
     }
   }
   if (result.ok) liveBrowserPositions.delete(signal.mint);
   write('events.jsonl', { type: result.ok ? 'BROWSER_SELL_SUBMITTED' : 'BROWSER_SELL_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, inputAmount: position.inputAmount, result });
+  write('live-trade-ledger.jsonl', {
+    type: 'LIVE_ORDER_SUBMITTED', side: 'SELL', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, observedAt: Date.now(),
+    orderId: (result as any).orderId ?? null, hash: (result as any).hash ?? null,
+    ok: result.ok, status: result.status, code: result.code, message: result.message, inputAmount: position.inputAmount, tokenPriceUsd,
+  });
   console.log(result.ok ? '[browser-sell-submitted]' : '[browser-sell-not-submitted]', signal.mint, result);
+  if (result.ok && orderSession.fromAddress) {
+    void (async () => {
+      await delay(3500);
+      const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+      if (wsData) recordWalletStatSnapshot(wsData, 'POST_SELL');
+    })();
+  }
 }
 const paperRiskListeners = new Map<string, (tick: TapeTrade) => void>();
 const ownerSnapshots = new Map<string, OwnerSample[]>();
@@ -767,9 +834,11 @@ function attachOrderApiInspector(target: Page | BrowserContext) {
     const orderEndpoint = isOrderEndpoint(request.url());
     const rpcSubmission = isSolanaRpcSubmission(request);
     const gmgnApiRequest = isGmgnApiRequest(request);
-    if (!orderEndpoint && !rpcSubmission && (!values.orderCapture || !gmgnApiRequest) && (!values.browserBuyPrompt || !gmgnApiRequest)) return;
+    if (!orderEndpoint && !rpcSubmission && (!values.orderCapture || !gmgnApiRequest) && (!browserTradingEnabled || !gmgnApiRequest)) return;
     const headers = request.headers();
-    if (values.browserBuyPrompt && typeof headers.authorization === 'string' && headers.authorization.length > 0) liveBrowserAuthorization = headers.authorization;
+    if (browserTradingEnabled && typeof headers.authorization === 'string' && headers.authorization.length > 0) liveBrowserAuthorization = headers.authorization;
+    const walletMatch = request.url().match(/\/smartmoney\/sol\/walletstat\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
+    if (walletMatch && walletMatch[1]) liveBrowserWalletAddress = walletMatch[1];
     if (values.orderOutcomeCapture && orderEndpoint && request.method() === 'POST') orderOutcomeCaptureUntil = Date.now() + 60_000;
     const endpoint = safeEndpoint(request.url());
     write('order-api-audit.jsonl', {
@@ -826,18 +895,7 @@ function attachOrderApiInspector(target: Page | BrowserContext) {
         if (new URL(response.url()).pathname.includes('/smartmoney/sol/walletstat/')) {
           try {
             const data = (JSON.parse(bodyText) as { data?: Record<string, unknown> }).data;
-            if (data) {
-              const buyCost = Number(data.history_bought_cost ?? 0), soldIncome = Number(data.history_sold_income ?? 0);
-              const grossPnlUsd = Number.isFinite(buyCost) && Number.isFinite(soldIncome) ? soldIncome - buyCost : null;
-              write('live-trade-ledger.jsonl', {
-                type: 'GMGN_WALLETSTAT_SNAPSHOT', observedAt: Date.now(), token: data.token_address ?? null, symbol: data.symbol ?? null,
-                balance: data.balance ?? null, historyBoughtCostUsd: data.history_bought_cost ?? null, historySoldIncomeUsd: data.history_sold_income ?? null,
-                grossPnlUsd, grossPnlPercent: buyCost > 0 && grossPnlUsd !== null ? grossPnlUsd / buyCost * 100 : null,
-                reportedRealizedProfitUsd: data.realized_profit ?? null, reportedRealizedPnlPercent: data.realized_profit_pnl ?? null,
-                reportedGasUsd: data.gas_usd ?? null, priceUsd: data.price ?? null,
-                note: 'Wallet-level response. Gross P/L is this response history_sold_income minus history_bought_cost; GMGN realized fields may include older activity for the same token.',
-              });
-            }
+            if (data) recordWalletStatSnapshot(data, 'PASSIVE_CAPTURE');
           } catch { /* Ignore non-JSON or incomplete wallet-stat responses. */ }
         }
       } catch { /* Some responses are no longer available to Playwright. */ }
@@ -1030,7 +1088,7 @@ function writeSimulationExit(position: SimulationPosition, paperLane: PaperLane,
   if (maxPaperBuys !== null && !values.browserBuyPrompt) {
     const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL' && event.paperLane === PAPER_LANES.control.id).length;
     const openLanes = simulatedEvents.filter(event => event.type === 'SIMULATED_BUY').length - simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
-    if (totalSells >= maxPaperBuys && openLanes === 0) {
+    if (totalSells >= maxPaperBuys && openLanes === 0 && liveBrowserPositions.size === 0) {
       console.log('[trial-complete]', `Target ${maxPaperBuys} buy dan ${totalSells} sell selesai.`);
       setTimeout(() => stopping.abort(), 2_000);
     }
@@ -1419,7 +1477,7 @@ async function worker(index: number, deadline: number) {
       if (openPositions <= 0) {
         // Keep the detail tab on the completed token so a manual order-capture
         // session can inspect and submit its Sell before the operator stops it.
-        if (values.orderCapture || values.browserBuyPrompt) { await delay(500); continue; }
+        if (values.orderCapture || browserTradingEnabled) { await delay(500); continue; }
         stopping.abort();
         break;
       }
@@ -1708,7 +1766,7 @@ async function worker(index: number, deadline: number) {
               if (!paperRiskListeners.has(mint)) paperRiskListeners.set(mint, tick => {
                 for (const [paperLane, state] of momentumLaneStates) {
                   if (state.closed) continue;
-                  if (values.browserBuyPrompt && paperLane === PAPER_LANES.control.id) {
+                  if (browserTradingEnabled && paperLane === PAPER_LANES.control.id) {
                     const livePosition = liveBrowserPositions.get(mint);
                     if (!livePosition) {
                       if (!browserSellDeferredBeforeBuy.has(mint)) {
@@ -1762,7 +1820,7 @@ async function worker(index: number, deadline: number) {
             if (!momentumV2 && simulation) writeSimulation({ type: 'SIMULATED_BUY', paperLane: PAPER_LANES.control.id, mint, worker: index, observedAt: entryDecisionAt,
               entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
               entryGate: { momentum: momentumEntry, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
-            if (values.prepareTradeUi && !buyUiPreparedOnOpen && !flow3 && !values.browserBuyPrompt) {
+            if (values.prepareTradeUi && !buyUiPreparedOnOpen && !flow3 && !browserTradingEnabled) {
               await prepareBuyPanel(page, mint, index, now).catch(error => {
                 write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
               });
@@ -1995,7 +2053,7 @@ async function worker(index: number, deadline: number) {
             write('events.jsonl', { type: 'DETAIL_SLOT_RELEASED_AFTER_SELL_HOLD', mint, worker: index, observedAt: Date.now(), reason: exitReason, holdSeconds: exitHoldSeconds });
             if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys && !values.browserBuyPrompt) {
               const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
-              if (openPositions <= 0) {
+              if (openPositions <= 0 && liveBrowserPositions.size === 0) {
                 console.log('[trial-complete]', `Target of ${maxPaperBuys} transactions completed.`);
                 stopping.abort();
               }
@@ -2072,7 +2130,7 @@ async function worker(index: number, deadline: number) {
       // The operator owns the cadence in the one-tab capture flow.  Keep this
       // exact token on screen after a dump, timeout, or rejected V2 signal;
       // only closing the detail tab releases the worker to inspect a new one.
-      if (values.orderCapture && !page.isClosed() && !stopping.signal.aborted) {
+      if (values.orderCapture && !browserAutoTrade && !page.isClosed() && !stopping.signal.aborted) {
         write('events.jsonl', { type: 'DETAIL_AWAITING_OPERATOR_CLOSE', mint, worker: index, observedAt: Date.now(),
           note: 'Detail tab stays on this token. Close it to release the worker to the next candidate.' });
         console.log('[detail-awaiting-operator-close]', mint);
@@ -2083,8 +2141,8 @@ async function worker(index: number, deadline: number) {
         }
       }
       // In an order-capture session the completed token must remain visible for
-      // the operator's manual Sell. Ordinary research workers clear the tab.
-      if (!values.orderCapture && !page.isClosed()) await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
+      // the operator's manual Sell. Ordinary research workers or auto-traders clear the tab.
+      if ((!values.orderCapture || browserAutoTrade) && !page.isClosed()) await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
     }
   }
   await page.close().catch(() => {});

@@ -17,6 +17,8 @@
     "research:trial": "node scripts/run.mjs research --maxBuys 2",
     "capture:orders": "node scripts/run.mjs research --strategy momentum-v2 --workers 1 --maxPaperBuys 1 --stakeUsd 0.25 --orderCapture --orderCapturePayloads --controlOnly",
     "simulate:order": "node scripts/run.mjs research --strategy momentum-v2 --workers 1 --maxPaperBuys 1 --stakeUsd 0.25 --simulateOrder --controlOnly",
+    "browser:buy": "node scripts/run.mjs research --strategy momentum-v2 --browserBuyPrompt --orderOutcomeCapture --controlOnly",
+    "browser:buy:auto": "node scripts/run.mjs research --strategy momentum-v2 --seconds 0 --workers 3 --stakeUsd 0.25 --browserAutoTrade --orderOutcomeCapture --controlOnly",
     "browser:buy:test": "node scripts/run.mjs research --strategy momentum-v2 --workers 1 --maxPaperBuys 1 --stakeUsd 0.25 --browserBuyPrompt --browserPromptTestSignal --orderOutcomeCapture --controlOnly",
     "trade-ui": "node scripts/run.mjs trade-ui",
     "replay": "node scripts/run.mjs replay",

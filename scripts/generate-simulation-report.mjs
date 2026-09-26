@@ -16,6 +16,65 @@ const completedDetails = new Set(tokenSummaries.keys());
 const summary = readJson('simulation-summary.json');
 const manifest = readJson('manifest.json');
 const strategy = readJson('strategy.json');
+const liveLedger = readLines('live-trade-ledger.jsonl');
+const followupRows = readLines('order-followup-responses.jsonl');
+
+const liveOrdersByMint = new Map();
+for (const row of liveLedger) {
+  if (row.type === 'LIVE_ORDER_SUBMITTED' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (row.side === 'BUY') cur.buy = row;
+    if (row.side === 'SELL') cur.sell = row;
+    liveOrdersByMint.set(row.mint, cur);
+  }
+}
+for (const row of events) {
+  if (row.type === 'BROWSER_BUY_SUBMITTED' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (!cur.buy) cur.buy = { observedAt: row.observedAt, orderId: row.result?.orderId, hash: row.result?.hash, acquiredAmount: row.result?.acquiredAmount, stakeUsd: row.stakeUsd, ok: row.result?.ok };
+    liveOrdersByMint.set(row.mint, cur);
+  }
+  if (row.type === 'BROWSER_SELL_SUBMITTED' && row.mint) {
+    const cur = liveOrdersByMint.get(row.mint) ?? {};
+    if (!cur.sell) cur.sell = { observedAt: row.observedAt, orderId: row.result?.orderId, hash: row.result?.hash, inputAmount: row.inputAmount, ok: row.result?.ok };
+    liveOrdersByMint.set(row.mint, cur);
+  }
+}
+
+const walletstatByMint = new Map();
+for (const row of liveLedger) {
+  if (row.type === 'GMGN_WALLETSTAT_SNAPSHOT' && row.token) {
+    walletstatByMint.set(row.token, row);
+  }
+}
+for (const row of followupRows) {
+  if (row.type === 'ORDER_FOLLOWUP_RESPONSE' && row.url && row.url.includes('/smartmoney/sol/walletstat/') && row.bodyText) {
+    try {
+      const data = JSON.parse(row.bodyText).data;
+      if (data?.token_address && !walletstatByMint.has(data.token_address)) {
+        const buyCost = Number(data.history_bought_cost ?? 0), soldIncome = Number(data.history_sold_income ?? 0);
+        const grossPnlUsd = Number.isFinite(buyCost) && Number.isFinite(soldIncome) ? soldIncome - buyCost : null;
+        walletstatByMint.set(data.token_address, {
+          observedAt: row.observedAt,
+          token: data.token_address,
+          symbol: data.symbol,
+          balance: data.balance,
+          historyBoughtCostUsd: data.history_bought_cost,
+          historyBoughtAmount: data.history_bought_amount,
+          historyAvgCost: data.history_avg_cost,
+          historySoldIncomeUsd: data.history_sold_income,
+          avgSold: data.avg_sold,
+          grossPnlUsd,
+          grossPnlPercent: buyCost > 0 && grossPnlUsd !== null ? grossPnlUsd / buyCost * 100 : null,
+          reportedRealizedProfitUsd: data.realized_profit,
+          reportedGasUsd: data.gas_usd,
+          priceUsd: data.price,
+        });
+      }
+    } catch { /* Ignore */ }
+  }
+}
+
 const paperLane = row => row?.paperLane ?? 'control';
 const paperLaneLabel = lane => lane === 'r5-band' ? 'R5-band 5%–<10%' : 'Kontrol V2';
 const buys = rows.filter(row => row.type === 'SIMULATED_BUY');
@@ -42,11 +101,11 @@ for (const row of activityRows) {
   if (Number.isFinite(row.priceUsd)) current.latestPriceUsd = row.priceUsd;
   activityByMint.set(row.mint, current);
 }
-const f = (v, digits = 4) => Number.isFinite(v) ? Number(v).toLocaleString('en-US', { maximumFractionDigits: digits }) : '—';
+const f = (v, digits = 4) => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) ? Number(v).toLocaleString('en-US', { maximumFractionDigits: digits }) : '—';
 // Six decimals turns $0.000007781 into the misleading $0.000008.  Memecoin
 // prices need enough digits for the report to show the actual simulation tick.
-const usd = v => Number.isFinite(v) ? '$' + f(v, Math.abs(Number(v)) < 0.01 ? 10 : 6) : '—';
-const pct = v => Number.isFinite(v) ? (v > 0 ? '+' : '') + f(v, 2) + '%' : '—';
+const usd = v => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) ? '$' + f(Number(v), Math.abs(Number(v)) < 0.01 ? 10 : 6) : '—';
+const pct = v => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) ? (Number(v) > 0 ? '+' : '') + f(Number(v), 2) + '%' : '—';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const time = value => value ? new Date(value).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '—';
 const timeExact = value => value ? new Intl.DateTimeFormat('id-ID', {
@@ -119,12 +178,106 @@ const tradeRows = lane => buys.filter(buy => lane === null || paperLane(buy) ===
   const resultClass = sell ? (sell.pnlUsd > 0 ? 'up' : sell.pnlUsd < 0 ? 'down' : '') : '';
   return `<tr><td><button class="token" data-mint="${esc(buy.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(buy.mint)}</span><small>${paperLaneLabel(paperLane(buy))} · Preview detail GMGN</small></button></td><td>${timeExact(buy.observedAt)} WIB<br>${usd(buy.stakeUsd)} @ ${usd(buy.entryPriceUsd)}${strategy?.strategy === 'momentum-v2' ? signalTiming(buy) : ''}</td><td>${esc(buyReason(buy))}</td><td>${sell ? `${timeExact(sell.observedAt)} WIB<br>${usd(sell.exit?.priceUsd)}${strategy?.strategy === 'momentum-v2' ? signalTiming(sell) : ''}` : unpriced ? `<span class="watch">Sesi selesai ${time(unpriced.observedAt)}</span>` : '<span class="watch">Masih dipantau</span>'}</td><td>${sell ? esc(sellReason(sell)) : unpriced ? 'Harga transaksi terakhir sudah lebih dari 5 detik; hasil jual tidak dihitung.' : 'Belum ada sinyal sell.'}</td><td class="${resultClass}">${sell ? `<b>${usd(sell.pnlUsd)}</b><br>${pct(sell.pnlPercent)}` : '—'}</td></tr>`;
 }).join('');
+const hasR5BandTrades = buys.some(buy => paperLane(buy) === 'r5-band') || (summary?.lanes && summary.lanes['r5-band']?.positionsOpened > 0);
+const singleLaneMode = !hasR5BandTrades;
+
+const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').slice().reverse().map(buy => {
+  const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
+  const symbol = buy.metadata?.symbol || sell?.metadata?.symbol || 'Token';
+  const unpriced = unpricedByMint.get(buy.mint);
+  const simResultClass = sell ? (sell.pnlUsd > 0 ? 'up' : sell.pnlUsd < 0 ? 'down' : '') : '';
+
+  const liveBuy = liveOrdersByMint.get(buy.mint)?.buy;
+  const liveSell = liveOrdersByMint.get(buy.mint)?.sell;
+  const ws = walletstatByMint.get(buy.mint);
+
+  const simBuyCell = `${timeExact(buy.observedAt)} WIB<br><b>${usd(buy.stakeUsd)} @ ${usd(buy.entryPriceUsd)}</b><br><small class="muted">${esc(buyReason(buy))}</small>`;
+  const simSellCell = sell
+    ? `${timeExact(sell.observedAt)} WIB<br><b>@ ${usd(sell.exit?.priceUsd)}</b><br><small class="muted">${esc(sellReason(sell))}</small>`
+    : unpriced ? `<span class="watch">Sesi selesai tanpa tick</span>` : '<span class="watch">Masih dipantau</span>';
+  const simResultCell = sell ? `<b class="${simResultClass}">${usd(sell.pnlUsd)}</b><br><span class="${simResultClass}">${pct(sell.pnlPercent)}</span>` : '—';
+
+  let liveBuyCell = '<span class="muted">Hanya paper simulasi</span>';
+  let liveSellCell = '—';
+  let liveResultCell = '—';
+  let deltaCell = '—';
+
+  if (liveBuy || ws) {
+    const buyTimeStr = liveBuy?.observedAt ? `${timeExact(liveBuy.observedAt)} WIB<br>` : '';
+    const buyCost = ws?.historyBoughtCostUsd != null ? usd(ws.historyBoughtCostUsd) : (liveBuy?.stakeUsd ? usd(liveBuy.stakeUsd) : '—');
+    const buyAmount = ws?.historyBoughtAmount ? `<br><small class="muted">Vol: ${f(ws.historyBoughtAmount, 2)} unit</small>` : '';
+    const buyPrice = ws?.historyAvgCost ? `<br><small>Harga: ${usd(ws.historyAvgCost)}</small>` : '';
+    const buyTx = liveBuy?.hash ? `<br><a class="mono tx-link" href="https://solscan.io/tx/${esc(liveBuy.hash)}" target="_blank" rel="noopener">Tx: ${esc(liveBuy.hash.slice(0, 8))}…</a>` : (liveBuy?.orderId ? `<br><span class="mono">Order: ${esc(liveBuy.orderId.slice(0, 10))}…</span>` : '');
+    liveBuyCell = `${buyTimeStr}<b>Cost: ${buyCost}</b>${buyAmount}${buyPrice}${buyTx}`;
+
+    if (liveSell || (ws && Number(ws.historySoldIncomeUsd) > 0)) {
+      const sellTimeStr = liveSell?.observedAt ? `${timeExact(liveSell.observedAt)} WIB<br>` : '';
+      const soldIncome = ws?.historySoldIncomeUsd != null ? usd(ws.historySoldIncomeUsd) : '—';
+      const sellPrice = ws?.avgSold ? `<br><small>Harga: ${usd(ws.avgSold)}</small>` : '';
+      const sellTx = liveSell?.hash ? `<br><a class="mono tx-link" href="https://solscan.io/tx/${esc(liveSell.hash)}" target="_blank" rel="noopener">Tx: ${esc(liveSell.hash.slice(0, 8))}…</a>` : (liveSell?.orderId ? `<br><span class="mono">Order: ${esc(liveSell.orderId.slice(0, 10))}…</span>` : '');
+      liveSellCell = `${sellTimeStr}<b>Income: ${soldIncome}</b>${sellPrice}${sellTx}`;
+    } else {
+      liveSellCell = '<span class="watch">Menunggu sell riil</span>';
+    }
+
+    if (ws?.grossPnlUsd != null) {
+      const livePnlClass = ws.grossPnlUsd > 0 ? 'up' : ws.grossPnlUsd < 0 ? 'down' : '';
+      const balNote = ws.balance && ws.balance !== '0' ? `<br><small class="watch">Sisa saldo: ${f(ws.balance, 0)}</small>` : '';
+      liveResultCell = `<b class="${livePnlClass}">${usd(ws.grossPnlUsd)}</b><br><span class="${livePnlClass}">${pct(ws.grossPnlPercent)}</span>${balNote}`;
+
+      if (sell && sell.pnlUsd != null) {
+        const deltaUsd = ws.grossPnlUsd - sell.pnlUsd;
+        const deltaClass = deltaUsd >= 0 ? 'up' : 'down';
+        const priceSlippage = (ws.historyAvgCost && buy.entryPriceUsd) ? ((ws.historyAvgCost - buy.entryPriceUsd) / buy.entryPriceUsd * 100) : null;
+        const slippageText = priceSlippage !== null ? `<br><small class="muted">Slip entry: ${pct(priceSlippage)}</small>` : '';
+        deltaCell = `<b class="${deltaClass}">${usd(deltaUsd)}</b>${slippageText}`;
+      }
+    } else if (liveBuy && !liveSell) {
+      liveResultCell = '<span class="watch">Posisi live terbuka</span>';
+    }
+  }
+
+  return `<tr>
+    <td><button class="token" data-mint="${esc(buy.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(buy.mint)}</span><small>Preview detail GMGN</small></button></td>
+    <td>${simBuyCell}</td>
+    <td>${simSellCell}</td>
+    <td style="border-right:2px solid #2d4563">${simResultCell}</td>
+    <td>${liveBuyCell}</td>
+    <td>${liveSellCell}</td>
+    <td style="border-right:2px solid #2d4563">${liveResultCell}</td>
+    <td style="text-align:center">${deltaCell}</td>
+  </tr>`;
+}).join('');
+
 const tradeTableHtml = (rows, emptyText) => `<div class="scroll"><table><thead><tr><th>Token</th><th>Buy simulasi</th><th>Kenapa dibeli</th><th>Sell simulasi</th><th>Kenapa dijual</th><th>Hasil</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${emptyText}</td></tr>`}</tbody></table></div>`;
 const controlTradeRows = tradeRows('control');
 const r5BandTradeRows = tradeRows('r5-band');
-const transactionsHtml = strategy?.strategy === 'momentum-v2'
-  ? `<h2>Transaksi simulasi V2</h2>${tradeTableHtml(controlTradeRows, 'Belum ada transaksi simulasi V2.') }<h2>Transaksi simulasi R5-band</h2>${tradeTableHtml(r5BandTradeRows, 'Belum ada transaksi simulasi R5-band.')}`
-  : `<h2>Setiap transaksi simulasi</h2>${tradeTableHtml(tradeRows(null), 'Belum ada token yang masuk detail.')}`;
+const transactionsHtml = singleLaneMode
+  ? `<h2>Komparasi Transaksi: Simulasi (Sinyal) vs Eksekusi Riil API (Wallet)</h2>
+     <div class="scroll"><table class="comparison-table">
+     <thead>
+       <tr>
+         <th rowspan="2" style="vertical-align:middle">Token</th>
+         <th colspan="3" style="text-align:center;background:#152438;border-right:2px solid #2d4563">1. Perhitungan Sinyal Simulasi (Paper)</th>
+         <th colspan="3" style="text-align:center;background:#102e26;border-right:2px solid #2d4563">2. Data Riil API / Wallet GMGN</th>
+         <th rowspan="2" style="vertical-align:middle;text-align:center">Selisih Riil vs Sim</th>
+       </tr>
+       <tr>
+         <th style="background:#152438">Buy Simulasi</th>
+         <th style="background:#152438">Sell Simulasi</th>
+         <th style="background:#152438;border-right:2px solid #2d4563">P/L Sinyal</th>
+         <th style="background:#102e26">Buy Riil / Order</th>
+         <th style="background:#102e26">Sell Riil / Order</th>
+         <th style="background:#102e26;border-right:2px solid #2d4563">Gross P/L Riil</th>
+       </tr>
+     </thead>
+     <tbody>
+       ${comparisonTradeRows || '<tr><td colspan="8" class="muted" style="text-align:center">Belum ada transaksi.</td></tr>'}
+     </tbody>
+     </table></div>`
+  : (strategy?.strategy === 'momentum-v2'
+    ? `<h2>Transaksi simulasi V2</h2>${tradeTableHtml(controlTradeRows, 'Belum ada transaksi simulasi V2.') }<h2>Transaksi simulasi R5-band</h2>${tradeTableHtml(r5BandTradeRows, 'Belum ada transaksi simulasi R5-band.')}`
+    : `<h2>Setiap transaksi simulasi</h2>${tradeTableHtml(tradeRows(null), 'Belum ada token yang masuk detail.')}`);
 const blocked = [...blockedByMint.values()];
 for (const [mint, dumpRow] of dumpAbortedByMint) {
   if (!blockedByMint.has(mint)) {
@@ -195,16 +348,34 @@ const laneFinancials = Object.fromEntries(['control', 'r5-band'].map(lane => {
   const loss = laneSells.filter(row => row.pnlUsd < 0).reduce((sum, row) => sum + row.pnlUsd, 0);
   return [lane, { profit, loss, pnl: profit + loss }];
 }));
-const laneComparisonHtml = strategy?.strategy === 'momentum-v2' ? `<h2>Hasil per lane paper</h2><div class="scroll"><table><thead><tr><th>Lane</th><th>Entry</th><th>Exit</th><th>Masih terbuka</th><th>Menang / kalah</th><th>Keuntungan</th><th>Kerugian</th><th>P/L sinyal</th></tr></thead><tbody>${Object.entries(laneSummary).map(([lane, value]) => { const financial = laneFinancials[lane] ?? { profit: 0, loss: 0, pnl: value.totalPnlUsd ?? 0 }; return `<tr><td><b>${paperLaneLabel(lane)}</b></td><td>${value.positionsOpened ?? 0}</td><td>${value.positionsClosed ?? 0}</td><td>${value.openAtEnd ?? 0}</td><td>${value.profitable ?? 0} / ${value.losing ?? 0}</td><td class="up">${usd(financial.profit)}</td><td class="down">${usd(financial.loss)}</td><td class="${financial.pnl > 0 ? 'up' : financial.pnl < 0 ? 'down' : ''}">${usd(financial.pnl)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
-const allLanes = strategy?.strategy === 'momentum-v2';
+const laneComparisonHtml = (strategy?.strategy === 'momentum-v2' && !singleLaneMode) ? `<h2>Hasil per lane paper</h2><div class="scroll"><table><thead><tr><th>Lane</th><th>Entry</th><th>Exit</th><th>Masih terbuka</th><th>Menang / kalah</th><th>Keuntungan</th><th>Kerugian</th><th>P/L sinyal</th></tr></thead><tbody>${Object.entries(laneSummary).map(([lane, value]) => { const financial = laneFinancials[lane] ?? { profit: 0, loss: 0, pnl: value.totalPnlUsd ?? 0 }; return `<tr><td><b>${paperLaneLabel(lane)}</b></td><td>${value.positionsOpened ?? 0}</td><td>${value.positionsClosed ?? 0}</td><td>${value.openAtEnd ?? 0}</td><td>${value.profitable ?? 0} / ${value.losing ?? 0}</td><td class="up">${usd(financial.profit)}</td><td class="down">${usd(financial.loss)}</td><td class="${financial.pnl > 0 ? 'up' : financial.pnl < 0 ? 'down' : ''}">${usd(financial.pnl)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+const allLanes = strategy?.strategy === 'momentum-v2' && !singleLaneMode;
+const liveRealizedTrades = [...walletstatByMint.values()].filter(w => w.grossPnlUsd !== null && Number(w.historySoldIncomeUsd) > 0);
+const totalLivePnl = liveRealizedTrades.reduce((acc, w) => acc + (w.grossPnlUsd ?? 0), 0);
+const liveProfitCount = liveRealizedTrades.filter(w => (w.grossPnlUsd ?? 0) > 0).length;
+const liveLossCount = liveRealizedTrades.filter(w => (w.grossPnlUsd ?? 0) < 0).length;
+
+const gridCardsHtml = singleLaneMode && (liveOrdersByMint.size > 0 || liveRealizedTrades.length > 0)
+  ? `<div class="grid">
+      <div class="card"><div class="label">Total Posisi</div><div class="value">${buys.length} <small style="font-size:14px;color:#9cafc5">(${sells.length} sell)</small></div></div>
+      <div class="card"><div class="label">Masih Dipantau</div><div class="value watch">${open}</div></div>
+      <div class="card"><div class="label">P/L Sinyal Simulasi</div><div class="value ${totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : ''}">${usd(totalPnl)}</div></div>
+      <div class="card"><div class="label">P/L Riil Walletstat</div><div class="value ${totalLivePnl > 0 ? 'up' : totalLivePnl < 0 ? 'down' : ''}">${liveRealizedTrades.length ? usd(totalLivePnl) : '—'}</div></div>
+      <div class="card"><div class="label">Selisih Real vs Sim</div><div class="value ${(totalLivePnl - totalPnl) >= 0 ? 'up' : 'down'}">${liveRealizedTrades.length ? usd(totalLivePnl - totalPnl) : '—'}</div></div>
+      <div class="card"><div class="label">Win Rate (Sim vs Riil)</div><div class="value">${sells.filter(r => r.pnlUsd > 0).length}/${sells.length} <small style="font-size:13px;color:#9cafc5">vs ${liveProfitCount}/${liveRealizedTrades.length}</small></div></div>
+    </div>`
+  : `<div class="grid"><div class="card"><div class="label">${allLanes ? 'Buy seluruh lane' : 'Simulasi buy'}</div><div class="value">${buys.length}</div></div><div class="card"><div class="label">${allLanes ? 'Sell seluruh lane' : 'Sudah sell'}</div><div class="value">${sells.length}</div></div><div class="card"><div class="label">${strategy?.strategy === 'pump-band' ? 'Harga keluar tak segar' : 'Masih dipantau'}</div><div class="value watch">${strategy?.strategy === 'pump-band' ? unpricedByMint.size : open}</div></div><div class="card"><div class="label">${allLanes ? 'Keuntungan seluruh lane' : 'Total keuntungan'}</div><div class="value up">${usd(profit)}</div></div><div class="card"><div class="label">${allLanes ? 'Kerugian seluruh lane' : 'Total kerugian'}</div><div class="value down">${usd(loss)}</div></div><div class="card"><div class="label">${allLanes ? 'P/L seluruh lane' : 'P/L total'}</div><div class="value ${totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : ''}">${usd(totalPnl)}</div></div></div>`;
 const pumpBandNote = strategy?.strategy === 'pump-band'
   ? `Token fresh dalam market cap $3.000–$10.000 mendapat slot detail kosong. Buy simulasi $${f(manifest?.simulation?.stakeUsd ?? 0.25, 2)} dilakukan pada tick transaksi pu baru pertama. Sell simulasi terjadi saat harga turun 20% dari puncak, atau setelah 20 detik jika harga terakhir masih berumur paling lama 5 detik. Fee dan slippage belum dihitung. ${unpricedByMint.size} sesi selesai tanpa harga jual segar sehingga P/L-nya belum dinilai.`
-  : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.${strategy?.strategy === 'momentum-v2' ? ' Kontrol V2 dan R5-band memakai data socket yang sama, tetapi posisi serta P/L dicatat per lane. Jam sinyal, trade pasar, WebSocket, dan order simulasi dicatat terpisah sampai milidetik. Target order simulasi 0,9 detik, batas 1 detik setelah sinyal. P/L tetap memakai tick pemicu; belum ada permintaan GMGN, fill, atau harga eksekusi nyata.' : ''}`;
+  : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.${strategy?.strategy === 'momentum-v2' && !singleLaneMode ? ' Kontrol V2 dan R5-band memakai data socket yang sama, tetapi posisi serta P/L dicatat per lane. Jam sinyal, trade pasar, WebSocket, dan order simulasi dicatat terpisah sampai milidetik. Target order simulasi 0,9 detik, batas 1 detik setelah sinyal. P/L tetap memakai tick pemicu; belum ada permintaan GMGN, fill, atau harga eksekusi nyata.' : ''}`;
 const pumpBandRulesHtml = strategy?.strategy === 'pump-band'
   ? '<h2>Arti sinyal sell</h2><div class="rule"><b>PUMP_DUMP_20</b>: harga transaksi pu turun sedikitnya 20% dari puncak yang tertangkap setelah buy.</div><div class="rule"><b>PUMP_OBSERVATION_END</b>: sesi 20 detik selesai dan harga transaksi terakhir masih segar. Harga yang lebih tua dari 5 detik tidak dipakai untuk menghitung hasil jual.</div>'
   : '<h2>Arti sinyal sell</h2><div class="rule"><b>Holder growth recovery</b> menahan posisi 10 detik saat harga −10% sampai sebelum −20%, holder total naik ≥10% dan ≥5, serta buy USD 5 detik ≥ sell USD. Stop −20% tetap berlaku.</div><div class="rule"><b>Target +40% dengan holder momentum</b> menunda sell hanya jika dua pembaruan holder signifikan datang berurutan dan harga masih naik ≥2% per 5 detik. Saat kenaikan melandai &lt;0,5% per 5 detik, exit memakai <code>TARGET_40_HOLDER_FLAT</code>.</div><div class="rule"><b>Sell pressure</b> memerlukan dua jendela socket 5-detik selesai berturut-turut: ≥10 trade, ≥3 penjual kandidat, sell USD share ≥70%, dan posisi sudah ≤−5%.</div><p class="muted">Sinyal hold holder tercatat: ' + holds.length + '. Aturan holder hanya aktif bila socket memberi angka total holder baru; daftar holder parsial tidak dipakai sebagai total.</p>';
 const title = `Laporan simulasi — ${basename(folder)}`;
-let html = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#09111d;color:#e8eff8;font:15px/1.5 system-ui,Segoe UI,sans-serif}main{max-width:1500px;margin:auto;padding:30px}.tag{color:#6be1b2;font-weight:700;letter-spacing:1px;font-size:12px}.muted{color:#9cafc5}.note{background:#19273a;border-left:3px solid #7fb8ff;padding:14px 17px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card{padding:17px;background:#111e2e;border:1px solid #263950;border-radius:12px}.label{color:#9cafc5;font-size:13px}.value{font-size:23px;font-weight:700;margin-top:4px}.up{color:#62dfa8}.down{color:#ff9299}.watch{color:#ffce76;font-weight:700}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #263950}th{color:#a9c1df;background:#0d1827}.mono{font:11px ui-monospace,Consolas,monospace;color:#a9c1df;word-break:break-all}.rule{background:#111e2e;border:1px solid #263950;border-radius:10px;padding:14px;margin:10px 0}.token{padding:0;border:0;background:transparent;color:#e8eff8;text-align:left;cursor:pointer}.token:hover b,.token:hover small{color:#6be1b2}.token small{display:block;color:#7fb8ff;margin-top:4px}.modal{position:fixed;inset:0;z-index:10;background:#000b;display:none;place-items:center;padding:20px}.modal.open{display:grid}.dialog{width:min(1400px,96vw);height:min(860px,92vh);background:#111e2e;border:1px solid #426381;border-radius:14px;display:grid;grid-template-rows:auto 1fr;overflow:hidden;box-shadow:0 24px 80px #000}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#19273a}.modal-head strong{margin-right:auto}.modal-head a,.modal-head button{border:1px solid #49739a;border-radius:7px;background:#0e1a29;color:#e8eff8;padding:7px 10px;text-decoration:none;cursor:pointer}.modal iframe{display:none}.preview{overflow:auto;padding:24px}.preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview .card{min-height:62px}.preview h3{margin:20px 0 8px}.preview a{color:#7fb8ff}.tl-table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}.tl-table th{background:#0d1827;color:#a9c1df;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1}.tl-table td{padding:6px 10px;border-bottom:1px solid #1e2e40;vertical-align:top}.tl-table tr:hover td{background:#192a3d}.tl-scroll{max-height:280px;overflow:auto;border:1px solid #263950;border-radius:8px;margin-top:6px}.hbar{display:flex;align-items:center;gap:5px;font-size:12px;margin:2px 0}.hbar-fill{height:8px;border-radius:4px;background:#5b8ecc;flex-shrink:0}.hbar-fill.dev{background:#f5a623}.hbar-pct{color:#9cafc5;min-width:42px;text-align:right}.hbar-addr{font:10px ui-monospace,Consolas,monospace;color:#7d9bb7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}.delta-up{color:#62dfa8}.delta-down{color:#ff9299}.block-reason{font-size:11px;color:#ffce76;background:#1e2c10;border-radius:3px;padding:1px 5px;margin:1px 2px;display:inline-block}#refresh-bar{position:fixed;top:0;left:0;right:0;height:3px;background:#1e3a5a;z-index:20}#refresh-fill{height:100%;width:0;background:#6be1b2;transition:width 10s linear}@media(max-width:800px){main{padding:16px}.grid{grid-template-columns:1fr 1fr}.modal{padding:6px}.dialog{width:100%;height:96vh}.preview-grid{grid-template-columns:1fr 1fr}}</style><div id="refresh-bar"><div id="refresh-fill"></div></div><main><div class="tag">GMGN SOCKET · PAPER SIMULATION · BUKAN ORDER NYATA</div><h1>${title}</h1><p class="muted">Laporan diperbarui setiap 10 detik. Data terakhir dibaca ${time(Date.now())} WIB; run mulai ${time(Date.parse(manifest?.startedAt ?? ''))} WIB.</p><div class="note">${pumpBandNote}</div><div class="grid"><div class="card"><div class="label">${allLanes ? 'Buy seluruh lane' : 'Simulasi buy'}</div><div class="value">${buys.length}</div></div><div class="card"><div class="label">${allLanes ? 'Sell seluruh lane' : 'Sudah sell'}</div><div class="value">${sells.length}</div></div><div class="card"><div class="label">${strategy?.strategy === 'pump-band' ? 'Harga keluar tak segar' : 'Masih dipantau'}</div><div class="value watch">${strategy?.strategy === 'pump-band' ? unpricedByMint.size : open}</div></div><div class="card"><div class="label">${allLanes ? 'Keuntungan seluruh lane' : 'Total keuntungan'}</div><div class="value up">${usd(profit)}</div></div><div class="card"><div class="label">${allLanes ? 'Kerugian seluruh lane' : 'Total kerugian'}</div><div class="value down">${usd(loss)}</div></div><div class="card"><div class="label">${allLanes ? 'P/L seluruh lane' : 'P/L total'}</div><div class="value ${totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : ''}">${usd(totalPnl)}</div></div></div>${transactionsHtml}${pumpBandRulesHtml}</main><div class="modal" id="tokenModal" role="dialog" aria-modal="true"><div class="dialog"><div class="modal-head"><strong id="modalTitle">Detail token</strong><a id="openGmgn" target="_blank" rel="noopener">Buka GMGN penuh</a><button id="closeModal">Tutup</button></div><section class="preview" id="localPreview"></section></div></div><script>
+const tagText = (singleLaneMode && (liveOrdersByMint.size > 0 || liveRealizedTrades.length > 0))
+  ? 'GMGN LIVE TRADE & SIMULATION COMPARISON'
+  : 'GMGN SOCKET · PAPER SIMULATION · BUKAN ORDER NYATA';
+let html = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#09111d;color:#e8eff8;font:15px/1.5 system-ui,Segoe UI,sans-serif}main{max-width:1500px;margin:auto;padding:30px}.tag{color:#6be1b2;font-weight:700;letter-spacing:1px;font-size:12px}.muted{color:#9cafc5}.note{background:#19273a;border-left:3px solid #7fb8ff;padding:14px 17px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card{padding:17px;background:#111e2e;border:1px solid #263950;border-radius:12px}.label{color:#9cafc5;font-size:13px}.value{font-size:23px;font-weight:700;margin-top:4px}.up{color:#62dfa8}.down{color:#ff9299}.watch{color:#ffce76;font-weight:700}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #263950}th{color:#a9c1df;background:#0d1827}.mono{font:11px ui-monospace,Consolas,monospace;color:#a9c1df;word-break:break-all}.tx-link{color:#58b4ff;text-decoration:none}.tx-link:hover{text-decoration:underline}.rule{background:#111e2e;border:1px solid #263950;border-radius:10px;padding:14px;margin:10px 0}.token{padding:0;border:0;background:transparent;color:#e8eff8;text-align:left;cursor:pointer}.token:hover b,.token:hover small{color:#6be1b2}.token small{display:block;color:#7fb8ff;margin-top:4px}.comparison-table th{padding:10px 12px;font-size:13px}.comparison-table td{padding:11px 12px;font-size:13px;border-right:1px solid #1a293c}.comparison-table tr:hover td{background:#132235}.modal{position:fixed;inset:0;z-index:10;background:#000b;display:none;place-items:center;padding:20px}.modal.open{display:grid}.dialog{width:min(1400px,96vw);height:min(860px,92vh);background:#111e2e;border:1px solid #426381;border-radius:14px;display:grid;grid-template-rows:auto 1fr;overflow:hidden;box-shadow:0 24px 80px #000}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#19273a}.modal-head strong{margin-right:auto}.modal-head a,.modal-head button{border:1px solid #49739a;border-radius:7px;background:#0e1a29;color:#e8eff8;padding:7px 10px;text-decoration:none;cursor:pointer}.modal iframe{display:none}.preview{overflow:auto;padding:24px}.preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview .card{min-height:62px}.preview h3{margin:20px 0 8px}.preview a{color:#7fb8ff}.tl-table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}.tl-table th{background:#0d1827;color:#a9c1df;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1}.tl-table td{padding:6px 10px;border-bottom:1px solid #1e2e40;vertical-align:top}.tl-table tr:hover td{background:#192a3d}.tl-scroll{max-height:280px;overflow:auto;border:1px solid #263950;border-radius:8px;margin-top:6px}.hbar{display:flex;align-items:center;gap:5px;font-size:12px;margin:2px 0}.hbar-fill{height:8px;border-radius:4px;background:#5b8ecc;flex-shrink:0}.hbar-fill.dev{background:#f5a623}.hbar-pct{color:#9cafc5;min-width:42px;text-align:right}.hbar-addr{font:10px ui-monospace,Consolas,monospace;color:#7d9bb7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}.delta-up{color:#62dfa8}.delta-down{color:#ff9299}.block-reason{font-size:11px;color:#ffce76;background:#1e2c10;border-radius:3px;padding:1px 5px;margin:1px 2px;display:inline-block}#refresh-bar{position:fixed;top:0;left:0;right:0;height:3px;background:#1e3a5a;z-index:20}#refresh-fill{height:100%;width:0;background:#6be1b2;transition:width 10s linear}@media(max-width:800px){main{padding:16px}.grid{grid-template-columns:1fr 1fr}.modal{padding:6px}.dialog{width:100%;height:96vh}.preview-grid{grid-template-columns:1fr 1fr}}</style><div id="refresh-bar"><div id="refresh-fill"></div></div><main><div class="tag">${tagText}</div><h1>${title}</h1><p class="muted">Laporan diperbarui setiap 10 detik. Data terakhir dibaca ${time(Date.now())} WIB; run mulai ${time(Date.parse(manifest?.startedAt ?? ''))} WIB.</p><div class="note">${pumpBandNote}</div>${gridCardsHtml}${transactionsHtml}${pumpBandRulesHtml}</main><div class="modal" id="tokenModal" role="dialog" aria-modal="true"><div class="dialog"><div class="modal-head"><strong id="modalTitle">Detail token</strong><a id="openGmgn" target="_blank" rel="noopener">Buka GMGN penuh</a><button id="closeModal">Tutup</button></div><section class="preview" id="localPreview"></section></div></div><script>
 const modal=document.querySelector('#tokenModal'),titleEl=document.querySelector('#modalTitle'),openLink=document.querySelector('#openGmgn'),preview=document.querySelector('#localPreview');
 let _activeMint=null;
 function closeModal(){modal.classList.remove('open')}
