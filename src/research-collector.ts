@@ -277,7 +277,7 @@ function parseBalanceToBaseUnits(balanceStr: string, decimals = 6): string {
   const combined = (whole + frac).replace(/^0+/, '') || '0';
   return combined;
 }
-const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number; walletBalanceDecimal?: string }>();
+const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number; isRealBalanceConfirmed: boolean; walletBalanceDecimal?: string }>();
 const liveTokenBalances = new Map<string, { balanceBaseUnits: string; balanceDecimal: string; decimals: number; updatedAt: number }>();
 function recordWalletStatSnapshot(data: Record<string, unknown>, stage: 'PRE_BUY' | 'POST_BUY' | 'PRE_SELL' | 'RETRY_SELL' | 'POST_SELL' | 'PASSIVE_CAPTURE' = 'POST_BUY') {
   if (typeof data.token_address === 'string' && typeof data.balance === 'string' && data.balance !== '' && data.balance !== '0') {
@@ -290,6 +290,7 @@ function recordWalletStatSnapshot(data: Record<string, unknown>, stage: 'PRE_BUY
         pos.inputAmount = baseUnits;
         pos.tokenDecimals = decimals;
         pos.walletBalanceDecimal = data.balance;
+        pos.isRealBalanceConfirmed = true;
         if (typeof data.history_avg_cost === 'number' && data.history_avg_cost > 0) {
           pos.entryPriceUsd = data.history_avg_cost;
         }
@@ -492,7 +493,7 @@ async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeU
     }
   }
   if (result.ok && 'acquiredAmount' in result && typeof result.acquiredAmount === 'string' && typeof result.acquiredDecimals === 'number') {
-    liveBrowserPositions.set(signal.mint, { inputAmount: result.acquiredAmount, tokenDecimals: result.acquiredDecimals, confirmedAt: Date.now(), entryPriceUsd: tokenPriceUsd });
+    liveBrowserPositions.set(signal.mint, { inputAmount: result.acquiredAmount, tokenDecimals: result.acquiredDecimals, confirmedAt: Date.now(), entryPriceUsd: tokenPriceUsd, isRealBalanceConfirmed: false });
   }
   write('events.jsonl', { type: result.ok ? 'BROWSER_BUY_SUBMITTED' : 'BROWSER_BUY_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, stakeUsd, inputLamports, result });
   write('live-trade-ledger.jsonl', {
@@ -531,27 +532,31 @@ async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, token
     return;
   }
 
-  // 1. Sync real token balance from walletstat before requesting sell route
-  const cachedBalance = liveTokenBalances.get(signal.mint);
-  if (cachedBalance && cachedBalance.balanceBaseUnits !== '0') {
-    position.inputAmount = cachedBalance.balanceBaseUnits;
-    position.tokenDecimals = cachedBalance.decimals;
-  }
-
-  try {
-    const freshWs = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
-    if (freshWs) {
-      recordWalletStatSnapshot(freshWs, 'PRE_SELL');
-      if (typeof freshWs.balance === 'string' && freshWs.balance !== '0' && Number(freshWs.balance) > 0) {
-        const dec = typeof freshWs.decimals === 'number' ? freshWs.decimals : position.tokenDecimals;
-        const realBaseUnits = parseBalanceToBaseUnits(freshWs.balance, dec);
-        if (realBaseUnits !== '0') {
-          position.inputAmount = realBaseUnits;
-          position.tokenDecimals = dec;
+  // 1. Sync real token balance. If already confirmed post-buy, directly hit sell without network latency.
+  if (!position.isRealBalanceConfirmed) {
+    const cachedBalance = liveTokenBalances.get(signal.mint);
+    if (cachedBalance && cachedBalance.balanceBaseUnits !== '0') {
+      position.inputAmount = cachedBalance.balanceBaseUnits;
+      position.tokenDecimals = cachedBalance.decimals;
+      position.isRealBalanceConfirmed = true;
+    } else {
+      try {
+        const freshWs = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+        if (freshWs) {
+          recordWalletStatSnapshot(freshWs, 'PRE_SELL');
+          if (typeof freshWs.balance === 'string' && freshWs.balance !== '0' && Number(freshWs.balance) > 0) {
+            const dec = typeof freshWs.decimals === 'number' ? freshWs.decimals : position.tokenDecimals;
+            const realBaseUnits = parseBalanceToBaseUnits(freshWs.balance, dec);
+            if (realBaseUnits !== '0') {
+              position.inputAmount = realBaseUnits;
+              position.tokenDecimals = dec;
+              position.isRealBalanceConfirmed = true;
+            }
+          }
         }
-      }
+      } catch { /* Fallback to cached balance or initial estimate */ }
     }
-  } catch { /* Fallback to cached balance or initial estimate */ }
+  }
 
   const solPriceUsd = await currentSolUsd(page);
   let result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
