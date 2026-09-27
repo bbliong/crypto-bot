@@ -20,7 +20,7 @@ import { ResearchHolderStore, type ResearchTrackedHolder } from './research-hold
 
 const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '0' }, detailSeconds: { type: 'string', default: '600' },
-  workers: { type: 'string', default: '3' }, stopLossPercent: { type: 'string', default: '20' },
+  workers: { type: 'string' }, stopLossPercent: { type: 'string', default: '20' },
   simulationStakeUsd: { type: 'string' },
   stake: { type: 'string' },
   stakeUsd: { type: 'string' },
@@ -39,6 +39,7 @@ const { values } = parseArgs({ options: {
   browserPromptTestSignal: { type: 'boolean', default: false },
   browserAutoTrade: { type: 'boolean', default: false },
   browserBuyAuto: { type: 'boolean', default: false },
+  quoteSimulation: { type: 'boolean', default: false },
   orderOutcomeCapture: { type: 'boolean', default: false },
   controlOnly: { type: 'boolean', default: false },
   strategy: { type: 'string', default: 'momentum-v2' },
@@ -50,7 +51,9 @@ if (!['legacy', 'flow-3', 'momentum-v2', 'pump-band'].includes(values.strategy!)
 const momentumV2 = values.strategy === 'momentum-v2';
 const browserAutoTrade = Boolean(values.browserAutoTrade || values.browserBuyAuto);
 const browserTradingEnabled = values.browserBuyPrompt || browserAutoTrade;
+const quoteSimulationEnabled = Boolean(values.quoteSimulation);
 if (browserAutoTrade && !momentumV2) throw new Error('--browserAutoTrade is only supported with --strategy momentum-v2.');
+if (quoteSimulationEnabled && !momentumV2) throw new Error('--quoteSimulation is only supported with --strategy momentum-v2.');
 if (browserAutoTrade) {
   values.orderOutcomeCapture = true;
   values.controlOnly = true;
@@ -79,7 +82,7 @@ const config: Config = flow3 ? {
   maximumTop10Percent: 30,
 } : loadedConfig;
 const runSeconds = Number(values.seconds), detailSeconds = Number(pumpBand && values.detailSeconds === '600' ? '20' : values.detailSeconds);
-const workers = Number(values.workers), stopLossPercent = Number(values.stopLossPercent);
+const workers = Number(values.workers !== undefined ? values.workers : (config.workers ?? 3)), stopLossPercent = Number(values.stopLossPercent);
 const exitHoldSeconds = Number(values.exitHoldSeconds);
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
@@ -140,6 +143,13 @@ function refreshLatestReport(): Promise<void> {
     const child = spawn(process.execPath, ['scripts/generate-simulation-report.mjs', output], {
       cwd: process.cwd(), stdio: 'ignore', windowsHide: true,
     });
+    child.once('error', () => resolve());
+    child.once('exit', () => resolve());
+  });
+}
+function runPostRunExecutionAnalysis(script: string): Promise<void> {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, [script, output], { cwd: process.cwd(), stdio: 'ignore', windowsHide: true });
     child.once('error', () => resolve());
     child.once('exit', () => resolve());
   });
@@ -228,6 +238,36 @@ function scheduleSimulatedOrder(signal: PaperSignal, stakeUsd: number): void {
 let liveBrowserAuthorization: string | null = null;
 let liveBrowserWalletAddress: string | null = null;
 let orderOutcomeCaptureUntil = 0;
+const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * Quote-only mode never posts an order, so it does not need an order
+ * authorization.  It does need the wallet address used by GMGN's route
+ * endpoint.  The address is already present in the redacted request audit
+ * from a prior browser auto-trade run; reuse only that non-secret field when
+ * the current browser session has not made a walletstat request yet.
+ */
+function latestQuoteWalletAddress(): string | null {
+  if (liveBrowserWalletAddress) return liveBrowserWalletAddress;
+  try {
+    const root = join(process.cwd(), 'research');
+    for (const entry of readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
+      const auditFile = join(root, entry.name, 'order-api-audit.jsonl');
+      if (!existsSync(auditFile)) continue;
+      const lines = readFileSync(auditFile, 'utf8').trim().split(/\r?\n/).reverse();
+      for (const line of lines) {
+        try {
+          const row = JSON.parse(line) as { type?: string; path?: string };
+          if (row.type !== 'GMGN_API_REQUEST' || typeof row.path !== 'string') continue;
+          const match = row.path.match(/\/smartmoney\/sol\/walletstat\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+          if (match?.[1] && SOLANA_ADDRESS_PATTERN.test(match[1])) return match[1];
+        } catch { /* Ignore an incomplete JSONL row. */ }
+      }
+    }
+  } catch { /* A first-time profile has no prior request audit. */ }
+  return null;
+}
+
 function latestCapturedOrderSession(): { fromAddress: string; authorization: string } | null {
   if (liveBrowserWalletAddress && (liveBrowserAuthorization || browserAutoTrade)) {
     return { fromAddress: liveBrowserWalletAddress, authorization: liveBrowserAuthorization ?? '' };
@@ -244,7 +284,7 @@ function latestCapturedOrderSession(): { fromAddress: string; authorization: str
           if (row.type !== 'ORDER_REQUEST_PAYLOAD' || !row.bodyText || !row.url?.includes('/mrtapi/v2/swap_batch_order')) continue;
           const body = JSON.parse(row.bodyText) as { from_address?: unknown };
           const authorization = row.headers?.authorization;
-          if (typeof body.from_address === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(body.from_address)
+          if (typeof body.from_address === 'string' && SOLANA_ADDRESS_PATTERN.test(body.from_address)
             && (liveBrowserAuthorization || (typeof authorization === 'string' && authorization.length > 0))) {
             return { fromAddress: body.from_address, authorization: liveBrowserAuthorization ?? authorization as string };
           }
@@ -449,6 +489,81 @@ async function browserSellRoute(page: Page, input: { mint: string; fromAddress: 
     return { status: response.status, body: await response.json().catch(() => null) };
   }, input);
 }
+type QuoteSimulationPosition = { inputAmount: string; tokenDecimals: number; quoteAt: number };
+const quoteSimulationPositions = new Map<string, QuoteSimulationPosition>();
+const quoteSimulationBuyTasks = new Map<string, Promise<void>>();
+function quoteSummary(routeData: any) {
+  const quote = routeData?.quote ?? {};
+  return {
+    amountInUsd: routeData?.amount_in_usd ?? null, amountOutUsd: routeData?.amount_out_usd ?? null,
+    inAmount: quote.inAmount ?? null, outAmount: quote.outAmount ?? null,
+    inDecimals: quote.inDecimals ?? null, outDecimals: quote.outDecimals ?? null,
+    otherAmountThreshold: quote.otherAmountThreshold ?? null, priceImpactPct: quote.priceImpactPct ?? null,
+    exchange: routeData?.exchange ?? null,
+  };
+}
+/** Request a route only. This function never creates a transaction or calls the submit endpoint. */
+function scheduleQuoteSimulationBuy(page: Page, signal: PaperSignal, stakeUsd: number, tokenPriceUsd: number): void {
+  if (!quoteSimulationEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
+  const task = (async () => {
+    const quoteStartedAt = Date.now();
+    const walletAddress = latestQuoteWalletAddress();
+    if (!walletAddress) {
+      write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_BUY_SKIPPED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt: Date.now(), reason: 'NO_QUOTE_WALLET_CONTEXT' });
+      return;
+    }
+    const solSpot = cachedSolUsdForEntry();
+    if (!solSpot) {
+      write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_BUY_SKIPPED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, observedAt: Date.now(), reason: 'NO_FRESH_SOL_SPOT', execution: 'ROUTE_ONLY_NO_SUBMIT' });
+      return;
+    }
+    const solPriceUsd = solSpot.usd;
+    const inputAmount = Math.floor(stakeUsd / solPriceUsd * 1_000_000_000).toString();
+    const routeRequestedAt = Date.now(), route = await browserRoute(page, { mint: signal.mint, fromAddress: walletAddress, inputLamports: inputAmount });
+    const observedAt = Date.now(), data = route.body?.data;
+    if (route.status !== 200 || route.body?.code !== 0 || !data?.quote || typeof data.quote.outAmount !== 'string' || !Number.isInteger(data.quote.outDecimals)) {
+      write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_BUY_UNPRICED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, quoteStartedAt, routeRequestedAt, observedAt, latencyMs: observedAt - routeRequestedAt, decisionToRouteMs: routeRequestedAt - signal.decisionAt, totalLatencyMs: observedAt - signal.decisionAt, solSpotAgeMs: solSpot.ageMs, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null, execution: 'ROUTE_ONLY_NO_SUBMIT' });
+      return;
+    }
+    quoteSimulationPositions.set(signal.positionId, { inputAmount: data.quote.outAmount, tokenDecimals: data.quote.outDecimals, quoteAt: observedAt });
+    write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_BUY', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, signalPriceUsd: tokenPriceUsd, quoteStartedAt, routeRequestedAt, observedAt, latencyMs: observedAt - routeRequestedAt, decisionToRouteMs: routeRequestedAt - signal.decisionAt, totalLatencyMs: observedAt - signal.decisionAt, solSpotAgeMs: solSpot.ageMs, inputAmountBaseUnits: inputAmount, solPriceUsd, quote: quoteSummary(data), execution: 'ROUTE_ONLY_NO_SUBMIT' });
+  })();
+  quoteSimulationBuyTasks.set(signal.positionId, task);
+  pendingPaperOrders.add(task);
+  void task.then(() => {
+    quoteSimulationBuyTasks.delete(signal.positionId);
+    pendingPaperOrders.delete(task);
+  }, error => {
+    quoteSimulationBuyTasks.delete(signal.positionId);
+    pendingPaperOrders.delete(task);
+    write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_BUY_ERROR', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+  });
+}
+function scheduleQuoteSimulationSell(page: Page, signal: PaperSignal, tokenPriceUsd: number): void {
+  if (!quoteSimulationEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
+  const task = (async () => {
+    // This is independent from the risk listener. A route response can never delay a sell signal.
+    await quoteSimulationBuyTasks.get(signal.positionId);
+    const position = quoteSimulationPositions.get(signal.positionId), walletAddress = latestQuoteWalletAddress();
+    if (!position || !walletAddress) {
+      write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_SELL_SKIPPED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt: Date.now(), reason: position ? 'NO_QUOTE_WALLET_CONTEXT' : 'NO_BUY_ROUTE_QUOTE' });
+      return;
+    }
+    const startedAt = Date.now(), route = await browserSellRoute(page, { mint: signal.mint, fromAddress: walletAddress, inputAmount: position.inputAmount });
+    const observedAt = Date.now(), data = route.body?.data;
+    if (route.status !== 200 || route.body?.code !== 0 || !data?.quote) {
+      write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_SELL_UNPRICED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, startedAt, observedAt, latencyMs: observedAt - startedAt, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null, execution: 'ROUTE_ONLY_NO_SUBMIT' });
+      return;
+    }
+    write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_SELL', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, signalPriceUsd: tokenPriceUsd, startedAt, observedAt, latencyMs: observedAt - startedAt, inputAmountBaseUnits: position.inputAmount, tokenDecimals: position.tokenDecimals, buyQuoteAt: position.quoteAt, quote: quoteSummary(data), execution: 'ROUTE_ONLY_NO_SUBMIT' });
+    quoteSimulationPositions.delete(signal.positionId);
+  })();
+  pendingPaperOrders.add(task);
+  void task.then(() => pendingPaperOrders.delete(task), error => {
+    pendingPaperOrders.delete(task);
+    write('quote-simulated-orders.jsonl', { type: 'QUOTE_SIMULATION_SELL_ERROR', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
+  });
+}
 async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }, skipPrompt = false) {
   const route = await browserSellRoute(page, input);
   const routeData = route.body?.data;
@@ -482,7 +597,12 @@ async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeU
     write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, observedAt: Date.now(), reason: 'NO_CAPTURED_ORDER_SESSION' });
     return;
   }
-  const solPriceUsd = await currentSolUsd(page);
+  const solSpot = cachedSolUsdForEntry();
+  if (!solSpot) {
+    write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_FRESH_SOL_SPOT' });
+    return;
+  }
+  const solPriceUsd = solSpot.usd;
   const inputLamports = Math.floor(stakeUsd / solPriceUsd * 1_000_000_000).toString();
   let result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
   if (isExpiredBrowserAuthorization(result)) {
@@ -593,6 +713,14 @@ async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, token
   if (result.ok) {
     liveBrowserPositions.delete(signal.mint);
     liveTokenBalances.delete(signal.mint);
+    if (maxPaperBuys !== null && browserAutoTrade) {
+      const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL' && event.paperLane === PAPER_LANES.control.id).length;
+      const openLanes = simulatedEvents.filter(event => event.type === 'SIMULATED_BUY').length - simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
+      if (totalSells >= maxPaperBuys && openLanes === 0 && liveBrowserPositions.size === 0) {
+        console.log('[trial-complete]', `Target ${maxPaperBuys} buy dan ${totalSells} sell selesai.`);
+        setTimeout(() => stopping.abort(), 2_000);
+      }
+    }
   }
   write('events.jsonl', { type: result.ok ? 'BROWSER_SELL_SUBMITTED' : 'BROWSER_SELL_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, inputAmount: position.inputAmount, result });
   write('live-trade-ledger.jsonl', {
@@ -621,6 +749,10 @@ const rejected = new Set<string>(), youngRejected = new Set<string>(), rejection
 const stopping = new AbortController();
 let context: BrowserContext | undefined, received = 0, sockets = 0;
 let solSpotCache: { usd: number; observedAt: number } | undefined;
+let solSpotRefreshInFlight: Promise<void> | undefined;
+let solSpotRefreshTimer: ReturnType<typeof setInterval> | undefined;
+const SOL_SPOT_REFRESH_INTERVAL_MS = 15_000;
+const SOL_SPOT_MAX_AGE_FOR_ENTRY_MS = 60_000;
 let paperBuyCount = 0;
 // DEV-tag data is supplementary. Reserve one request globally so five detail
 // workers never burst the endpoint and trigger a session-wide 429.
@@ -892,6 +1024,9 @@ function attachHolderNetworkInspector(page: Page) {
 /** Records GMGN order endpoint metadata and, only when explicitly requested,
  * the complete local request/response exchange for the order endpoint. */
 function attachOrderApiInspector(target: Page | BrowserContext) {
+  // Quote-only asks GMGN only for a route. It never posts an order, but its
+  // passive request audit may establish the wallet address for later quotes.
+  const quoteSessionCaptureEnabled = browserTradingEnabled || quoteSimulationEnabled;
   const isGmgnApiRequest = (request: import('playwright').Request) => {
     try {
       const url = new URL(request.url());
@@ -923,7 +1058,7 @@ function attachOrderApiInspector(target: Page | BrowserContext) {
     const orderEndpoint = isOrderEndpoint(request.url());
     const rpcSubmission = isSolanaRpcSubmission(request);
     const gmgnApiRequest = isGmgnApiRequest(request);
-    if (!orderEndpoint && !rpcSubmission && (!values.orderCapture || !gmgnApiRequest) && (!browserTradingEnabled || !gmgnApiRequest)) return;
+    if (!orderEndpoint && !rpcSubmission && (!values.orderCapture || !gmgnApiRequest) && (!quoteSessionCaptureEnabled || !gmgnApiRequest)) return;
     const headers = request.headers();
     if (browserTradingEnabled && typeof headers.authorization === 'string' && headers.authorization.length > 0) liveBrowserAuthorization = headers.authorization;
     const walletMatch = request.url().match(/\/smartmoney\/sol\/walletstat\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
@@ -1072,13 +1207,22 @@ async function maybeRefreshDeveloperHolders(page: Page, mint: string, observedAt
 }
 
 const trackedHolders = new Map<string, Map<string, TrackedHolder>>();
+// The WebSocket tells us who has just traded.  This is a separate, bounded
+// Top-100 ownership cache used to give that wallet a supply-share/DEV context.
+// Never await it in a socket callback or an order path.
+const TOP_HOLDERS_REFRESH_MS = 10_000;
+const TOP_HOLDERS_CACHE_MAX_AGE_MS = 9_000;
+const TOP_HOLDERS_GLOBAL_SPACING_MS = 3_000;
+let nextTrackedHolderApiAt = 0;
 
 async function refreshTrackedHolders(page: Page, mint: string, observedAt: number) {
   const cachedStatus = holderApiStatus.get(mint);
   const cachedHolders = trackedHolders.get(mint);
-  if (cachedStatus && cachedStatus.status === 200 && cachedHolders && cachedHolders.size > 0 && observedAt - cachedStatus.observedAt <= 20_000) {
+  if (cachedStatus && cachedStatus.status === 200 && cachedHolders && cachedHolders.size > 0 && observedAt - cachedStatus.observedAt <= TOP_HOLDERS_CACHE_MAX_AGE_MS) {
     return { status: 200, holders: [...cachedHolders.values()] };
   }
+  if (Date.now() < nextTrackedHolderApiAt) return { status: null, holders: cachedHolders ? [...cachedHolders.values()] : [], deferred: true };
+  nextTrackedHolderApiAt = Date.now() + TOP_HOLDERS_GLOBAL_SPACING_MS;
 
   const response = await page.evaluate(async ({ mint: tokenMint, cachedParams }) => {
     let deviceId = cachedParams.deviceId;
@@ -1359,12 +1503,37 @@ function attach(page: Page, feed: boolean, active: () => string | undefined) {
     }
   });
 }
+function cachedSolUsdForEntry(): { usd: number; observedAt: number; ageMs: number } | null {
+  if (!solSpotCache) return null;
+  const ageMs = Date.now() - solSpotCache.observedAt;
+  return ageMs <= SOL_SPOT_MAX_AGE_FOR_ENTRY_MS ? { ...solSpotCache, ageMs } : null;
+}
+function refreshSolSpot(page: Page): Promise<void> {
+  if (solSpotRefreshInFlight) return solSpotRefreshInFlight;
+  solSpotRefreshInFlight = (async () => {
+    try {
+      let usd: number;
+      try { usd = await fetchSolUsdSpot(); } catch { usd = await fetchSolUsdSpotInBrowser(page); }
+      solSpotCache = { usd, observedAt: Date.now() };
+    } catch (error) {
+      console.warn('[sol-spot-refresh-failed]', error instanceof Error ? error.message : error);
+    } finally {
+      solSpotRefreshInFlight = undefined;
+    }
+  })();
+  return solSpotRefreshInFlight;
+}
+function startSolSpotPrefetch(page: Page): void {
+  solSpotRefreshTimer = setInterval(() => void refreshSolSpot(page), SOL_SPOT_REFRESH_INTERVAL_MS);
+  solSpotRefreshTimer.unref?.();
+}
 async function currentSolUsd(page: Page) {
-  if (solSpotCache && Date.now() - solSpotCache.observedAt < 30_000) return solSpotCache.usd;
-  let usd: number;
-  try { usd = await fetchSolUsdSpot(); } catch { usd = await fetchSolUsdSpotInBrowser(page); }
-  solSpotCache = { usd, observedAt: Date.now() };
-  return usd;
+  const cached = cachedSolUsdForEntry();
+  if (cached) return cached.usd;
+  await refreshSolSpot(page);
+  const refreshed = cachedSolUsdForEntry();
+  if (!refreshed) throw new Error('SOL/USD spot price is unavailable.');
+  return refreshed.usd;
 }
 async function safelySetAmount(page: Page, solAmount: string) {
   const input = await amountInput(page);
@@ -1566,7 +1735,7 @@ async function worker(index: number, deadline: number) {
       if (openPositions <= 0) {
         // Keep the detail tab on the completed token so a manual order-capture
         // session can inspect and submit its Sell before the operator stops it.
-        if (values.orderCapture || browserTradingEnabled) { await delay(500); continue; }
+        if (values.orderCapture || (browserTradingEnabled && !browserAutoTrade)) { await delay(500); continue; }
         stopping.abort();
         break;
       }
@@ -1591,7 +1760,7 @@ async function worker(index: number, deadline: number) {
     let pendingMomentumExit: ReturnType<typeof assessMomentumExit> = null;
     const momentumLaneStates = new Map<PaperLane, { position: SimulationPosition; riskState: ReturnType<typeof createMomentumPosition>; closed: boolean }>();
     let lastMomentumBlockAt = 0, lastR5BandBlockAt = 0;
-    let lastTrackedPollAt = Date.now(), trackedPollDelayMs = 21_000;
+    let lastTrackedPollAt = Date.now(), trackedPollDelayMs = TOP_HOLDERS_REFRESH_MS;
     // A single socket trade can make a thin launch wick below the stop.  Keep
     // the breach pending until independent socket and candle evidence agree.
     let entryCandleClose: number | null = null, hardStopPendingAt = 0, hardStopDistinctTicks = 0, hardStopLastPriceObservedAt = 0;
@@ -1639,8 +1808,9 @@ async function worker(index: number, deadline: number) {
         }
         let now = Date.now();
         if (momentumV2 && now - lastTrackedPollAt >= trackedPollDelayMs) {
-          const tracked = await refreshTrackedHolders(page, mint, now).catch(() => ({ status: 0 }));
-          lastTrackedPollAt = Date.now(); trackedPollDelayMs = tracked.status === 429 ? 60_000 : 21_000;
+          const tracked = await refreshTrackedHolders(page, mint, now).catch(() => ({ status: 0, deferred: false }));
+          lastTrackedPollAt = Date.now();
+          trackedPollDelayMs = tracked.status === 429 ? 60_000 : tracked.deferred ? TOP_HOLDERS_GLOBAL_SPACING_MS : TOP_HOLDERS_REFRESH_MS;
         }
         if (now - lastTokenStatAt >= 5_000) { await refreshTokenStat(page, mint, now); lastTokenStatAt = Date.now(); }
         if (now - lastCandlePollAt >= 3_000) {
@@ -1838,6 +2008,7 @@ async function worker(index: number, deadline: number) {
                 decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
               });
               write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal); scheduleSimulatedOrder(entrySignal, paperPosition.stakeUsd);
+              scheduleQuoteSimulationBuy(page, entrySignal, paperPosition.stakeUsd, price);
               void promptAndSubmitBrowserBuy(page, entrySignal, paperPosition.stakeUsd, price, num(candidate, 'marketCapUsd')).catch(error => {
                 write('events.jsonl', { type: 'BROWSER_BUY_ERROR', mint, observedAt: Date.now(), signalId: entrySignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
               });
@@ -1886,6 +2057,7 @@ async function worker(index: number, deadline: number) {
                     reason: decision.reason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
                     decisionAt: exitDecisionAt, paperRecordedAt: Date.now(), priceUsd: decision.priceUsd });
                   write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
+                  scheduleQuoteSimulationSell(page, exitSignal, decision.priceUsd);
                   void promptAndSubmitBrowserSell(page, exitSignal, decision.priceUsd, num(candidates.get(mint), 'marketCapUsd')).catch(error => {
                     write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
                   });
@@ -1984,7 +2156,7 @@ async function worker(index: number, deadline: number) {
             monitoringSnapshots.set(mint, prevSnaps);
           }
         }
-        if (momentumV2 && pendingMomentumExit && r5BandSimulation && r5BandExit) {
+        if (momentumV2 && pendingMomentumExit && (!r5BandSimulation || r5BandExit)) {
           const exit = pendingMomentumExit as NonNullable<ReturnType<typeof assessMomentumExit>>;
           if (values.prepareTradeUi && exit.reason) await prepareSellPanel(page, mint, index, exit.observedAt, exit.reason).catch(error => {
             write('events.jsonl', { type: 'SELL_PREPARATION_ERROR', mint, observedAt: Date.now(), message: String(error) });
@@ -2237,7 +2409,7 @@ async function worker(index: number, deadline: number) {
   await page.close().catch(() => {});
 }
 async function main() {
-  writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled,
+  writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled, quoteSimulationEnabled,
     runSeconds: runSeconds === 0 ? null : runSeconds,
     rules: pumpBand ? { ...PUMP_BAND_RULES, observationSeconds: detailSeconds, simulationStakeUsdc: simulationStakeUsd, maximumExitPriceAgeMs: 5_000,
       entry: 'first fresh token_activity pu after detail opened', exit: '20% fall from observed price peak or observation window end' }
@@ -2269,7 +2441,13 @@ async function main() {
   else
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumV2 ? { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label }, [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
-  context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
+  context = await chromium.launchPersistentContext(values.profileDir, {
+    channel: config.browserChannel || undefined,
+    headless: false,
+    viewport: null,
+    args: ['--start-maximized', '--profile-directory=' + values.profileName, '--disable-gpu', '--disable-dev-shm-usage', '--disable-session-crashed-bubble', '--no-first-run', '--no-default-browser-check'],
+    ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined
+  });
   context.on('close', () => stopping.abort());
   attachOrderApiInspector(context);
   process.once('SIGINT', () => stopping.abort());
@@ -2277,11 +2455,14 @@ async function main() {
   console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds, simulationStakeSol !== null ? ('stakeSol=' + simulationStakeSol) : ('stakeUsd=$' + simulationStakeUsd));
   const feed = context.pages()[0] ?? await context.newPage(); attach(feed, true, () => undefined);
   await feed.goto(config.feedUrl, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
+  await refreshSolSpot(feed);
+  startSolSpotPrefetch(feed);
   const deadline = runSeconds === 0 ? Number.POSITIVE_INFINITY : Date.now() + runSeconds * 1000;
   const timer = runSeconds === 0 ? null : setTimeout(() => stopping.abort(), runSeconds * 1000);
   await Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline)));
   await Promise.allSettled([...pendingPaperOrders]);
   if (timer) clearTimeout(timer);
+  if (solSpotRefreshTimer) clearInterval(solSpotRefreshTimer);
   const simulated = simulatedEvents;
   const summarizeLane = (paperLane: PaperLane) => {
     const buys = simulated.filter(row => row.type === 'SIMULATED_BUY' && row.paperLane === paperLane);
@@ -2299,6 +2480,10 @@ async function main() {
   writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), ...controlSummary, lanes,
     holderStorage: { api: holderStore.counts(), socket: holderStore.socketCounts() },
     assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));
+  await Promise.all([
+    runPostRunExecutionAnalysis('scripts/reconcile-live-orders.mjs'),
+    runPostRunExecutionAnalysis('scripts/replay-execution-delay.mjs'),
+  ]);
   if (reportRefreshTimer) clearTimeout(reportRefreshTimer);
   await refreshLatestReport();
   write('events.jsonl', { type: 'RUN_COMPLETE', observedAt: Date.now(), sockets, received, screened: inspected.size, rejected: rejected.size, rejectionCounts: Object.fromEntries(rejectionCounts), youngRejected: youngRejected.size, youngRejectionCounts: Object.fromEntries(youngRejectionCounts), simulation: { lanes } });

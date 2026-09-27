@@ -48,6 +48,27 @@ Jumlah token diambil dari `ba`, nilai USD dari `au`; keduanya tidak dipertukarka
 
 ## Replay dan batas kesimpulan
 
+### Rekonsiliasi eksekusi dan replay delay
+
+Untuk setiap run auto-trade, buat dua artefak berikut setelah run selesai:
+
+```
+npm run execution:reconcile -- research/<run-id>
+npm run execution:delay-replay -- research/<run-id> --delays=500,1000,2000,3000
+```
+
+`execution-reconciliation.json` memasangkan sinyal, order GMGN, route quote, hash transaksi, tick socket yang memiliki signature sama, dan snapshot wallet. Harga dari tick ber-signature sama adalah bukti eksekusi yang lebih kuat daripada harga sinyal, namun tetap bukan bukti fill on-chain final atau P/L setelah semua fee.
+
+`execution-delay-replay.json` menjaga sinyal historis lalu mengganti harga buy/sell dengan tick socket pertama yang diterima setelah delay yang dipilih. Ini mengukur dampak latency, bukan backtest strategi baru: exit tidak dihitung ulang dari harga entry yang terlambat.
+
+Untuk forward test tanpa submit order, gunakan:
+
+```
+npm run research:quote
+```
+
+Mode ini menulis `quote-simulated-orders.jsonl`. Setelah sinyal buy dan sell kontrol V2, collector meminta route quote GMGN untuk nominal yang sama dan quantity dari quote buy. Tidak ada request submit, signature, maupun transaksi blockchain. Quote diproses paralel sehingga tidak menunda evaluator socket atau sinyal exit.
+
 Jalankan:
 
 ```

@@ -100,11 +100,13 @@ cd /home/crypto/crypto-bot
 DISPLAY=:99 npm run browser:buy:auto -- --maxBuys 1 --profileDir profiles/research-vps --profileName Default
 ```
 
-#### Pilihan B: Jalan Kontinu Tanpa Batas (3 Worker Standar)
+#### Pilihan B: Jalan Kontinu Tanpa Batas (Default Konfigurasi)
 ```bash
 cd /home/crypto/crypto-bot
 DISPLAY=:99 npm run browser:buy:auto -- --profileDir profiles/research-vps --profileName Default
 ```
+
+Tanpa `--workers`, bot memakai nilai `workers` pada `config/rules.yaml` (saat ini 2). Satu worker memiliki satu tab detail; ada satu tab feed tambahan. Jadi 2 worker berarti maksimal dua token dipantau atau diproses bersamaan.
 
 #### Pilihan C: Mode Hemat RAM VPS (1 Worker Saja)
 Sangat dianjurkan jika VPS Anda hanya memiliki RAM 1 GB – 2 GB:
@@ -112,6 +114,16 @@ Sangat dianjurkan jika VPS Anda hanya memiliki RAM 1 GB – 2 GB:
 cd /home/crypto/crypto-bot
 DISPLAY=:99 npm run browser:buy:auto -- --workers 1 --profileDir profiles/research-vps --profileName Default
 ```
+
+#### Pilihan D: Uji Quote Tanpa Order Nyata
+Meminta quote buy dan sell GMGN setelah sinyal V2, tetapi tidak membuat signature atau submit order. Mulai dengan satu worker agar hasil latency mudah diaudit:
+
+```bash
+cd /home/crypto/crypto-bot
+DISPLAY=:99 npm run research:quote -- --seconds 3600 --workers 1 --profileDir profiles/research-vps --profileName Default
+```
+
+Nilai `--workers` yang valid adalah 1 sampai 8. Untuk auto-trade, mulai dari 1 worker, lalu gunakan 2 setelah laporan quote dan replay delay stabil. Worker lebih tinggi berarti lebih banyak tab, kandidat, request data, dan potensi posisi aktif pada waktu yang sama.
 
 Untuk keluar dari tmux tanpa mematikan bot: tekan `Ctrl+B` lalu `D` (*detach*).  
 Untuk kembali masuk ke tmux: `tmux attach -t gmgn`.
@@ -172,7 +184,7 @@ WorkingDirectory=/home/crypto/crypto-bot
 Environment=HOME=/home/crypto
 Environment=DISPLAY=:99
 # Jalankan bot otomatis secara kontinu:
-ExecStart=/usr/bin/npm run browser:buy:auto -- --seconds 0 --workers 3 --stakeUsd 0.25 --profileDir profiles/research-vps --profileName Default
+ExecStart=/usr/bin/npm run browser:buy:auto -- --seconds 0 --workers 2 --stakeUsd 0.25 --profileDir profiles/research-vps --profileName Default
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=30

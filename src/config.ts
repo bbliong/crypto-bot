@@ -15,7 +15,7 @@ export function loadConfig(path = 'config/rules.yaml'): Config {
     'maximumDeveloperSoldPercent'] as const) {
     if (!Number.isFinite(c[key]) || c[key] < 0 || (key !== 'minimumAgeSeconds' && c[key] === 0)) throw new Error(`Invalid ${key}`);
   }
-  if (!Number.isInteger(c.workers) || c.workers > 4 || !Number.isInteger(c.queueCapacity)) throw new Error('workers: 1..4; queueCapacity: integer');
+  if (!Number.isInteger(c.workers) || c.workers < 1 || c.workers > 8 || !Number.isInteger(c.queueCapacity)) throw new Error('workers: 1..8; queueCapacity: integer');
   if (c.minimumLiquidityUsd > c.maximumLiquidityUsd) throw new Error('minimumLiquidityUsd cannot exceed maximumLiquidityUsd');
   if (c.minimumAgeSeconds > c.maximumAgeSeconds) throw new Error('minimumAgeSeconds cannot exceed maximumAgeSeconds');
   if (c.simulationStakeUsd !== undefined && (!Number.isFinite(c.simulationStakeUsd) || c.simulationStakeUsd <= 0)) throw new Error('Invalid simulationStakeUsd');

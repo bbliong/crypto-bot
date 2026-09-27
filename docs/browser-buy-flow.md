@@ -5,7 +5,7 @@ Pipeline ini mengintegrasikan eksekusi order GMGN langsung dari konteks tab brow
 ## Mode Eksekusi
 
 ### 1. Mode Otomatis Tanpa Modal (`browser:buy:auto`)
-Menjalankan pipeline riset secara kontinu (`--seconds 0`, `--workers 3`, `--stakeUsd 0.25`) dan mengeksekusi order Buy & Sell secara langsung via API GMGN (`/mrtapi/v2/swap_batch_order`) di dalam sesi browser aktif tanpa menampilkan modal prompt konfirmasi.
+Menjalankan pipeline riset secara kontinu (`--seconds 0`) dan mengeksekusi order Buy & Sell langsung via API GMGN (`/mrtapi/v2/swap_batch_order`) di dalam sesi browser aktif tanpa menampilkan modal prompt konfirmasi. Jumlah worker dapat diatur dari 1 sampai 8; bila tidak diberi flag, collector memakai `workers` dari `config/rules.yaml`.
 
 ```bash
 # Menjalankan di VPS (Linux / Headless Xvfb)
@@ -13,6 +13,16 @@ DISPLAY=:99 npm run browser:buy:auto -- --profileDir profiles/research-vps --pro
 
 # Atau di Windows / Local
 npm run browser:buy:auto
+```
+
+Contoh jumlah worker:
+
+```bash
+# Satu token detail pada satu waktu; pilihan awal untuk validasi live
+DISPLAY=:99 npm run browser:buy:auto -- --workers 1 --profileDir profiles/research-vps --profileName Default
+
+# Dua token detail pada satu waktu
+DISPLAY=:99 npm run browser:buy:auto -- --workers 2 --profileDir profiles/research-vps --profileName Default
 ```
 
 Argumen internal yang diaktifkan secara otomatis:

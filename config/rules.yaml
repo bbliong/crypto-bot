@@ -14,14 +14,14 @@ headless: false
 # everyday Chrome user-data directory.
 browserUserDataDir: C:/Projects/Crypto/profiles/aria-tele01
 browserProfileDirectory: Profile 12
-workers: 1
+workers: 2
 queueCapacity: 100
 workerTimeoutMs: 12000
 # A Phase-1 token that reaches ENTRY_READY holds the only detail tab here.
 activeMonitorSeconds: 300
 # Jumlah modal beli per transaksi dalam USD (contoh: 0.25, 1.0, 5.0) atau gunakan simulationStakeSol (contoh: 0.005)
 # Nilai ini juga bisa dioverride via CLI: --stake 1 atau --sol 0.005
-simulationStakeUsd: 0.25
+simulationStakeUsd: 2.0
 # Take profit instan saat harga stagnan/tidak naik selama 10 detik dan sudah untung >= +3%
 profitStagnationPercent: 3
 profitStagnationSeconds: 10
