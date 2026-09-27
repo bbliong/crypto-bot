@@ -10,6 +10,7 @@
     "probe": "node scripts/run.mjs probe",
     "start": "node scripts/run.mjs start",
     "research": "node scripts/run.mjs research",
+    "research:three-lanes": "node scripts/run.mjs research --strategy momentum-v2 --quoteSimulation --laneWorkers --workers 3 --seconds 1800 --stakeUsd 2",
     "monitor": "node scripts/run.mjs monitor",
     "research:flow3": "node scripts/run.mjs research --strategy flow-3",
     "research:pump-band": "node scripts/run.mjs pump-research",

@@ -1,7 +1,7 @@
 export class CandidateQueue {
   private pending = new Map<string, number>();
   private active = new Set<string>();
-  constructor(private capacity: number, private ttlMs: number) {}
+  constructor(private capacity: number, private ttlMs: number, private newestFirst = true) {}
   push(mint: string, now = Date.now()): 'queued' | 'duplicate' | 'full' {
     this.prune(now);
     if (this.pending.has(mint) || this.active.has(mint)) return 'duplicate';
@@ -10,9 +10,9 @@ export class CandidateQueue {
   }
   take(now = Date.now()): string | undefined {
     this.prune(now);
-    // Detail monitoring favors the freshest eligible token. Map keeps insertion
-    // order, so the final key is the most recent candidate still in the queue.
-    const mint = [...this.pending.keys()].at(-1);
+    // Most collectors favor the freshest eligible token. Lane comparisons use
+    // FIFO instead, so every lane receives the same screened cohort in order.
+    const mint = this.newestFirst ? [...this.pending.keys()].at(-1) : this.pending.keys().next().value as string | undefined;
     if (mint) { this.pending.delete(mint); this.active.add(mint); }
     return mint;
   }

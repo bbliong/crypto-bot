@@ -43,6 +43,8 @@ Listener pasif tidak membuka tab analyzer otomatis. Detail token perlu tersedia 
 
 `assessExit` menyediakan perhitungan target net +50% dari fill aktual dan quote executable untuk seluruh posisi, tetapi belum tersambung ke fill/quote Fomo live. Paper mode mencatat harga referensi, bukan fill executable. Penilaian outcome 1–15 menit, ATH/drawdown pascasinyal, dan pemantauan posisi otomatis belum tersedia.
 
+Untuk membandingkan tiga lane paper dalam tiga tab detail terpisah, jalankan `npm run research:three-lanes -- --profileDir profiles/research-vps --profileName Default`. Worker 1 memakai kontrol V2, worker 2 memakai R5-band, dan worker 3 memakai filter flow-distribution (Top-10 <15%, buy share 5 detik ≥85%, maksimal satu seller, serta satu buyer maksimum 45% dari buy USD). Sebelum buy, worker 1 dilepas setelah 90 detik, worker 2 setelah 60 detik, dan worker 3 setelah 10 detik; worker 3 langsung melepas token bila Top-10 fresh ≥15%. Semua lane meminta route quote GMGN tetapi tidak mengirim order.
+
 ## Mapping data
 
 Edit `config/rules.yaml`, lihat contoh `config/mappings.example.yaml`. Gunakan channel, chain, mintPath dan timestamp units yang terbukti. Angka persen memakai 0..100; gunakan `scale: 100` untuk pecahan 0..1. Boolean harus boolean JSON.

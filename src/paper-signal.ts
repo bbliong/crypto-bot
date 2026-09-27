@@ -1,7 +1,7 @@
 export type PaperSignal = {
   type: 'PAPER_TRADE_SIGNAL';
   side: 'BUY' | 'SELL';
-  paperLane: 'control' | 'r5-band';
+  paperLane: 'control' | 'aggressive-flow' | 'flow-distribution';
   runId: string;
   mint: string;
   positionId: string;
@@ -31,7 +31,7 @@ export type PaperOrderEvent = {
   signalId: string;
   positionId: string;
   side: 'BUY' | 'SELL';
-  paperLane: 'control' | 'r5-band';
+  paperLane: 'control' | 'aggressive-flow' | 'flow-distribution';
   mint: string;
   decisionAt: number;
   plannedOrderAt: number;

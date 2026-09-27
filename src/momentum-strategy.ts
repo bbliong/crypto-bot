@@ -13,6 +13,15 @@ export const MOMENTUM_RULES = Object.freeze({
 export const MOMENTUM_R5_BAND = Object.freeze({
   id: 'r5-band-5-to-10', minimumReturn5s: 5, maximumReturn5s: 10,
 });
+export const FLOW_DISTRIBUTION_RULES = Object.freeze({
+  id: 'flow-distribution', maximumTop10Percent: 15, minimumBuyShare: 0.85,
+  maximumUniqueSellers: 1, maximumTopBuyerShare: 0.45,
+});
+export const AGGRESSIVE_FLOW_RULES = Object.freeze({
+  id: 'aggressive-flow', minimumReturn5s: 3, maximumReturn5s: 18,
+  minimumTrades: 10, minimumBuyers: 5, minimumBuyShare: 0.65,
+  maximumTopBuyerShare: 0.35, minimumHolderStep: 2, hardStopPercent: 12,
+});
 export type MomentumEntryBand = { id: string; minimumReturn5s: number; maximumReturn5s: number };
 export type TapeTrade = { id: string; observedAt: number; occurredAt: number; priceUsd: number | null;
   side: 'buy' | 'sell'; wallet: string | null; usd: number | null; tokens: number | null };
@@ -83,6 +92,35 @@ export function assessMomentumEntry(tape: TapeTrade[], holders: HolderSample[], 
   if (early && !h.sustained) reasons.push('EARLY_HOLDERS_NEED_TWO_GROWING_SNAPSHOTS');
   return { allowed: reasons.length === 0, reasons, metrics: m, holders: h, version: MOMENTUM_RULES.version, band: band ?? null };
 }
+/** Fast momentum scalp derived from the APE observation: strong, broad buy
+ * flow plus a fresh holder increase. It intentionally does not wait for two
+ * full holder-growth intervals, which would enter after the initial move. */
+export function assessAggressiveFlowEntry(tape: TapeTrade[], holders: HolderSample[], now: number) {
+  const m = momentumMetrics(tape, now), h = holderGrowth(holders, now), reasons: string[] = [];
+  if (!m.ready) reasons.push('AGGRESSIVE_INSUFFICIENT_FRESH_HISTORY');
+  if (m.return5s === null || m.return5s < AGGRESSIVE_FLOW_RULES.minimumReturn5s || (m.slope5s ?? 0) <= 0) reasons.push('AGGRESSIVE_MOMENTUM_TOO_WEAK');
+  if ((m.return5s ?? 0) > AGGRESSIVE_FLOW_RULES.maximumReturn5s) reasons.push('AGGRESSIVE_SPIKE_CHASING');
+  if ((m.drawdown5s ?? Infinity) > 3) reasons.push('AGGRESSIVE_PULLBACK');
+  if (m.trades < AGGRESSIVE_FLOW_RULES.minimumTrades || m.buyers < AGGRESSIVE_FLOW_RULES.minimumBuyers || (m.buyShare ?? 0) < AGGRESSIVE_FLOW_RULES.minimumBuyShare) reasons.push('AGGRESSIVE_BUY_FLOW_WEAK');
+  if (m.topBuyerShare === null || m.topBuyerShare > AGGRESSIVE_FLOW_RULES.maximumTopBuyerShare) reasons.push('AGGRESSIVE_SINGLE_BUYER_DOMINANCE');
+  if (!h.fresh || (h.steps.at(-1)?.delta ?? 0) < AGGRESSIVE_FLOW_RULES.minimumHolderStep) reasons.push('AGGRESSIVE_HOLDER_GROWTH_MISSING');
+  return { allowed: reasons.length === 0, reasons, metrics: m, holders: h, version: 'aggressive-flow-v1', rules: AGGRESSIVE_FLOW_RULES };
+}
+/**
+ * Experimental entry lane derived from historical paper data.  It only uses
+ * evidence available when the entry decision is made; a missing Top-10 value
+ * is a block, never an assumed safe distribution.
+ */
+export function assessFlowDistributionEntry(tape: TapeTrade[], holders: HolderSample[], now: number, early: boolean, top10Percent: number | null) {
+  const base = assessMomentumEntry(tape, holders, now, early);
+  const reasons = [...base.reasons];
+  if (!positive(top10Percent)) reasons.push('FLOW_DISTRIBUTION_TOP10_UNVERIFIED');
+  else if (top10Percent >= FLOW_DISTRIBUTION_RULES.maximumTop10Percent) reasons.push('FLOW_DISTRIBUTION_TOP10_CONCENTRATED');
+  if ((base.metrics.buyShare ?? 0) < FLOW_DISTRIBUTION_RULES.minimumBuyShare) reasons.push('FLOW_DISTRIBUTION_BUY_SHARE_LOW');
+  if (base.metrics.sellers > FLOW_DISTRIBUTION_RULES.maximumUniqueSellers) reasons.push('FLOW_DISTRIBUTION_TOO_MANY_SELLERS');
+  if (base.metrics.topBuyerShare === null || base.metrics.topBuyerShare > FLOW_DISTRIBUTION_RULES.maximumTopBuyerShare) reasons.push('FLOW_DISTRIBUTION_SINGLE_BUYER_DOMINANCE');
+  return { ...base, allowed: reasons.length === 0, reasons, distribution: { top10Percent, ...FLOW_DISTRIBUTION_RULES } };
+}
 export type MomentumExitReason = 'V2_HARD_STOP' | 'V2_CONFIRMED_CRASH' | 'V2_MAJOR_HOLDER_SELL' | 'V2_PROFIT_LOCK' | 'V2_TARGET_40' | 'V2_TARGET_50' | 'V2_MOMENTUM_FADE' | 'V2_SELL_PRESSURE';
 export type MomentumPosition = { openedAt: number; entry: number; peak: number; lastId: string | null; entryEventAt: number; lastEventAt: number;
   breachAt: number | null; breachTicks: number; recoveryUntil: number; recoverySampleAt: number; closed: boolean };
@@ -133,4 +171,17 @@ export function assessMomentumExit(p: MomentumPosition, tick: TapeTrade, tape: T
   return { reason, observedAt: now, priceUsd: tick.priceUsd, returnPercent: r, peakReturnPercent: peakReturn, drawdownPercent: drawdown,
     trailPercent, lockReturn, majorSell, metrics: m, holders: h, recoveryUntil: p.recoveryUntil,
     breachTicks: p.breachTicks, version: MOMENTUM_RULES.version };
+}
+export function assessAggressiveFlowExit(p: MomentumPosition, tick: TapeTrade, tape: TapeTrade[], holders: HolderSample[], owners: OwnerSample[]) {
+  const decision = assessMomentumExit(p, tick, tape, holders, owners);
+  if (!decision || decision.reason) return decision;
+  if (decision.returnPercent <= -AGGRESSIVE_FLOW_RULES.hardStopPercent) {
+    p.closed = true;
+    return { ...decision, reason: 'V2_HARD_STOP' as const };
+  }
+  if (decision.peakReturnPercent >= 10 && decision.drawdownPercent >= 4) {
+    p.closed = true;
+    return { ...decision, reason: 'V2_PROFIT_LOCK' as const };
+  }
+  return decision;
 }

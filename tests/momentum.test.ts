@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessMomentumEntry, assessMomentumExit, createMomentumPosition, holderGrowth, momentumMetrics, MOMENTUM_R5_BAND, type TapeTrade } from '../src/momentum-strategy.js';
+import { assessFlowDistributionEntry, assessMomentumEntry, assessMomentumExit, createMomentumPosition, holderGrowth, momentumMetrics, MOMENTUM_R5_BAND, type TapeTrade } from '../src/momentum-strategy.js';
 const tick = (at: number, price: number, extra: Partial<TapeTrade> = {}): TapeTrade => ({ id: String(at), observedAt: at, occurredAt: at, priceUsd: price, side: 'buy', wallet: `w${at % 3}`, usd: 20, tokens: 1, ...extra });
 const rising = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i));
 test('momentum measures five seconds, ignores future/out-of-order frames and one-tick history', () => {
@@ -29,6 +29,13 @@ test('R5-band lane keeps the base gates and waits for momentum from 5% through b
   assert.ok(assessMomentumEntry(slow, holders, 10000, false, MOMENTUM_R5_BAND).reasons.includes('MOMENTUM_R5_BELOW_BAND'));
   const fast = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i * 3));
   assert.ok(assessMomentumEntry(fast, holders, 10000, false, MOMENTUM_R5_BAND).reasons.includes('MOMENTUM_R5_ABOVE_BAND'));
+});
+test('flow-distribution lane requires diverse, buy-led flow and a verified unconcentrated Top-10', () => {
+  const holders = [{ observedAt: 0, count: 100 }, { observedAt: 5000, count: 110 }, { observedAt: 10000, count: 121 }];
+  const tape = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i, { wallet: `b${i}`, usd: 20 }));
+  assert.equal(assessFlowDistributionEntry(tape, holders, 10000, false, 12).allowed, true);
+  assert.ok(assessFlowDistributionEntry(tape, holders, 10000, false, 15).reasons.includes('FLOW_DISTRIBUTION_TOP10_CONCENTRATED'));
+  assert.ok(assessFlowDistributionEntry([...tape, tick(9900, 109, { id: 'sell-1', side: 'sell', wallet: 'seller-1', usd: 20 }), tick(10000, 110, { id: 'sell-2', side: 'sell', wallet: 'seller-2', usd: 20 })], holders, 10000, false, 12).reasons.includes('FLOW_DISTRIBUTION_TOO_MANY_SELLERS'));
 });
 test('hard stop needs distinct evidence; gap exits record actual price, never an invented -20% fill', () => {
   const p = createMomentumPosition(1000, 100), one = tick(2000, 79);

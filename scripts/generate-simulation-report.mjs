@@ -156,7 +156,9 @@ for (const row of followupRows) {
 }
 
 const paperLane = row => row?.paperLane ?? 'control';
-const paperLaneLabel = lane => lane === 'r5-band' ? 'R5-band 5%–<10%' : 'Kontrol V2';
+const paperLaneLabel = lane => lane === 'aggressive-flow' ? 'Aggressive Flow'
+  : lane === 'flow-distribution' ? 'Flow & distribusi Top-10'
+  : 'Kontrol V2';
 const buys = rows.filter(row => row.type === 'SIMULATED_BUY');
 const sells = rows.filter(row => row.type === 'SIMULATED_SELL');
 const holds = rows.filter(row => row.type === 'SIMULATION_HOLD');
@@ -214,12 +216,13 @@ const quoteRowsHtml = quotePositions.slice().reverse().map(position => {
   const socketReturn = quoteSocketReturn(position), netReturn = quoteNetReturn(position), netPnl = quoteNetPnlUsd(position);
   const paperBuy = paperBuyByPosition.get(position.positionId);
   const paperSell = sellsByPosition.get(position.positionId);
+  const lane = paperLane(paperBuy ?? paperSell);
   const paperPnl = finite(paperSell?.pnlUsd), paperReturn = finite(paperSell?.pnlPercent);
   const delta = socketReturn !== null && netReturn !== null ? netReturn - socketReturn : null;
   const netClass = netReturn !== null ? (netReturn >= 0 ? 'up' : 'down') : 'watch';
   const paperClass = paperPnl !== null ? (paperPnl >= 0 ? 'up' : 'down') : 'watch';
   const issueText = (position.issues ?? []).map(row => `${row.type.replace('QUOTE_SIMULATION_', '')}: ${row.reason ?? row.message ?? row.status ?? 'tidak ada harga'}`).join('<br>');
-  return `<tr><td><button class="token" data-mint="${esc(mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(mint)}</span></button></td>
+  return `<tr><td><button class="token" data-mint="${esc(mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(mint)}</span><small>${esc(paperLaneLabel(lane))}</small></button></td>
     <td>${paperBuy ? `${timeExact(paperBuy.observedAt)} WIB<br><b>${usd(paperBuy.stakeUsd)} @ ${usd(paperBuy.entryPriceUsd)}</b>` : '—'}</td>
     <td>${paperSell ? `${timeExact(paperSell.observedAt)} WIB<br><b>@ ${usd(paperSell.exit?.priceUsd)}</b><br><small>${esc(paperSell.reason ?? '—')}</small>` : '<span class="watch">Menunggu paper sell</span>'}</td>
     <td class="${paperClass}">${paperPnl === null ? '—' : `<b>${usd(paperPnl)}</b><br>${pct(paperReturn)}`}</td>
@@ -239,7 +242,7 @@ const quoteSectionHtml = quoteReportEnabled
   ? `<h2>Komparasi Paper vs Route GMGN</h2>
     <div class="note"><b>Paper</b> memakai harga socket saat sinyal. <b>Route GMGN</b> memakai estimasi output swap pada saat quote. Keduanya bukan order/fill blockchain. “Selisih route vs paper” menunjukkan tambahan profit atau kerugian yang muncul bila estimasi route dipakai.</div>
     <div class="grid"><div class="card"><div class="label">Posisi dengan route</div><div class="value">${quotePositions.length}</div></div><div class="card"><div class="label">Pasangan buy + sell route</div><div class="value">${completedQuotePositions.length}</div></div><div class="card"><div class="label">P/L paper (semua route)</div><div class="value ${pairedPaperPnl > 0 ? 'up' : pairedPaperPnl < 0 ? 'down' : ''}">${usd(pairedPaperPnl)}</div></div><div class="card"><div class="label">P/L route (buy+sell lengkap)</div><div class="value ${pairedRoutePnl > 0 ? 'up' : pairedRoutePnl < 0 ? 'down' : ''}">${usd(pairedRoutePnl)}</div></div><div class="card"><div class="label">Selisih route vs paper</div><div class="value ${routeVsPaperPnl > 0 ? 'up' : routeVsPaperPnl < 0 ? 'down' : ''}">${usd(routeVsPaperPnl)}</div></div></div>
-    <div class="scroll"><table><thead><tr><th rowspan="2">Token</th><th colspan="3">1. Paper / harga socket</th><th colspan="3">2. Estimasi route swap GMGN</th><th rowspan="2">Selisih return<br>route vs socket</th></tr><tr><th>Buy paper</th><th>Sell paper</th><th>P/L paper</th><th>Quote buy</th><th>Quote sell</th><th>P/L route</th></tr></thead><tbody>${quoteRowsHtml || '<tr><td colspan="8" class="muted">Belum ada sinyal paper yang menghasilkan route. Tabel akan terisi otomatis tanpa melakukan order.</td></tr>'}</tbody></table></div>`
+    <div class="scroll"><table><thead><tr><th rowspan="2">Token / lane</th><th colspan="3">1. Paper / harga socket</th><th colspan="3">2. Estimasi route swap GMGN</th><th rowspan="2">Selisih return<br>route vs socket</th></tr><tr><th>Buy paper</th><th>Sell paper</th><th>P/L paper</th><th>Quote buy</th><th>Quote sell</th><th>P/L route</th></tr></thead><tbody>${quoteRowsHtml || '<tr><td colspan="8" class="muted">Belum ada sinyal paper yang menghasilkan route. Tabel akan terisi otomatis tanpa melakukan order.</td></tr>'}</tbody></table></div>`
   : '';
 const signalTiming = row => {
   if (!row?.timing) return '<small>Waktu sinyal terpisah belum dicatat pada run ini.</small>';
@@ -307,8 +310,13 @@ const tradeRows = lane => buys.filter(buy => lane === null || paperLane(buy) ===
   const resultClass = sell ? (sell.pnlUsd > 0 ? 'up' : sell.pnlUsd < 0 ? 'down' : '') : '';
   return `<tr><td><button class="token" data-mint="${esc(buy.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(buy.mint)}</span><small>${paperLaneLabel(paperLane(buy))} · Preview detail GMGN</small></button></td><td>${timeExact(buy.observedAt)} WIB<br>${usd(buy.stakeUsd)} @ ${usd(buy.entryPriceUsd)}${strategy?.strategy === 'momentum-v2' ? signalTiming(buy) : ''}</td><td>${esc(buyReason(buy))}</td><td>${sell ? `${timeExact(sell.observedAt)} WIB<br>${usd(sell.exit?.priceUsd)}${strategy?.strategy === 'momentum-v2' ? signalTiming(sell) : ''}` : unpriced ? `<span class="watch">Sesi selesai ${time(unpriced.observedAt)}</span>` : '<span class="watch">Masih dipantau</span>'}</td><td>${sell ? esc(sellReason(sell)) : unpriced ? 'Harga transaksi terakhir sudah lebih dari 5 detik; hasil jual tidak dihitung.' : 'Belum ada sinyal sell.'}</td><td class="${resultClass}">${sell ? `<b>${usd(sell.pnlUsd)}</b><br>${pct(sell.pnlPercent)}` : '—'}</td></tr>`;
 }).join('');
-const hasR5BandTrades = buys.some(buy => paperLane(buy) === 'r5-band') || (summary?.lanes && summary.lanes['r5-band']?.positionsOpened > 0);
-const singleLaneMode = !hasR5BandTrades;
+const knownLanes = ['control', 'aggressive-flow', 'flow-distribution'];
+// A lane must be visible from the start of a lane-worker run.  Waiting for its
+// first paper buy hides the comparison precisely when the operator needs to
+// see that the stricter lanes are screening tokens without entering them.
+const configuredLanes = Object.keys(manifest?.paperLanes ?? {});
+const activeLanes = knownLanes.filter(lane => configuredLanes.includes(lane) || buys.some(buy => paperLane(buy) === lane) || summary?.lanes?.[lane] !== undefined);
+const singleLaneMode = activeLanes.length <= 1;
 
 const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').slice().reverse().map(buy => {
   const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
@@ -397,7 +405,8 @@ const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').sli
 
 const tradeTableHtml = (rows, emptyText) => `<div class="scroll"><table><thead><tr><th>Token</th><th>Buy simulasi</th><th>Kenapa dibeli</th><th>Sell simulasi</th><th>Kenapa dijual</th><th>Hasil</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${emptyText}</td></tr>`}</tbody></table></div>`;
 const controlTradeRows = tradeRows('control');
-const r5BandTradeRows = tradeRows('r5-band');
+const r5BandTradeRows = tradeRows('aggressive-flow');
+const flowDistributionTradeRows = tradeRows('flow-distribution');
 const transactionsHtml = singleLaneMode
   ? `<h2>Komparasi Transaksi: Simulasi (Sinyal) vs Eksekusi Riil API (Wallet)</h2>
      <div class="scroll"><table class="comparison-table">
@@ -422,7 +431,7 @@ const transactionsHtml = singleLaneMode
      </tbody>
      </table></div>`
   : (strategy?.strategy === 'momentum-v2'
-    ? `<h2>Transaksi simulasi V2</h2>${tradeTableHtml(controlTradeRows, 'Belum ada transaksi simulasi V2.') }<h2>Transaksi simulasi R5-band</h2>${tradeTableHtml(r5BandTradeRows, 'Belum ada transaksi simulasi R5-band.')}`
+    ? activeLanes.map(lane => `<h2>Transaksi simulasi ${paperLaneLabel(lane)}</h2>${tradeTableHtml(lane === 'control' ? controlTradeRows : lane === 'aggressive-flow' ? r5BandTradeRows : flowDistributionTradeRows, `Belum ada transaksi simulasi ${paperLaneLabel(lane)}.`)}`).join('')
     : `<h2>Setiap transaksi simulasi</h2>${tradeTableHtml(tradeRows(null), 'Belum ada token yang masuk detail.')}`);
 const blocked = [...blockedByMint.values()];
 for (const [mint, dumpRow] of dumpAbortedByMint) {
@@ -483,18 +492,23 @@ const profit = sells.filter(row => row.pnlUsd > 0).reduce((sum, row) => sum + ro
 const loss = sells.filter(row => row.pnlUsd < 0).reduce((sum, row) => sum + row.pnlUsd, 0);
 const totalPnl = sells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0);
 const open = buys.length - sells.length - unpricedByMint.size;
-const laneSummary = summary?.lanes ?? Object.fromEntries(['control', 'r5-band'].map(lane => {
+const laneSummary = summary?.lanes ?? Object.fromEntries(activeLanes.map(lane => {
   const laneBuys = buys.filter(row => paperLane(row) === lane), laneSells = sells.filter(row => paperLane(row) === lane);
   return [lane, { positionsOpened: laneBuys.length, positionsClosed: laneSells.length, openAtEnd: laneBuys.length - laneSells.length,
     totalPnlUsd: laneSells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0), profitable: laneSells.filter(row => row.pnlUsd > 0).length, losing: laneSells.filter(row => row.pnlUsd < 0).length }];
 }));
-const laneFinancials = Object.fromEntries(['control', 'r5-band'].map(lane => {
+const laneFinancials = Object.fromEntries(activeLanes.map(lane => {
   const laneSells = sells.filter(row => paperLane(row) === lane);
   const profit = laneSells.filter(row => row.pnlUsd > 0).reduce((sum, row) => sum + row.pnlUsd, 0);
   const loss = laneSells.filter(row => row.pnlUsd < 0).reduce((sum, row) => sum + row.pnlUsd, 0);
   return [lane, { profit, loss, pnl: profit + loss }];
 }));
-const laneComparisonHtml = (strategy?.strategy === 'momentum-v2' && !singleLaneMode) ? `<h2>Hasil per lane paper</h2><div class="scroll"><table><thead><tr><th>Lane</th><th>Entry</th><th>Exit</th><th>Masih terbuka</th><th>Menang / kalah</th><th>Keuntungan</th><th>Kerugian</th><th>P/L sinyal</th></tr></thead><tbody>${Object.entries(laneSummary).map(([lane, value]) => { const financial = laneFinancials[lane] ?? { profit: 0, loss: 0, pnl: value.totalPnlUsd ?? 0 }; return `<tr><td><b>${paperLaneLabel(lane)}</b></td><td>${value.positionsOpened ?? 0}</td><td>${value.positionsClosed ?? 0}</td><td>${value.openAtEnd ?? 0}</td><td>${value.profitable ?? 0} / ${value.losing ?? 0}</td><td class="up">${usd(financial.profit)}</td><td class="down">${usd(financial.loss)}</td><td class="${financial.pnl > 0 ? 'up' : financial.pnl < 0 ? 'down' : ''}">${usd(financial.pnl)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+const laneRouteFinancials = Object.fromEntries(activeLanes.map(lane => {
+  const completed = completedQuotePositions.filter(position => paperLane(paperBuyByPosition.get(position.positionId)) === lane);
+  const pnl = completed.reduce((sum, position) => sum + (quoteNetPnlUsd(position) ?? 0), 0);
+  return [lane, { completed: completed.length, pnl }];
+}));
+const laneComparisonHtml = (strategy?.strategy === 'momentum-v2' && !singleLaneMode) ? `<h2>Hasil per lane paper</h2><div class="scroll"><table><thead><tr><th>Lane</th><th>Entry</th><th>Exit</th><th>Masih terbuka</th><th>Menang / kalah</th><th>Keuntungan</th><th>Kerugian</th><th>P/L sinyal</th><th>P/L route GMGN</th></tr></thead><tbody>${Object.entries(laneSummary).map(([lane, value]) => { const financial = laneFinancials[lane] ?? { profit: 0, loss: 0, pnl: value.totalPnlUsd ?? 0 }; const route = laneRouteFinancials[lane] ?? { completed: 0, pnl: 0 }; return `<tr><td><b>${paperLaneLabel(lane)}</b></td><td>${value.positionsOpened ?? 0}</td><td>${value.positionsClosed ?? 0}</td><td>${value.openAtEnd ?? 0}</td><td>${value.profitable ?? 0} / ${value.losing ?? 0}</td><td class="up">${usd(financial.profit)}</td><td class="down">${usd(financial.loss)}</td><td class="${financial.pnl > 0 ? 'up' : financial.pnl < 0 ? 'down' : ''}">${usd(financial.pnl)}</td><td class="${route.pnl > 0 ? 'up' : route.pnl < 0 ? 'down' : ''}">${route.completed ? usd(route.pnl) : '—'}<br><small>${route.completed} pasangan route</small></td></tr>`; }).join('')}</tbody></table></div>` : '';
 const allLanes = strategy?.strategy === 'momentum-v2' && !singleLaneMode;
 const liveRealizedTrades = [...walletstatByMint.values()].filter(w => w.grossPnlUsd !== null && Number(w.historySoldIncomeUsd) > 0);
 const totalLivePnl = liveRealizedTrades.reduce((acc, w) => acc + (w.grossPnlUsd ?? 0), 0);
@@ -558,7 +572,7 @@ const liveErrorSectionHtml = liveErrors.length > 0
 
 const pumpBandNote = strategy?.strategy === 'pump-band'
   ? `Token fresh dalam market cap $3.000–$10.000 mendapat slot detail kosong. Buy simulasi $${f(manifest?.simulation?.stakeUsd ?? 0.25, 2)} dilakukan pada tick transaksi pu baru pertama. Sell simulasi terjadi saat harga turun 20% dari puncak, atau setelah 20 detik jika harga terakhir masih berumur paling lama 5 detik. Fee dan slippage belum dihitung. ${unpricedByMint.size} sesi selesai tanpa harga jual segar sehingga P/L-nya belum dinilai.`
-  : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.${strategy?.strategy === 'momentum-v2' && !singleLaneMode ? ' Kontrol V2 dan R5-band memakai data socket yang sama, tetapi posisi serta P/L dicatat per lane. Jam sinyal, trade pasar, WebSocket, dan order simulasi dicatat terpisah sampai milidetik. Target order simulasi 0,9 detik, batas 1 detik setelah sinyal. P/L tetap memakai tick pemicu; belum ada permintaan GMGN, fill, atau harga eksekusi nyata.' : ''}`;
+  : `Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar <b>${usd(manifest?.simulation?.stakeUsd ?? 0.25)}</b>. Fee, slippage, dampak harga, dan swap nyata dihitung 0.${strategy?.strategy === 'momentum-v2' && !singleLaneMode ? ' Setiap lane mempunyai posisi, P/L, dan route quote GMGN sendiri. Jam sinyal, trade pasar, WebSocket, dan order simulasi dicatat terpisah sampai milidetik. Target order simulasi 0,9 detik, batas 1 detik setelah sinyal. P/L tetap memakai tick pemicu; belum ada fill atau harga eksekusi nyata.' : ''}`;
 const pumpBandRulesHtml = strategy?.strategy === 'pump-band'
   ? '<h2>Arti sinyal sell</h2><div class="rule"><b>PUMP_DUMP_20</b>: harga transaksi pu turun sedikitnya 20% dari puncak yang tertangkap setelah buy.</div><div class="rule"><b>PUMP_OBSERVATION_END</b>: sesi 20 detik selesai dan harga transaksi terakhir masih segar. Harga yang lebih tua dari 5 detik tidak dipakai untuk menghitung hasil jual.</div>'
   : '<h2>Arti sinyal sell</h2><div class="rule"><b>Holder growth recovery</b> menahan posisi 10 detik saat harga −10% sampai sebelum −20%, holder total naik ≥10% dan ≥5, serta buy USD 5 detik ≥ sell USD. Stop −20% tetap berlaku.</div><div class="rule"><b>Target +40% dengan holder momentum</b> menunda sell hanya jika dua pembaruan holder signifikan datang berurutan dan harga masih naik ≥2% per 5 detik. Saat kenaikan melandai &lt;0,5% per 5 detik, exit memakai <code>TARGET_40_HOLDER_FLAT</code>.</div><div class="rule"><b>Sell pressure</b> memerlukan dua jendela socket 5-detik selesai berturut-turut: ≥10 trade, ≥3 penjual kandidat, sell USD share ≥70%, dan posisi sudah ≤−5%.</div><p class="muted">Sinyal hold holder tercatat: ' + holds.length + '. Aturan holder hanya aktif bila socket memberi angka total holder baru; daftar holder parsial tidak dipakai sebagai total.</p>';
@@ -664,7 +678,7 @@ html = html.replace('<h1>', '<nav style="display:flex;gap:8px;margin-bottom:18px
 if (allLanes) html = html.replace(/<div class="card"><div class="label">Keuntungan seluruh lane<\/div><div class="value up">[^<]*<\/div><\/div><div class="card"><div class="label">Kerugian seluruh lane<\/div><div class="value down">[^<]*<\/div><\/div><div class="card"><div class="label">P\/L seluruh lane<\/div><div class="value[^\"]*">[^<]*<\/div><\/div>/, '');
 if (allLanes) html = html.replace(/<div class="grid"><div class="card"><div class="label">Buy seluruh lane<\/div><div class="value">[^<]*<\/div><\/div><div class="card"><div class="label">Sell seluruh lane<\/div><div class="value">[^<]*<\/div><\/div><div class="card"><div class="label">Masih dipantau<\/div><div class="value watch">[^<]*<\/div><\/div><\/div>/, '');
 if (laneComparisonHtml) html = html.replace(transactionsHtml, `${laneComparisonHtml}${transactionsHtml}`);
-html = html.replace('<h2>Arti sinyal sell</h2>', `<h2>Masuk detail, belum dibeli</h2><p class="muted">Satu daftar bersama per token. Status ini memakai gate dasar dan Kontrol V2; R5-band hanya muncul sebagai lane tersendiri setelah ada transaksi simulasi.</p><div class="scroll"><table><thead><tr><th>Token</th><th>Terakhir diblok</th><th>Harga saat diblok</th><th>Perubahan 5 dtk</th><th>Turun beruntun</th><th>Status</th></tr></thead><tbody>${blockedTable || '<tr><td colspan="6" class="muted">Belum ada token yang diblok karena penurunan harga beruntun.</td></tr>'}</tbody></table></div><h2>Arti sinyal sell</h2>`);
+html = html.replace('<h2>Arti sinyal sell</h2>', `<h2>Masuk detail, belum dibeli</h2><p class="muted">Daftar ini memakai gate dasar. Ketiga lane mengevaluasi syarat tambahan masing-masing setelah token masuk detail.</p><div class="scroll"><table><thead><tr><th>Token</th><th>Terakhir diblok</th><th>Harga saat diblok</th><th>Perubahan 5 dtk</th><th>Turun beruntun</th><th>Status</th></tr></thead><tbody>${blockedTable || '<tr><td colspan="6" class="muted">Belum ada token yang diblok karena penurunan harga beruntun.</td></tr>'}</tbody></table></div><h2>Arti sinyal sell</h2>`);
 const preview = Object.fromEntries(buys.map(buy => {
   const screen = screened.get(buy.mint), activity = activityByMint.get(buy.mint) ?? {}, sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
   const sum = tokenSummaries.get(buy.mint);
