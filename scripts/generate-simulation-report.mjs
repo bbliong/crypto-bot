@@ -18,6 +18,7 @@ const manifest = readJson('manifest.json');
 const strategy = readJson('strategy.json');
 const liveLedger = readLines('live-trade-ledger.jsonl');
 const followupRows = readLines('order-followup-responses.jsonl');
+const routeComparisonRows = readLines('quote-simulated-orders.jsonl');
 
 const liveOrdersByMint = new Map();
 const liveErrors = [];
@@ -179,6 +180,17 @@ const timeExact = value => value ? new Intl.DateTimeFormat('id-ID', {
   timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: 'numeric',
   hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false,
 }).format(new Date(value)) : '—';
+const routeComparisonByPosition = new Map();
+for (const row of routeComparisonRows.filter(row => row.positionId)) {
+  const position = routeComparisonByPosition.get(row.positionId) ?? {};
+  if (row.type?.startsWith('QUOTE_BUY_COMPARISON')) position.buy = row;
+  if (row.type?.startsWith('QUOTE_SELL_COMPARISON')) position.sell = row;
+  routeComparisonByPosition.set(row.positionId, position);
+}
+const buyByPosition = new Map(buys.filter(row => row.positionId).map(row => [row.positionId, row]));
+const routeComparisonHtml = (strategy?.quoteSimulationEnabled === true || routeComparisonRows.length > 0)
+  ? `<h2>Komparasi harga socket vs route swap GMGN</h2><div class="note">Harga SOL diambil saat token masuk detail. Ketika paper BUY dan SELL terjadi, sistem meminta route swap GMGN tanpa submit order. Selisih positif pada harga buy berarti route lebih mahal; selisih negatif pada token/proceeds berarti hasil route lebih buruk daripada harga socket.</div><div class="scroll"><table><thead><tr><th>Token / lane</th><th>Paper BUY / socket</th><th>SOL saat masuk detail</th><th>Quote buy · selisih harga / token</th><th>Quote sell · selisih proceeds</th></tr></thead><tbody>${[...routeComparisonByPosition.entries()].reverse().map(([positionId, position]) => { const row = position.buy ?? position.sell ?? {}; const buy = buyByPosition.get(positionId); const screen = screened.get(row.mint); const symbol = screen?.metadata?.symbol ?? buy?.metadata?.symbol ?? row.mint?.slice(0, 8) ?? 'Token'; const lane = paperLane(buy); const deltaClass = (value, inverse = false) => { const n = Number(value); return !Number.isFinite(n) || n === 0 ? '' : (inverse ? n < 0 : n > 0) ? 'down' : 'up'; }; const quoteCell = (quote, kind) => quote?.type === `QUOTE_${kind}_COMPARISON` ? `${timeExact(quote.observedAt)} WIB<br><b>${usd(quote.quote?.amountInUsd)}</b> → ${usd(quote.quote?.amountOutUsd)}<br><small>${f(quote.latencyMs, 0)} ms · impact ${esc(quote.quote?.priceImpactPct ?? '—')}%</small>` : `<span class="watch">${esc(quote?.type?.replace(`QUOTE_${kind}_COMPARISON_`, '') ?? 'MENUNGGU')}</span><br><small>${esc(quote?.reason ?? quote?.message ?? '')}</small>`; const buyQuote = position.buy, sellQuote = position.sell; return `<tr><td><b>${esc(symbol)}</b><br><span class="mono">${esc(row.mint)}</span><small>${esc(paperLaneLabel(lane))}</small></td><td>${buy ? `${timeExact(buy.observedAt)} WIB<br><b>${usd(buy.entryPriceUsd)}</b><br><small>Estimasi ${f(buyQuote?.socketExpectedTokenAmount, 4)} token</small>` : '—'}</td><td>${buyQuote?.detailSolSpotUsd ? `<b>${usd(buyQuote.detailSolSpotUsd)}</b><br><small>${timeExact(buyQuote.detailSolSpotAt)} WIB</small>` : '—'}</td><td>${quoteCell(buyQuote, 'BUY')}<br><small class="${deltaClass(buyQuote?.routeVsSocketPricePercent)}">Harga ${pct(buyQuote?.routeVsSocketPricePercent)}</small><br><small class="${deltaClass(buyQuote?.routeVsSocketTokenPercent, true)}">Token ${pct(buyQuote?.routeVsSocketTokenPercent)}</small></td><td>${quoteCell(sellQuote, 'SELL')}<br><small class="${deltaClass(sellQuote?.routeVsSocketProceedsPercent, true)}">Proceeds ${pct(sellQuote?.routeVsSocketProceedsPercent)}</small></td></tr>`; }).join('') || '<tr><td colspan="5" class="muted">Belum ada paper BUY yang meminta quote route.</td></tr>'}</tbody></table></div>`
+  : '';
 const signalTiming = row => {
   if (!row?.timing) return '<small>Waktu sinyal terpisah belum dicatat pada run ini.</small>';
   const signal = row.timing, order = paperOrdersBySignal.get(signal.signalId);
@@ -247,6 +259,79 @@ const tradeRows = lane => buys.filter(buy => lane === null || paperLane(buy) ===
 }).join('');
 const hasR5BandTrades = buys.some(buy => paperLane(buy) === 'r5-band') || (summary?.lanes && summary.lanes['r5-band']?.positionsOpened > 0);
 const singleLaneMode = !hasR5BandTrades;
+
+// The Momentum V2 dashboard is deliberately a lane-to-lane execution ledger.
+// A route comparison belongs beside its paper position, rather than in a
+// separate table where the two P/L figures are difficult to compare.
+const quoteStatus = (quote, side) => {
+  if (quote?.type === `QUOTE_${side}_COMPARISON`) return null;
+  const state = quote?.type?.replace(`QUOTE_${side}_COMPARISON_`, '') ?? 'MENUNGGU';
+  return { state, detail: quote?.reason ?? quote?.message ?? '' };
+};
+const quotePnl = (comparison) => {
+  const buy = comparison?.buy, sell = comparison?.sell;
+  if (quoteStatus(buy, 'BUY') || quoteStatus(sell, 'SELL')) return null;
+  const cost = Number(buy.amountInUsd ?? buy.quote?.amountInUsd);
+  const proceeds = Number(sell.amountOutUsd ?? sell.quote?.amountOutUsd);
+  if (!Number.isFinite(cost) || cost <= 0 || !Number.isFinite(proceeds)) return null;
+  const pnlUsd = proceeds - cost;
+  return { cost, proceeds, pnlUsd, pnlPercent: pnlUsd / cost * 100 };
+};
+const moneyClass = value => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : '';
+const quoteCell = (quote, side) => {
+  const status = quoteStatus(quote, side);
+  if (status) return `<span class="watch">${esc(status.state)}</span>${status.detail ? `<br><small class="muted">${esc(status.detail)}</small>` : ''}`;
+  const price = quote.routeImpliedTokenPriceUsd;
+  const input = quote.amountInUsd ?? quote.quote?.amountInUsd;
+  const output = quote.amountOutUsd ?? quote.quote?.amountOutUsd;
+  const amounts = side === 'BUY'
+    ? `<small>Modal route (SOL): <b>${usd(input)}</b><br>Nilai token versi GMGN: <b>${usd(output)}</b></small>`
+    : `<small>Nilai token sebelum jual: <b>${usd(input)}</b><br>Estimasi SOL diterima: <b>${usd(output)}</b></small>`;
+  return `${timeExact(quote.observedAt)} WIB<br><b>Harga route ${usd(price)}</b><br>${amounts}<br><small class="muted">Respons route ${f(quote.latencyMs, 0)} ms · bukan order/fill</small>`;
+};
+const paperPnl = sell => sell ? { pnlUsd: Number(sell.pnlUsd), pnlPercent: Number(sell.pnlPercent) } : null;
+const laneLedgerRows = lane => buys.filter(buy => paperLane(buy) === lane).slice().reverse().map(buy => {
+  const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
+  const comparison = routeComparisonByPosition.get(buy.positionId) ?? {};
+  const quoted = quotePnl(comparison);
+  const paper = paperPnl(sell);
+  const symbol = buy.metadata?.symbol || sell?.metadata?.symbol || 'Token';
+  const paperResult = paper ? `<b class="${moneyClass(paper.pnlUsd)}">${usd(paper.pnlUsd)}</b><br><span class="${moneyClass(paper.pnlUsd)}">${pct(paper.pnlPercent)}</span>` : '<span class="watch">Menunggu sell</span>';
+  const quoteResult = quoted ? `<b class="${moneyClass(quoted.pnlUsd)}">${usd(quoted.pnlUsd)}</b><br><span class="${moneyClass(quoted.pnlUsd)}">${pct(quoted.pnlPercent)}</span>` : `<span class="watch">${sell ? 'Quote belum lengkap' : 'Menunggu sell'}</span>`;
+  const paperSell = sell
+    ? `${timeExact(sell.observedAt)} WIB<br><b>${usd(sell.exit?.priceUsd)}</b>`
+    : '<span class="watch">Masih dipantau</span>';
+  return `<tr class="ledger-main">
+    <td><button class="token" data-mint="${esc(buy.mint)}" data-symbol="${esc(symbol)}"><b>${esc(symbol)}</b><br><span class="mono">${esc(buy.mint)}</span></button></td>
+    <td>${timeExact(buy.observedAt)} WIB<br><b>${usd(buy.entryPriceUsd)}</b><br><small>Modal paper ${usd(buy.stakeUsd)}</small></td>
+    <td>${quoteCell(comparison.buy, 'BUY')}</td>
+    <td>${paperSell}</td>
+    <td>${quoteCell(comparison.sell, 'SELL')}</td>
+    <td>${paperResult}</td>
+    <td>${quoteResult}</td>
+  </tr><tr class="ledger-reason"><td colspan="7"><div><b>Alasan beli:</b> ${esc(buyReason(buy))}</div><div><b>Alasan jual:</b> ${sell ? esc(sellReason(sell)) : '<span class="watch">Belum ada sinyal jual.</span>'}</div></td></tr>`;
+}).join('');
+const laneLedgerTotals = lane => {
+  const laneBuys = buys.filter(buy => paperLane(buy) === lane);
+  const closed = laneBuys.map(buy => {
+    const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
+    const comparison = routeComparisonByPosition.get(buy.positionId) ?? {};
+    return { paper: paperPnl(sell), quote: quotePnl(comparison) };
+  });
+  const summarize = key => {
+    const values = closed.map(row => row[key]).filter(Boolean);
+    const profit = values.filter(row => row.pnlUsd > 0).reduce((total, row) => total + row.pnlUsd, 0);
+    const loss = values.filter(row => row.pnlUsd < 0).reduce((total, row) => total + row.pnlUsd, 0);
+    return { completed: values.length, profit, loss, net: profit + loss };
+  };
+  return { positions: laneBuys.length, paper: summarize('paper'), quote: summarize('quote') };
+};
+const laneLedgerTable = lane => {
+  const totals = laneLedgerTotals(lane);
+  const totalCell = values => `<b>Untung ${values.completed ? usd(values.profit) : '—'}</b><br><span class="down">Rugi ${values.completed ? usd(values.loss) : '—'}</span><br><span class="${moneyClass(values.net)}">Net ${values.completed ? usd(values.net) : '—'}</span>`;
+  return `<section class="lane-ledger"><h2>${paperLaneLabel(lane)}</h2><p class="muted">Paper memakai harga socket pada sinyal. Quote memakai route GMGN pada saat sinyal, tanpa submit order. Harga dan P/L quote hanya final jika quote BUY serta SELL sama-sama tersedia.</p><div class="scroll"><table class="ledger-table"><thead><tr><th>Token</th><th>Harga Paper Buy</th><th>Harga Quote Buy<br><small>(route GMGN)</small></th><th>Harga Paper Sell</th><th>Harga Quote Sell<br><small>(route GMGN)</small></th><th>P/L Paper</th><th>P/L Quote<br><small>(estimasi route)</small></th></tr></thead><tbody>${laneLedgerRows(lane) || '<tr><td colspan="7" class="muted">Belum ada transaksi pada lane ini.</td></tr>'}</tbody><tfoot><tr><th colspan="4">Total ${paperLaneLabel(lane)} · ${totals.positions} posisi</th><th>Transaksi selesai<br>Paper: ${totals.paper.completed}<br>Quote lengkap: ${totals.quote.completed}</th><th>${totalCell(totals.paper)}</th><th>${totalCell(totals.quote)}</th></tr></tfoot></table></div></section>`;
+};
+const v2LaneDashboardHtml = `<div class="lane-ledger-intro"><b>Komparasi transaksi per lane</b><br><span class="muted">Paper = harga socket; Quote = estimasi route swap GMGN. Tidak ada order nyata yang dikirim.</span></div>${laneLedgerTable('control')}${laneLedgerTable('r5-band')}`;
 
 const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').slice().reverse().map(buy => {
   const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
@@ -336,7 +421,7 @@ const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').sli
 const tradeTableHtml = (rows, emptyText) => `<div class="scroll"><table><thead><tr><th>Token</th><th>Buy simulasi</th><th>Kenapa dibeli</th><th>Sell simulasi</th><th>Kenapa dijual</th><th>Hasil</th></tr></thead><tbody>${rows || `<tr><td colspan="6" class="muted">${emptyText}</td></tr>`}</tbody></table></div>`;
 const controlTradeRows = tradeRows('control');
 const r5BandTradeRows = tradeRows('r5-band');
-const transactionsHtml = singleLaneMode
+const legacyTransactionsHtml = singleLaneMode
   ? `<h2>Komparasi Transaksi: Simulasi (Sinyal) vs Eksekusi Riil API (Wallet)</h2>
      <div class="scroll"><table class="comparison-table">
      <thead>
@@ -362,6 +447,7 @@ const transactionsHtml = singleLaneMode
   : (strategy?.strategy === 'momentum-v2'
     ? `<h2>Transaksi simulasi V2</h2>${tradeTableHtml(controlTradeRows, 'Belum ada transaksi simulasi V2.') }<h2>Transaksi simulasi R5-band</h2>${tradeTableHtml(r5BandTradeRows, 'Belum ada transaksi simulasi R5-band.')}`
     : `<h2>Setiap transaksi simulasi</h2>${tradeTableHtml(tradeRows(null), 'Belum ada token yang masuk detail.')}`);
+const transactionsHtml = strategy?.strategy === 'momentum-v2' ? v2LaneDashboardHtml : legacyTransactionsHtml;
 const blocked = [...blockedByMint.values()];
 for (const [mint, dumpRow] of dumpAbortedByMint) {
   if (!blockedByMint.has(mint)) {
@@ -504,7 +590,7 @@ const title = `Laporan simulasi — ${basename(folder)}`;
 const tagText = (singleLaneMode && (liveOrdersByMint.size > 0 || liveRealizedTrades.length > 0))
   ? 'GMGN LIVE TRADE & SIMULATION COMPARISON'
   : 'GMGN SOCKET · PAPER SIMULATION · BUKAN ORDER NYATA';
-let html = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#09111d;color:#e8eff8;font:15px/1.5 system-ui,Segoe UI,sans-serif}main{max-width:1500px;margin:auto;padding:30px}.tag{color:#6be1b2;font-weight:700;letter-spacing:1px;font-size:12px}.muted{color:#9cafc5}.note{background:#19273a;border-left:3px solid #7fb8ff;padding:14px 17px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card{padding:17px;background:#111e2e;border:1px solid #263950;border-radius:12px}.label{color:#9cafc5;font-size:13px}.value{font-size:23px;font-weight:700;margin-top:4px}.up{color:#62dfa8}.down{color:#ff9299}.watch{color:#ffce76;font-weight:700}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #263950}th{color:#a9c1df;background:#0d1827}.mono{font:11px ui-monospace,Consolas,monospace;color:#a9c1df;word-break:break-all}.tx-link{color:#58b4ff;text-decoration:none}.tx-link:hover{text-decoration:underline}.rule{background:#111e2e;border:1px solid #263950;border-radius:10px;padding:14px;margin:10px 0}.token{padding:0;border:0;background:transparent;color:#e8eff8;text-align:left;cursor:pointer}.token:hover b,.token:hover small{color:#6be1b2}.token small{display:block;color:#7fb8ff;margin-top:4px}.comparison-table th{padding:10px 12px;font-size:13px}.comparison-table td{padding:11px 12px;font-size:13px;border-right:1px solid #1a293c}.comparison-table tr:hover td{background:#132235}.modal{position:fixed;inset:0;z-index:10;background:#000b;display:none;place-items:center;padding:20px}.modal.open{display:grid}.dialog{width:min(1400px,96vw);height:min(860px,92vh);background:#111e2e;border:1px solid #426381;border-radius:14px;display:grid;grid-template-rows:auto 1fr;overflow:hidden;box-shadow:0 24px 80px #000}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#19273a}.modal-head strong{margin-right:auto}.modal-head a,.modal-head button{border:1px solid #49739a;border-radius:7px;background:#0e1a29;color:#e8eff8;padding:7px 10px;text-decoration:none;cursor:pointer}.modal iframe{display:none}.preview{overflow:auto;padding:24px}.preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview .card{min-height:62px}.preview h3{margin:20px 0 8px}.preview a{color:#7fb8ff}.tl-table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}.tl-table th{background:#0d1827;color:#a9c1df;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1}.tl-table td{padding:6px 10px;border-bottom:1px solid #1e2e40;vertical-align:top}.tl-table tr:hover td{background:#192a3d}.tl-scroll{max-height:280px;overflow:auto;border:1px solid #263950;border-radius:8px;margin-top:6px}.hbar{display:flex;align-items:center;gap:5px;font-size:12px;margin:2px 0}.hbar-fill{height:8px;border-radius:4px;background:#5b8ecc;flex-shrink:0}.hbar-fill.dev{background:#f5a623}.hbar-pct{color:#9cafc5;min-width:42px;text-align:right}.hbar-addr{font:10px ui-monospace,Consolas,monospace;color:#7d9bb7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}.delta-up{color:#62dfa8}.delta-down{color:#ff9299}.block-reason{font-size:11px;color:#ffce76;background:#1e2c10;border-radius:3px;padding:1px 5px;margin:1px 2px;display:inline-block}#refresh-bar{position:fixed;top:0;left:0;right:0;height:3px;background:#1e3a5a;z-index:20}#refresh-fill{height:100%;width:0;background:#6be1b2;transition:width 10s linear}@media(max-width:800px){main{padding:16px}.grid{grid-template-columns:1fr 1fr}.modal{padding:6px}.dialog{width:100%;height:96vh}.preview-grid{grid-template-columns:1fr 1fr}}</style><div id="refresh-bar"><div id="refresh-fill"></div></div><main><div class="tag">${tagText}</div><h1>${title}</h1><p class="muted">Laporan diperbarui setiap 10 detik. Data terakhir dibaca ${time(Date.now())} WIB; run mulai ${time(Date.parse(manifest?.startedAt ?? ''))} WIB.</p><div class="note">${pumpBandNote}</div>${gridCardsHtml}${liveErrorSectionHtml}${transactionsHtml}${pumpBandRulesHtml}</main><div class="modal" id="tokenModal" role="dialog" aria-modal="true"><div class="dialog"><div class="modal-head"><strong id="modalTitle">Detail token</strong><a id="openGmgn" target="_blank" rel="noopener">Buka GMGN penuh</a><button id="closeModal">Tutup</button></div><section class="preview" id="localPreview"></section></div></div><script>
+let html = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#09111d;color:#e8eff8;font:15px/1.5 system-ui,Segoe UI,sans-serif}main{max-width:1500px;margin:auto;padding:30px}.tag{color:#6be1b2;font-weight:700;letter-spacing:1px;font-size:12px}.muted{color:#9cafc5}.note{background:#19273a;border-left:3px solid #7fb8ff;padding:14px 17px;border-radius:6px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card{padding:17px;background:#111e2e;border:1px solid #263950;border-radius:12px}.label{color:#9cafc5;font-size:13px}.value{font-size:23px;font-weight:700;margin-top:4px}.up{color:#62dfa8}.down{color:#ff9299}.watch{color:#ffce76;font-weight:700}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1100px}th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #263950}th{color:#a9c1df;background:#0d1827}.mono{font:11px ui-monospace,Consolas,monospace;color:#a9c1df;word-break:break-all}.tx-link{color:#58b4ff;text-decoration:none}.tx-link:hover{text-decoration:underline}.rule{background:#111e2e;border:1px solid #263950;border-radius:10px;padding:14px;margin:10px 0}.token{padding:0;border:0;background:transparent;color:#e8eff8;text-align:left;cursor:pointer}.token:hover b,.token:hover small{color:#6be1b2}.token small{display:block;color:#7fb8ff;margin-top:4px}.comparison-table th{padding:10px 12px;font-size:13px}.comparison-table td{padding:11px 12px;font-size:13px;border-right:1px solid #1a293c}.comparison-table tr:hover td{background:#132235}.lane-ledger-intro{margin:22px 0 10px;padding:14px 17px;background:#102a2b;border:1px solid #245a59;border-radius:10px}.lane-ledger{margin:28px 0 42px}.lane-ledger h2{margin:0 0 6px;color:#8ed8ff}.ledger-table{min-width:1420px}.ledger-table th{white-space:nowrap}.ledger-table .ledger-main:hover td{background:#132235}.ledger-reason td{background:#0d1827;color:#c7d6e8;padding:12px 16px 14px}.ledger-reason div+div{margin-top:7px}.ledger-table tfoot th{background:#16283a;border-top:2px solid #4c779d;border-bottom:0}.modal{position:fixed;inset:0;z-index:10;background:#000b;display:none;place-items:center;padding:20px}.modal.open{display:grid}.dialog{width:min(1400px,96vw);height:min(860px,92vh);background:#111e2e;border:1px solid #426381;border-radius:14px;display:grid;grid-template-rows:auto 1fr;overflow:hidden;box-shadow:0 24px 80px #000}.modal-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#19273a}.modal-head strong{margin-right:auto}.modal-head a,.modal-head button{border:1px solid #49739a;border-radius:7px;background:#0e1a29;color:#e8eff8;padding:7px 10px;text-decoration:none;cursor:pointer}.modal iframe{display:none}.preview{overflow:auto;padding:24px}.preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview .card{min-height:62px}.preview h3{margin:20px 0 8px}.preview a{color:#7fb8ff}.tl-table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}.tl-table th{background:#0d1827;color:#a9c1df;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1}.tl-table td{padding:6px 10px;border-bottom:1px solid #1e2e40;vertical-align:top}.tl-table tr:hover td{background:#192a3d}.tl-scroll{max-height:280px;overflow:auto;border:1px solid #263950;border-radius:8px;margin-top:6px}.hbar{display:flex;align-items:center;gap:5px;font-size:12px;margin:2px 0}.hbar-fill{height:8px;border-radius:4px;background:#5b8ecc;flex-shrink:0}.hbar-fill.dev{background:#f5a623}.hbar-pct{color:#9cafc5;min-width:42px;text-align:right}.hbar-addr{font:10px ui-monospace,Consolas,monospace;color:#7d9bb7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}.delta-up{color:#62dfa8}.delta-down{color:#ff9299}.block-reason{font-size:11px;color:#ffce76;background:#1e2c10;border-radius:3px;padding:1px 5px;margin:1px 2px;display:inline-block}#refresh-bar{position:fixed;top:0;left:0;right:0;height:3px;background:#1e3a5a;z-index:20}#refresh-fill{height:100%;width:0;background:#6be1b2;transition:width 10s linear}@media(max-width:800px){main{padding:16px}.grid{grid-template-columns:1fr 1fr}.modal{padding:6px}.dialog{width:100%;height:96vh}.preview-grid{grid-template-columns:1fr 1fr}}</style><div id="refresh-bar"><div id="refresh-fill"></div></div><main><div class="tag">${tagText}</div><h1>${title}</h1><p class="muted">Laporan diperbarui setiap 10 detik. Data terakhir dibaca ${time(Date.now())} WIB; run mulai ${time(Date.parse(manifest?.startedAt ?? ''))} WIB.</p><div class="note">${pumpBandNote}</div>${gridCardsHtml}${liveErrorSectionHtml}${transactionsHtml}${pumpBandRulesHtml}</main><div class="modal" id="tokenModal" role="dialog" aria-modal="true"><div class="dialog"><div class="modal-head"><strong id="modalTitle">Detail token</strong><a id="openGmgn" target="_blank" rel="noopener">Buka GMGN penuh</a><button id="closeModal">Tutup</button></div><section class="preview" id="localPreview"></section></div></div><script>
 const modal=document.querySelector('#tokenModal'),titleEl=document.querySelector('#modalTitle'),openLink=document.querySelector('#openGmgn'),preview=document.querySelector('#localPreview');
 let _activeMint=null;
 function closeModal(){modal.classList.remove('open')}
@@ -601,8 +687,9 @@ startRefreshCycle();
 html = html.replace('<h1>', '<nav style="display:flex;gap:8px;margin-bottom:18px"><a style="padding:8px 12px;border:1px solid #426381;border-radius:7px;color:#fff;background:#235577;text-decoration:none" href="/paper-simulation-report.html">Run terbaru</a><a style="padding:8px 12px;border:1px solid #426381;border-radius:7px;color:#b9d5f3;text-decoration:none" href="/run-history.html">Riwayat run</a></nav><h1>');
 if (allLanes) html = html.replace(/<div class="card"><div class="label">Keuntungan seluruh lane<\/div><div class="value up">[^<]*<\/div><\/div><div class="card"><div class="label">Kerugian seluruh lane<\/div><div class="value down">[^<]*<\/div><\/div><div class="card"><div class="label">P\/L seluruh lane<\/div><div class="value[^\"]*">[^<]*<\/div><\/div>/, '');
 if (allLanes) html = html.replace(/<div class="grid"><div class="card"><div class="label">Buy seluruh lane<\/div><div class="value">[^<]*<\/div><\/div><div class="card"><div class="label">Sell seluruh lane<\/div><div class="value">[^<]*<\/div><\/div><div class="card"><div class="label">Masih dipantau<\/div><div class="value watch">[^<]*<\/div><\/div><\/div>/, '');
-if (laneComparisonHtml) html = html.replace(transactionsHtml, `${laneComparisonHtml}${transactionsHtml}`);
-html = html.replace('<h2>Arti sinyal sell</h2>', `<h2>Masuk detail, belum dibeli</h2><p class="muted">Satu daftar bersama per token. Status ini memakai gate dasar dan Kontrol V2; R5-band hanya muncul sebagai lane tersendiri setelah ada transaksi simulasi.</p><div class="scroll"><table><thead><tr><th>Token</th><th>Terakhir diblok</th><th>Harga saat diblok</th><th>Perubahan 5 dtk</th><th>Turun beruntun</th><th>Status</th></tr></thead><tbody>${blockedTable || '<tr><td colspan="6" class="muted">Belum ada token yang diblok karena penurunan harga beruntun.</td></tr>'}</tbody></table></div><h2>Arti sinyal sell</h2>`);
+if (routeComparisonHtml && strategy?.strategy !== 'momentum-v2') html = html.replace(transactionsHtml, `${routeComparisonHtml}${transactionsHtml}`);
+if (laneComparisonHtml && strategy?.strategy !== 'momentum-v2') html = html.replace(transactionsHtml, `${laneComparisonHtml}${transactionsHtml}`);
+if (strategy?.strategy !== 'momentum-v2') html = html.replace('<h2>Arti sinyal sell</h2>', `<h2>Masuk detail, belum dibeli</h2><p class="muted">Satu daftar bersama per token. Status ini memakai gate dasar dan Kontrol V2; R5-band hanya muncul sebagai lane tersendiri setelah ada transaksi simulasi.</p><div class="scroll"><table><thead><tr><th>Token</th><th>Terakhir diblok</th><th>Harga saat diblok</th><th>Perubahan 5 dtk</th><th>Turun beruntun</th><th>Status</th></tr></thead><tbody>${blockedTable || '<tr><td colspan="6" class="muted">Belum ada token yang diblok karena penurunan harga beruntun.</td></tr>'}</tbody></table></div><h2>Arti sinyal sell</h2>`);
 const preview = Object.fromEntries(buys.map(buy => {
   const screen = screened.get(buy.mint), activity = activityByMint.get(buy.mint) ?? {}, sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
   const sum = tokenSummaries.get(buy.mint);
@@ -657,8 +744,13 @@ for (const row of detailStartedByMint.values()) {
 const previewBase='/research-preview/'+encodeURIComponent(basename(folder))+'/';
 html = html.replace('<script>', `<script>window.__preview={};const previewBase='${previewBase}';`);
 if (strategy?.strategy === 'momentum-v2') {
-  html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Rumus momentum v2</h2><div class="rule">Entry: return harga 5 detik +0.25% hingga +20%, regresi log-harga positif, buy share ≥60%, minimal 3 pembeli, pembeli terbesar ≤50%. Token muda memerlukan dua interval pertumbuhan holder ≥10% dan ≥5 holder.</div><div class="rule">Exit diperiksa pada trade socket baru: stop −20% dengan konfirmasi trade berbeda, penjualan holder signifikan, profit lock dan trailing 4–8%. Target +40% dapat ditahan bila momentum serta holder kuat, dengan batas +50%. Harga loncat tetap dicatat sesuai tick yang tersedia.</div><p><a href="/momentum-replay.html">Lihat perbandingan replay dan keterbatasannya</a></p></main>`);
-  html = html.replace('Setiap token yang lolos screening dan masuk detail dibeli secara simulasi sebesar', 'Token dibeli secara simulasi setelah screening, candle, holder, dan momentum v2 lolos; nominal');
+  // Keep this view strictly to completed/current V2 and R5 positions.  The
+  // blocked-token and rules sections are useful for research, but obscure the
+  // per-lane execution comparison requested by the dashboard.
+  html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, '</main>');
+  html = html.replace(gridCardsHtml, '');
+  html = html.replace(liveErrorSectionHtml, '');
+  html = html.replace('<div class="note">' + pumpBandNote + '</div>', '<div class="note">Dua lane berjalan pada data socket yang sama. P/L <b>paper</b> memakai harga socket; P/L <b>quote</b> memakai amount-in/amount-out dari route GMGN. Semua route hanya estimasi dan tidak pernah disubmit.</div>');
 }
 if (strategy?.strategy === 'flow-3') {
   html = html.replace(/<h2>Arti sinyal sell<\/h2>[\s\S]*?<\/main>/, `<h2>Aturan flow-3</h2><div class="rule">Screening tetap memakai umur 0–900 detik, holder minimal 20, likuiditas $6.000–$15.000, dan Top-10 maksimal 30%. Entry memerlukan harga detail yang stabil serta minimal 5 trade dalam 20 detik dengan USD buy ≥ USD sell. Riwayat dua candle diperbolehkan, selama candle berjalan tidak turun.</div><div class="rule">Exit flow-3: target +40%, stop −20%, trailing 10% setelah puncak minimal +20%, atau sell pressure dua window. Tidak memakai gate holder-distribution, blind-protection, target dinamis, maupun exit developer/whale dari strategi yang lebih baru.</div></main>`);
