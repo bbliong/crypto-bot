@@ -129,6 +129,7 @@ export function checkSocketBuyCondition(p, s, rules) {
   if (finite(rules.minBuyShare) && (p.buyShare === null || p.buyShare < rules.minBuyShare)) return false;
   if (finite(rules.minBuyers) && p.uniqueBuyers < rules.minBuyers) return false;
   if (finite(rules.minTrades) && p.flowTrades < rules.minTrades) return false;
+  if (finite(rules.minBuyUsd) && (p.buyUsd === null || p.buyUsd < rules.minBuyUsd)) return false;
 
   // Optional Top-1 holder filter
   if (rules.maxTop1 !== null && rules.maxTop1 !== 'off' && finite(rules.maxTop1)) {
@@ -231,6 +232,13 @@ export function evaluateTokenSocketStream(session, buyRules, sellRules, latencyM
     // Time-based exit limit
     if (!reason && finite(sellRules.maxHoldSeconds) && p.at - buy.at >= sellRules.maxHoldSeconds * 1000) {
       reason = 'TIME_LIMIT';
+    }
+
+    // Stagnation exit (momentum stall)
+    if (!reason && finite(sellRules.stagnationSeconds) && p.at - buy.at >= sellRules.stagnationSeconds * 1000) {
+      if (peak < (sellRules.stagnationThreshold ?? 2.5)) {
+        reason = 'STAGNATION_EXIT';
+      }
     }
 
     // Flow reversal exit
@@ -342,6 +350,16 @@ async function main() {
       label: '4. AGY Adaptive Runner V3 (Anti-Choke Act 3.5%, Lock 2%, Pure Flow 90%, Flow Exit)',
       buy: { entryReturn: 0.5, momentum1s: 0.5, maxDrawdown: -3, minBuyShare: 0.90, minBuyers: 2, maxTop1: 40, maxRange3: 5, maxMarketCap: 300000 },
       sell: { hardStop: 3, activation: 3.5, lock: 2.0, trailing: 1.0, takeProfit: null, flowExit: true },
+    },
+    aggressiveVelocity: {
+      label: '5. AGY Aggressive Velocity Scalp (Top1 80% Allowed, BuyUsd >= $200, TP +6%, Stag 10s)',
+      buy: { entryReturn: 0.8, momentum1s: 0.8, maxDrawdown: -2.5, minBuyShare: 0.90, minBuyers: 3, minBuyUsd: 200, maxTop1: 80, maxRange3: 5, maxMarketCap: 250000 },
+      sell: { hardStop: 2.5, takeProfit: 6.0, activation: 3.5, lock: 2.0, trailing: 1.0, stagnationSeconds: 10, stagnationThreshold: 2.5, flowExit: true },
+    },
+    aggressiveRunner: {
+      label: '6. AGY Aggressive High-Volume Sniper (Top1 OFF, BuyUsd >= $300, Pure Flow 95%, Trailing 1%)',
+      buy: { entryReturn: 1.0, momentum1s: 1.0, maxDrawdown: -2.0, minBuyShare: 0.95, minBuyers: 3, minBuyUsd: 300, maxTop1: 'off', maxRange3: 5, maxMarketCap: 200000 },
+      sell: { hardStop: 3.0, takeProfit: null, activation: 4.0, lock: 2.5, trailing: 1.0, stagnationSeconds: 12, stagnationThreshold: 2.5, flowExit: true },
     },
   };
 

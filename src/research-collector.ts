@@ -13,10 +13,14 @@ import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, asse
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
-import { MOMENTUM_R5_BAND, MOMENTUM_RULES, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveExit, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 import { ResearchHolderStore, type ResearchTrackedHolder } from './research-holder-store.js';
+import { assessPreBuyHolderGate } from './prebuy-holder-gate.js';
+
+const defaultProfileDir = existsSync('profiles/research-vps') ? 'profiles/research-vps' : 'profiles/research-aria-tele01';
+const defaultProfileName = defaultProfileDir === 'profiles/research-vps' ? 'Default' : 'Profile 12';
 
 const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '0' }, detailSeconds: { type: 'string', default: '600' },
@@ -27,8 +31,8 @@ const { values } = parseArgs({ options: {
   amount: { type: 'string' },
   sol: { type: 'string' },
   buySol: { type: 'string' },
-  profileDir: { type: 'string', default: 'profiles/research-aria-tele01' },
-  profileName: { type: 'string', default: 'Profile 12' }, output: { type: 'string' },
+  profileDir: { type: 'string', default: defaultProfileDir },
+  profileName: { type: 'string', default: defaultProfileName }, output: { type: 'string' },
   prepareTradeUi: { type: 'boolean', default: true }, enableExtensions: { type: 'boolean', default: true },
   exitHoldSeconds: { type: 'string', default: '20' }, maxPaperBuys: { type: 'string' }, maxBuys: { type: 'string' },
   autoBuy: { type: 'boolean' },
@@ -47,18 +51,24 @@ const { values } = parseArgs({ options: {
   config: { type: 'string', default: 'config/rules.yaml' },
 } });
 const loadedConfig = loadConfig(values.config);
-if (!['legacy', 'flow-3', 'momentum-v2', 'pump-band'].includes(values.strategy!)) throw new Error('Unknown research strategy');
-const momentumV2 = values.strategy === 'momentum-v2';
+if (!['legacy', 'flow-3', 'momentum-v2', 'momentum-v3', 'momentum-v2-v3', 'pump-band', 'momentum-aggressive'].includes(values.strategy!)) throw new Error('Unknown research strategy');
+const momentumAggressive = values.strategy === 'momentum-aggressive';
+const momentumComparison = values.strategy === 'momentum-v2-v3';
+const standaloneMomentumV2 = values.strategy === 'momentum-v2';
+const standaloneMomentumV3 = values.strategy === 'momentum-v3';
+const momentumV2 = standaloneMomentumV2 || momentumComparison;
+const momentumV3 = standaloneMomentumV3 || momentumComparison;
+const momentumResearch = momentumV2 || momentumV3 || momentumAggressive;
 const browserAutoTrade = Boolean(values.browserAutoTrade || values.browserBuyAuto);
 const browserTradingEnabled = values.browserBuyPrompt || browserAutoTrade;
 const quoteSimulationEnabled = Boolean(values.quoteSimulation);
-if (browserAutoTrade && !momentumV2) throw new Error('--browserAutoTrade is only supported with --strategy momentum-v2.');
-if (quoteSimulationEnabled && !momentumV2) throw new Error('--quoteSimulation is only supported with --strategy momentum-v2.');
+if (browserAutoTrade && !standaloneMomentumV2) throw new Error('--browserAutoTrade is only supported with standalone --strategy momentum-v2.');
+if (quoteSimulationEnabled && !momentumResearch) throw new Error('--quoteSimulation is only supported with momentum paper strategies.');
 if (browserAutoTrade) {
   values.orderOutcomeCapture = true;
   values.controlOnly = true;
 }
-const r5BandEnabled = momentumV2 && !values.controlOnly;
+const r5BandEnabled = standaloneMomentumV2 && !values.controlOnly;
 const flow3 = values.strategy === 'flow-3';
 const pumpBand = values.strategy === 'pump-band';
 const FLOW3_RULES = {
@@ -86,10 +96,10 @@ const workers = Number(values.workers), stopLossPercent = Number(values.stopLoss
 const exitHoldSeconds = Number(values.exitHoldSeconds);
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
-if ((momentumV2 || flow3 || pumpBand) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
-if (values.orderCapture && !momentumV2) throw new Error('--orderCapture is only supported with --strategy momentum-v2.');
-if (values.simulateOrder && !momentumV2) throw new Error('--simulateOrder is only supported with --strategy momentum-v2.');
-if (values.browserBuyPrompt && !momentumV2) throw new Error('--browserBuyPrompt is only supported with --strategy momentum-v2.');
+if ((momentumResearch || flow3 || pumpBand) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
+if (values.orderCapture && !standaloneMomentumV2) throw new Error('--orderCapture is only supported with standalone --strategy momentum-v2.');
+if (values.simulateOrder && !standaloneMomentumV2 && !momentumAggressive) throw new Error('--simulateOrder is only supported with standalone --strategy momentum-v2 or momentum-aggressive.');
+if (values.browserBuyPrompt && !standaloneMomentumV2) throw new Error('--browserBuyPrompt is only supported with standalone --strategy momentum-v2.');
 if (values.browserPromptTestSignal && !values.browserBuyPrompt) throw new Error('--browserPromptTestSignal requires --browserBuyPrompt.');
 const topHolderDumpMinPercent = values.topHolderDumpMinPercent !== undefined ? Number(values.topHolderDumpMinPercent) : (config.topHolderDumpMinPercent ?? 1.5);
 
@@ -114,9 +124,101 @@ type DeveloperHolder = { mint: string; wallet: string; observedAt: number; amoun
 type TrackedHolder = ResearchTrackedHolder;
 type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
 const holderApiStatus = new Map<string, HolderApiStatus>();
-type PaperLane = 'control' | 'r5-band';
-const PAPER_LANES = Object.freeze({ control: { id: 'control' as const, label: 'momentum-v2-control' }, r5Band: { id: 'r5-band' as const, label: 'momentum-v2-r5-band' } });
+const developerHolderApiStatus = new Map<string, HolderApiStatus>();
+type PaperLane = 'control' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
+const PAPER_LANES = Object.freeze({
+  control: { id: 'control' as const, label: momentumAggressive ? 'momentum-aggressive' : standaloneMomentumV3 ? 'momentum-v3-control' : 'momentum-v2-control' },
+  r5Band: { id: 'r5-band' as const, label: 'momentum-v2-r5-band' },
+  v3: { id: 'v3-v8' as const, label: 'momentum-v3-v8' },
+  v3ExitConfirmed: { id: 'v3-exit-confirmed' as const, label: 'momentum-v3-exit-confirmed' },
+});
+const v3PaperLane: PaperLane = momentumComparison ? PAPER_LANES.v3.id : PAPER_LANES.control.id;
+// GMGN stores the New Pair controls as a map keyed by its internal trend route.
+// Keep the user's selected launchpad set, but require the UI's minimum MC field
+// to be 5 (GMGN displays this as $5K).  This is only a feed pre-filter: all
+// later paper-entry checks still use live socket/detail evidence.
+const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
+  __v: '20260922',
+  '0bks': '1', '0pm': '1', '0bags_v2': '1', '0stonkfun': '1', '0ks': '1', '0ory': '1', '0bags': '1', 'lb': '1',
+  '0stx': '1', '0tren_ch': '1', '0pf': '1', '0pfa': '1', '0pma': '1', '0vi': '1', '0swarms': '1', '0meo': '1',
+  '0li': '1', '0bk': '1', '0zr': '1', '0sg': '1', '0an': '1', '0msa': '1', '0wdt': '1', '0heaven': '1',
+  '0sugar': '1', '0tm': '1', '0bel': '1', '0tsfun': '1', '0tfun': '1', '0js': '1', '0Ms': '1', 'bp': '1',
+  '0xtc': '1', 'ry': '1', '0mvc': '1', '0pla': '1', '0pra': '1', '0plpa': '1', '0po': '1',
+  '9mim': '20', '9im': '1',
+});
+async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise<void> {
+  await browserContext.addInitScript(filter => {
+    if (location.hostname !== 'gmgn.ai') return;
+    const storageKey = 'filter_query_map';
+    let map: Record<string, Record<string, string>> = {};
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const parsed: unknown = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
+    } catch { /* replace an invalid saved value with a valid map */ }
+    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
+    localStorage.setItem(storageKey, JSON.stringify(map));
+  }, GMGN_NEW_PAIR_SOL_FILTER);
+}
 type SimulatedEvent = { type: 'SIMULATED_BUY' | 'SIMULATED_SELL' | 'SIMULATION_HOLD'; paperLane?: PaperLane; pnlUsd?: number; reason?: string };
+
+type MomentumV3EntryDecision = {
+  allowed: boolean;
+  passedValidations: number;
+  totalValidations: number;
+  blockingReasons: string[];
+  hardRejections: string[];
+  version: typeof MOMENTUM_V3_RULES.version;
+};
+
+/**
+ * V3 intentionally permits up to four soft validation misses, but never
+ * enters with stale/falling price evidence, a red live candle, sell-dominant
+ * 20-second flow, single-buyer dominance, or a holder-distribution reject.
+ * The count uses the same five base gates and seven momentum gates shown in
+ * the detail monitoring timeline, so replay and live paper runs agree.
+ */
+function assessMomentumV3Entry(input: {
+  momentumReasons: string[];
+  candleAllowed: boolean;
+  candleReason: string | null;
+  blindProtectionAllowed: boolean;
+  blindProtectionReason: string;
+  holderDistributionAllowed: boolean;
+  holderDistributionReason: string;
+  entryStable: boolean;
+  entryReason: string;
+  flowAllowed: boolean;
+  candleEntryFlowReason: string | null;
+  flowSellUsdDominant: boolean;
+}): MomentumV3EntryDecision {
+  const blockingReasons = [
+    ...input.momentumReasons,
+    ...(input.candleAllowed ? [] : [`CANDLE:${input.candleReason ?? 'UNKNOWN'}`]),
+    ...(input.blindProtectionAllowed ? [] : [`BLIND_PROTECTION:${input.blindProtectionReason}`]),
+    ...(input.holderDistributionAllowed ? [] : [`HOLDER_DIST:${input.holderDistributionReason}`]),
+    ...(input.entryStable ? [] : [`ENTRY:${input.entryReason}`]),
+    ...(input.flowAllowed ? [] : ['FLOW:INSUFFICIENT_BUY_PRESSURE']),
+  ];
+  const hardRejections = [
+    ...(input.momentumReasons.includes('MOMENTUM_NOT_RISING') ? ['MOMENTUM_NOT_RISING'] : []),
+    ...(input.momentumReasons.includes('MOMENTUM_INSUFFICIENT_FRESH_HISTORY') ? ['MOMENTUM_INSUFFICIENT_FRESH_HISTORY'] : []),
+    ...(input.momentumReasons.includes('MOMENTUM_SINGLE_BUYER_DOMINANCE') ? ['MOMENTUM_SINGLE_BUYER_DOMINANCE'] : []),
+    ...(!input.entryStable ? ['ENTRY_UNSTABLE'] : []),
+    ...(input.candleEntryFlowReason === 'CURRENT_CANDLE_DROP' ? ['CURRENT_CANDLE_DROP'] : []),
+    ...(input.flowSellUsdDominant ? ['FLOW_SELL_USD_DOMINANT'] : []),
+    ...(!input.holderDistributionAllowed ? ['HOLDER_DISTRIBUTION_RISK'] : []),
+  ];
+  const passedValidations = MOMENTUM_V3_RULES.totalValidations - blockingReasons.length;
+  return {
+    allowed: passedValidations >= MOMENTUM_V3_RULES.minimumPassedValidations && hardRejections.length === 0,
+    passedValidations,
+    totalValidations: MOMENTUM_V3_RULES.totalValidations,
+    blockingReasons,
+    hardRejections,
+    version: MOMENTUM_V3_RULES.version,
+  };
+}
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const output = values.output || join('research', runId);
 mkdirSync(output, { recursive: true });
@@ -160,6 +262,7 @@ function scheduleReportRefresh() {
 }
 const write = (file: string, value: unknown) => {
   appendFileSync(join(output, file), JSON.stringify(value) + '\n');
+  if (file === 'quote-simulated-orders.jsonl') scheduleReportRefresh();
   if (file === 'events.jsonl' && value && typeof value === 'object'
     && reportRelevantEventTypes.has((value as { type?: unknown }).type as string)) scheduleReportRefresh();
 };
@@ -534,8 +637,8 @@ async function browserSellRoute(page: Page, input: { mint: string; fromAddress: 
 }
 /** Passive sell-side counterpart to the buy comparison. It waits for the buy
  * quote so the sell route uses exactly the token amount GMGN quoted at entry. */
-function scheduleSellRouteComparison(page: Page, signal: PaperSignal): void {
-  if (!quoteSimulationEnabled) return;
+function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<void> {
+  if (!quoteSimulationEnabled) return Promise.resolve();
   const task = (async () => {
     await routeComparisonBuyTasks.get(signal.positionId);
     const position = routeComparisonPositions.get(signal.positionId);
@@ -568,6 +671,7 @@ function scheduleSellRouteComparison(page: Page, signal: PaperSignal): void {
   })();
   pendingPaperOrders.add(task);
   void task.then(() => pendingPaperOrders.delete(task), () => pendingPaperOrders.delete(task));
+  return task;
 }
 async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }, skipPrompt = false) {
   const route = await browserSellRoute(page, input);
@@ -921,6 +1025,7 @@ function parseAndStoreDeveloperHolders(mint: string, body: unknown, observedAt: 
     write('developer-balance-changes.jsonl', { mint, observedAt, event: 'DEVELOPER_HOLDER_NOT_RETURNED', wallet: before.wallet, previousAmount: before.amount, previousAmountPercentage: before.amountPercentage, note: 'The DEV-tag holder endpoint no longer returned this wallet. It can indicate a full exit, but is retained as an observation rather than asserted as a sale until a matching trade is seen.' });
   }
   if (found.length) developerHolders.set(mint, map);
+  developerHolderApiStatus.set(mint, { status, count: found.length, observedAt, source });
   write('developer-holders.jsonl', { mint, observedAt, source: `GMGN ${source} /vas/api/v1/token_holders tag=dev`, status, holders: found });
   return found;
 }
@@ -1182,7 +1287,7 @@ async function refreshDeveloperHolders(page: Page, mint: string, observedAt: num
     status: 0, body: { error: error instanceof Error ? error.message : 'request failed' }
   }));
 
-  const found = parseAndStoreDeveloperHolders(mint, response.body, observedAt, 'replayed_xhr', response.status);
+  const found = parseAndStoreDeveloperHolders(mint, response.body, Date.now(), 'replayed_xhr', response.status);
   return { status: response.status, holders: found };
 }
 
@@ -1300,7 +1405,9 @@ function writeSimulationExit(position: SimulationPosition, paperLane: PaperLane,
   if (maxPaperBuys !== null && !values.browserBuyPrompt) {
     const totalSells = simulatedEvents.filter(event => event.type === 'SIMULATED_SELL' && event.paperLane === PAPER_LANES.control.id).length;
     const openLanes = simulatedEvents.filter(event => event.type === 'SIMULATED_BUY').length - simulatedEvents.filter(event => event.type === 'SIMULATED_SELL').length;
-    if (totalSells >= maxPaperBuys && openLanes === 0 && liveBrowserPositions.size === 0) {
+    const comparisonComplete = !momentumComparison || [PAPER_LANES.control.id, PAPER_LANES.v3.id, PAPER_LANES.v3ExitConfirmed.id]
+      .every(lane => simulatedEvents.filter(event => event.type === 'SIMULATED_SELL' && event.paperLane === lane).length >= maxPaperBuys);
+    if (comparisonComplete && totalSells >= maxPaperBuys && openLanes === 0 && liveBrowserPositions.size === 0) {
       console.log('[trial-complete]', `Target ${maxPaperBuys} buy dan ${totalSells} sell selesai.`);
       setTimeout(() => stopping.abort(), 2_000);
     }
@@ -1331,7 +1438,7 @@ function captureTrades(payload: unknown, now: number, mint: string | undefined) 
       amount: Number.isFinite(Number(at(row, 'au'))) ? Number(at(row, 'au')) : null,
       amountUsd, raw };
     list.push(trade); trades.set(mint, list); write('trades.jsonl', trade);
-    if (momentumV2) {
+    if (momentumResearch) {
       const rawTokens = trade.raw.ba;
       const tick: TapeTrade = { id: signature ?? String(trade.raw.id ?? trade.raw.si ?? `${mint}:${trade.occurredAt}:${trade.wallet}:${trade.side}:${trade.priceUsd}:${rawTokens}`),
         observedAt: now, occurredAt: trade.occurredAt, priceUsd: trade.priceUsd, side: trade.side, wallet: trade.wallet,
@@ -1687,7 +1794,7 @@ async function worker(index: number, deadline: number) {
   let page = await openDetailPage();
   while (!stopping.signal.aborted && Date.now() < deadline) {
     if (page.isClosed()) page = await openDetailPage();
-    if (maxPaperBuys !== null && paperBuyCount >= maxPaperBuys) {
+    if (maxPaperBuys !== null && !momentumComparison && paperBuyCount >= maxPaperBuys) {
       const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
       if (openPositions <= 0) {
         // Keep the detail tab on the completed token so a manual order-capture
@@ -1714,8 +1821,8 @@ async function worker(index: number, deadline: number) {
     let holderCount: number | null = typeof candidates.get(mint)?.fields.holders?.value === 'number' ? (candidates.get(mint)!.fields.holders!.value as number) : null;
     const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastCandlePollAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, latestCandles: McapCandle[] = [], candleBlockRecorded = false, trialLimitRecorded = false, blindProtectionBlockRecorded = false, holderDistributionBlockRecorded = false, lastHolderDistributionLogAt = 0;
     let lastMonitoringSnapshotAt = 0;
-    let pendingMomentumExit: ReturnType<typeof assessMomentumExit> = null;
-    const momentumLaneStates = new Map<PaperLane, { position: SimulationPosition; riskState: ReturnType<typeof createMomentumPosition>; closed: boolean }>();
+    let pendingMomentumExit: ReturnType<typeof assessMomentumExit> | ReturnType<typeof assessMomentumAggressiveExit> = null;
+    const momentumLaneStates = new Map<PaperLane, { position: SimulationPosition; riskState: ReturnType<typeof createMomentumPosition>; closed: boolean; whaleSellPendingAt: number | null }>();
     let lastMomentumBlockAt = 0, lastR5BandBlockAt = 0;
     let lastTrackedPollAt = Date.now(), trackedPollDelayMs = 21_000;
     // A single socket trade can make a thin launch wick below the stop.  Keep
@@ -1755,7 +1862,7 @@ async function worker(index: number, deadline: number) {
       // amount ready as soon as the detail page loads.  Momentum V2 still
       // controls the paper-entry decision; this only fills the input and
       // never submits an order.
-      const buyUiPreparedOnOpen = values.prepareTradeUi && (!momentumV2 || values.orderCapture);
+      const buyUiPreparedOnOpen = values.prepareTradeUi && (!momentumResearch || values.orderCapture);
       if (buyUiPreparedOnOpen) {
         await prepareBuyPanel(page, mint, index, Date.now()).catch(error => {
           write('events.jsonl', { type: 'BUY_PREPARATION_ERROR', mint, worker: index, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown' });
@@ -1773,7 +1880,7 @@ async function worker(index: number, deadline: number) {
           break;
         }
         let now = Date.now();
-        if (momentumV2 && now - lastTrackedPollAt >= trackedPollDelayMs) {
+        if (momentumResearch && now - lastTrackedPollAt >= trackedPollDelayMs) {
           const tracked = await refreshTrackedHolders(page, mint, now).catch(() => ({ status: 0 }));
           lastTrackedPollAt = Date.now(); trackedPollDelayMs = tracked.status === 429 ? 60_000 : 21_000;
         }
@@ -1786,7 +1893,7 @@ async function worker(index: number, deadline: number) {
             const prevAllowed = (candleDecision?.allowed ?? false) && (candleEntryFlow?.allowed ?? false);
             candleDecision = assessCandleHistory(freshCandleResult.candles);
             candleEntryFlow = assessCandleEntryFlow(freshCandleResult.candles);
-            if (!simulation && !r5BandSimulation) {
+            if (!simulation && !r5BandSimulation && ![...momentumLaneStates.values()].some(state => !state.closed)) {
               entryCandleClose = freshCandleResult.candles.at(-1)?.close ?? null;
             }
             const freshEarlyRising = assessEarlyCandleRising(freshCandleResult.candles, candleDecision, candleEntryFlow, holderCount, earlyMinHolders);
@@ -1798,7 +1905,7 @@ async function worker(index: number, deadline: number) {
             lastCandlePollAt = Date.now() + 2_000;
           }
         }
-        if ((simulation || r5BandSimulation) && now - lastDeveloperHoldersAt >= developerHolderPollMs) {
+        if ((simulation || r5BandSimulation || [...momentumLaneStates.values()].some(state => !state.closed)) && now - lastDeveloperHoldersAt >= developerHolderPollMs) {
           const developerSnapshot = await maybeRefreshDeveloperHolders(page, mint, now);
           if (!developerSnapshot.deferred) {
             lastDeveloperHoldersAt = Date.now(); developerHolderPollMs = developerSnapshot.status === 429 ? 60_000 : 30_000;
@@ -1807,8 +1914,8 @@ async function worker(index: number, deadline: number) {
         now = Date.now();
         const candidate = candidates.get(mint);
         const lastMomentumTick = cleanTape(momentumTape.get(mint) ?? [], now).filter(t => t.priceUsd !== null && t.priceUsd > 0).at(-1);
-        const price = momentumV2 ? lastMomentumTick?.priceUsd ?? null : num(candidate, 'priceUsd');
-        const priceObservedAt = momentumV2 ? lastMomentumTick?.observedAt ?? 0 : candidate?.fields.priceUsd?.observedAt ?? 0;
+        const price = momentumResearch ? lastMomentumTick?.priceUsd ?? null : num(candidate, 'priceUsd');
+        const priceObservedAt = momentumResearch ? lastMomentumTick?.observedAt ?? 0 : candidate?.fields.priceUsd?.observedAt ?? 0;
         const holderField = candidate?.fields.holders;
         if (typeof holderField?.value === 'number') holderCount = holderField.value;
         if (holderCount !== null && holderField && holderField.observedAt > lastHolderObservedAt) {
@@ -1825,7 +1932,7 @@ async function worker(index: number, deadline: number) {
         }
         if (price && openingPrice === null) openingPrice = price;
         if (price) peakObservedPrice = Math.max(peakObservedPrice, price);
-        if (!simulation && !r5BandSimulation) {
+        if (!simulation && !r5BandSimulation && ![...momentumLaneStates.values()].some(state => !state.closed)) {
           const flow = entryTradeFlow(mint, now);
           const dumpAssessment = assessObservationDump({
             currentPriceUsd: price,
@@ -1858,7 +1965,7 @@ async function worker(index: number, deadline: number) {
             break;
           }
         }
-        if (price && (!simulation || (momentumV2 && !r5BandSimulation)) && now - priceObservedAt <= 10_000) {
+        if (price && (momentumResearch || !simulation) && now - priceObservedAt <= 10_000) {
           const entry = flow3 ? assessFlow3EntryStability(priceSamples) : assessEntryStability(priceSamples);
           const flow = entryTradeFlow(mint, now);
           const flowAllowed = flow.trades >= 5 && flow.buyUsd >= flow.sellUsd;
@@ -1872,12 +1979,24 @@ async function worker(index: number, deadline: number) {
             || earlyCandleRising.allowed
             || (candidateCreatedAt !== null ? (now - candidateCreatedAt <= 120_000) : false);
 
+          // The holder gate is checked before any paper BUY. It requires a
+          // recent full untagged list AND a separate recent tag=dev response.
+          // The dev-tag list supplies developer evidence only; it cannot ever
+          // become the Top-1 distribution source.
+          if (momentumAggressive) {
+            const devStatus = developerHolderApiStatus.get(mint);
+            if (!devStatus || now - devStatus.observedAt > MOMENTUM_RULES.holderEvidenceMaxAgeMs) {
+              const refreshed = await maybeRefreshDeveloperHolders(page, mint, now);
+              if (!refreshed.deferred) lastDeveloperHoldersAt = Date.now();
+              now = Date.now();
+            }
+          }
           const tokenHoldersMap = trackedHolders.get(mint);
           const currentHolderCount = tokenHoldersMap?.size ?? 0;
           const currentHolderStatus = holderApiStatus.get(mint)?.status ?? null;
           const ownerStatus = holderApiStatus.get(mint);
-          const verifiedStatus = momentumV2 && (!ownerStatus || now - ownerStatus.observedAt > MOMENTUM_RULES.holderEvidenceMaxAgeMs) ? null : currentHolderStatus;
-          const blindProtection = assessBlindProtection(momentumV2 || isYoungToken, verifiedStatus, currentHolderCount);
+          const verifiedStatus = momentumResearch && (!ownerStatus || now - ownerStatus.observedAt > MOMENTUM_RULES.holderEvidenceMaxAgeMs) ? null : currentHolderStatus;
+          const blindProtection = assessBlindProtection(momentumResearch || isYoungToken, verifiedStatus, currentHolderCount);
 
           // Calculate holder distribution metrics (Top 1, Top 5, Dev) excluding liquidity pool / bonding curve
           let top1Pct = 0, top5Pct = 0, devHoldingPct = 0;
@@ -1909,6 +2028,14 @@ async function worker(index: number, deadline: number) {
 
           const effectiveHolderCount = Math.max(holderCount ?? 0, currentHolderCount);
           const holderDistribution = assessHolderDistribution(effectiveHolderCount, top1Pct, top5Pct, devHoldingPct);
+          const strictHolderPreBuy = assessPreBuyHolderGate({
+            now,
+            holders: tokenHoldersMap?.values(),
+            holderStatus: ownerStatus,
+            developerStatus: developerHolderApiStatus.get(mint),
+            maximumAgeMs: MOMENTUM_RULES.holderEvidenceMaxAgeMs,
+            maximumTop1Percent: 50,
+          });
 
           if (!simulation && !holderDistribution.allowed && holderDistribution.action === 'WAIT_FOR_DILUTION' && now - lastHolderDistributionLogAt >= 10_000) {
             lastHolderDistributionLogAt = now;
@@ -1927,7 +2054,8 @@ async function worker(index: number, deadline: number) {
             || singleCandleOverride.allowed
             || earlyCandleRising.allowed);
 
-          const momentumEntry = momentumV2 ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken) : null;
+          const momentumEntry = (momentumV2 || momentumV3) ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken) : null;
+          const momentumAggressiveEntry = momentumAggressive ? assessMomentumAggressiveEntry(momentumTape.get(mint) ?? [], now) : null;
           const r5BandEntry = r5BandEnabled ? assessMomentumEntry(momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], now, isYoungToken, MOMENTUM_R5_BAND) : null;
           // Flow-3 uses the historical entry contract: stable live price,
           // safe candle history, and net-positive 20-second buy flow.  Holder
@@ -1936,6 +2064,20 @@ async function worker(index: number, deadline: number) {
           const baseBuyAllowed = flow3
             ? entry.stable && candleAllowed && flowAllowed
             : entry.stable && candleAllowed && flowAllowed && blindProtection.allowed && holderDistribution.allowed;
+          const momentumV3Entry = momentumV3 && momentumEntry ? assessMomentumV3Entry({
+            momentumReasons: momentumEntry.reasons,
+            candleAllowed,
+            candleReason: candleDecision?.reason ?? candleEntryFlow?.reason ?? null,
+            blindProtectionAllowed: blindProtection.allowed,
+            blindProtectionReason: blindProtection.reason,
+            holderDistributionAllowed: holderDistribution.allowed,
+            holderDistributionReason: holderDistribution.reason,
+            entryStable: entry.stable,
+            entryReason: entry.reason,
+            flowAllowed,
+            candleEntryFlowReason: candleEntryFlow?.reason ?? null,
+            flowSellUsdDominant: flow.sellUsd > flow.buyUsd,
+          }) : null;
           // Browser prompt testing intentionally uses only live, easily
           // observable evidence. It never changes the regular V2 or paper
           // simulation rules unless the explicit test flag is supplied.
@@ -1950,25 +2092,44 @@ async function worker(index: number, deadline: number) {
               : socketBuySurgeForPromptTest ? 'BROWSER_TEST_SOCKET_BUY_SURGE'
                 : null
             : null;
-          const controlBuyAllowed = browserPromptTestReason !== null || (baseBuyAllowed && (momentumEntry?.allowed ?? true));
+          const v2ControlBuyAllowed = momentumV2 && (browserPromptTestReason !== null || (baseBuyAllowed && (momentumEntry?.allowed ?? true)));
+          const v3ControlBuyAllowed = momentumV3 && (momentumV3Entry?.allowed ?? false);
+          const candidateMC = num(candidate, 'marketCapUsd');
+          const aggressiveMcAllowed = candidateMC === null || (candidateMC >= MOMENTUM_AGGRESSIVE_RULES.minMarketCap && candidateMC <= MOMENTUM_AGGRESSIVE_RULES.maxMarketCap);
+          const aggressiveControlBuyAllowed = momentumAggressive
+            && (momentumAggressiveEntry?.allowed ?? false)
+            && aggressiveMcAllowed;
           const r5BandBuyAllowed = r5BandEnabled && baseBuyAllowed && (r5BandEntry?.allowed ?? false);
-          const canOpenControl = controlBuyAllowed && !simulation && (maxPaperBuys === null || paperBuyCount < maxPaperBuys);
+          const laneAtPaperLimit = (paperLane: PaperLane) => maxPaperBuys !== null && simulatedEvents.filter(event => event.type === 'SIMULATED_BUY' && event.paperLane === paperLane).length >= maxPaperBuys;
+          const canOpenControl = (v2ControlBuyAllowed || aggressiveControlBuyAllowed) && !simulation && !laneAtPaperLimit(PAPER_LANES.control.id);
+          const canOpenV3 = v3ControlBuyAllowed && !momentumLaneStates.has(v3PaperLane) && !laneAtPaperLimit(v3PaperLane);
+          const canOpenV3ExitConfirmed = momentumComparison && v3ControlBuyAllowed
+            && !momentumLaneStates.has(PAPER_LANES.v3ExitConfirmed.id)
+            && !laneAtPaperLimit(PAPER_LANES.v3ExitConfirmed.id);
           // The variant may enter later than control when R5 first reaches its
           // band. It never opens a browser trade control or changes control's
           // position state.
           const canOpenR5Band = r5BandBuyAllowed && !r5BandSimulation
             && (maxPaperBuys === null || paperBuyCount < maxPaperBuys || canOpenControl);
 
-          if (canOpenControl || canOpenR5Band) {
+          if (canOpenControl || canOpenV3 || canOpenR5Band) {
             const effectiveStakeUsd = simulationStakeSol !== null
               ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
               : simulationStakeUsd;
-            const entryDecisionAt = momentumV2 ? Date.now() : now;
-            const openMomentumLane = (paperLane: PaperLane, entryGate: typeof momentumEntry, entryReason?: string) => {
+            const entryDecisionAt = momentumResearch ? Date.now() : now;
+            const openMomentumLane = (paperLane: PaperLane, entryGate: any, entryReason?: string) => {
               const paperPosition = openSimulation(mint, entryDecisionAt, price, effectiveStakeUsd);
               const entrySignal = paperSignal({
                 side: 'BUY', paperLane, runId, mint, positionId: `${mint}:${paperPosition.openedAt}:${paperLane}`, worker: index,
-                reason: entryReason ?? (paperLane === PAPER_LANES.control.id ? 'MOMENTUM_V2_ENTRY_PASSED' : 'MOMENTUM_V2_R5_BAND_ENTRY_PASSED'),
+                reason: entryReason ?? (paperLane === PAPER_LANES.r5Band.id
+                  ? 'MOMENTUM_V2_R5_BAND_ENTRY_PASSED'
+                  : paperLane === v3PaperLane && !momentumV2
+                    ? 'MOMENTUM_V3_ENTRY_PASSED'
+                    : paperLane === PAPER_LANES.v3.id
+                      ? 'MOMENTUM_V3_ENTRY_PASSED'
+                      : momentumAggressive
+                        ? 'MOMENTUM_AGGRESSIVE_ENTRY_PASSED'
+                        : 'MOMENTUM_V2_ENTRY_PASSED'),
                 marketTradeAt: lastMomentumTick?.occurredAt ?? null, priceReceivedAt: lastMomentumTick?.observedAt ?? priceObservedAt,
                 decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
               });
@@ -1978,15 +2139,27 @@ async function worker(index: number, deadline: number) {
                 write('events.jsonl', { type: 'BROWSER_BUY_ERROR', mint, observedAt: Date.now(), signalId: entrySignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
               });
               const riskState = createMomentumPosition(entryDecisionAt, price, lastMomentumTick?.occurredAt ?? entryDecisionAt);
-              momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false });
+              momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false, whaleSellPendingAt: null });
               writeSimulation({ type: 'SIMULATED_BUY', paperLane, mint, worker: index, observedAt: entryDecisionAt, timing: entrySignal, positionId: entrySignal.positionId,
                 entryPriceUsd: price, stakeUsd: paperPosition.stakeUsd, quantity: paperPosition.quantity,
-                entryGate: { momentum: entryGate, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
+                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
                 assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper lane only; no GMGN order is submitted.' } });
               return paperPosition;
             };
-            if (momentumV2) {
-              if (canOpenControl) { paperBuyCount++; simulation = openMomentumLane(PAPER_LANES.control.id, momentumEntry, browserPromptTestReason ?? undefined); }
+            if (momentumResearch) {
+              if (canOpenControl) {
+                paperBuyCount++;
+                simulation = openMomentumLane(
+                  PAPER_LANES.control.id,
+                  momentumAggressive ? momentumAggressiveEntry : momentumEntry,
+                  browserPromptTestReason ?? (momentumAggressive ? 'MOMENTUM_AGGRESSIVE_ENTRY_PASSED' : undefined)
+                );
+              }
+              if (canOpenV3) {
+                if (!canOpenControl) paperBuyCount++;
+                openMomentumLane(v3PaperLane, momentumEntry, 'MOMENTUM_V3_ENTRY_PASSED');
+              }
+              if (canOpenV3ExitConfirmed) openMomentumLane(PAPER_LANES.v3ExitConfirmed.id, momentumEntry, 'MOMENTUM_V3_ENTRY_PASSED');
               if (canOpenR5Band) r5BandSimulation = openMomentumLane(PAPER_LANES.r5Band.id, r5BandEntry);
               if (!paperRiskListeners.has(mint)) paperRiskListeners.set(mint, tick => {
                 for (const [paperLane, state] of momentumLaneStates) {
@@ -2007,26 +2180,90 @@ async function worker(index: number, deadline: number) {
                       continue;
                     }
                   }
-                  const decision = assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
+                  const decision = momentumAggressive
+                    ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [])
+                    : assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
                   if (!decision) continue;
                   if (decision.reason || tick.observedAt - lastMonitoringSnapshotAt >= 5_000) {
                     lastMonitoringSnapshotAt = tick.observedAt;
                     write('momentum-decisions.jsonl', { mint, paperLane, ...decision });
                   }
                   if (!decision.reason) continue;
+                  let exitReason: SimulationExitReason | null = decision.reason;
+                  let customExitPolicy: Record<string, unknown> | null = null;
+                  // This lane has the identical V3 entry as the normal V3 lane.
+                  // Only its exit differs: a non-dev whale sell exits immediately
+                  // when underwater/unsupported, while a profitable, supported
+                  // position may wait for two bearish confirmations after 5 seconds.
+                  if (paperLane === PAPER_LANES.v3ExitConfirmed.id) {
+                    const holderDelta = decision.holders.steps.reduce((total, step) => total + step.delta, 0);
+                    const sellUsd = decision.metrics.sellUsd ?? 0;
+                    const buyUsd = decision.metrics.buyUsd ?? 0;
+                    const sellDominant = sellUsd >= Math.max(1, buyUsd) * 1.5;
+                    const priceFalling = (decision.metrics.return5s ?? 0) <= -2;
+                    const holdersWeak = holderDelta <= 0;
+                    const confirmations = Number(sellDominant) + Number(priceFalling) + Number(holdersWeak);
+
+                    if (decision.reason === 'V2_MAJOR_HOLDER_SELL' && !decision.majorSell?.isDev) {
+                      const profitableAtWhaleSignal = decision.returnPercent > 0;
+                      const flowAndHoldersSupportHold = buyUsd > sellUsd && holderDelta > 0;
+                      if (!profitableAtWhaleSignal || !flowAndHoldersSupportHold) {
+                        exitReason = 'V3_EXIT_IMMEDIATE_WHALE_SELL';
+                        customExitPolicy = { immediate: true, returnPercent: decision.returnPercent, profitableAtWhaleSignal, flowAndHoldersSupportHold, holderDelta, buyUsd, sellUsd, sellerWallet: decision.majorSell?.wallet ?? null, tradeUsd: decision.majorSell?.usd ?? null };
+                      } else if (state.whaleSellPendingAt === null) {
+                        state.whaleSellPendingAt = tick.observedAt;
+                        state.riskState.closed = false;
+                        write('events.jsonl', { type: 'V3_WHALE_SELL_PENDING', paperLane, mint, worker: index, observedAt: tick.observedAt,
+                          sellerWallet: decision.majorSell?.wallet ?? null, tradeUsd: decision.majorSell?.usd ?? null,
+                          pendingUntil: tick.observedAt + 5_000, sellDominant, priceFalling, holdersWeak, holderDelta, returnPercent: decision.returnPercent,
+                          note: 'Profitable, supported position: non-dev whale sell is being confirmed for 5 seconds before the V3 exit lane closes.' });
+                        continue;
+                      } else if (tick.observedAt - state.whaleSellPendingAt < 5_000) {
+                        state.riskState.closed = false;
+                        continue;
+                      } else if (confirmations >= 2) {
+                        exitReason = 'V3_EXIT_CONFIRMED_WHALE_SELL';
+                        customExitPolicy = { pendingMs: tick.observedAt - state.whaleSellPendingAt, confirmations, sellDominant, priceFalling, holdersWeak, holderDelta, buyUsd, sellUsd };
+                      } else {
+                        write('events.jsonl', { type: 'V3_WHALE_SELL_CANCELLED', paperLane, mint, worker: index, observedAt: tick.observedAt,
+                          pendingMs: tick.observedAt - state.whaleSellPendingAt, confirmations, sellDominant, priceFalling, holdersWeak, holderDelta,
+                          note: 'Whale sell did not receive two bearish confirmations; the V3 confirmed-exit lane keeps holding.' });
+                        state.whaleSellPendingAt = null;
+                        state.riskState.closed = false;
+                        continue;
+                      }
+                    } else if (decision.reason === 'V2_MAJOR_HOLDER_SELL' && decision.majorSell?.isDev) {
+                      exitReason = 'V3_EXIT_DEV_DUMP';
+                      customExitPolicy = { immediate: true, sellerWallet: decision.majorSell.wallet, tradeUsd: decision.majorSell.usd };
+                    } else if (decision.reason === 'V2_PROFIT_LOCK') {
+                      const bullishProfit = buyUsd > sellUsd && holderDelta > 0 && (decision.metrics.return5s ?? 0) > 0;
+                      if (bullishProfit && decision.drawdownPercent < 5) {
+                        state.riskState.closed = false;
+                        write('events.jsonl', { type: 'V3_PROFIT_LOCK_HELD', paperLane, mint, worker: index, observedAt: tick.observedAt,
+                          returnPercent: decision.returnPercent, drawdownPercent: decision.drawdownPercent, holderDelta, buyUsd, sellUsd,
+                          note: 'Profit lock deferred: buy flow, holder growth, and 5-second price momentum are all still positive.' });
+                        continue;
+                      }
+                      if (bullishProfit) {
+                        exitReason = 'V3_EXIT_PROFIT_TRAIL';
+                        customExitPolicy = { trailingDrawdownPercent: decision.drawdownPercent, holderDelta, buyUsd, sellUsd };
+                      }
+                    }
+                  }
+                  if (!exitReason) continue;
                   state.closed = true;
-                  if (paperLane === PAPER_LANES.control.id) { simulationExit = decision.reason; pendingMomentumExit = decision; }
-                  else r5BandExit = decision.reason;
+                  if (paperLane === PAPER_LANES.control.id) { simulationExit = exitReason; pendingMomentumExit = decision; }
+                  else if (paperLane === PAPER_LANES.r5Band.id) r5BandExit = exitReason;
                   const exitDecisionAt = Date.now();
                   const exitSignal = paperSignal({ side: 'SELL', paperLane, runId, mint, positionId: `${mint}:${state.position.openedAt}:${paperLane}`, worker: index,
-                    reason: decision.reason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
+                    reason: exitReason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
                     decisionAt: exitDecisionAt, paperRecordedAt: Date.now(), priceUsd: decision.priceUsd });
                   write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
                   scheduleSellRouteComparison(page, exitSignal);
                   void promptAndSubmitBrowserSell(page, exitSignal, decision.priceUsd, num(candidates.get(mint), 'marketCapUsd')).catch(error => {
                     write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
                   });
-                  writeSimulationExit(state.position, paperLane, mint, exitDecisionAt, decision.priceUsd, decision.reason, candidates.get(mint)?.metadata ?? null, decision, exitSignal);
+                  writeSimulationExit(state.position, paperLane, mint, exitDecisionAt, decision.priceUsd, exitReason, candidates.get(mint)?.metadata ?? null, { ...decision, reason: exitReason, customExitPolicy }, exitSignal);
                 }
               });
             } else if (canOpenControl) {
@@ -2035,7 +2272,7 @@ async function worker(index: number, deadline: number) {
             highestProfitPriceUsd = price;
             lastProfitProgressAt = now;
             dynamicTargetPercent = 30;
-            const developerSnapshot = momentumV2 ? { deferred: true, status: null } : await maybeRefreshDeveloperHolders(page, mint, now);
+            const developerSnapshot = momentumResearch ? { deferred: true, status: null } : await maybeRefreshDeveloperHolders(page, mint, now);
             if (!developerSnapshot.deferred) {
               lastDeveloperHoldersAt = Date.now(); developerHolderPollMs = developerSnapshot.status === 429 ? 60_000 : 30_000;
             }
@@ -2043,7 +2280,7 @@ async function worker(index: number, deadline: number) {
             // This lets the current candle confirm a later socket stop without
             // assuming a fixed token supply.
             if (!entryCandleClose || entryCandleClose <= 0) entryCandleClose = null;
-            if (!momentumV2 && simulation) writeSimulation({ type: 'SIMULATED_BUY', paperLane: PAPER_LANES.control.id, mint, worker: index, observedAt: entryDecisionAt,
+            if (!momentumResearch && simulation) writeSimulation({ type: 'SIMULATED_BUY', paperLane: PAPER_LANES.control.id, mint, worker: index, observedAt: entryDecisionAt,
               entryPriceUsd: price, stakeUsd: simulation.stakeUsd, quantity: simulation.quantity,
               entryGate: { momentum: momentumEntry, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null, assumptions: { feeUsd: 0, slippagePercent: 0, note: autoBuyEnabled ? 'Paper simulation with real GMGN UI Buy button click.' : 'Paper simulation (real UI Buy button click disabled by autoBuy=false).' } });
             if (values.prepareTradeUi && !buyUiPreparedOnOpen && !flow3 && !browserTradingEnabled) {
@@ -2063,13 +2300,29 @@ async function worker(index: number, deadline: number) {
                 console.log('[paper-only]', candidate?.metadata?.symbol ?? mint, 'Simulated buy opened; real UI buy click skipped (autoBuy=false)');
               }
             }
-            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
-          } else if (maxPaperBuys !== null && controlBuyAllowed && !trialLimitRecorded) {
+            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
+          } else if (maxPaperBuys !== null && (v2ControlBuyAllowed || v3ControlBuyAllowed) && !trialLimitRecorded) {
             trialLimitRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
               note: 'All entry gates passed, but the non-submitting paper-buy trial has already prepared its maximum number of candidates.' });
             console.log('[sim-buy-skipped]', candidate?.metadata?.symbol ?? mint, 'TRIAL_LIMIT=' + maxPaperBuys);
-          } else if (momentumEntry && !momentumEntry.allowed && now - lastMomentumBlockAt >= 5_000) {
+          } else if (momentumAggressive && !aggressiveMcAllowed && now - lastMomentumBlockAt >= 5_000) {
+            lastMomentumBlockAt = now;
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price,
+              reason: 'MC_OUTSIDE_SWEET_SPOT', aggressive: momentumAggressiveEntry, candidateMC,
+              note: `Aggressive Flow: Market cap ($${candidateMC}) di luar sweet spot ($5.5k - $15k).` });
+            console.log('[sim-buy-blocked]', candidate?.metadata?.symbol ?? mint, 'MC_OUTSIDE_SWEET_SPOT', candidateMC);
+          } else if (momentumAggressive && momentumAggressiveEntry && !momentumAggressiveEntry.allowed && now - lastMomentumBlockAt >= 5_000) {
+            lastMomentumBlockAt = now;
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price,
+              reason: momentumAggressiveEntry.reasons.join(', '), aggressive: momentumAggressiveEntry });
+            console.log('[sim-buy-blocked]', candidate?.metadata?.symbol ?? mint, momentumAggressiveEntry.reasons.join(', '));
+          } else if (momentumV3 && momentumV3Entry && !momentumV3Entry.allowed && now - lastMomentumBlockAt >= 5_000) {
+            lastMomentumBlockAt = now;
+            write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price,
+              reason: momentumV3Entry.blockingReasons.join(', '), momentum: momentumEntry, v3: momentumV3Entry,
+              note: `Momentum V3 requires ${MOMENTUM_V3_RULES.minimumPassedValidations}/${MOMENTUM_V3_RULES.totalValidations} validations and no V3 hard rejection.` });
+          } else if (momentumV2 && momentumEntry && !momentumEntry.allowed && now - lastMomentumBlockAt >= 5_000) {
             lastMomentumBlockAt = now;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, reason: momentumEntry.reasons.join(', '), momentum: momentumEntry });
           } else if (!flow3 && !blindProtection.allowed && !blindProtectionBlockRecorded) {
@@ -2129,7 +2382,7 @@ async function worker(index: number, deadline: number) {
           if (exitHoldSeconds > 0) await delay(exitHoldSeconds * 1000);
           break;
         }
-        if (!momentumV2 && price && simulation && now - priceObservedAt <= 10_000) {
+        if (!momentumResearch && price && simulation && now - priceObservedAt <= 10_000) {
           const trades5s = recentTradeWindow(mint, now), returnPercent = (price / simulation.entryPriceUsd - 1) * 100;
           const freshSignificantGrowth = lastSignificantGrowthAt > 0 && now - lastSignificantGrowthAt <= 5_000;
           const recoveryEligible = returnPercent <= -10 && returnPercent > -20 && freshSignificantGrowth && trades5s.buyUsd >= trades5s.sellUsd;
@@ -2289,7 +2542,7 @@ async function worker(index: number, deadline: number) {
         }
         // A non-bought detail can be released on a rug.  A paper position must
         // stay alive long enough for the two-source stop confirmation above.
-        if (!simulation && !r5BandSimulation && price && openingPrice && (openingPrice - price) / openingPrice * 100 >= stopLossPercent) { stopLoss = true; write('events.jsonl', { type: 'STOP_LOSS_REACHED', mint, observedAt: Date.now(), openingPriceUsd: openingPrice, currentPriceUsd: price, drawdownPercent: (openingPrice - price) / openingPrice * 100, thresholdPercent: stopLossPercent }); break; }
+        if (!simulation && !r5BandSimulation && ![...momentumLaneStates.values()].some(state => !state.closed) && price && openingPrice && (openingPrice - price) / openingPrice * 100 >= stopLossPercent) { stopLoss = true; write('events.jsonl', { type: 'STOP_LOSS_REACHED', mint, observedAt: Date.now(), openingPriceUsd: openingPrice, currentPriceUsd: price, drawdownPercent: (openingPrice - price) / openingPrice * 100, thresholdPercent: stopLossPercent }); break; }
         await delay(500);
       }
       const candidate = candidates.get(mint);
@@ -2302,16 +2555,30 @@ async function worker(index: number, deadline: number) {
         // after the collector itself has already ended.
         const finalTick = priceSamples.at(-1);
         const closePrice = endPrice && candidate.fields.priceUsd && endedAt - candidate.fields.priceUsd.observedAt <= 10_000 ? endPrice : finalTick?.priceUsd;
-        if (simulation && !simulationExit && closePrice) {
+        if (momentumResearch && closePrice) {
+          const finalObservedAt = finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? endedAt;
+          for (const [paperLane, state] of momentumLaneStates) {
+            if (state.closed) continue;
+            state.closed = true;
+            const exitSignal = paperSignal({ side: 'SELL', paperLane, runId, mint, positionId: `${mint}:${state.position.openedAt}:${paperLane}`, worker: index,
+              reason: 'OBSERVATION_END', marketTradeAt: finalTick?.observedAt ?? null, priceReceivedAt: finalObservedAt,
+              decisionAt: endedAt, paperRecordedAt: Date.now(), priceUsd: closePrice });
+            write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
+            await scheduleSellRouteComparison(page, exitSignal);
+            const result = writeSimulationExit(state.position, paperLane, mint, endedAt, closePrice, 'OBSERVATION_END', candidate.metadata ?? null,
+              { priceSource: finalTick?.priceUsd === closePrice ? 'last observed detail socket tick' : 'fresh candidate price', priceObservedAt: finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? null }, exitSignal);
+            if (paperLane === PAPER_LANES.control.id) simulationExit = 'OBSERVATION_END';
+            else if (paperLane === PAPER_LANES.r5Band.id) r5BandExit = 'OBSERVATION_END';
+            console.log('[sim-sell]', candidate.metadata?.symbol ?? mint, paperLane, 'OBSERVATION_END', 'pnl=$' + result.pnlUsd.toFixed(6));
+          }
+        } else if (simulation && !simulationExit && closePrice) {
           simulationExit = 'OBSERVATION_END'; const result = writeSimulationExit(simulation, PAPER_LANES.control.id, mint, endedAt, closePrice, simulationExit, candidate.metadata ?? null, { priceSource: finalTick?.priceUsd === closePrice ? 'last observed detail socket tick' : 'fresh candidate price', priceObservedAt: finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? null }); console.log('[sim-sell]', candidate.metadata?.symbol ?? mint, simulationExit, 'pnl=$' + result.pnlUsd.toFixed(6));
           if (values.prepareTradeUi) {
             await prepareSellPanel(page, mint, index, endedAt, simulationExit).catch(() => {});
-            if (autoBuyEnabled) {
-              await clickTradeButton(page, 'sell').catch(() => {});
-            }
+            if (autoBuyEnabled) await clickTradeButton(page, 'sell').catch(() => {});
           }
         }
-        if (r5BandSimulation && !r5BandExit && closePrice) {
+        if (!momentumResearch && r5BandSimulation && !r5BandExit && closePrice) {
           r5BandExit = 'OBSERVATION_END'; const result = writeSimulationExit(r5BandSimulation, PAPER_LANES.r5Band.id, mint, endedAt, closePrice, r5BandExit, candidate.metadata ?? null, { priceSource: finalTick?.priceUsd === closePrice ? 'last observed detail socket tick' : 'fresh candidate price', priceObservedAt: finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? null }); console.log('[sim-sell]', candidate.metadata?.symbol ?? mint, 'r5-band', r5BandExit, 'pnl=$' + result.pnlUsd.toFixed(6));
         }
         const summary = {
@@ -2378,9 +2645,15 @@ async function main() {
     runSeconds: runSeconds === 0 ? null : runSeconds,
     rules: pumpBand ? { ...PUMP_BAND_RULES, observationSeconds: detailSeconds, simulationStakeUsdc: simulationStakeUsd, maximumExitPriceAgeMs: 5_000,
       entry: 'first fresh token_activity pu after detail opened', exit: '20% fall from observed price peak or observation window end' }
+      : momentumComparison ? { version: 'momentum-v2-v3', comparison: { v2: MOMENTUM_RULES, v3: MOMENTUM_V3_RULES }, exits: MOMENTUM_RULES }
+      : momentumAggressive ? MOMENTUM_AGGRESSIVE_RULES
+      : momentumV3 ? { ...MOMENTUM_V3_RULES, exits: MOMENTUM_RULES }
       : momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null,
-    ...(momentumV2 ? { paperLanes: {
-      [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: { minimumReturn5s: MOMENTUM_RULES.minimumReturn5s, maximumReturn5s: MOMENTUM_RULES.maximumReturn5s } },
+    ...(momentumResearch ? { paperLanes: {
+      [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: momentumAggressive ? MOMENTUM_AGGRESSIVE_RULES : standaloneMomentumV3 ? MOMENTUM_V3_RULES : { minimumReturn5s: MOMENTUM_RULES.minimumReturn5s, maximumReturn5s: MOMENTUM_RULES.maximumReturn5s } },
+      ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES } } : {}),
+      ...(momentumComparison ? { [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES,
+        exit: { nonDevWhaleSell: 'immediate when P/L <= 0 or buy flow/holder growth is not supportive; otherwise pending 5 seconds, then sell with 2 of: sell USD >= 1.5x buy USD, 5s price <= -2%, holder delta <= 0', devSell: 'immediate', profitLock: 'hold while buy USD > sell USD, holder delta > 0, price 5s > 0; exit on 5% drawdown' } } } : {}),
       ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}),
     }, timing: {
       signalFile: 'trade-signals.jsonl',
@@ -2404,9 +2677,10 @@ async function main() {
       sellSignal: '20% drawdown from observed pu peak or observation window end', maximumExitPriceAgeMs: 5_000,
       feeUsd: 0, slippagePercent: 0, maxPaperBuys }, tradePreparation: { enabled: false, autoBuyEnabled: false } }, null, 2));
   else
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumV2 ? { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label }, [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumHolders: config.minimumHolders, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumResearch ? { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: momentumAggressive ? MOMENTUM_AGGRESSIVE_RULES : standaloneMomentumV3 ? MOMENTUM_V3_RULES : undefined }, ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES }, [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: 'immediate when underwater or flow/holders do not support holding; otherwise 5-second confirmation with 2 of 3 bearish signals', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}) } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
+  await installGmgnNewPairFilter(context);
   context.on('close', () => stopping.abort());
   attachOrderApiInspector(context);
   process.once('SIGINT', () => stopping.abort());
@@ -2431,7 +2705,7 @@ async function main() {
       exitsByReason: Object.fromEntries(sells.reduce((map, row) => map.set(row.reason ?? 'UNKNOWN', (map.get(row.reason ?? 'UNKNOWN') ?? 0) + 1), new Map<string, number>())),
     };
   };
-  const lanes = { [PAPER_LANES.control.id]: summarizeLane(PAPER_LANES.control.id), [PAPER_LANES.r5Band.id]: summarizeLane(PAPER_LANES.r5Band.id) };
+  const lanes = { [PAPER_LANES.control.id]: summarizeLane(PAPER_LANES.control.id), ...(momentumComparison ? { [PAPER_LANES.v3.id]: summarizeLane(PAPER_LANES.v3.id), [PAPER_LANES.v3ExitConfirmed.id]: summarizeLane(PAPER_LANES.v3ExitConfirmed.id) } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: summarizeLane(PAPER_LANES.r5Band.id) } : {}) };
   const controlSummary = lanes[PAPER_LANES.control.id];
   writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), ...controlSummary, lanes,
     holderStorage: { api: holderStore.counts(), socket: holderStore.socketCounts() },

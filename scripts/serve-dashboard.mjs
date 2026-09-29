@@ -72,6 +72,20 @@ createServer(async (req, res) => {
     catch { res.writeHead(404).end('Run report not found'); }
     return;
   }
+  if (path.startsWith('/mc-momentum-report/')) {
+    const folder = decodeURIComponent(path.slice('/mc-momentum-report/'.length));
+    if (!/^[A-Za-z0-9._-]+$/.test(folder)) { res.writeHead(403).end(); return; }
+    try { const data = await readFile(join(researchRoot, folder, 'pump-band-report.html')); res.writeHead(200, { 'content-type':'text/html; charset=utf-8', 'cache-control':'no-store' }).end(data); }
+    catch { res.writeHead(404).end('MC momentum report not available yet'); }
+    return;
+  }
+  if (path.startsWith('/mc-formula-report/')) {
+    const folder = decodeURIComponent(path.slice('/mc-formula-report/'.length));
+    if (!/^[A-Za-z0-9._-]+$/.test(folder)) { res.writeHead(403).end(); return; }
+    try { const data = await readFile(join(researchRoot, folder, 'formula-optimization.html')); res.writeHead(200, { 'content-type':'text/html; charset=utf-8', 'cache-control':'no-store' }).end(data); }
+    catch { res.writeHead(404).end('MC formula optimization report not available'); }
+    return;
+  }
   const requested = path === '/' ? 'index.html' : path.replace(/^\/+/, '');
   const target = normalize(join(root, requested));
   if (!target.startsWith(normalize(root))) { res.writeHead(403).end(); return; }

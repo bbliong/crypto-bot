@@ -13,6 +13,21 @@ export const MOMENTUM_RULES = Object.freeze({
 export const MOMENTUM_R5_BAND = Object.freeze({
   id: 'r5-band-5-to-10', minimumReturn5s: 5, maximumReturn5s: 10,
 });
+/** Earlier-entry paper hypothesis. V3 reuses V2's twelve validation groups. */
+export const MOMENTUM_V3_RULES = Object.freeze({
+  version: 'momentum-v3',
+  totalValidations: 12,
+  minimumPassedValidations: 8,
+  hardRejections: [
+    'MOMENTUM_NOT_RISING',
+    'MOMENTUM_INSUFFICIENT_FRESH_HISTORY',
+    'MOMENTUM_SINGLE_BUYER_DOMINANCE',
+    'ENTRY_UNSTABLE',
+    'CURRENT_CANDLE_DROP',
+    'FLOW_SELL_USD_DOMINANT',
+    'HOLDER_DISTRIBUTION_RISK',
+  ],
+});
 export type MomentumEntryBand = { id: string; minimumReturn5s: number; maximumReturn5s: number };
 export type TapeTrade = { id: string; observedAt: number; occurredAt: number; priceUsd: number | null;
   side: 'buy' | 'sell'; wallet: string | null; usd: number | null; tokens: number | null };
@@ -83,7 +98,40 @@ export function assessMomentumEntry(tape: TapeTrade[], holders: HolderSample[], 
   if (early && !h.sustained) reasons.push('EARLY_HOLDERS_NEED_TWO_GROWING_SNAPSHOTS');
   return { allowed: reasons.length === 0, reasons, metrics: m, holders: h, version: MOMENTUM_RULES.version, band: band ?? null };
 }
-export type MomentumExitReason = 'V2_HARD_STOP' | 'V2_CONFIRMED_CRASH' | 'V2_MAJOR_HOLDER_SELL' | 'V2_PROFIT_LOCK' | 'V2_TARGET_40' | 'V2_TARGET_50' | 'V2_MOMENTUM_FADE' | 'V2_SELL_PRESSURE';
+
+export const MOMENTUM_AGGRESSIVE_RULES = Object.freeze({
+  version: 'momentum-aggressive',
+  windowMs: 5_000,
+  minBuyUsd: 300,
+  minBuyShare: 0.95,
+  minBuyers: 4,
+  maximumBuyerShare: 0.70,
+  minimumReturn5s: 1.0,
+  maximumReturn5s: 30,
+  maximumEntryDrawdown: 2.5,
+  hardStopPercent: 3.0,
+  activationPercent: 4.0,
+  lockPercent: 2.5,
+  trailingPercent: 1.0,
+  runnerActivationPercent: 11.0,
+  runnerTrailingPercent: 8.0,
+  runnerLockPercent: 4.0,
+  stagnationSeconds: 15,
+  stagnationThreshold: 2.5,
+  flowExit: false,
+  minMarketCap: 5_500,
+  maxMarketCap: 15_000,
+});
+
+export type MomentumAggressiveExitReason =
+  | 'AGGRESSIVE_HARD_STOP'
+  | 'AGGRESSIVE_PROFIT_TRAIL'
+  | 'AGGRESSIVE_RUNNER_TRAIL'
+  | 'AGGRESSIVE_STAGNATION'
+  | 'AGGRESSIVE_FLOW_EXIT'
+  | 'AGGRESSIVE_OBSERVATION_END';
+
+export type MomentumExitReason = 'V2_HARD_STOP' | 'V2_CONFIRMED_CRASH' | 'V2_MAJOR_HOLDER_SELL' | 'V2_PROFIT_LOCK' | 'V2_TARGET_40' | 'V2_TARGET_50' | 'V2_MOMENTUM_FADE' | 'V2_SELL_PRESSURE' | MomentumAggressiveExitReason;
 export type MomentumPosition = { openedAt: number; entry: number; peak: number; lastId: string | null; entryEventAt: number; lastEventAt: number;
   breachAt: number | null; breachTicks: number; recoveryUntil: number; recoverySampleAt: number; closed: boolean };
 export function createMomentumPosition(openedAt: number, entry: number, entryEventAt = openedAt): MomentumPosition {
@@ -134,3 +182,88 @@ export function assessMomentumExit(p: MomentumPosition, tick: TapeTrade, tape: T
     trailPercent, lockReturn, majorSell, metrics: m, holders: h, recoveryUntil: p.recoveryUntil,
     breachTicks: p.breachTicks, version: MOMENTUM_RULES.version };
 }
+
+export function assessMomentumAggressiveEntry(tape: TapeTrade[], now: number) {
+  const m = momentumMetrics(tape, now);
+  const reasons: string[] = [];
+  if (!m.ready) reasons.push('MOMENTUM_INSUFFICIENT_FRESH_HISTORY');
+  if (m.return5s === null || m.return5s < MOMENTUM_AGGRESSIVE_RULES.minimumReturn5s || (m.slope5s ?? 0) <= 0) reasons.push('MOMENTUM_NOT_RISING');
+  if ((m.return5s ?? 0) > MOMENTUM_AGGRESSIVE_RULES.maximumReturn5s) reasons.push('MOMENTUM_SPIKE_CHASING');
+  if ((m.drawdown5s ?? Infinity) > MOMENTUM_AGGRESSIVE_RULES.maximumEntryDrawdown) reasons.push('MOMENTUM_PULLBACK');
+  if (m.buyers < MOMENTUM_AGGRESSIVE_RULES.minBuyers || (m.buyShare ?? 0) < MOMENTUM_AGGRESSIVE_RULES.minBuyShare) reasons.push('MOMENTUM_WEAK_BUY_FLOW');
+  if (m.topBuyerShare === null || m.topBuyerShare > MOMENTUM_AGGRESSIVE_RULES.maximumBuyerShare) reasons.push('MOMENTUM_SINGLE_BUYER_DOMINANCE');
+  if (m.buyUsd < MOMENTUM_AGGRESSIVE_RULES.minBuyUsd) reasons.push('MOMENTUM_INSUFFICIENT_BUY_USD');
+  return { allowed: reasons.length === 0, reasons, metrics: m, version: MOMENTUM_AGGRESSIVE_RULES.version };
+}
+
+export function assessMomentumAggressiveExit(p: MomentumPosition, tick: TapeTrade, tape: TapeTrade[]) {
+  const now = tick.observedAt;
+  if (p.closed || tick.id === p.lastId || now <= p.openedAt || tick.occurredAt < p.entryEventAt || tick.occurredAt < p.lastEventAt || !positive(tick.priceUsd)) return null;
+  p.lastId = tick.id; p.lastEventAt = tick.occurredAt;
+  const r = pct(tick.priceUsd, p.entry);
+  p.peak = Math.max(p.peak, tick.priceUsd);
+  const peakReturn = pct(p.peak, p.entry);
+  const m = momentumMetrics(tape, now);
+
+  let reason: MomentumAggressiveExitReason | null = null;
+
+  // 1. Hard stop
+  if (r <= -MOMENTUM_AGGRESSIVE_RULES.hardStopPercent) {
+    reason = 'AGGRESSIVE_HARD_STOP';
+  }
+  // 2. High Runner Tier Trailing Stop (Peak >= 11%)
+  else if (peakReturn >= MOMENTUM_AGGRESSIVE_RULES.runnerActivationPercent) {
+    const trailFloor = (100 + peakReturn) * (1 - MOMENTUM_AGGRESSIVE_RULES.runnerTrailingPercent / 100) - 100;
+    const lockFloor = MOMENTUM_AGGRESSIVE_RULES.runnerLockPercent;
+    if (r <= Math.max(lockFloor, trailFloor)) {
+      reason = 'AGGRESSIVE_RUNNER_TRAIL';
+    }
+  }
+  // 3. Scalp / Early Protection Tier (Peak >= 4% & < 11%)
+  else if (peakReturn >= MOMENTUM_AGGRESSIVE_RULES.activationPercent) {
+    const trailFloor = (100 + peakReturn) * (1 - MOMENTUM_AGGRESSIVE_RULES.trailingPercent / 100) - 100;
+    const lockFloor = MOMENTUM_AGGRESSIVE_RULES.lockPercent;
+    if (r <= Math.max(lockFloor, trailFloor)) {
+      reason = 'AGGRESSIVE_PROFIT_TRAIL';
+    }
+  }
+
+  // 4. Stagnation exit (momentum stalled > stagnationSeconds)
+  if (!reason && (now - p.openedAt) >= MOMENTUM_AGGRESSIVE_RULES.stagnationSeconds * 1000) {
+    if (peakReturn < MOMENTUM_AGGRESSIVE_RULES.stagnationThreshold) {
+      reason = 'AGGRESSIVE_STAGNATION';
+    }
+  }
+
+  // 5. Flow exit (sell flow takes over, if enabled)
+  if (!reason && MOMENTUM_AGGRESSIVE_RULES.flowExit && m.trades >= 4 && (m.sellUsd ?? 0) >= 100 && m.buyShare !== null && m.buyShare < 0.25 && (m.slope5s ?? 0) < 0) {
+    reason = 'AGGRESSIVE_FLOW_EXIT';
+  }
+
+  if (reason) p.closed = true;
+  const drawdown = (1 - tick.priceUsd / p.peak) * 100;
+  const activeTrailPercent = peakReturn >= MOMENTUM_AGGRESSIVE_RULES.runnerActivationPercent
+    ? MOMENTUM_AGGRESSIVE_RULES.runnerTrailingPercent
+    : MOMENTUM_AGGRESSIVE_RULES.trailingPercent;
+  const activeLockReturn = peakReturn >= MOMENTUM_AGGRESSIVE_RULES.runnerActivationPercent
+    ? MOMENTUM_AGGRESSIVE_RULES.runnerLockPercent
+    : MOMENTUM_AGGRESSIVE_RULES.lockPercent;
+
+  return {
+    reason,
+    observedAt: now,
+    priceUsd: tick.priceUsd,
+    returnPercent: r,
+    peakReturnPercent: peakReturn,
+    drawdownPercent: drawdown,
+    trailPercent: activeTrailPercent,
+    lockReturn: activeLockReturn,
+    majorSell: null,
+    metrics: m,
+    holders: { count: 0, steps: [], fresh: false, significant: false, sustained: false, observedAt: null },
+    recoveryUntil: 0,
+    breachTicks: 0,
+    version: MOMENTUM_AGGRESSIVE_RULES.version,
+  };
+}
+

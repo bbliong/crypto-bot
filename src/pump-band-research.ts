@@ -15,42 +15,119 @@ const { values } = parseArgs({ options: {
   seconds: { type: 'string', default: '1800' },
   workers: { type: 'string', default: String(PUMP_BAND_RULES.maximumSlots) },
   detailSeconds: { type: 'string', default: String(PUMP_BAND_RULES.observationSeconds) },
+  maximumObservationSeconds: { type: 'string', default: '120' },
   dumpPercent: { type: 'string', default: String(PUMP_BAND_RULES.dumpFromPeakPercent) },
   minMarketCap: { type: 'string', default: String(PUMP_BAND_RULES.minimumMarketCapUsd) },
   maxMarketCap: { type: 'string', default: String(PUMP_BAND_RULES.maximumMarketCapUsd) },
+  maxAgeSeconds: { type: 'string', default: '120' },
+  maxTop1Percent: { type: 'string', default: '50' },
   profileDir: { type: 'string', default: 'profiles/research-aria-tele01' },
   profileName: { type: 'string', default: 'Profile 12' },
-  output: { type: 'string' }, config: { type: 'string', default: 'config/rules.yaml' },
+  output: { type: 'string' }, activeFormula: { type: 'string' }, pauseFile: { type: 'string' }, config: { type: 'string', default: 'config/rules.yaml' },
 } });
 
 const baseConfig = loadConfig(values.config);
-const workers = Number(values.workers), runSeconds = Number(values.seconds), detailSeconds = Number(values.detailSeconds);
+const workers = Number(values.workers), runSeconds = Number(values.seconds), detailSeconds = Number(values.detailSeconds), maximumObservationSeconds = Number(values.maximumObservationSeconds);
 const dumpPercent = Number(values.dumpPercent), minMarketCap = Number(values.minMarketCap), maxMarketCap = Number(values.maxMarketCap);
-if (![workers, runSeconds, detailSeconds, dumpPercent, minMarketCap, maxMarketCap].every(Number.isFinite)
+const maxAgeSeconds = Number(values.maxAgeSeconds), maxTop1Percent = Number(values.maxTop1Percent);
+if (![workers, runSeconds, detailSeconds, maximumObservationSeconds, dumpPercent, minMarketCap, maxMarketCap, maxAgeSeconds, maxTop1Percent].every(Number.isFinite)
   || !Number.isInteger(workers) || workers < 1 || workers > PUMP_BAND_RULES.maximumSlots
-  || runSeconds <= 0 || detailSeconds <= 0 || dumpPercent <= 0 || dumpPercent >= 100
-  || minMarketCap <= 0 || minMarketCap >= maxMarketCap) throw new Error('Invalid pump-band research options');
+  || runSeconds <= 0 || detailSeconds <= 0 || maximumObservationSeconds < detailSeconds || dumpPercent <= 0 || dumpPercent >= 100
+  || minMarketCap <= 0 || minMarketCap >= maxMarketCap || maxAgeSeconds <= 0 || maxTop1Percent <= 0 || maxTop1Percent > 100) throw new Error('Invalid pump-band research options');
 if (!existsSync(values.profileDir)) throw new Error('Research profile tidak ditemukan: ' + values.profileDir);
 
 type Primitive = string | number | boolean | null;
 type ObservedTrade = { mint: string; wallet: string | null; side: 'buy' | 'sell'; occurredAt: number; observedAt: number; priceUsd: number | null; amountUsd: number | null };
 type HolderRow = { wallet: string; amountPercentage: number | null; isDev: boolean; devEvidence: string[]; addrType: number | null; exchange: string; walletTag: string; isPoolOrExchange: boolean };
 type Slot = { state: 'idle' | 'assigned' | 'active'; mint: string | null };
-type Session = { mint: string; worker: number; startedAt: number; closedAt: number | null; entryMarketCapUsd: number; peakMarketCapUsd: number; ticks: PumpBandTick[]; lastHolderCount: number | null; topHolders: HolderRow[]; lastHolderResponseAt: number; holderPhase: 'start' | 'monitor' | 'end'; entryPriceUsd: number | null; entryPriceObservedAt: number | null; latestPriceUsd: number | null; latestPriceObservedAt: number | null; peakPriceUsd: number | null; lowPriceUsd: number | null; priceTickCount: number };
+type PricePoint = { observedAt: number; priceUsd: number };
+type Session = { mint: string; worker: number; startedAt: number; closedAt: number | null; entryMarketCapUsd: number; peakMarketCapUsd: number; ticks: PumpBandTick[]; priceTicks: PricePoint[]; lastHolderCount: number | null; topHolders: HolderRow[]; lastHolderResponseAt: number; holderPhase: 'start' | 'monitor' | 'end'; entryPriceUsd: number | null; entryPriceObservedAt: number | null; latestPriceUsd: number | null; latestPriceObservedAt: number | null; peakPriceUsd: number | null; lowPriceUsd: number | null; priceTickCount: number };
+type FormulaSnapshot = { status: 'VALIDATED' | 'TESTING' | 'NO_ENTRY' | 'LEGACY_NO_FORMULA_FILE' | 'INVALID_FORMULA_FILE'; version: string | null; formula: unknown };
 
 const runId = 'pump-band-' + new Date().toISOString().replace(/[:.]/g, '-');
 const output = values.output || join('research', runId);
 mkdirSync(output, { recursive: true });
 const write = (file: string, value: unknown) => appendFileSync(join(output, file), JSON.stringify(value) + '\n');
+const intakePaused = () => Boolean(values.pauseFile && existsSync(values.pauseFile));
+function activeFormulaSnapshot(): FormulaSnapshot {
+  const path = values.activeFormula;
+  if (!path) return { status: 'LEGACY_NO_FORMULA_FILE', version: null, formula: null };
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { status: 'INVALID_FORMULA_FILE', version: null, formula: null };
+    const value = parsed as { status?: unknown; version?: unknown; formula?: unknown };
+    // Only an optimizer-approved formula can be recorded as active. Any
+    // malformed or in-progress file makes the session a deliberate NO_ENTRY.
+    return (value.status === 'VALIDATED' || value.status === 'TESTING') && value.formula && typeof value.formula === 'object'
+      ? { status: value.status, version: typeof value.version === 'string' ? value.version : null, formula: value.formula }
+      : { status: 'NO_ENTRY', version: typeof value.version === 'string' ? value.version : null, formula: null };
+  } catch { return { status: 'NO_ENTRY', version: null, formula: null }; }
+}
+function formulaNumbers(snapshot: FormulaSnapshot) {
+  if ((snapshot.status !== 'VALIDATED' && snapshot.status !== 'TESTING') || !snapshot.formula || typeof snapshot.formula !== 'object' || Array.isArray(snapshot.formula)) return null;
+  const formula = snapshot.formula as Record<string, unknown>;
+  const number = (key: string) => typeof formula[key] === 'number' && Number.isFinite(formula[key]) ? formula[key] : null;
+  const entryReturn = number('entryReturn'), return5 = number('return5'), maxDrawdown = number('maxDrawdown'), hardStop = number('hardStop'), activation = number('activation'), lock = number('lock'), trailing = number('trailing'), negativeWindows = number('negativeWindows');
+  if ([entryReturn, return5, maxDrawdown, hardStop, activation, lock, trailing, negativeWindows].some(value => value === null)) return null;
+  return { entryReturn: entryReturn as number, return5: return5 as number, maxDrawdown: maxDrawdown as number, hardStop: hardStop as number, activation: activation as number, lock: lock as number, trailing: trailing as number, negativeWindows: negativeWindows as number, maxMarketCap: number('maxMarketCap'), requireTop1Safe: formula.requireTop1Safe === true };
+}
+function evaluateLiveFormula(session: Session, snapshot: FormulaSnapshot, top1Safe: boolean, endedAt: number) {
+  const formula = formulaNumbers(snapshot);
+  const base = { type: 'FORMULA_LIVE_RESULT', mint: session.mint, worker: session.worker, formulaStatus: snapshot.status, formulaVersion: snapshot.version, formula: snapshot.formula, sessionStartedAt: session.startedAt, sessionEndedAt: endedAt };
+  if (!formula) return { ...base, entryAccepted: false, reason: 'NO_APPROVED_OR_TESTING_FORMULA' };
+  const prices = session.priceTicks;
+  const decisionAt = session.startedAt + detailSeconds * 1_000;
+  const entry = prices[0] ?? null;
+  const decision = prices.filter(point => point.observedAt <= decisionAt).at(-1) ?? prices.find(point => point.observedAt > decisionAt) ?? null;
+  if (!entry || !decision) return { ...base, entryAccepted: false, reason: 'INSUFFICIENT_SOCKET_PRICE_DATA' };
+  const untilDecision = prices.filter(point => point.observedAt <= decision.observedAt);
+  const anchor5s = untilDecision.filter(point => point.observedAt <= decision.observedAt - 5_000).at(-1) ?? null;
+  const return30 = (decision.priceUsd / entry.priceUsd - 1) * 100;
+  const return5s = anchor5s ? (decision.priceUsd / anchor5s.priceUsd - 1) * 100 : null;
+  const peakAtDecision = Math.max(...untilDecision.map(point => point.priceUsd));
+  const drawdown30 = (decision.priceUsd / peakAtDecision - 1) * 100;
+  const rejected = return30 < formula.entryReturn || return5s === null || return5s < formula.return5 || drawdown30 < formula.maxDrawdown
+    || (formula.maxMarketCap !== null && session.entryMarketCapUsd > formula.maxMarketCap) || (formula.requireTop1Safe && !top1Safe);
+  const features = { priceReturn30: return30, priceReturn5s: return5s, drawdown30, top1Safe, entryMarketCapUsd: session.entryMarketCapUsd };
+  if (rejected) return { ...base, entryAccepted: false, reason: 'ENTRY_RULE_NOT_MET', features };
+  const hardStop = decision.priceUsd * (1 - formula.hardStop / 100), activateAt = decision.priceUsd * (1 + formula.activation / 100), lockAt = decision.priceUsd * (1 + formula.lock / 100);
+  let peak = decision.priceUsd, negatives = 0, lastWindowAt = -Infinity;
+  for (const point of prices.filter(item => item.observedAt > decision.observedAt)) {
+    peak = Math.max(peak, point.priceUsd);
+    const result = (point.priceUsd / decision.priceUsd - 1) * 100;
+    if (peak < activateAt && point.priceUsd <= hardStop) return { ...base, entryAccepted: true, entryAt: decision.observedAt, entryPriceUsd: decision.priceUsd, exitAt: point.observedAt, exitPriceUsd: point.priceUsd, returnPercent: result, exitReason: `HARD_STOP_${formula.hardStop}_PERSEN`, features };
+    if (peak >= activateAt && point.priceUsd <= Math.max(lockAt, peak * (1 - formula.trailing / 100))) return { ...base, entryAccepted: true, entryAt: decision.observedAt, entryPriceUsd: decision.priceUsd, exitAt: point.observedAt, exitPriceUsd: point.priceUsd, returnPercent: result, exitReason: `PROFIT_LOCK_${formula.lock}_ATAU_TRAILING_${formula.trailing}`, features };
+    if (formula.negativeWindows > 0 && point.observedAt - lastWindowAt >= 4_500) {
+      const prior = prices.filter(item => item.observedAt <= point.observedAt - 5_000).at(-1) ?? null;
+      const change5 = prior ? (point.priceUsd / prior.priceUsd - 1) * 100 : null;
+      if (change5 !== null) { negatives = change5 < 0 ? negatives + 1 : 0; lastWindowAt = point.observedAt; }
+      if (negatives >= formula.negativeWindows && point.priceUsd > decision.priceUsd) return { ...base, entryAccepted: true, entryAt: decision.observedAt, entryPriceUsd: decision.priceUsd, exitAt: point.observedAt, exitPriceUsd: point.priceUsd, returnPercent: result, exitReason: `MOMENTUM_5DTK_NEGATIF_${formula.negativeWindows}X_DI_ATAS_BUY`, features };
+    }
+  }
+  const latest = prices.at(-1) ?? decision;
+  return { ...base, entryAccepted: true, entryAt: decision.observedAt, entryPriceUsd: decision.priceUsd, exitAt: latest.observedAt, exitPriceUsd: latest.priceUsd, returnPercent: (latest.priceUsd / decision.priceUsd - 1) * 100, exitReason: 'CAPTURE_END_NO_SELL_SIGNAL', features };
+}
 const candidates = new Map<string, Candidate>();
 const firstSeen = new Set<string>(), considered = new Set<string>(), activeMints = new Set<string>();
 const trades = new Map<string, ObservedTrade[]>(), sessions = new Map<string, Session>();
+const formulaSnapshotByMint = new Map<string, FormulaSnapshot>();
 const holderQueryByWorker = new Map<number, Record<string, string>>();
 const manualHolderRequests = new Set<string>();
 const slots: Slot[] = Array.from({ length: workers }, () => ({ state: 'idle', mint: null }));
 let context: BrowserContext | undefined, received = 0, sockets = 0, skippedNoSlot = 0, nextHolderApiAt = 0, holderApiCooldownUntil = 0;
 const stopping = new AbortController();
+let liveReportRunning = false;
 const HOLDER_QUERY_KEYS = ['device_id', 'tab_id', 'fp_did', 'client_id', 'from_app', 'app_ver', 'tz_name', 'tz_offset', 'app_lang', 'os', 'worker'] as const;
+function writeFormulaLiveStatus() {
+  const activeSessions = [...sessions.values()].map(session => {
+    const first = session.priceTicks[0] ?? null, latest = session.priceTicks.at(-1) ?? null;
+    return { mint: session.mint, worker: session.worker, startedAt: session.startedAt, formula: formulaSnapshotByMint.get(session.mint) ?? null,
+      elapsedSeconds: (Date.now() - session.startedAt) / 1_000, decisionAt: session.startedAt + detailSeconds * 1_000,
+      initialPriceUsd: first?.priceUsd ?? null, latestPriceUsd: latest?.priceUsd ?? null,
+      priceReturnPercent: first && latest ? (latest.priceUsd / first.priceUsd - 1) * 100 : null };
+  });
+  writeFileSync(join(output, 'formula-live-status.json'), JSON.stringify({ observedAt: Date.now(), currentFormula: activeFormulaSnapshot(), activeSessions }, null, 2));
+}
 
 function merge(update: Candidate) {
   const candidate = candidates.get(update.mint) ?? { mint: update.mint, firstSeenAt: update.firstSeenAt, updatedAt: update.updatedAt, fields: {} };
@@ -91,6 +168,8 @@ function updateTick(mint: string, now: number, source: string, values: { marketC
       write('events.jsonl', { type: 'PRICE_BASELINE_CAPTURED', mint, worker: session.worker, observedAt: now, latencyMs: now - session.startedAt, priceUsd: usablePrice, source });
     }
     session.latestPriceUsd = usablePrice; session.latestPriceObservedAt = now;
+    session.priceTicks.push({ observedAt: now, priceUsd: usablePrice });
+    writeFormulaLiveStatus();
     session.peakPriceUsd = Math.max(session.peakPriceUsd ?? usablePrice, usablePrice);
     session.lowPriceUsd = Math.min(session.lowPriceUsd ?? usablePrice, usablePrice);
     session.priceTickCount++;
@@ -121,18 +200,24 @@ function captureDetailPayload(payload: unknown, now: number, activeMint: string)
 function assignFresh(candidate: Candidate, now: number) {
   if (considered.has(candidate.mint)) return;
   const marketCapUsd = fieldNumber(candidate, 'marketCapUsd');
-  if (!isInPumpBand(marketCapUsd) || marketCapUsd === null || marketCapUsd < minMarketCap || marketCapUsd > maxMarketCap) return;
+  const createdAt = fieldNumber(candidate, 'createdAt');
+  const ageSeconds = createdAt === null ? null : Math.max(0, (now - createdAt) / 1_000);
+  if (marketCapUsd === null || marketCapUsd < minMarketCap || marketCapUsd > maxMarketCap || ageSeconds === null || ageSeconds > maxAgeSeconds) return;
+  if (intakePaused()) {
+    write('fresh-tokens.jsonl', { type: 'SKIPPED_OPTIMIZER_PAUSE', mint: candidate.mint, observedAt: now, marketCapUsd, ageSeconds, metadata: candidate.metadata ?? null, fields: snapshotFields(candidate) });
+    return;
+  }
   considered.add(candidate.mint);
   const slotIndex = slots.findIndex(slot => slot.state === 'idle');
   if (slotIndex < 0) {
     skippedNoSlot++;
-    write('fresh-tokens.jsonl', { type: 'SKIPPED_NO_EMPTY_SLOT', mint: candidate.mint, observedAt: now, marketCapUsd, metadata: candidate.metadata ?? null, fields: snapshotFields(candidate) });
+    write('fresh-tokens.jsonl', { type: 'SKIPPED_NO_EMPTY_SLOT', mint: candidate.mint, observedAt: now, marketCapUsd, ageSeconds, metadata: candidate.metadata ?? null, fields: snapshotFields(candidate) });
     return;
   }
   const slot = slots[slotIndex]!;
   slot.state = 'assigned';
   slot.mint = candidate.mint;
-  write('fresh-tokens.jsonl', { type: 'ASSIGNED_FRESH_TOKEN', mint: candidate.mint, worker: slotIndex + 1, observedAt: now, marketCapUsd, metadata: candidate.metadata ?? null, fields: snapshotFields(candidate) });
+  write('fresh-tokens.jsonl', { type: 'ASSIGNED_FRESH_TOKEN', mint: candidate.mint, worker: slotIndex + 1, observedAt: now, marketCapUsd, ageSeconds, metadata: candidate.metadata ?? null, fields: snapshotFields(candidate) });
   console.log('[pump-band-assigned]', 'slot=' + (slotIndex + 1), candidate.metadata?.symbol ?? candidate.mint, '$' + marketCapUsd.toFixed(2));
 }
 function attachFeed(page: Page) {
@@ -304,17 +389,34 @@ async function observe(page: Page, worker: number, mint: string, deadline: numbe
   const candidate = candidates.get(mint);
   const entryMarketCapUsd = fieldNumber(candidate, 'marketCapUsd');
   if (entryMarketCapUsd === null) return;
-  const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1_000);
-  session = { mint, worker, startedAt, closedAt: null, entryMarketCapUsd, peakMarketCapUsd: entryMarketCapUsd, ticks: [{ observedAt: startedAt, marketCapUsd: entryMarketCapUsd, priceUsd: null }], lastHolderCount: fieldNumber(candidate, 'holders'), topHolders: [], lastHolderResponseAt: 0, holderPhase: 'start', entryPriceUsd: null, entryPriceObservedAt: null, latestPriceUsd: null, latestPriceObservedAt: null, peakPriceUsd: null, lowPriceUsd: null, priceTickCount: 0 };
-  sessions.set(mint, session); activeMints.add(mint);
-  write('events.jsonl', { type: 'SESSION_STARTED', mint, worker, startedAt, entryMarketCapUsd, metadata: candidate?.metadata ?? null });
+  const startedAt = Date.now(), maximumStopAt = Math.min(deadline, startedAt + maximumObservationSeconds * 1_000);
+  const formulaAtStart = activeFormulaSnapshot();
+  let stopAt = Math.min(maximumStopAt, startedAt + detailSeconds * 1_000);
+  session = { mint, worker, startedAt, closedAt: null, entryMarketCapUsd, peakMarketCapUsd: entryMarketCapUsd, ticks: [{ observedAt: startedAt, marketCapUsd: entryMarketCapUsd, priceUsd: null }], priceTicks: [], lastHolderCount: fieldNumber(candidate, 'holders'), topHolders: [], lastHolderResponseAt: 0, holderPhase: 'start', entryPriceUsd: null, entryPriceObservedAt: null, latestPriceUsd: null, latestPriceObservedAt: null, peakPriceUsd: null, lowPriceUsd: null, priceTickCount: 0 };
+  sessions.set(mint, session); formulaSnapshotByMint.set(mint, formulaAtStart); activeMints.add(mint); writeFormulaLiveStatus();
+  write('events.jsonl', { type: 'SESSION_STARTED', mint, worker, startedAt, entryMarketCapUsd, activeFormula: formulaAtStart, metadata: candidate?.metadata ?? null });
   console.log('[pump-band-start]', 'slot=' + worker, candidate?.metadata?.symbol ?? mint, '$' + entryMarketCapUsd.toFixed(2));
   let endedBecause = `OBSERVATION_${detailSeconds}S_COMPLETE`, dumpDetails: { reference: string; entryPriceUsd: number; peakPriceUsd: number; currentPriceUsd: number; drawdownPercent: number } | null = null, lastPollAt = 0;
   try {
     await page.goto(baseConfig.tokenUrlTemplate.replaceAll('{mint}', mint), { waitUntil: 'commit', timeout: baseConfig.workerTimeoutMs });
     await Promise.allSettled([refreshHolderCount(page, session, Date.now()), refreshTopHolders(page, session, Date.now(), 'start'), captureCandles(page, session, Date.now(), 'start')]);
-    while (!stopping.signal.aborted && Date.now() < stopAt) {
+    while (!stopping.signal.aborted) {
       const now = Date.now();
+      if (now >= stopAt) {
+        const prices = session.ticks.filter(tick => tick.priceUsd !== null && tick.priceUsd > 0);
+        const last = prices.at(-1)?.priceUsd ?? null;
+        const anchor = prices.filter(tick => tick.observedAt <= now - 5_000).at(-1)?.priceUsd ?? null;
+        const returnFromStart = last !== null && session.entryPriceUsd ? ((last / session.entryPriceUsd) - 1) * 100 : null;
+        const return5s = last !== null && anchor !== null ? ((last / anchor) - 1) * 100 : null;
+        const drawdownFromPeak = last !== null && session.peakPriceUsd ? ((last / session.peakPriceUsd) - 1) * 100 : null;
+        const stillRising = returnFromStart !== null && returnFromStart > 0 && return5s !== null && return5s > 0 && (drawdownFromPeak ?? -Infinity) >= -5;
+        if (stillRising && stopAt < maximumStopAt) {
+          const previousStopAt = stopAt;
+          stopAt = Math.min(maximumStopAt, stopAt + 10_000);
+          endedBecause = `OBSERVATION_EXTENDED_TO_${Math.round((stopAt - startedAt) / 1_000)}S`;
+          write('events.jsonl', { type: 'OBSERVATION_EXTENDED_UPTREND', mint, worker, observedAt: now, previousObservationSeconds: (previousStopAt - startedAt) / 1_000, observationSeconds: (stopAt - startedAt) / 1_000, returnFromStart, return5s, drawdownFromPeak });
+        } else break;
+      }
       session.holderPhase = 'monitor';
       const currentMarketCapUsd = fieldNumber(candidates.get(mint), 'marketCapUsd');
       if (typeof currentMarketCapUsd === 'number' && Number.isFinite(currentMarketCapUsd)) session.peakMarketCapUsd = Math.max(session.peakMarketCapUsd, currentMarketCapUsd);
@@ -346,14 +448,26 @@ async function observe(page: Page, worker: number, mint: string, deadline: numbe
     const holderAtEnd = session.lastHolderCount;
     const startHolders = fieldNumber(candidate, 'holders');
     const top = session.topHolders.filter(row => !row.isPoolOrExchange).slice(0, 10);
+    const top1Percent = top[0]?.amountPercentage ?? null;
+    const top1Safe = top1Percent !== null && top1Percent <= maxTop1Percent;
+    const priceReturnPercent = session.entryPriceUsd && session.latestPriceUsd ? ((session.latestPriceUsd / session.entryPriceUsd) - 1) * 100 : null;
+    const peakToFinalPriceDrawdownPercent = session.peakPriceUsd && session.latestPriceUsd ? ((session.latestPriceUsd / session.peakPriceUsd) - 1) * 100 : null;
+    const behavior = priceReturnPercent === null ? 'INSUFFICIENT_PRICE_DATA'
+      : priceReturnPercent >= 5 && (peakToFinalPriceDrawdownPercent ?? -Infinity) >= -5 ? 'SUSTAINED_UPTREND'
+        : (session.peakPriceUsd && session.entryPriceUsd && ((session.peakPriceUsd / session.entryPriceUsd) - 1) * 100 >= 5 && priceReturnPercent <= 0) ? 'SPIKE_THEN_REVERSAL'
+          : priceReturnPercent < 0 ? 'FAILED_TO_HOLD' : 'FLAT_OR_UNCONFIRMED';
+    // This result is forward-only: formulaAtStart was read before this token
+    // was observed, and this evaluator consumes only the socket prices that
+    // arrived during this same session. It never rewrites older sessions.
+    const formulaLiveResult = evaluateLiveFormula(session, formulaAtStart, top1Safe, endedAt);
+    write('formula-live-results.jsonl', formulaLiveResult);
     write('token-summary.jsonl', { mint, worker, startedAt, endedAt, endedBecause, entryMarketCapUsd: session.entryMarketCapUsd, finalMarketCapUsd, peakMarketCapUsd: session.peakMarketCapUsd, entryToFinalPercent: finalMarketCapUsd === null ? null : ((finalMarketCapUsd / session.entryMarketCapUsd) - 1) * 100, peakToFinalDrawdownPercent: finalMarketCapUsd === null ? null : ((finalMarketCapUsd / session.peakMarketCapUsd) - 1) * 100,
       entryPriceUsd: session.entryPriceUsd, entryPriceObservedAt: session.entryPriceObservedAt, entryPriceLatencyMs: session.entryPriceObservedAt === null ? null : session.entryPriceObservedAt - startedAt,
       finalPriceUsd: session.latestPriceUsd, finalPriceObservedAt: session.latestPriceObservedAt, peakPriceUsd: session.peakPriceUsd, lowPriceUsd: session.lowPriceUsd, priceTickCount: session.priceTickCount,
-      priceReturnPercent: session.entryPriceUsd && session.latestPriceUsd ? ((session.latestPriceUsd / session.entryPriceUsd) - 1) * 100 : null,
-      pricePeakToFinalDrawdownPercent: session.peakPriceUsd && session.latestPriceUsd ? ((session.latestPriceUsd / session.peakPriceUsd) - 1) * 100 : null,
-      priceReturnMethod: 'first valid observed socket price pu to last valid observed socket price pu; not an execution fill', dumpDetails, milestonesMs: pumpMilestones(session.ticks, startedAt), holderCountStart: startHolders, holderCountEnd: holderAtEnd, holderChange: startHolders !== null && holderAtEnd !== null ? holderAtEnd - startHolders : null, top1Percent: top[0]?.amountPercentage ?? null, top5Percent: top.slice(0, 5).reduce((sum, row) => sum + (row.amountPercentage ?? 0), 0), top10Percent: top.reduce((sum, row) => sum + (row.amountPercentage ?? 0), 0), devHolders: top.filter(row => row.isDev).length, capturedTicks: session.ticks.length, capturedTrades: (trades.get(mint) ?? []).length, metadata: candidate?.metadata ?? null });
-    write('events.jsonl', { type: 'SESSION_FINISHED', mint, worker, observedAt: endedAt, endedBecause });
-    sessions.delete(mint); activeMints.delete(mint);
+      priceReturnPercent, pricePeakToFinalDrawdownPercent: peakToFinalPriceDrawdownPercent, behavior,
+      priceReturnMethod: 'first valid observed socket price pu to last valid observed socket price pu; not an execution fill', activeFormula: formulaAtStart, formulaLiveResult, dumpDetails, milestonesMs: pumpMilestones(session.ticks, startedAt), holderCountStart: startHolders, holderCountEnd: holderAtEnd, holderChange: startHolders !== null && holderAtEnd !== null ? holderAtEnd - startHolders : null, top1Percent, top1Safe, maximumTop1Percent: maxTop1Percent, top5Percent: top.slice(0, 5).reduce((sum, row) => sum + (row.amountPercentage ?? 0), 0), top10Percent: top.reduce((sum, row) => sum + (row.amountPercentage ?? 0), 0), devHolders: top.filter(row => row.isDev).length, capturedTicks: session.ticks.length, capturedTrades: (trades.get(mint) ?? []).length, metadata: candidate?.metadata ?? null });
+    write('events.jsonl', { type: 'SESSION_FINISHED', mint, worker, observedAt: endedAt, endedBecause, formulaLiveResult });
+    sessions.delete(mint); formulaSnapshotByMint.delete(mint); activeMints.delete(mint); writeFormulaLiveStatus();
     console.log('[pump-band-complete]', 'slot=' + worker, candidate?.metadata?.symbol ?? mint, endedBecause);
   }
 }
@@ -384,13 +498,33 @@ async function worker(index: number, deadline: number) {
   }
 }
 async function main() {
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, startedAt: new Date().toISOString(), purpose: 'Fresh-token pump-band research only. No buy, sell, or paper position is created.', rules: { ...PUMP_BAND_RULES, minimumMarketCapUsd: minMarketCap, maximumMarketCapUsd: maxMarketCap, observationSeconds: detailSeconds, maximumSlots: workers, dumpFromPeakPercent: dumpPercent }, scheduling: 'No queue. A token is assigned only if a detail slot is empty at its first eligible live feed observation. Full slots cause SKIPPED_NO_EMPTY_SLOT.', sources: ['GMGN WebSocket feed and detail sockets', 'GMGN token_stat API every 5 seconds', 'GMGN holder XHR response interception with full-query API fallback, start/end, global 3-second minimum spacing and 60-second cooldown after HTTP 429', 'GMGN mcap candles at session start/end'] }, null, 2));
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, startedAt: new Date().toISOString(), purpose: 'MC momentum behavior observation only. No buy, sell, or paper position is created.', activeFormulaPath: values.activeFormula ?? null, rules: { minimumMarketCapUsd: minMarketCap, maximumMarketCapUsd: maxMarketCap, maximumAgeSeconds: maxAgeSeconds, maximumTop1Percent: maxTop1Percent, initialObservationSeconds: detailSeconds, maximumObservationSeconds, maximumSlots: workers, dumpFromPeakPercent: dumpPercent }, behaviorLabels: ['SUSTAINED_UPTREND', 'SPIKE_THEN_REVERSAL', 'FAILED_TO_HOLD', 'FLAT_OR_UNCONFIRMED', 'INSUFFICIENT_PRICE_DATA'], scheduling: 'No queue. A token is assigned only if a detail slot is empty at its first eligible live feed observation. Full slots cause SKIPPED_NO_EMPTY_SLOT.', sources: ['GMGN WebSocket feed and detail sockets', 'GMGN token_stat API every 5 seconds', 'GMGN holder XHR response interception with full-query API fallback, start/end, global 3-second minimum spacing and 60-second cooldown after HTTP 429', 'GMGN mcap candles at session start/end'] }, null, 2));
   context = await chromium.launchPersistentContext(values.profileDir, { channel: baseConfig.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName] });
+  await context.addInitScript(() => {
+    if (location.hostname !== 'gmgn.ai') return;
+    const key = 'filter_query_map';
+    let map: Record<string, Record<string, string>> = {};
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
+    } catch { /* replace malformed storage below */ }
+    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), __v: '20260922', '9mim': '20', '9im': '1' };
+    localStorage.setItem(key, JSON.stringify(map));
+  });
   const feed = context.pages()[0] ?? await context.newPage(); attachFeed(feed);
   await feed.goto(baseConfig.feedUrl, { waitUntil: 'commit', timeout: baseConfig.workerTimeoutMs });
   const deadline = Date.now() + runSeconds * 1_000, timer = setTimeout(() => stopping.abort(), runSeconds * 1_000);
+  const refreshLiveReport = () => {
+    if (liveReportRunning) return;
+    liveReportRunning = true;
+    const child = spawn(process.execPath, ['scripts/generate-pump-band-report.mjs', output], { cwd: process.cwd(), stdio: 'ignore', windowsHide: true });
+    child.once('exit', () => { liveReportRunning = false; });
+  };
+  refreshLiveReport();
+  const liveReportTimer = setInterval(refreshLiveReport, 10_000);
   console.log('[pump-band-research-start]', output, 'slots=' + workers, 'seconds=' + detailSeconds, 'band=$' + minMarketCap + '-$' + maxMarketCap);
   await Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline)));
+  clearInterval(liveReportTimer);
   clearTimeout(timer);
   const summaries = existsSync(join(output, 'token-summary.jsonl')) ? requireLines(join(output, 'token-summary.jsonl')) : [];
   const byReason = summaries.reduce((map, row) => map.set(String(row.endedBecause), (map.get(String(row.endedBecause)) ?? 0) + 1), new Map<string, number>());

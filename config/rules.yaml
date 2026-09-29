@@ -3,7 +3,7 @@ mode: manual
 # Phase 1: only verified GMGN WebSocket fields.  Phase 2 restores the on-chain
 # checks after an RPC/indexer extractor is configured.
 phase: 1
-feedUrl: https://gmgn.ai/?chain=sol
+feedUrl: https://gmgn.ai/trend?chain=sol&tab=new_pair
 tokenUrlTemplate: https://gmgn.ai/sol/token/{mint}
 gmgnCookiesFile: gmgn-cookies.json
 fomoCookiesFile: fomo-cookies.json

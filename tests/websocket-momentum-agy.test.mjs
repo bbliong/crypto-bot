@@ -125,3 +125,47 @@ test('agyBestWinRate and agyBestRunner formulas execute successfully and produce
   const rRun = simulate(s, iRun, agyBestRunner.exit, 0);
   assert.ok(rRun !== null && typeof rRun.ret === 'number');
 });
+
+test('assessMomentumAggressiveEntry and assessMomentumAggressiveExit perform as specified', async () => {
+  const { assessMomentumAggressiveEntry, assessMomentumAggressiveExit, createMomentumPosition } = await import('../src/momentum-strategy.js');
+  
+  const now = 10_000;
+  const tape = [
+    { id: '0', observedAt: 5000, occurredAt: 5000, priceUsd: 1.0, side: 'buy', wallet: 'w0', usd: 100, tokens: 100 },
+    { id: '1', observedAt: 6000, occurredAt: 6000, priceUsd: 1.005, side: 'buy', wallet: 'w1', usd: 120, tokens: 120 },
+    { id: '2', observedAt: 7000, occurredAt: 7000, priceUsd: 1.01, side: 'buy', wallet: 'w2', usd: 120, tokens: 118 },
+    { id: '3', observedAt: 8000, occurredAt: 8000, priceUsd: 1.015, side: 'buy', wallet: 'w3', usd: 120, tokens: 117 },
+    { id: '4', observedAt: 9500, occurredAt: 9500, priceUsd: 1.025, side: 'buy', wallet: 'w4', usd: 120, tokens: 116 },
+  ];
+
+  const entry = assessMomentumAggressiveEntry(tape, now);
+  assert.equal(entry.allowed, true);
+  assert.equal(entry.version, 'momentum-aggressive');
+
+  const pos = createMomentumPosition(now, 1.02);
+  
+  // Test profit trail: price surges to +5%, then drops to +3%
+  const surgeTick = { id: '4', observedAt: 12000, occurredAt: 12000, priceUsd: 1.071, side: 'buy', wallet: 'w4', usd: 50, tokens: 46 };
+  const d1 = assessMomentumAggressiveExit(pos, surgeTick, [...tape, surgeTick]);
+  assert.equal(d1?.reason, null);
+
+  const pullTick = { id: '5', observedAt: 13000, occurredAt: 13000, priceUsd: 1.045, side: 'sell', wallet: 'w5', usd: 50, tokens: 47 };
+  const d2 = assessMomentumAggressiveExit(pos, pullTick, [...tape, surgeTick, pullTick]);
+  assert.equal(d2?.reason, 'AGGRESSIVE_PROFIT_TRAIL');
+
+  // Test runner tier: position reaches +20% (runner tier), slight pullback of 3% does NOT exit, but 9% pullback exits with AGGRESSIVE_RUNNER_TRAIL
+  const posRunner = createMomentumPosition(now, 1.00);
+  const surgeRunner = { id: '6', observedAt: 14000, occurredAt: 14000, priceUsd: 1.20, side: 'buy', wallet: 'w6', usd: 200, tokens: 166 };
+  const dRunner1 = assessMomentumAggressiveExit(posRunner, surgeRunner, [...tape, surgeRunner]);
+  assert.equal(dRunner1?.reason, null);
+
+  // Pullback from +20% to +15% (only 4.1% drawdown from peak 1.20) -> should NOT exit because runner trail is 8%
+  const minorPullback = { id: '7', observedAt: 15000, occurredAt: 15000, priceUsd: 1.15, side: 'sell', wallet: 'w7', usd: 50, tokens: 43 };
+  const dRunner2 = assessMomentumAggressiveExit(posRunner, minorPullback, [...tape, surgeRunner, minorPullback]);
+  assert.equal(dRunner2?.reason, null);
+
+  // Pullback from +20% to +1.09 (9.1% drawdown from peak 1.20 -> below 1.20 * 0.92 = 1.104) -> triggers AGGRESSIVE_RUNNER_TRAIL
+  const majorPullback = { id: '8', observedAt: 16000, occurredAt: 16000, priceUsd: 1.09, side: 'sell', wallet: 'w8', usd: 50, tokens: 45 };
+  const dRunner3 = assessMomentumAggressiveExit(posRunner, majorPullback, [...tape, surgeRunner, majorPullback]);
+  assert.equal(dRunner3?.reason, 'AGGRESSIVE_RUNNER_TRAIL');
+});
