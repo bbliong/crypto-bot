@@ -203,7 +203,7 @@ function getAggressiveDashboardData(targetRunId) {
       const isSocketWin = socketReturn > 0;
       if (isSocketWin) socketWins++; else socketLosses++;
 
-      const stakeUsd = buy.stakeUsd || 0.25;
+      const stakeUsd = buy.stakeUsd || 5.0;
       const tradePnlUsd = stakeUsd * (socketReturn / 100);
       totalNetTradePnlUsd += tradePnlUsd;
 

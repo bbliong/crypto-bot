@@ -18,7 +18,7 @@ function parseArgs() {
     workers: '3',
     seconds: '0',
     detailSeconds: '90',
-    stakeUsd: '0.25',
+    stakeUsd: '5',
     profileDir: defaultProfileDir,
     profileName: defaultProfileName,
     output: null,
