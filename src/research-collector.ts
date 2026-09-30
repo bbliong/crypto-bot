@@ -528,6 +528,143 @@ function quoteSummary(routeData: any) {
 type RouteComparisonPosition = { inputAmount: string; tokenDecimals: number; routeTokenAmount: number; quoteAt: number };
 const routeComparisonPositions = new Map<string, RouteComparisonPosition>();
 const routeComparisonBuyTasks = new Map<string, Promise<void>>();
+
+async function browserSellRoute(page: Page, input: { mint: string; fromAddress: string; inputAmount: string }) {
+  if (page.isClosed()) return { status: 499, body: null };
+  return page.evaluate(async value => {
+    const params = new URLSearchParams({ web_from_source: 'token_poll', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
+      token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', in_amount: value.inputAmount,
+      slippage: '15', is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
+    const response = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  }, input).catch(() => ({ status: 500, body: null }));
+}
+
+interface PrewarmedSellRoute {
+  mint: string;
+  positionId: string;
+  inputAmount: string;
+  tokenDecimals: number;
+  routeTokenAmount: number;
+  quoteAt: number;
+  latencyMs: number;
+  data: any;
+  route: any;
+  routeOutputUsd: number;
+  routeImpliedTokenPriceUsd: number;
+  netPnlUsd: number;
+  netPnlPercent: number;
+}
+
+const closedRoutePositions = new Set<string>();
+const activeSellRoutePollers = new Map<string, { abort: () => void; mint: string }>();
+const prewarmedSellRoutes = new Map<string, PrewarmedSellRoute>();
+const prewarmedSellRoutesByMint = new Map<string, PrewarmedSellRoute>();
+
+function stopPeriodicSellRoutePolling(positionId: string): void {
+  const poller = activeSellRoutePollers.get(positionId);
+  if (poller) {
+    poller.abort();
+    activeSellRoutePollers.delete(positionId);
+  }
+}
+
+function stopAllPeriodicSellRoutePollingForMint(mint: string): void {
+  for (const [posId, poller] of activeSellRoutePollers.entries()) {
+    if (poller.mint === mint) {
+      poller.abort();
+      activeSellRoutePollers.delete(posId);
+      prewarmedSellRoutes.delete(posId);
+    }
+  }
+  prewarmedSellRoutesByMint.delete(mint);
+}
+
+function startPeriodicSellRoutePolling(
+  page: Page,
+  positionId: string,
+  mint: string,
+  inputAmount: string,
+  tokenDecimals: number,
+  routeTokenAmount: number,
+  stakeUsd: number,
+  walletAddress: string
+): void {
+  if (closedRoutePositions.has(positionId)) return;
+  if (activeSellRoutePollers.has(positionId)) return;
+
+  let stopped = false;
+  activeSellRoutePollers.set(positionId, {
+    abort: () => { stopped = true; },
+    mint,
+  });
+
+  const pollIntervalMs = 500;
+
+  void (async () => {
+    while (!stopped && !page.isClosed()) {
+      const pollStartedAt = Date.now();
+      try {
+        const route = await browserSellRoute(page, { mint, fromAddress: walletAddress, inputAmount });
+        if (stopped || page.isClosed()) break;
+        const observedAt = Date.now();
+        const latencyMs = observedAt - pollStartedAt;
+        const data = route.body?.data;
+        const quote = data?.quote;
+        if (route.status === 200 && route.body?.code === 0 && quote) {
+          const routeOutputUsd = Number(data.amount_out_usd);
+          const routeImpliedTokenPriceUsd = Number.isFinite(routeOutputUsd) && routeOutputUsd > 0 && routeTokenAmount > 0
+            ? routeOutputUsd / routeTokenAmount
+            : 0;
+          const netPnlUsd = Number.isFinite(routeOutputUsd) ? routeOutputUsd - stakeUsd : 0;
+          const netPnlPercent = Number.isFinite(routeOutputUsd) && stakeUsd > 0
+            ? ((routeOutputUsd / stakeUsd) - 1) * 100
+            : 0;
+
+          const prewarmed: PrewarmedSellRoute = {
+            mint,
+            positionId,
+            inputAmount,
+            tokenDecimals,
+            routeTokenAmount,
+            quoteAt: observedAt,
+            latencyMs,
+            data,
+            route,
+            routeOutputUsd,
+            routeImpliedTokenPriceUsd,
+            netPnlUsd,
+            netPnlPercent,
+          };
+          prewarmedSellRoutes.set(positionId, prewarmed);
+          prewarmedSellRoutesByMint.set(mint, prewarmed);
+
+          write('quote-simulated-orders.jsonl', {
+            type: 'PERIODIC_SELL_ROUTE_QUOTE',
+            positionId,
+            mint,
+            observedAt,
+            latencyMs,
+            routeOutputUsd,
+            netPnlUsd,
+            netPnlPercent,
+            inputAmountBaseUnits: inputAmount,
+            tokenDecimals,
+            quote: quoteSummary(data),
+            execution: 'ROUTE_PREWARM_POLL',
+          });
+        }
+      } catch {
+        if (stopped || page.isClosed()) break;
+      }
+
+      const elapsed = Date.now() - pollStartedAt;
+      const sleepMs = Math.max(100, pollIntervalMs - elapsed);
+      await delay(sleepMs);
+    }
+  })();
+}
+
 /**
  * Passive research quote: paper BUY is already recorded and is never delayed
  * or rejected by this function. It only compares GMGN's executable route to
@@ -567,6 +704,7 @@ function scheduleBuyRouteComparison(page: Page, signal: PaperSignal, stakeUsd: n
         detailSolSpotUsd: detailSolSpot.usd, detailSolSpotAt: detailSolSpot.observedAt, detailSolSpotAgeMs: routeRequestedAt - detailSolSpot.observedAt,
         inputAmountBaseUnits: inputAmount, socketExpectedTokenAmount, routeTokenAmount, routeImpliedTokenPriceUsd, routeVsSocketTokenPercent, routeVsSocketPricePercent,
         quote: quoteSummary(data), execution: 'ROUTE_ONLY_NO_SUBMIT' });
+      startPeriodicSellRoutePolling(page, signal.positionId, signal.mint, quote.outAmount, quote.outDecimals, routeTokenAmount, stakeUsd, walletAddress);
     } catch (error) {
       write('quote-simulated-orders.jsonl', { type: 'QUOTE_BUY_COMPARISON_ERROR', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown', execution: 'ROUTE_ONLY_NO_SUBMIT' });
     }
@@ -626,19 +764,12 @@ async function submitBrowserBuy(page: Page, input: { mint: string; fromAddress: 
     return { ok: response.ok && body?.code === 0, status: response.status, code: body?.code ?? null, message: body?.message ?? body?.msg ?? null, orderId: body?.data?.order_id ?? null, hash: body?.data?.hash ?? null, acquiredAmount: quote.outAmount ?? null, acquiredDecimals: quote.outDecimals ?? null };
   }, { value: input, routeBody: freshRoute.body });
 }
-async function browserSellRoute(page: Page, input: { mint: string; fromAddress: string; inputAmount: string }) {
-  return page.evaluate(async value => {
-    const params = new URLSearchParams({ web_from_source: 'token_poll', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
-      token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', in_amount: value.inputAmount,
-      slippage: '15', is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
-    const response = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
-    return { status: response.status, body: await response.json().catch(() => null) };
-  }, input);
-}
 /** Passive sell-side counterpart to the buy comparison. It waits for the buy
  * quote so the sell route uses exactly the token amount GMGN quoted at entry. */
 function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<void> {
   if (!quoteSimulationEnabled) return Promise.resolve();
+  closedRoutePositions.add(signal.positionId);
+  stopPeriodicSellRoutePolling(signal.positionId);
   const task = (async () => {
     await routeComparisonBuyTasks.get(signal.positionId);
     const position = routeComparisonPositions.get(signal.positionId);
@@ -648,25 +779,49 @@ function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<v
       return;
     }
     try {
-      const routeRequestedAt = Date.now();
-      const route = await browserSellRoute(page, { mint: signal.mint, fromAddress: walletAddress, inputAmount: position.inputAmount });
-      const observedAt = Date.now(), data = route.body?.data, quote = data?.quote;
-      if (route.status !== 200 || route.body?.code !== 0 || !quote) {
-        write('quote-simulated-orders.jsonl', { type: 'QUOTE_SELL_COMPARISON_UNPRICED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, routeRequestedAt, observedAt, latencyMs: observedAt - routeRequestedAt, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null, execution: 'ROUTE_ONLY_NO_SUBMIT' });
-        return;
+      const prewarmed = prewarmedSellRoutes.get(signal.positionId);
+      const isPrewarmedFresh = prewarmed && (Date.now() - prewarmed.quoteAt < 1500) && prewarmed.data?.quote;
+      let data: any;
+      let quote: any;
+      let routeRequestedAt: number;
+      let observedAt: number;
+      let latencyMs: number;
+      let isPrewarmedCacheHit = false;
+
+      if (isPrewarmedFresh) {
+        data = prewarmed.data;
+        quote = data.quote;
+        routeRequestedAt = prewarmed.quoteAt;
+        observedAt = Date.now();
+        latencyMs = 0;
+        isPrewarmedCacheHit = true;
+      } else {
+        routeRequestedAt = Date.now();
+        const route = await browserSellRoute(page, { mint: signal.mint, fromAddress: walletAddress, inputAmount: position.inputAmount });
+        observedAt = Date.now();
+        latencyMs = observedAt - routeRequestedAt;
+        data = route.body?.data;
+        quote = data?.quote;
+        if (route.status !== 200 || route.body?.code !== 0 || !quote) {
+          write('quote-simulated-orders.jsonl', { type: 'QUOTE_SELL_COMPARISON_UNPRICED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, routeRequestedAt, observedAt, latencyMs, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null, execution: 'ROUTE_ONLY_NO_SUBMIT' });
+          return;
+        }
       }
+
       const routeOutputUsd = Number(data.amount_out_usd);
       const socketExpectedProceedsUsd = position.routeTokenAmount * signal.priceUsd;
       const routeVsSocketProceedsPercent = Number.isFinite(routeOutputUsd) && routeOutputUsd >= 0 && socketExpectedProceedsUsd > 0 ? (routeOutputUsd / socketExpectedProceedsUsd - 1) * 100 : null;
       const routeImpliedTokenPriceUsd = Number.isFinite(routeOutputUsd) && routeOutputUsd >= 0 && position.routeTokenAmount > 0 ? routeOutputUsd / position.routeTokenAmount : null;
       write('quote-simulated-orders.jsonl', { type: 'QUOTE_SELL_COMPARISON', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, signalPriceUsd: signal.priceUsd,
-        routeRequestedAt, observedAt, latencyMs: observedAt - routeRequestedAt, buyQuoteAt: position.quoteAt, inputAmountBaseUnits: position.inputAmount, tokenDecimals: position.tokenDecimals,
+        routeRequestedAt, observedAt, latencyMs, prewarmedCacheHit: isPrewarmedCacheHit, prewarmedAgeMs: isPrewarmedCacheHit ? observedAt - routeRequestedAt : null, buyQuoteAt: position.quoteAt, inputAmountBaseUnits: position.inputAmount, tokenDecimals: position.tokenDecimals,
         socketExpectedProceedsUsd, routeImpliedTokenPriceUsd, routeVsSocketProceedsPercent, quote: quoteSummary(data), execution: 'ROUTE_ONLY_NO_SUBMIT' });
     } catch (error) {
       write('quote-simulated-orders.jsonl', { type: 'QUOTE_SELL_COMPARISON_ERROR', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt: Date.now(), message: error instanceof Error ? error.message : 'unknown', execution: 'ROUTE_ONLY_NO_SUBMIT' });
     } finally {
+      prewarmedSellRoutes.delete(signal.positionId);
       routeComparisonPositions.delete(signal.positionId);
       routeComparisonBuyTasks.delete(signal.positionId);
+      closedRoutePositions.delete(signal.positionId);
     }
   })();
   pendingPaperOrders.add(task);
@@ -674,7 +829,9 @@ function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<v
   return task;
 }
 async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }, skipPrompt = false) {
-  const route = await browserSellRoute(page, input);
+  const prewarmed = prewarmedSellRoutesByMint.get(input.mint);
+  const isPrewarmedFresh = prewarmed && (Date.now() - prewarmed.quoteAt < 1500) && prewarmed.route?.body?.code === 0 && prewarmed.route?.body?.data?.quote;
+  const route = isPrewarmedFresh ? prewarmed.route : await browserSellRoute(page, input);
   const routeData = route.body?.data;
   if (route.status !== 200 || route.body?.code !== 0 || !routeData?.quote) return { ok: false, stage: 'route', status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null };
   if (!skipPrompt) {
@@ -682,7 +839,7 @@ async function submitBrowserSell(page: Page, input: { mint: string; fromAddress:
     const approved = await showBrowserOrderPrompt(page, { side: 'SELL', mint: input.mint, symbol: input.mint.slice(0, 8), amountLine: 'Jual 100%: ' + input.inputAmount + ' base units', expectedOut: routeData.quote.outAmount ?? null });
     if (!approved) return { ok: false, stage: 'operator_declined' };
   }
-  const freshRoute = await browserSellRoute(page, input);
+  const freshRoute = (!skipPrompt || !isPrewarmedFresh) ? await browserSellRoute(page, input) : route;
   const fresh = freshRoute.body?.data;
   if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
   writeLiveRouteLedger('SELL', fresh, { mint: input.mint, inputAmount: input.inputAmount, tokenPriceUsd: input.tokenPriceUsd, solPriceUsd: input.solPriceUsd });
@@ -2615,6 +2772,7 @@ async function worker(index: number, deadline: number) {
       console.log('[detail-error]', 'worker=' + index, mint, error instanceof Error ? error.message : error);
     }
     finally {
+      stopAllPeriodicSellRoutePollingForMint(mint);
       paperRiskListeners.delete(mint);
       momentumTape.delete(mint);
       totalHolderSamples.delete(mint);
