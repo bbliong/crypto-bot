@@ -561,20 +561,22 @@ const activeSellRoutePollers = new Map<string, { abort: () => void; mint: string
 const prewarmedSellRoutes = new Map<string, PrewarmedSellRoute>();
 const prewarmedSellRoutesByMint = new Map<string, PrewarmedSellRoute>();
 
-function stopPeriodicSellRoutePolling(positionId: string): void {
+function stopPeriodicSellRoutePolling(positionId: string, reason = 'SELL_SIGNAL'): void {
   const poller = activeSellRoutePollers.get(positionId);
   if (poller) {
     poller.abort();
     activeSellRoutePollers.delete(positionId);
+    write('events.jsonl', { type: 'POLL_SELL_ROUTE_STOPPED', positionId, observedAt: Date.now(), reason });
   }
 }
 
-function stopAllPeriodicSellRoutePollingForMint(mint: string): void {
+function stopAllPeriodicSellRoutePollingForMint(mint: string, reason = 'WORKER_DETAIL_CLEANUP'): void {
   for (const [posId, poller] of activeSellRoutePollers.entries()) {
     if (poller.mint === mint) {
       poller.abort();
       activeSellRoutePollers.delete(posId);
       prewarmedSellRoutes.delete(posId);
+      write('events.jsonl', { type: 'POLL_SELL_ROUTE_STOPPED', positionId: posId, mint, observedAt: Date.now(), reason });
     }
   }
   prewarmedSellRoutesByMint.delete(mint);
@@ -590,7 +592,14 @@ function startPeriodicSellRoutePolling(
   stakeUsd: number,
   walletAddress: string
 ): void {
-  if (closedRoutePositions.has(positionId)) return;
+  if (closedRoutePositions.has(positionId)) {
+    write('events.jsonl', { type: 'ORPHAN_POLL_PREVENTED', positionId, mint, observedAt: Date.now(), reason: 'POSITION_ALREADY_CLOSED_BEFORE_START' });
+    return;
+  }
+  if (!routeComparisonPositions.has(positionId)) {
+    write('events.jsonl', { type: 'ORPHAN_POLL_PREVENTED', positionId, mint, observedAt: Date.now(), reason: 'NO_OPEN_BUY_POSITION' });
+    return;
+  }
   if (activeSellRoutePollers.has(positionId)) return;
 
   let stopped = false;
@@ -599,10 +608,19 @@ function startPeriodicSellRoutePolling(
     mint,
   });
 
+  write('events.jsonl', { type: 'POLL_SELL_ROUTE_STARTED', positionId, mint, observedAt: Date.now(), inputAmount, stakeUsd });
+
   const pollIntervalMs = 500;
 
   void (async () => {
     while (!stopped && !page.isClosed()) {
+      // Guard: Ensure worker has not sold or closed position in the meantime
+      if (closedRoutePositions.has(positionId) || !routeComparisonPositions.has(positionId)) {
+        write('events.jsonl', { type: 'ORPHAN_POLL_PREVENTED', positionId, mint, observedAt: Date.now(), reason: 'POSITION_CLOSED_DURING_POLL' });
+        stopPeriodicSellRoutePolling(positionId, 'DETECTED_ORPHAN_CLOSED');
+        break;
+      }
+
       const pollStartedAt = Date.now();
       try {
         const route = await browserSellRoute(page, { mint, fromAddress: walletAddress, inputAmount });
@@ -611,6 +629,29 @@ function startPeriodicSellRoutePolling(
         const latencyMs = observedAt - pollStartedAt;
         const data = route.body?.data;
         const quote = data?.quote;
+
+        // Check for rate limit response
+        const isRateLimit = route.status === 429 || route.body?.code === 429 ||
+          (typeof route.body?.msg === 'string' && route.body.msg.toLowerCase().includes('rate limit')) ||
+          (typeof route.body?.message === 'string' && route.body.message.toLowerCase().includes('rate limit'));
+
+        if (isRateLimit) {
+          write('events.jsonl', {
+            type: 'SWAP_ROUTE_RATELIMITED',
+            positionId,
+            mint,
+            observedAt,
+            latencyMs,
+            status: route.status,
+            code: route.body?.code ?? null,
+            message: route.body?.msg ?? route.body?.message ?? null,
+            execution: 'ROUTE_PREWARM_POLL',
+          });
+          console.warn(`[swap-route-ratelimit] ⚠️ Rate limit detected on /txproxy/v1/get_swap_route for ${mint}: status=${route.status} code=${route.body?.code}`);
+          await delay(1500); // Backoff before next attempt
+          continue;
+        }
+
         if (route.status === 200 && route.body?.code === 0 && quote) {
           const routeOutputUsd = Number(data.amount_out_usd);
           const routeImpliedTokenPriceUsd = Number.isFinite(routeOutputUsd) && routeOutputUsd > 0 && routeTokenAmount > 0
@@ -689,6 +730,13 @@ function scheduleBuyRouteComparison(page: Page, signal: PaperSignal, stakeUsd: n
       const route = await browserRoute(page, { mint: signal.mint, fromAddress: walletAddress, inputLamports: inputAmount });
       const observedAt = Date.now(), data = route.body?.data, quote = data?.quote;
       if (route.status !== 200 || route.body?.code !== 0 || !quote || typeof quote.outAmount !== 'string' || !Number.isInteger(quote.outDecimals)) {
+        const isRateLimit = route.status === 429 || route.body?.code === 429 ||
+          (typeof route.body?.msg === 'string' && route.body.msg.toLowerCase().includes('rate limit')) ||
+          (typeof route.body?.message === 'string' && route.body.message.toLowerCase().includes('rate limit'));
+        if (isRateLimit) {
+          write('events.jsonl', { type: 'SWAP_ROUTE_RATELIMITED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? route.body?.message ?? null, side: 'BUY' });
+          console.warn(`[swap-route-ratelimit] ⚠️ Rate limit detected on BUY route for ${signal.mint}: status=${route.status} code=${route.body?.code}`);
+        }
         write('quote-simulated-orders.jsonl', { type: 'QUOTE_BUY_COMPARISON_UNPRICED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, quoteStartedAt, routeRequestedAt, observedAt, latencyMs: observedAt - routeRequestedAt, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null, execution: 'ROUTE_ONLY_NO_SUBMIT' });
         return;
       }
@@ -803,6 +851,13 @@ function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<v
         data = route.body?.data;
         quote = data?.quote;
         if (route.status !== 200 || route.body?.code !== 0 || !quote) {
+          const isRateLimit = route.status === 429 || route.body?.code === 429 ||
+            (typeof route.body?.msg === 'string' && route.body.msg.toLowerCase().includes('rate limit')) ||
+            (typeof route.body?.message === 'string' && route.body.message.toLowerCase().includes('rate limit'));
+          if (isRateLimit) {
+            write('events.jsonl', { type: 'SWAP_ROUTE_RATELIMITED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, observedAt, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? route.body?.message ?? null, side: 'SELL' });
+            console.warn(`[swap-route-ratelimit] ⚠️ Rate limit detected on SELL route for ${signal.mint}: status=${route.status} code=${route.body?.code}`);
+          }
           write('quote-simulated-orders.jsonl', { type: 'QUOTE_SELL_COMPARISON_UNPRICED', signalId: signal.signalId, positionId: signal.positionId, mint: signal.mint, decisionAt: signal.decisionAt, routeRequestedAt, observedAt, latencyMs, status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null, execution: 'ROUTE_ONLY_NO_SUBMIT' });
           return;
         }
