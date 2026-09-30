@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,37 +28,39 @@ function parseArgs() {
 
 const opts = parseArgs();
 
-function findAggressiveRuns() {
+let cachedRuns = null;
+let lastRunsScanAt = 0;
+
+function findAggressiveRuns(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedRuns && (now - lastRunsScanAt < 10_000)) {
+    return cachedRuns;
+  }
   if (!existsSync(researchDir)) return [];
   const entries = readdirSync(researchDir, { withFileTypes: true });
   const runs = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    if (!entry.name.includes('momentum') && !entry.name.includes('pump-band')) continue;
     const folder = join(researchDir, entry.name);
-    const manifestPath = join(folder, 'manifest.json');
-    const strategyPath = join(folder, 'strategy.json');
+    let mtime = 0;
+    try { mtime = statSync(folder).mtimeMs; } catch {}
 
     let isAggressive = entry.name.includes('aggressive');
     let startedAt = null;
 
-    if (existsSync(strategyPath)) {
-      try {
-        const strat = JSON.parse(readFileSync(strategyPath, 'utf8'));
-        if (strat?.strategy === 'momentum-aggressive') isAggressive = true;
-      } catch {}
-    }
-    if (existsSync(manifestPath)) {
-      try {
-        const man = JSON.parse(readFileSync(manifestPath, 'utf8'));
-        if (man?.strategy === 'momentum-aggressive') isAggressive = true;
-        startedAt = man?.startedAt;
-      } catch {}
+    if (!isAggressive) {
+      const strategyPath = join(folder, 'strategy.json');
+      if (existsSync(strategyPath)) {
+        try {
+          const strat = JSON.parse(readFileSync(strategyPath, 'utf8'));
+          if (strat?.strategy === 'momentum-aggressive') isAggressive = true;
+        } catch {}
+      }
     }
 
     if (isAggressive) {
-      let mtime = 0;
-      try { mtime = statSync(folder).mtimeMs; } catch {}
       runs.push({
         id: entry.name,
         path: folder,
@@ -68,25 +70,51 @@ function findAggressiveRuns() {
     }
   }
 
-  // Also include general momentum runs if no dedicated aggressive run found yet
-  if (runs.length === 0) {
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const folder = join(researchDir, entry.name);
-      if (entry.name.includes('momentum') || entry.name.includes('pump-band')) {
-        let mtime = 0;
-        try { mtime = statSync(folder).mtimeMs; } catch {}
-        runs.push({
-          id: entry.name,
-          path: folder,
-          startedAt: new Date(mtime).toISOString(),
-          mtime,
-        });
+  cachedRuns = runs.sort((a, b) => b.mtime - a.mtime);
+  lastRunsScanAt = now;
+  return cachedRuns;
+}
+
+function countLinesFast(filePath) {
+  if (!existsSync(filePath)) return 0;
+  try {
+    const stat = statSync(filePath);
+    if (stat.size === 0) return 0;
+    const fd = openSync(filePath, 'r');
+    const buf = Buffer.alloc(64 * 1024);
+    let count = 0;
+    let bytesRead = 0;
+    while ((bytesRead = readSync(fd, buf, 0, buf.length, null)) > 0) {
+      for (let i = 0; i < bytesRead; i++) {
+        if (buf[i] === 10) count++;
       }
     }
+    closeSync(fd);
+    return count;
+  } catch {
+    return 0;
   }
+}
 
-  return runs.sort((a, b) => b.mtime - a.mtime);
+function readLastJsonLines(filePath, maxLines = 100) {
+  if (!existsSync(filePath)) return [];
+  try {
+    const stat = statSync(filePath);
+    if (stat.size === 0) return [];
+    const readSize = Math.min(stat.size, 256 * 1024);
+    const fd = openSync(filePath, 'r');
+    const buf = Buffer.alloc(readSize);
+    readSync(fd, buf, 0, readSize, stat.size - readSize);
+    closeSync(fd);
+    const text = buf.toString('utf8');
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const targetLines = lines.slice(-maxLines);
+    return targetLines.map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function readJsonLines(filePath) {
@@ -139,11 +167,14 @@ function getAggressiveDashboardData(targetRunId) {
   const simulatedTrades = readJsonLines(join(runDir, 'simulated-trades.jsonl'));
   const tradeSignals = readJsonLines(join(runDir, 'trade-signals.jsonl'));
   const routeQuotes = readJsonLines(join(runDir, 'quote-simulated-orders.jsonl'));
-  const decisions = readJsonLines(join(runDir, 'momentum-decisions.jsonl'));
-  const tokenSummaries = readJsonLines(join(runDir, 'token-summary.jsonl'));
-  const socketTicks = readJsonLines(join(runDir, 'socket-ticks.jsonl'));
-  const rawTrades = readJsonLines(join(runDir, 'trades.jsonl'));
-  const events = readJsonLines(join(runDir, 'events.jsonl'));
+  const decisions = readLastJsonLines(join(runDir, 'momentum-decisions.jsonl'), 300);
+  const screenedTokens = readLastJsonLines(join(runDir, 'screened-tokens.jsonl'), 300);
+  const recentTicks = readLastJsonLines(join(runDir, 'socket-ticks.jsonl'), 200);
+  const recentEvents = readLastJsonLines(join(runDir, 'events.jsonl'), 100);
+  const tokenSummaries = readLastJsonLines(join(runDir, 'token-summary.jsonl'), 100);
+
+  const totalRawTrades = countLinesFast(join(runDir, 'trades.jsonl'));
+  const totalTicks = countLinesFast(join(runDir, 'socket-ticks.jsonl'));
 
   const buys = simulatedTrades.filter(t => t.type === 'SIMULATED_BUY');
   const sells = simulatedTrades.filter(t => t.type === 'SIMULATED_SELL');
@@ -271,13 +302,14 @@ function getAggressiveDashboardData(targetRunId) {
     } else {
       // Still open position
       // Find latest socket tick price
-      const tokenTicks = socketTicks.filter(t => t.mint === buy.mint);
+      const tokenTicks = recentTicks.filter(t => t.mint === buy.mint);
       const latestTick = tokenTicks[tokenTicks.length - 1];
-      const currentPrice = latestTick?.priceUsd || buy.entryPriceUsd;
+      const tokenDecisions = decisions.filter(d => d.mint === buy.mint);
+      const latestDecision = tokenDecisions[tokenDecisions.length - 1];
+      const currentPrice = latestTick?.priceUsd || latestDecision?.priceUsd || buy.entryPriceUsd;
       const floatingReturn = ((currentPrice / buy.entryPriceUsd) - 1) * 100;
 
       // Peak price from decisions or ticks
-      const tokenDecisions = decisions.filter(d => d.mint === buy.mint);
       let peakReturn = floatingReturn;
       for (const d of tokenDecisions) {
         if (d.peakReturnPercent != null && d.peakReturnPercent > peakReturn) {
@@ -305,6 +337,12 @@ function getAggressiveDashboardData(targetRunId) {
     }
   }
 
+  // Enrich route quotes with token metadata
+  const metadataByMint = new Map();
+  for (const b of buys) if (b.mint && b.metadata) metadataByMint.set(b.mint, b.metadata);
+  for (const s of screenedTokens) if (s.mint && s.metadata) metadataByMint.set(s.mint, s.metadata);
+  for (const t of tokenSummaries) if (t.mint && t.metadata) metadataByMint.set(t.mint, t.metadata);
+
   // Worker status calculation
   const workers = [1, 2, 3].map(wId => {
     // Find active token in events or openPositions
@@ -315,25 +353,25 @@ function getAggressiveDashboardData(targetRunId) {
         status: 'POSITION_OPEN',
         currentMint: activePos.mint,
         symbol: activePos.symbol,
-        ticks: socketTicks.filter(t => t.mint === activePos.mint).length,
+        ticks: recentTicks.filter(t => t.mint === activePos.mint).length,
         durationSec: activePos.elapsedSec,
       };
     }
 
     // Check recent detail open events
-    const workerEvents = events.filter(e => e.worker === wId);
+    const workerEvents = recentEvents.filter(e => e.worker === wId);
     const latestEvent = workerEvents[workerEvents.length - 1];
     const isObserving = latestEvent?.type === 'DETAIL_WINDOW_OPEN';
     const mint = latestEvent?.mint || null;
-    const summary = tokenSummaries.find(s => s.mint === mint);
-    const symbol = summary?.symbol || (mint ? mint.slice(0, 6) : null);
+    const meta = metadataByMint.get(mint);
+    const symbol = meta?.symbol || (mint ? mint.slice(0, 6) : null);
 
     return {
       id: wId,
       status: isObserving ? 'OBSERVING_SOCKET' : 'SEARCHING',
       currentMint: mint,
       symbol,
-      ticks: mint ? socketTicks.filter(t => t.mint === mint).length : 0,
+      ticks: mint ? recentTicks.filter(t => t.mint === mint).length : 0,
       durationSec: latestEvent ? Math.max(0, Math.round((now - latestEvent.observedAt) / 1000)) : 0,
     };
   });
@@ -345,16 +383,9 @@ function getAggressiveDashboardData(targetRunId) {
   const avgSlippagePct = slippageCount > 0 ? Number((totalSlippagePct / slippageCount).toFixed(2)) : 5.43;
 
   // Throughput
-  const totalRawTrades = rawTrades.length;
-  const totalTicks = socketTicks.length;
   const startTime = manifest?.startedAt ? new Date(manifest.startedAt).getTime() : (selectedRun.mtime || now);
   const runtimeSeconds = Math.max(1, Math.round((now - startTime) / 1000));
   const ratePerSec = Number(((totalRawTrades + totalTicks) / runtimeSeconds).toFixed(1));
-
-  // Enrich route quotes with token metadata
-  const metadataByMint = new Map();
-  for (const b of buys) if (b.mint && b.metadata) metadataByMint.set(b.mint, b.metadata);
-  for (const s of tokenSummaries) if (s.mint && s.metadata) metadataByMint.set(s.mint, s.metadata);
 
   const enrichedRouteQuotes = routeQuotes.map(q => {
     const meta = metadataByMint.get(q.mint);
@@ -1206,14 +1237,27 @@ function renderHtml() {
       }
     }
 
-    function changeRun(val) {
-      currentRun = val;
-      fetchData();
+    let fetchTimer = null;
+    let isFetching = false;
+
+    async function loopFetch() {
+      if (isFetching) return;
+      isFetching = true;
+      try {
+        await fetchData();
+      } finally {
+        isFetching = false;
+        fetchTimer = setTimeout(loopFetch, 2500);
+      }
     }
 
-    // Polling every 1500ms
-    fetchData();
-    setInterval(fetchData, 1500);
+    function changeRun(val) {
+      currentRun = val;
+      if (fetchTimer) clearTimeout(fetchTimer);
+      loopFetch();
+    }
+
+    loopFetch();
   </script>
 </body>
 </html>`;
