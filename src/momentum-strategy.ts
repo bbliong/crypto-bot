@@ -110,11 +110,10 @@ export const MOMENTUM_AGGRESSIVE_RULES = Object.freeze({
   maximumReturn5s: 30,
   maximumEntryDrawdown: 2.5,
   hardStopPercent: 3.0,
-  activationPercent: 4.0,
-  lockPercent: 2.5,
-  trailingPercent: 1.0,
-  runnerActivationPercent: 11.0,
-  runnerTrailingPercent: 8.0,
+  breakevenActivationPercent: 5.0,
+  breakevenFloorPercent: 0.5,
+  runnerActivationPercent: 8.0,
+  runnerTrailingPercent: 7.0,
   runnerLockPercent: 4.0,
   stagnationSeconds: 15,
   stagnationThreshold: 2.5,
@@ -125,6 +124,7 @@ export const MOMENTUM_AGGRESSIVE_RULES = Object.freeze({
 
 export type MomentumAggressiveExitReason =
   | 'AGGRESSIVE_HARD_STOP'
+  | 'AGGRESSIVE_BREAKEVEN_STOP'
   | 'AGGRESSIVE_PROFIT_TRAIL'
   | 'AGGRESSIVE_RUNNER_TRAIL'
   | 'AGGRESSIVE_STAGNATION'
@@ -207,11 +207,17 @@ export function assessMomentumAggressiveExit(p: MomentumPosition, tick: TapeTrad
 
   let reason: MomentumAggressiveExitReason | null = null;
 
-  // 1. Hard stop
-  if (r <= -MOMENTUM_AGGRESSIVE_RULES.hardStopPercent) {
-    reason = 'AGGRESSIVE_HARD_STOP';
+  // 1. Dynamic Stop Loss (Breakeven Protection if peak >= 5%, otherwise Hard Stop -3%)
+  const effectiveStopLoss = peakReturn >= MOMENTUM_AGGRESSIVE_RULES.breakevenActivationPercent
+    ? MOMENTUM_AGGRESSIVE_RULES.breakevenFloorPercent
+    : -MOMENTUM_AGGRESSIVE_RULES.hardStopPercent;
+
+  if (r <= effectiveStopLoss) {
+    reason = peakReturn >= MOMENTUM_AGGRESSIVE_RULES.breakevenActivationPercent
+      ? 'AGGRESSIVE_BREAKEVEN_STOP'
+      : 'AGGRESSIVE_HARD_STOP';
   }
-  // 2. High Runner Tier Trailing Stop (Peak >= 11%)
+  // 2. High Runner Tier Trailing Stop (Peak >= 8%)
   else if (peakReturn >= MOMENTUM_AGGRESSIVE_RULES.runnerActivationPercent) {
     const trailFloor = (100 + peakReturn) * (1 - MOMENTUM_AGGRESSIVE_RULES.runnerTrailingPercent / 100) - 100;
     const lockFloor = MOMENTUM_AGGRESSIVE_RULES.runnerLockPercent;
@@ -219,23 +225,15 @@ export function assessMomentumAggressiveExit(p: MomentumPosition, tick: TapeTrad
       reason = 'AGGRESSIVE_RUNNER_TRAIL';
     }
   }
-  // 3. Scalp / Early Protection Tier (Peak >= 4% & < 11%)
-  else if (peakReturn >= MOMENTUM_AGGRESSIVE_RULES.activationPercent) {
-    const trailFloor = (100 + peakReturn) * (1 - MOMENTUM_AGGRESSIVE_RULES.trailingPercent / 100) - 100;
-    const lockFloor = MOMENTUM_AGGRESSIVE_RULES.lockPercent;
-    if (r <= Math.max(lockFloor, trailFloor)) {
-      reason = 'AGGRESSIVE_PROFIT_TRAIL';
-    }
-  }
 
-  // 4. Stagnation exit (momentum stalled > stagnationSeconds)
+  // 3. Stagnation exit (momentum stalled > stagnationSeconds)
   if (!reason && (now - p.openedAt) >= MOMENTUM_AGGRESSIVE_RULES.stagnationSeconds * 1000) {
     if (peakReturn < MOMENTUM_AGGRESSIVE_RULES.stagnationThreshold) {
       reason = 'AGGRESSIVE_STAGNATION';
     }
   }
 
-  // 5. Flow exit (sell flow takes over, if enabled)
+  // 4. Flow exit (sell flow takes over, if enabled)
   if (!reason && MOMENTUM_AGGRESSIVE_RULES.flowExit && m.trades >= 4 && (m.sellUsd ?? 0) >= 100 && m.buyShare !== null && m.buyShare < 0.25 && (m.slope5s ?? 0) < 0) {
     reason = 'AGGRESSIVE_FLOW_EXIT';
   }
@@ -244,10 +242,12 @@ export function assessMomentumAggressiveExit(p: MomentumPosition, tick: TapeTrad
   const drawdown = (1 - tick.priceUsd / p.peak) * 100;
   const activeTrailPercent = peakReturn >= MOMENTUM_AGGRESSIVE_RULES.runnerActivationPercent
     ? MOMENTUM_AGGRESSIVE_RULES.runnerTrailingPercent
-    : MOMENTUM_AGGRESSIVE_RULES.trailingPercent;
+    : 0;
   const activeLockReturn = peakReturn >= MOMENTUM_AGGRESSIVE_RULES.runnerActivationPercent
     ? MOMENTUM_AGGRESSIVE_RULES.runnerLockPercent
-    : MOMENTUM_AGGRESSIVE_RULES.lockPercent;
+    : peakReturn >= MOMENTUM_AGGRESSIVE_RULES.breakevenActivationPercent
+    ? MOMENTUM_AGGRESSIVE_RULES.breakevenFloorPercent
+    : null;
 
   return {
     reason,

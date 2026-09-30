@@ -714,6 +714,7 @@ function renderHtml() {
     .tag-win { background: var(--win-bg); color: var(--win); }
     .tag-loss { background: var(--loss-bg); color: var(--loss); }
     .tag-trail { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+    .tag-break { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
     .tag-stop { background: var(--loss-bg); color: var(--loss); }
     .tag-stag { background: rgba(168, 85, 247, 0.2); color: var(--purple); }
     .tag-flow { background: rgba(59, 130, 246, 0.2); color: var(--blue); }
@@ -943,8 +944,11 @@ function renderHtml() {
 
     function exitReasonBadge(reason) {
       if (!reason) return '<span class="tag">UNKNOWN</span>';
-      if (reason.includes('PROFIT_TRAIL') || reason.includes('TARGET')) {
+      if (reason.includes('RUNNER_TRAIL') || reason.includes('PROFIT_TRAIL') || reason.includes('TARGET')) {
         return '<span class="tag tag-trail">' + reason.replace('AGGRESSIVE_', '') + '</span>';
+      }
+      if (reason.includes('BREAKEVEN')) {
+        return '<span class="tag tag-break">' + reason.replace('AGGRESSIVE_', '') + '</span>';
       }
       if (reason.includes('HARD_STOP') || reason.includes('CRASH')) {
         return '<span class="tag tag-stop">' + reason.replace('AGGRESSIVE_', '') + '</span>';
