@@ -1264,7 +1264,7 @@ function renderHtml() {
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html {
-      font-size: 14.5px;
+      font-size: 16.5px;
       -webkit-text-size-adjust: 100%;
     }
     body {
