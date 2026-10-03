@@ -2656,7 +2656,7 @@ function renderHtml() {
         </div>
       </div>
       <div style="background: rgba(13, 148, 136, 0.25); border: 1px solid rgba(45, 212, 191, 0.4); border-radius: 0.65rem; padding: 0.65rem 0.85rem;">
-        <div style="font-weight: 700; color: #2dd4bf; font-size: 0.74rem; margin-bottom: 3px;">⚡ Plan 8: Aggressive Wave (Wave Maximizer: Target Dinamis ATH Min +20%, Trailing Runner, Turun Ditunggu)</div>
+        <div style="font-weight: 700; color: #2dd4bf; font-size: 0.74rem; margin-bottom: 3px;">⚡ Plan 8: Adaptive Wave V1 (Smart Momentum Entry, Break-even Floor, Dynamic Cut-loss)</div>
         <div style="font-size: 0.67rem; color: #cbd5e1; line-height: 1.45;">
           • <b>Entry:</b> Order Flow Buy ≥ <b>60%</b>, Dev ≤ <b>3.5%</b>, Top1 ≤ <b>25%</b>, Buyers ≥ 3, Inflow ≥ $300<br>
           • <b>Exit:</b> <b>Target Dinamis Sejarah Token (Min +20% s/d +150%)</b>, Breakeven Lock di <b>+10%</b> (Floor +3%), Runner Trail <b>5%</b> dari Puncak (&ge;18%), <b>Turun Ditunggu</b> (Hard Stop luas <b>-6.0%</b>, Stagnation 45s)
@@ -2782,8 +2782,8 @@ function renderHtml() {
       <!-- Wave Scalper Lane Card -->
       <div class="lane-card lane-card-wave">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-weight: 800; font-size: 0.88rem; color: #2dd4bf;">⚡ AGGRESSIVE WAVE</span>
-          <span class="tag tag-lane-wave">Wave Maximizer · Min +20%</span>
+          <span style="font-weight: 800; font-size: 0.88rem; color: #2dd4bf;">⚡ ADAPTIVE WAVE V1</span>
+          <span class="tag tag-lane-wave">Smart Momentum · Max -6% Loss</span>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
           <div>
@@ -2983,7 +2983,7 @@ function renderHtml() {
           <button id="btnFilterOptimal" class="btn-filter" onclick="setLaneFilter('aggressive-optimal')">🟣 Optimal</button>
           <button id="btnFilterWide" class="btn-filter" onclick="setLaneFilter('aggressive-wide')">🟠 Wide</button>
           <button id="btnFilterSwing" class="btn-filter" onclick="setLaneFilter('aggressive-swing-100k')">🌊 Swing 100k</button>
-          <button id="btnFilterWave" class="btn-filter" onclick="setLaneFilter('aggressive-wave')">⚡ Wave Maximizer</button>
+          <button id="btnFilterWave" class="btn-filter" onclick="setLaneFilter('aggressive-wave')">⚡ Adaptive Wave V1</button>
           <button id="btnFilterSafe" class="btn-filter" onclick="setLaneFilter('aggressive-safe')">🟢 Safe</button>
           <button id="btnFilterV2" class="btn-filter" onclick="setLaneFilter('momentum-v2')">🔵 V2</button>
           <button id="btnFilterV3" class="btn-filter" onclick="setLaneFilter('momentum-v3')">✨ V3</button>
@@ -3973,7 +3973,7 @@ function renderHtml() {
       const swapPnlVal = t.swapPnlUsd != null ? t.swapPnlUsd : t.pnlUsd;
       const swapPnlClass = swapPnlVal >= 0 ? 'up' : 'down';
       const laneBadge = t.lane === 'aggressive-wave'
-        ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
+        ? '<span class="tag tag-lane-wave">ADAPTIVE WAVE V1</span>'
         : t.lane === 'aggressive-swing-100k'
         ? '<span class="tag tag-lane-swing">SWING 100K</span>'
         : t.lane === 'r5-band'
@@ -4094,7 +4094,7 @@ function renderHtml() {
 
     function renderRealTradeRow(t) {
       const laneBadge = t.lane === 'aggressive-wave'
-        ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
+        ? '<span class="tag tag-lane-wave">ADAPTIVE WAVE V1</span>'
         : t.lane === 'aggressive-swing-100k'
         ? '<span class="tag tag-lane-swing">SWING 100K</span>'
         : t.lane === 'r5-band'
@@ -4518,7 +4518,7 @@ function renderHtml() {
           const estClass = estRealReturn >= 0 ? 'up' : 'down';
           const stagPct = Math.max(0, Math.min(100, (p.stagnationCountdownSec / 12) * 100));
           const laneBadge = p.lane === 'aggressive-wave'
-            ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
+            ? '<span class="tag tag-lane-wave">ADAPTIVE WAVE V1</span>'
             : p.lane === 'aggressive-swing-100k'
             ? '<span class="tag tag-lane-swing">SWING 100K</span>'
             : p.lane === 'r5-band'
