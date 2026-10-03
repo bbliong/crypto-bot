@@ -13,7 +13,7 @@ import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, asse
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
-import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_AGGRESSIVE_WAVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAggressiveExit, calculateDynamicWaveTarget, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_AGGRESSIVE_WAVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAdaptiveWaveEntry, assessMomentumAdaptiveWaveExit, MOMENTUM_ADAPTIVE_WAVE_RULES, assessMomentumAggressiveExit, calculateDynamicWaveTarget, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 import { ResearchHolderStore, type ResearchTrackedHolder } from './research-holder-store.js';
@@ -2631,11 +2631,13 @@ async function worker(index: number, deadline: number) {
           const aggressiveSwing100kBuyAllowed = momentumAggressive
             && swing100kMcAllowed
             && (aggressiveSwing100kEntry?.allowed ?? false);
-          const dynamicWaveMinMC = dynamicFeedSettings?.minMarketCapUsd ?? MOMENTUM_AGGRESSIVE_WAVE_RULES.minMarketCap;
-          const dynamicWaveMaxMC = dynamicFeedSettings?.maxMarketCapUsd ?? MOMENTUM_AGGRESSIVE_WAVE_RULES.maxMarketCap;
+          const dynamicWaveMinMC = dynamicFeedSettings?.minMarketCapUsd ?? MOMENTUM_ADAPTIVE_WAVE_RULES.hardGates.mcUsd[0];
+          const dynamicWaveMaxMC = dynamicFeedSettings?.maxMarketCapUsd ?? MOMENTUM_ADAPTIVE_WAVE_RULES.hardGates.mcUsd[1];
           const waveMcAllowed = candidateMC === null || (candidateMC >= dynamicWaveMinMC && candidateMC <= dynamicWaveMaxMC);
+          const createdAt = candidate?.fields.createdAt?.value ?? candidate?.fields.tradingStartedAt?.value;
+          const tokenAgeSec = typeof createdAt === "number" ? (now - createdAt * (createdAt < 1e12 ? 1000 : 1)) / 1000 : null;
           const aggressiveWaveEntry = momentumAggressive
-            ? assessMomentumAggressiveWaveEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, candidateMC, flow.buySharePercent)
+            ? assessMomentumAdaptiveWaveEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, top5Pct, candidateMC, tokenAgeSec, currentHolderCount)
             : null;
           const aggressiveWaveBuyAllowed = momentumAggressive
             && waveMcAllowed
@@ -2878,7 +2880,7 @@ async function worker(index: number, deadline: number) {
                   }
                   const decision = momentumAggressive
                     ? (paperLane === PAPER_LANES.aggressiveWave.id
-                        ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_WAVE_RULES)
+                        ? (assessMomentumAdaptiveWaveExit(state.riskState, tick, momentumTape.get(mint) ?? []) as any)
                         : paperLane === PAPER_LANES.aggressiveSwing100k.id
                         ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_SWING_100K_RULES)
                         : paperLane === PAPER_LANES.aggressiveWide.id
@@ -2904,7 +2906,7 @@ async function worker(index: number, deadline: number) {
                   // when underwater/unsupported, while a profitable, supported
                   // position may wait for two bearish confirmations after 5 seconds.
                   if (paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) {
-                    const holderDelta = decision.holders.steps.reduce((total, step) => total + step.delta, 0);
+                    const holderDelta = decision.holders.steps.reduce((total: number, step: any) => total + step.delta, 0);
                     const sellUsd = decision.metrics.sellUsd ?? 0;
                     const buyUsd = decision.metrics.buyUsd ?? 0;
                     const sellDominant = sellUsd >= Math.max(1, buyUsd) * 1.5;

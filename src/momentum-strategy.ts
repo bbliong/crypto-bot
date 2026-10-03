@@ -599,3 +599,255 @@ export function assessMomentumAggressiveExit(
   };
 }
 
+
+export const MOMENTUM_ADAPTIVE_WAVE_RULES = Object.freeze({
+  version: 'adaptive-wave-v1',
+  hardGates: {
+    mcUsd: [10000, 100000],
+    minAgeSec: 60,
+    minHolders: 100,
+    maxTop1Pct: 8.0,
+    maxTop5Pct: 25.0,
+    maxDevPct: 2.5,
+    maxDevSell30sUsd: 25.0
+  },
+  momentumEntry: {
+    return5sPct: [0.5, 15.0],
+    minTrades5s: 5,
+    minBuyers5s: 4,
+    minBuyUsd5s: 300,
+    maxTopBuyerShare: 0.50,
+    minBuyShare5s: 0.60,
+    adaptiveBuyShare20s: {
+      base: 0.65,
+      highVolatilityThreshold: 5.0,
+      highVolatilityReq: 0.70
+    },
+    maxDrawdown5sPct: 2.5
+  },
+  adaptiveExit: {
+    hardStopNetPct: -6.0,
+    flashCrash1sPct: -8.0,
+    stagnation: {
+      minHoldSec: 15,
+      maxPeakPct: 3.0,
+      breakFlowShare: 0.50
+    },
+    breakeven: {
+      activationPeakPct: 8.0,
+      floorNetPct: 1.5
+    },
+    trailing: [
+      { peakMin: 12.0, peakMax: 20.0, trailDistPct: 5.0 },
+      { peakMin: 20.0, peakMax: 50.0, trailDistPct: 10.0 },
+      { peakMin: 50.0, peakMax: 999.0, trailDistPct: 8.0 }
+    ],
+    contextualTp: {
+      minNetPct: 20.0,
+      flowReversalShare: 0.50
+    }
+  },
+  riskManagement: {
+    minStakeUsd: 5.0,
+    maxCostRoundtripPct: 3.0
+  }
+});
+
+export function assessMomentumAdaptiveWaveEntry(
+  tape: TapeTrade[],
+  now: number,
+  holderDistribution: { allowed: boolean; reason?: string },
+  devPercent: number,
+  top1Percent?: number | null,
+  top5Percent?: number | null,
+  marketCapUsd?: number | null,
+  tokenAgeSec?: number | null,
+  holderCount?: number | null
+) {
+  const rules = MOMENTUM_ADAPTIVE_WAVE_RULES;
+  const reasons: string[] = [];
+
+  // Hard Gates
+  if (marketCapUsd == null || marketCapUsd < rules.hardGates.mcUsd[0] || marketCapUsd > rules.hardGates.mcUsd[1]) {
+    reasons.push('MC_OUT_OF_BOUNDS');
+  }
+  if (tokenAgeSec == null || tokenAgeSec < rules.hardGates.minAgeSec) reasons.push('AGE_LT_60S');
+  if (holderCount != null && holderCount < rules.hardGates.minHolders) reasons.push('HOLDERS_LT_100');
+  if (top1Percent != null && top1Percent > rules.hardGates.maxTop1Pct) reasons.push('TOP1_GT_LIMIT');
+  if (top5Percent != null && top5Percent > rules.hardGates.maxTop5Pct) reasons.push('TOP5_GT_LIMIT');
+  if (devPercent > rules.hardGates.maxDevPct) reasons.push('DEV_GT_LIMIT');
+  if (!holderDistribution.allowed) reasons.push(holderDistribution.reason || 'HOLDER_DISTRIBUTION_NOT_ALLOWED');
+
+  // Tape calculation for momentum features
+  const windowMs = 5000;
+  const t5s = tape.filter(t => t.occurredAt >= now - windowMs && t.occurredAt <= now);
+  const t20s = tape.filter(t => t.occurredAt >= now - 20000 && t.occurredAt <= now);
+
+  if (t5s.length < rules.momentumEntry.minTrades5s) {
+    reasons.push('TRADES5S_LT_LIMIT');
+  }
+
+  const buyers = new Set(t5s.filter(t => t.side === 'buy' && t.wallet).map(t => t.wallet!));
+  if (buyers.size < rules.momentumEntry.minBuyers5s) {
+    reasons.push('BUYERS_LT_LIMIT');
+  }
+
+  let buyUsd = 0;
+  let totalUsd5s = 0;
+  let topBuyerVol = 0;
+  const buyerVols = new Map<string, number>();
+
+  let firstPrice = t5s[0]?.priceUsd;
+  let lastPrice = t5s[t5s.length - 1]?.priceUsd;
+  let maxPrice = firstPrice;
+  
+  for (const t of t5s) {
+    if (!t.usd || !t.priceUsd) continue;
+    totalUsd5s += t.usd;
+    if (t.priceUsd > (maxPrice ?? 0)) maxPrice = t.priceUsd;
+    if (t.side === 'buy') {
+      buyUsd += t.usd;
+      if (t.wallet) {
+        const v = (buyerVols.get(t.wallet) ?? 0) + t.usd;
+        buyerVols.set(t.wallet, v);
+        if (v > topBuyerVol) topBuyerVol = v;
+      }
+    }
+  }
+
+  if (buyUsd < rules.momentumEntry.minBuyUsd5s) reasons.push('BUY_USD_LT_LIMIT');
+  if (buyUsd > 0 && (topBuyerVol / buyUsd) > rules.momentumEntry.maxTopBuyerShare) reasons.push('TOP_BUYER_GT_LIMIT');
+
+  const buyShare5s = totalUsd5s > 0 ? buyUsd / totalUsd5s : 0;
+  if (buyShare5s < rules.momentumEntry.minBuyShare5s) reasons.push('BUY_SHARE_5S_LT_LIMIT');
+
+  let return5s = 0;
+  let slope5s = 0;
+  let drawdown5s = 0;
+  if (firstPrice && lastPrice && firstPrice > 0) {
+    return5s = ((lastPrice - firstPrice) / firstPrice) * 100;
+    slope5s = return5s / 5.0; // % per second over 5s
+    if (maxPrice && maxPrice > 0) {
+      drawdown5s = ((maxPrice - lastPrice) / maxPrice) * 100;
+    }
+  } else {
+    reasons.push('PRICE_INVALID');
+  }
+
+  if (return5s < rules.momentumEntry.return5sPct[0] || return5s > rules.momentumEntry.return5sPct[1]) reasons.push('RETURN5S_OUT_OF_BOUNDS');
+  if (slope5s <= 0) reasons.push('SLOPE_LE_0');
+  if (drawdown5s > rules.momentumEntry.maxDrawdown5sPct) reasons.push('DRAWDOWN5S_GT_LIMIT');
+
+  // Buy Share 20s
+  let totalUsd20s = 0;
+  let buyUsd20s = 0;
+  for (const t of t20s) {
+    if (!t.usd) continue;
+    totalUsd20s += t.usd;
+    if (t.side === 'buy') buyUsd20s += t.usd;
+  }
+  const buyShare20s = totalUsd20s > 0 ? buyUsd20s / totalUsd20s : 0;
+  const req20s = return5s >= rules.momentumEntry.adaptiveBuyShare20s.highVolatilityThreshold
+    ? rules.momentumEntry.adaptiveBuyShare20s.highVolatilityReq
+    : rules.momentumEntry.adaptiveBuyShare20s.base;
+  if (buyShare20s < req20s) reasons.push('ADAPTIVE_BUY_SHARE_20S_FAIL');
+
+  return {
+    allowed: reasons.length === 0,
+    reasons,
+    metrics: { return5s, slope5s, buyShare5s, buyShare20s, buyUsd, trades: t5s.length, buyers: buyers.size, drawdown5s },
+    version: rules.version
+  };
+}
+
+export function assessMomentumAdaptiveWaveExit(
+  p: MomentumPosition,
+  tick: TapeTrade,
+  tape: TapeTrade[]
+) {
+  const now = tick.observedAt;
+  if (!tick.priceUsd) return null;
+  const rawRet = ((tick.priceUsd - p.entry) / p.entry) * 100;
+  // Approximation of fees: 2% GMGN + 1% network = 3% total deduction to find net return
+  const feeDeductionPct = 3.0;
+  const netReturnPct = rawRet - feeDeductionPct;
+  const rawPeak = ((p.peak - p.entry) / p.entry) * 100;
+  const peakNetReturnPct = rawPeak - feeDeductionPct;
+
+  const rules = MOMENTUM_ADAPTIVE_WAVE_RULES.adaptiveExit;
+  const holdSec = (now - p.openedAt) / 1000;
+
+  // Compute 5s tape properties for exit
+  const windowMs = 5000;
+  const t5s = tape.filter(t => t.occurredAt >= now - windowMs && t.occurredAt <= now);
+  
+  let totalUsd = 0;
+  let sellUsd = 0;
+  let sellers = new Set<string>();
+  
+  let firstPrice = t5s[0]?.priceUsd;
+  let lastPrice = t5s[t5s.length - 1]?.priceUsd;
+  let slope5s = 0;
+  let sockCollapse1s = null;
+  
+  if (firstPrice && lastPrice && firstPrice > 0) {
+    slope5s = ((lastPrice - firstPrice) / firstPrice) * 100 / 5.0;
+  }
+  
+  const t1s = tape.filter(t => t.occurredAt >= now - 1000 && t.occurredAt <= now);
+  if (t1s.length > 0 && t1s[0]?.priceUsd && t1s[t1s.length-1]?.priceUsd) {
+    sockCollapse1s = ((t1s[t1s.length-1].priceUsd! - t1s[0].priceUsd!) / t1s[0].priceUsd!) * 100;
+  }
+
+  for (const t of t5s) {
+    if (!t.usd) continue;
+    totalUsd += t.usd;
+    if (t.side === 'sell') {
+      sellUsd += t.usd;
+      if (t.wallet) sellers.add(t.wallet);
+    }
+  }
+
+  const sellShare5s = totalUsd > 0 ? sellUsd / totalUsd : 0;
+  const buyShare5s = totalUsd > 0 ? (totalUsd - sellUsd) / totalUsd : 0;
+
+  // 1. Emergency Abort
+  let reason: string | null = null;
+  if (sockCollapse1s != null && sockCollapse1s <= rules.flashCrash1sPct && sellShare5s >= 0.70) reason = 'FLASH_CRASH_ABORT';
+  else if (netReturnPct <= rules.hardStopNetPct) reason = 'HARD_RISK_LIMIT';
+  // 2. Flow Broken
+  else if (sellShare5s >= 0.70 && sellUsd >= 150 && sellers.size >= 3 && slope5s < 0) reason = 'FLOW_BROKEN';
+  // 3. Stagnation
+  else if (holdSec >= rules.stagnation.minHoldSec && peakNetReturnPct < rules.stagnation.maxPeakPct && buyShare5s < rules.stagnation.breakFlowShare) reason = 'STAGNATION_DECAY';
+  // 4. Time Limit
+  else if (holdSec >= 90) reason = 'MAX_HOLD_TIME';
+  // 5. Contextual Take Profit
+  else if (netReturnPct >= rules.contextualTp.minNetPct && buyShare5s < rules.contextualTp.flowReversalShare) reason = 'CONTEXTUAL_TP';
+  // 6. Adaptive Runner Trailing
+  else {
+    let activeFloor = -Infinity;
+    if (peakNetReturnPct >= rules.breakeven.activationPeakPct) {
+      activeFloor = Math.max(activeFloor, rules.breakeven.floorNetPct);
+    }
+    for (const t of rules.trailing) {
+      if (peakNetReturnPct >= t.peakMin && peakNetReturnPct < t.peakMax) {
+        const trailFloor = peakNetReturnPct - t.trailDistPct;
+        activeFloor = Math.max(activeFloor, trailFloor);
+      }
+    }
+    if (activeFloor !== -Infinity && netReturnPct <= activeFloor) {
+      reason = peakNetReturnPct >= 12.0 ? 'ADAPTIVE_TRAILING_STOP' : 'BREAKEVEN_FLOOR';
+    }
+  }
+
+  if (reason) {
+    return {
+      reason,
+      observedAt: now,
+      priceUsd: tick.priceUsd,
+      returnPercent: rawRet,
+      peakReturnPercent: rawPeak,
+    };
+  }
+  return null;
+}
