@@ -13,7 +13,7 @@ import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, asse
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
-import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAdaptiveWaveEntry, assessMomentumAdaptiveWaveExit, MOMENTUM_ADAPTIVE_WAVE_RULES, assessMomentumAggressiveExit, calculateDynamicWaveTarget, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_AGGRESSIVE_WAVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAdaptiveWaveEntry, assessMomentumAdaptiveWaveExit, MOMENTUM_ADAPTIVE_WAVE_RULES, assessMomentumAggressiveExit, calculateDynamicWaveTarget, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 import { ResearchHolderStore, type ResearchTrackedHolder } from './research-holder-store.js';
@@ -141,7 +141,7 @@ type TrackedHolder = ResearchTrackedHolder;
 type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
 const holderApiStatus = new Map<string, HolderApiStatus>();
 const developerHolderApiStatus = new Map<string, HolderApiStatus>();
-type PaperLane = 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'momentum-v2' | 'momentum-v3' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
+type PaperLane = 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'adaptive-wave' | 'momentum-v2' | 'momentum-v3' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
 const PAPER_LANES = Object.freeze({
   control: { id: 'control' as const, label: momentumAggressive ? 'momentum-aggressive-safe' : standaloneMomentumV3 ? 'momentum-v3-control' : 'momentum-v2-control' },
   aggressiveSafe: { id: 'aggressive-safe' as const, label: 'momentum-aggressive-safe' },
@@ -149,6 +149,7 @@ const PAPER_LANES = Object.freeze({
   aggressiveWide: { id: 'aggressive-wide' as const, label: 'momentum-aggressive-wide' },
   aggressiveSwing100k: { id: 'aggressive-swing-100k' as const, label: 'momentum-aggressive-swing-100k' },
   aggressiveWave: { id: 'aggressive-wave' as const, label: 'momentum-aggressive-wave' },
+  adaptiveWave: { id: 'adaptive-wave' as const, label: 'momentum-adaptive-wave-v1' },
   momentumV2: { id: 'momentum-v2' as const, label: 'momentum-v2' },
   momentumV3: { id: 'momentum-v3' as const, label: 'momentum-v3' },
   r5Band: { id: 'r5-band' as const, label: 'momentum-v2-r5-band' },
@@ -2637,11 +2638,18 @@ async function worker(index: number, deadline: number) {
           const createdAt = candidate?.fields.createdAt?.value ?? candidate?.fields.tradingStartedAt?.value;
           const tokenAgeSec = typeof createdAt === "number" ? (now - createdAt * (createdAt < 1e12 ? 1000 : 1)) / 1000 : null;
           const aggressiveWaveEntry = momentumAggressive
-            ? assessMomentumAdaptiveWaveEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, top5Pct, candidateMC, tokenAgeSec, currentHolderCount)
+            ? assessMomentumAggressiveWaveEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, candidateMC)
             : null;
           const aggressiveWaveBuyAllowed = momentumAggressive
             && waveMcAllowed
             && (aggressiveWaveEntry?.allowed ?? false);
+          
+          const adaptiveWaveEntry = momentumAggressive
+            ? assessMomentumAdaptiveWaveEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, top5Pct, candidateMC, tokenAgeSec, currentHolderCount)
+            : null;
+          const adaptiveWaveBuyAllowed = momentumAggressive
+            && waveMcAllowed
+            && (adaptiveWaveEntry?.allowed ?? false);
           const r5BandBuyAllowed = r5BandEnabled && baseBuyAllowed && (r5BandEntry?.allowed ?? false);
           const laneAtPaperLimit = (paperLane: PaperLane) => maxPaperBuys !== null && simulatedEvents.filter(event => event.type === 'SIMULATED_BUY' && event.paperLane === paperLane).length >= maxPaperBuys;
           const requestedLane = (values.onlyLane || values.lane || '').trim();
@@ -2667,6 +2675,10 @@ async function worker(index: number, deadline: number) {
           const waveCanReenter = !waveState || (waveState.closed && now - (waveState.closedAt ?? 0) >= 5_000);
           const canOpenAggressiveWave = allowLane(PAPER_LANES.aggressiveWave.id)
             && aggressiveWaveBuyAllowed && waveCanReenter && !laneAtPaperLimit(PAPER_LANES.aggressiveWave.id);
+          const adaptiveWaveState = momentumLaneStates.get(PAPER_LANES.adaptiveWave.id);
+          const adaptiveWaveCanReenter = !adaptiveWaveState || (adaptiveWaveState.closed && now - (adaptiveWaveState.closedAt ?? 0) >= 5_000);
+          const canOpenAdaptiveWave = allowLane(PAPER_LANES.adaptiveWave.id)
+            && adaptiveWaveBuyAllowed && adaptiveWaveCanReenter && !laneAtPaperLimit(PAPER_LANES.adaptiveWave.id);
           const canOpenMomentumV2 = allowLane(PAPER_LANES.momentumV2.id)
             && momentumAggressive && v2ControlBuyAllowed && (momentumEntry?.allowed ?? false) && !momentumLaneStates.has(PAPER_LANES.momentumV2.id) && !laneAtPaperLimit(PAPER_LANES.momentumV2.id);
           const canOpenMomentumV3 = allowLane(PAPER_LANES.momentumV3.id)
@@ -2683,7 +2695,7 @@ async function worker(index: number, deadline: number) {
           const canOpenR5Band = allowLane(PAPER_LANES.r5Band.id)
             && r5BandBuyAllowed && !momentumLaneStates.has(PAPER_LANES.r5Band.id) && !laneAtPaperLimit(PAPER_LANES.r5Band.id);
 
-          if (canOpenControl || canOpenAggressiveSafe || canOpenAggressiveOptimal || canOpenAggressiveWide || canOpenAggressiveSwing100k || canOpenAggressiveWave || canOpenMomentumV2 || canOpenMomentumV3 || canOpenV3 || canOpenR5Band) {
+          if (canOpenControl || canOpenAggressiveSafe || canOpenAggressiveOptimal || canOpenAggressiveWide || canOpenAggressiveSwing100k || canOpenAggressiveWave || canOpenAdaptiveWave || canOpenMomentumV2 || canOpenMomentumV3 || canOpenV3 || canOpenR5Band) {
             const autoBuyCfg = getAutoBuySettings();
             const configStakeUsd = Number(autoBuyCfg.stakeUsd) > 0 ? Number(autoBuyCfg.stakeUsd) : simulationStakeUsd;
             const effectiveStakeUsd = autoBuyCfg.stakeMode === 'sol' && (detailSolSpot?.usd || solSpotCache?.usd || 150) > 0 && autoBuyCfg.stakeSol > 0
@@ -2702,7 +2714,7 @@ async function worker(index: number, deadline: number) {
                     ? 'MOMENTUM_V3_ENTRY_PASSED'
                     : paperLane === PAPER_LANES.v3.id
                       ? 'MOMENTUM_V3_ENTRY_PASSED'
-                      : paperLane === PAPER_LANES.aggressiveWave.id
+                        : paperLane === PAPER_LANES.aggressiveWave.id
                         ? 'MOMENTUM_AGGRESSIVE_WAVE_ENTRY_PASSED'
                         : paperLane === PAPER_LANES.aggressiveSwing100k.id
                         ? 'MOMENTUM_AGGRESSIVE_SWING_100K_ENTRY_PASSED'
@@ -2723,7 +2735,7 @@ async function worker(index: number, deadline: number) {
                 decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
               });
               write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal); scheduleSimulatedOrder(entrySignal, effectiveStakeUsd);
-              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
+              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
                 scheduleBuyRouteComparison(page, entrySignal, effectiveStakeUsd, detailSolSpot);
 
                 const currentAutoBuyCfg = getAutoBuySettings();
@@ -2752,7 +2764,7 @@ async function worker(index: number, deadline: number) {
                   });
                 }
               }
-              const waveTargetAnalysis = paperLane === PAPER_LANES.aggressiveWave.id
+              const waveTargetAnalysis = (paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id)
                 ? calculateDynamicWaveTarget(latestCandles, candidateMC)
                 : null;
               if (waveTargetAnalysis) {
@@ -2762,7 +2774,7 @@ async function worker(index: number, deadline: number) {
               momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false, whaleSellPendingAt: null, closedAt: null });
               writeSimulation({ type: 'SIMULATED_BUY', paperLane, mint, worker: index, observedAt: entryDecisionAt, timing: entrySignal, positionId: entrySignal.positionId,
                 entryPriceUsd: price, stakeUsd: paperPosition.stakeUsd, quantity: paperPosition.quantity,
-                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, aggressiveSafe: momentumAggressive ? aggressiveSafeEntry : null, aggressiveOptimal: momentumAggressive ? aggressiveOptimalEntry : null, aggressiveWide: momentumAggressive ? aggressiveWideEntry : null, aggressiveSwing100k: momentumAggressive ? aggressiveSwing100kEntry : null, aggressiveWave: momentumAggressive ? aggressiveWaveEntry : null, aggressiveWaveTarget: waveTargetAnalysis, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
+                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, aggressiveSafe: momentumAggressive ? aggressiveSafeEntry : null, aggressiveOptimal: momentumAggressive ? aggressiveOptimalEntry : null, aggressiveWide: momentumAggressive ? aggressiveWideEntry : null, aggressiveSwing100k: momentumAggressive ? aggressiveSwing100kEntry : null, aggressiveWave: momentumAggressive ? aggressiveWaveEntry : null, adaptiveWave: momentumAggressive ? adaptiveWaveEntry : null, aggressiveWaveTarget: waveTargetAnalysis, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
                 assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper lane only; no GMGN order is submitted.' } });
               return paperPosition;
             };
@@ -2815,8 +2827,16 @@ async function worker(index: number, deadline: number) {
                   'MOMENTUM_AGGRESSIVE_WAVE_ENTRY_PASSED'
                 );
               }
-              if (canOpenMomentumV2) {
+              if (canOpenAdaptiveWave) {
                 if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide && !canOpenAggressiveSwing100k && !canOpenAggressiveWave) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.adaptiveWave.id,
+                  adaptiveWaveEntry,
+                  'MOMENTUM_ADAPTIVE_WAVE_ENTRY_PASSED'
+                );
+              }
+              if (canOpenMomentumV2) {
+                if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide && !canOpenAggressiveSwing100k && !canOpenAggressiveWave && !canOpenAdaptiveWave) paperBuyCount++;
                 openMomentumLane(
                   PAPER_LANES.momentumV2.id,
                   momentumEntry,
@@ -2879,8 +2899,10 @@ async function worker(index: number, deadline: number) {
                     }
                   }
                   const decision = momentumAggressive
-                    ? (paperLane === PAPER_LANES.aggressiveWave.id
+                    ? (paperLane === PAPER_LANES.adaptiveWave.id
                         ? (assessMomentumAdaptiveWaveExit(state.riskState, tick, momentumTape.get(mint) ?? []) as any)
+                        : paperLane === PAPER_LANES.aggressiveWave.id
+                        ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_WAVE_RULES)
                         : paperLane === PAPER_LANES.aggressiveSwing100k.id
                         ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_SWING_100K_RULES)
                         : paperLane === PAPER_LANES.aggressiveWide.id
@@ -2970,7 +2992,7 @@ async function worker(index: number, deadline: number) {
                     reason: exitReason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
                     decisionAt: exitDecisionAt, paperRecordedAt: Date.now(), priceUsd: decision.priceUsd });
                   write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
-                  if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
+              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
                     scheduleSellRouteComparison(page, exitSignal);
                     const realPos = liveBrowserPositions.get(mint);
                     const isRealPositionMatch = realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
@@ -3017,7 +3039,7 @@ async function worker(index: number, deadline: number) {
                 console.log('[paper-only]', candidate?.metadata?.symbol ?? mint, 'Simulated buy opened; real UI buy click skipped (autoBuy=false)');
               }
             }
-            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenAggressiveSafe && PAPER_LANES.aggressiveSafe.id, canOpenAggressiveOptimal && PAPER_LANES.aggressiveOptimal.id, canOpenAggressiveWide && PAPER_LANES.aggressiveWide.id, canOpenAggressiveSwing100k && PAPER_LANES.aggressiveSwing100k.id, canOpenAggressiveWave && PAPER_LANES.aggressiveWave.id, canOpenMomentumV2 && PAPER_LANES.momentumV2.id, canOpenMomentumV3 && PAPER_LANES.momentumV3.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
+            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenAggressiveSafe && PAPER_LANES.aggressiveSafe.id, canOpenAggressiveOptimal && PAPER_LANES.aggressiveOptimal.id, canOpenAggressiveWide && PAPER_LANES.aggressiveWide.id, canOpenAggressiveSwing100k && PAPER_LANES.aggressiveSwing100k.id, canOpenAggressiveWave && PAPER_LANES.aggressiveWave.id, canOpenAdaptiveWave && PAPER_LANES.adaptiveWave.id, canOpenMomentumV2 && PAPER_LANES.momentumV2.id, canOpenMomentumV3 && PAPER_LANES.momentumV3.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
           } else if (maxPaperBuys !== null && (v2ControlBuyAllowed || v3ControlBuyAllowed) && !trialLimitRecorded) {
             trialLimitRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
@@ -3411,7 +3433,7 @@ async function main() {
         [PAPER_LANES.aggressiveOptimal.id]: { label: PAPER_LANES.aggressiveOptimal.label, entry: MOMENTUM_AGGRESSIVE_OPTIMAL_RULES },
         [PAPER_LANES.aggressiveWide.id]: { label: PAPER_LANES.aggressiveWide.label, entry: MOMENTUM_AGGRESSIVE_WIDE_RULES },
         [PAPER_LANES.aggressiveSwing100k.id]: { label: PAPER_LANES.aggressiveSwing100k.label, entry: MOMENTUM_AGGRESSIVE_SWING_100K_RULES },
-        [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_ADAPTIVE_WAVE_RULES },
+        [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_AGGRESSIVE_WAVE_RULES }, [PAPER_LANES.adaptiveWave.id]: { label: PAPER_LANES.adaptiveWave.label, entry: MOMENTUM_ADAPTIVE_WAVE_RULES },
         [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES },
         [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } },
       } : {
@@ -3444,7 +3466,7 @@ async function main() {
         sellSignal: '20% drawdown from observed price peak or observation window end', maximumExitPriceAgeMs: 5_000,
         feeUsd: 0, slippagePercent: 0, maxPaperBuys }, tradePreparation: { enabled: false, autoBuyEnabled: false } }, null, 2));
   } else {
-    if (!existsSync(join(output, 'manifest.json'))) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumResearch ? { ...(momentumAggressive ? { [PAPER_LANES.control.id]: { label: 'Raw Aggressive (Baseline)', entry: MOMENTUM_AGGRESSIVE_RULES }, [PAPER_LANES.aggressiveSafe.id]: { label: PAPER_LANES.aggressiveSafe.label, entry: MOMENTUM_AGGRESSIVE_SAFE_RULES }, [PAPER_LANES.aggressiveOptimal.id]: { label: PAPER_LANES.aggressiveOptimal.label, entry: MOMENTUM_AGGRESSIVE_OPTIMAL_RULES }, [PAPER_LANES.aggressiveWide.id]: { label: PAPER_LANES.aggressiveWide.label, entry: MOMENTUM_AGGRESSIVE_WIDE_RULES }, [PAPER_LANES.aggressiveSwing100k.id]: { label: PAPER_LANES.aggressiveSwing100k.label, entry: MOMENTUM_AGGRESSIVE_SWING_100K_RULES }, [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_ADAPTIVE_WAVE_RULES }, [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES }, [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: standaloneMomentumV3 ? MOMENTUM_V3_RULES : undefined } }), ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES }, [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: 'immediate when underwater or flow/holders do not support holding; otherwise 5-second confirmation with 2 of 3 bearish signals', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}) } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
+    if (!existsSync(join(output, 'manifest.json'))) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumResearch ? { ...(momentumAggressive ? { [PAPER_LANES.control.id]: { label: 'Raw Aggressive (Baseline)', entry: MOMENTUM_AGGRESSIVE_RULES }, [PAPER_LANES.aggressiveSafe.id]: { label: PAPER_LANES.aggressiveSafe.label, entry: MOMENTUM_AGGRESSIVE_SAFE_RULES }, [PAPER_LANES.aggressiveOptimal.id]: { label: PAPER_LANES.aggressiveOptimal.label, entry: MOMENTUM_AGGRESSIVE_OPTIMAL_RULES }, [PAPER_LANES.aggressiveWide.id]: { label: PAPER_LANES.aggressiveWide.label, entry: MOMENTUM_AGGRESSIVE_WIDE_RULES }, [PAPER_LANES.aggressiveSwing100k.id]: { label: PAPER_LANES.aggressiveSwing100k.label, entry: MOMENTUM_AGGRESSIVE_SWING_100K_RULES }, [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_AGGRESSIVE_WAVE_RULES }, [PAPER_LANES.adaptiveWave.id]: { label: PAPER_LANES.adaptiveWave.label, entry: MOMENTUM_ADAPTIVE_WAVE_RULES }, [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES }, [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: standaloneMomentumV3 ? MOMENTUM_V3_RULES : undefined } }), ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES }, [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: 'immediate when underwater or flow/holders do not support holding; otherwise 5-second confirmation with 2 of 3 bearish signals', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}) } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   }
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
@@ -3493,6 +3515,7 @@ async function main() {
       [PAPER_LANES.aggressiveWide.id]: summarizeLane(PAPER_LANES.aggressiveWide.id),
       [PAPER_LANES.aggressiveSwing100k.id]: summarizeLane(PAPER_LANES.aggressiveSwing100k.id),
       [PAPER_LANES.aggressiveWave.id]: summarizeLane(PAPER_LANES.aggressiveWave.id),
+      [PAPER_LANES.adaptiveWave.id]: summarizeLane(PAPER_LANES.adaptiveWave.id),
       [PAPER_LANES.momentumV2.id]: summarizeLane(PAPER_LANES.momentumV2.id),
       [PAPER_LANES.momentumV3.id]: summarizeLane(PAPER_LANES.momentumV3.id),
     } : {

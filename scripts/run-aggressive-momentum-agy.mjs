@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 import { getWibSlot, syncSingleRunToSqlite } from './crypto-db.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
