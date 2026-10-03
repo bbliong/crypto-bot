@@ -746,6 +746,7 @@ async function getAggressiveDashboardData(targetRunId) {
       const wideTrades = closedTrades.filter(t => t.lane === 'aggressive-wide');
       const swing100kTrades = closedTrades.filter(t => t.lane === 'aggressive-swing-100k');
       const waveTrades = closedTrades.filter(t => t.lane === 'aggressive-wave');
+      const adaptiveTrades = closedTrades.filter(t => t.lane === 'adaptive-wave');
       const v2Trades = closedTrades.filter(t => t.lane === 'momentum-v2');
       const v3Trades = closedTrades.filter(t => t.lane === 'momentum-v3');
       const r5Trades = closedTrades.filter(t => t.lane === 'r5-band');
@@ -789,6 +790,7 @@ async function getAggressiveDashboardData(targetRunId) {
           wide: { ...wideSummary, dumpPreventedCount: 0 },
           swing100k: { ...swing100kSummary, dumpPreventedCount: 0 },
           wave: { ...waveSummary, dumpPreventedCount: 0 },
+          adaptive: { ...summarizeMetrics(adaptiveTrades), dumpPreventedCount: 0 },
           v2: { ...v2Summary, dumpPreventedCount: 0 },
           v3: { ...v3Summary, dumpPreventedCount: 0 },
           r5: { ...r5Summary, dumpPreventedCount: 0 },
@@ -884,7 +886,7 @@ async function getAggressiveDashboardData(targetRunId) {
 
   for (const buy of buys) {
     const lane = buy.paperLane || 'control';
-    const laneLabel = lane === 'aggressive-wave' ? 'Wave Scalper Aggressive' : lane === 'aggressive-swing-100k' ? 'Swing 100k Aggressive' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
+    const laneLabel = lane === 'adaptive-wave' ? 'Adaptive Wave V1' : lane === 'aggressive-wave' ? 'Wave Scalper Aggressive' : lane === 'aggressive-swing-100k' ? 'Swing 100k Aggressive' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
     const posId = buy.positionId || `${buy.mint}:${buy.observedAt}:${lane}`;
     const sell = sellsByPosition.get(posId) || sells.find(s => s.mint === buy.mint && ((s.paperLane || 'control') === lane)) || sellsByMint.get(buy.mint);
     const buyQuotes = quotesByPosition.get(posId)
@@ -1110,6 +1112,7 @@ async function getAggressiveDashboardData(targetRunId) {
   const wideTrades = closedTrades.filter(t => t.lane === 'aggressive-wide');
   const swing100kTrades = closedTrades.filter(t => t.lane === 'aggressive-swing-100k');
   const waveTrades = closedTrades.filter(t => t.lane === 'aggressive-wave');
+      const adaptiveTrades = closedTrades.filter(t => t.lane === 'adaptive-wave');
   const v2Trades = closedTrades.filter(t => t.lane === 'momentum-v2');
   const v3Trades = closedTrades.filter(t => t.lane === 'momentum-v3');
   const r5Trades = closedTrades.filter(t => t.lane === 'r5-band');
@@ -1192,6 +1195,7 @@ async function getAggressiveDashboardData(targetRunId) {
       wide: { ...wideSummary, dumpPreventedCount },
       swing100k: { ...swing100kSummary, dumpPreventedCount: 0 },
       wave: { ...waveSummary, dumpPreventedCount: 0 },
+          adaptive: { ...summarizeMetrics(adaptiveTrades), dumpPreventedCount: 0 },
       v2: { ...v2Summary, dumpPreventedCount: 0 },
       v3: { ...v3Summary, dumpPreventedCount: 0 },
       r5: { ...r5Summary, dumpPreventedCount: 0 },
@@ -1746,6 +1750,7 @@ function renderHtml() {
     .tag-lane-wide { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     .tag-lane-swing { background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
     .tag-lane-wave { background: rgba(20, 184, 166, 0.2); color: #2dd4bf; border: 1px solid rgba(45, 212, 191, 0.4); }
+    .tag-lane-adaptive { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.4); }
     .tag-lane-v2 { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); }
     .tag-lane-v3 { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
     .tag-lane-r5 { background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
@@ -2156,6 +2161,10 @@ function renderHtml() {
     .lane-card-wave {
       background: rgba(13, 148, 136, 0.22);
       border: 1px solid rgba(45, 212, 191, 0.4);
+    }
+    .lane-card-adaptive {
+      background: rgba(6, 78, 59, 0.22);
+      border: 1px solid rgba(52, 211, 153, 0.4);
     }
     .lane-card-v2 {
       background: rgba(30, 58, 138, 0.22);
@@ -2779,11 +2788,11 @@ function renderHtml() {
         </div>
       </div>
 
-      <!-- Wave Scalper Lane Card -->
+      <!-- Original Wave Scalper Lane Card -->
       <div class="lane-card lane-card-wave">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-weight: 800; font-size: 0.88rem; color: #2dd4bf;">⚡ ADAPTIVE WAVE V1</span>
-          <span class="tag tag-lane-wave">Smart Momentum · Max -6% Loss</span>
+          <span style="font-weight: 800; font-size: 0.88rem; color: #2dd4bf;">⚡ AGGRESSIVE WAVE</span>
+          <span class="tag tag-lane-wave">Wave Maximizer · Min +20%</span>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
           <div>
@@ -2799,6 +2808,29 @@ function renderHtml() {
         </div>
         <div id="waveTrapNote" style="font-size: 0.66rem; color: #99f6e4; border-top: 1px dashed rgba(45, 212, 191, 0.3); padding-top: 5px;">
           ⚡ Rules: Target Dinamis ATH (Min +20%) | Runner Trail 5% (&ge;18%) | Breakeven +10% | Turun Ditunggu (Stop -6.0%)
+        </div>
+      </div>
+
+      <!-- New Adaptive Wave V1 Card -->
+      <div class="lane-card lane-card-adaptive">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 800; font-size: 0.88rem; color: #34d399;">💎 ADAPTIVE WAVE V1</span>
+          <span class="tag tag-lane-adaptive">Smart Momentum · Max -6% Loss</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div>
+            <div class="kpi-label">Real Win Rate</div>
+            <div id="adaptiveRealWinRate" class="kpi-value mono">0.0%</div>
+            <div id="adaptiveRealScore" class="kpi-sub">0W / 0L</div>
+          </div>
+          <div>
+            <div class="kpi-label">Net Real Profit ($)</div>
+            <div id="adaptiveRealPnl" class="kpi-value mono">$0.0000</div>
+            <div id="adaptiveSocketScore" class="kpi-sub" style="color: #34d399;">Socket: 0.0% ($0.00)</div>
+          </div>
+        </div>
+        <div id="adaptiveTrapNote" style="font-size: 0.66rem; color: #a7f3d0; border-top: 1px dashed rgba(52, 211, 153, 0.3); padding-top: 5px;">
+          💎 Rules: Strict Entry (MC 10k-100k, Vol 300+) | Trail Runner | Auto Breakeven
         </div>
       </div>
 
@@ -2983,7 +3015,8 @@ function renderHtml() {
           <button id="btnFilterOptimal" class="btn-filter" onclick="setLaneFilter('aggressive-optimal')">🟣 Optimal</button>
           <button id="btnFilterWide" class="btn-filter" onclick="setLaneFilter('aggressive-wide')">🟠 Wide</button>
           <button id="btnFilterSwing" class="btn-filter" onclick="setLaneFilter('aggressive-swing-100k')">🌊 Swing 100k</button>
-          <button id="btnFilterWave" class="btn-filter" onclick="setLaneFilter('aggressive-wave')">⚡ Adaptive Wave V1</button>
+          <button id="btnFilterWave" class="btn-filter" onclick="setLaneFilter('aggressive-wave')">⚡ Aggressive Wave</button>
+          <button id="btnFilterAdaptive" class="btn-filter" onclick="setLaneFilter('adaptive-wave')">💎 Adaptive Wave V1</button>
           <button id="btnFilterSafe" class="btn-filter" onclick="setLaneFilter('aggressive-safe')">🟢 Safe</button>
           <button id="btnFilterV2" class="btn-filter" onclick="setLaneFilter('momentum-v2')">🔵 V2</button>
           <button id="btnFilterV3" class="btn-filter" onclick="setLaneFilter('momentum-v3')">✨ V3</button>
@@ -3151,7 +3184,8 @@ function renderHtml() {
           <select id="cfgLane" class="config-select">
             <option value="aggressive-optimal">🟣 Aggressive Optimal (Rekomendasi)</option>
             <option value="aggressive-swing-100k">🌊 Swing 100k ($10k-$100k MC)</option>
-            <option value="aggressive-wave">⚡ Adaptive Wave V1 (Sangat Direkomendasikan: Real Win Rate 40%)</option>
+            <option value="aggressive-wave">⚡ Aggressive Wave (Wave Maximizer: Min +20% Target, Trail Runner)</option>
+            <option value="adaptive-wave">⚡ Adaptive Wave V1 (Sangat Direkomendasikan: Real Win Rate 40%)</option>
             <option value="aggressive-safe">🟢 Safe Aggressive (Baseline)</option>
             <option value="aggressive-wide">🟠 Wide Aggressive (-6% Stop)</option>
             <option value="momentum-v2">🔵 Momentum V2 (2x Snapshot)</option>
@@ -3972,8 +4006,8 @@ function renderHtml() {
       const tradePnlVal = t.tradePnlUsd != null ? t.tradePnlUsd : t.pnlUsd;
       const swapPnlVal = t.swapPnlUsd != null ? t.swapPnlUsd : t.pnlUsd;
       const swapPnlClass = swapPnlVal >= 0 ? 'up' : 'down';
-      const laneBadge = t.lane === 'aggressive-wave'
-        ? '<span class="tag tag-lane-wave">ADAPTIVE WAVE V1</span>'
+      const laneBadge = t.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : t.lane === 'aggressive-wave'
+        ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
         : t.lane === 'aggressive-swing-100k'
         ? '<span class="tag tag-lane-swing">SWING 100K</span>'
         : t.lane === 'r5-band'
@@ -4093,8 +4127,8 @@ function renderHtml() {
     }
 
     function renderRealTradeRow(t) {
-      const laneBadge = t.lane === 'aggressive-wave'
-        ? '<span class="tag tag-lane-wave">ADAPTIVE WAVE V1</span>'
+      const laneBadge = t.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : t.lane === 'aggressive-wave'
+        ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
         : t.lane === 'aggressive-swing-100k'
         ? '<span class="tag tag-lane-swing">SWING 100K</span>'
         : t.lane === 'r5-band'
@@ -4517,8 +4551,8 @@ function renderHtml() {
           const estRealReturn = p.floatingReturnPercent - 5.4;
           const estClass = estRealReturn >= 0 ? 'up' : 'down';
           const stagPct = Math.max(0, Math.min(100, (p.stagnationCountdownSec / 12) * 100));
-          const laneBadge = p.lane === 'aggressive-wave'
-            ? '<span class="tag tag-lane-wave">ADAPTIVE WAVE V1</span>'
+          const laneBadge = p.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : p.lane === 'aggressive-wave'
+            ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
             : p.lane === 'aggressive-swing-100k'
             ? '<span class="tag tag-lane-swing">SWING 100K</span>'
             : p.lane === 'r5-band'
@@ -4581,6 +4615,8 @@ function renderHtml() {
       if (btnWide) btnWide.className = 'btn-filter' + (lane === 'aggressive-wide' ? ' active' : '');
       if (btnSwing) btnSwing.className = 'btn-filter' + (lane === 'aggressive-swing-100k' ? ' active' : '');
       if (btnWave) btnWave.className = 'btn-filter' + (lane === 'aggressive-wave' ? ' active' : '');
+      const btnAdaptive = document.getElementById('btnFilterAdaptive');
+      if (btnAdaptive) btnAdaptive.className = 'btn-filter' + (lane === 'adaptive-wave' ? ' active' : '');
       if (btnSafe) btnSafe.className = 'btn-filter' + (lane === 'aggressive-safe' ? ' active' : '');
       if (btnV2) btnV2.className = 'btn-filter' + (lane === 'momentum-v2' ? ' active' : '');
       if (btnV3) btnV3.className = 'btn-filter' + (lane === 'momentum-v3' ? ' active' : '');
@@ -4822,6 +4858,25 @@ function renderHtml() {
               waveSocketEl.textContent = 'Socket: ' + s.wave.socketWinRate + '% (' + (s.wave.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.wave.totalNetTradePnlUsd.toFixed(2) + ')';
             }
           }
+          if (s.adaptive) {
+            const wrEl = document.getElementById('adaptiveRealWinRate');
+            if (wrEl) {
+              wrEl.textContent = s.adaptive.realWinRate + '%';
+              wrEl.className = 'kpi-value mono ' + (s.adaptive.realWinRate > 0 ? 'up' : (s.adaptive.closedTrades > 0 ? 'down' : ''));
+            }
+            const scoreEl = document.getElementById('adaptiveRealScore');
+            if (scoreEl) scoreEl.textContent = s.adaptive.realWins + 'W / ' + s.adaptive.realLosses + 'L (' + s.adaptive.closedTrades + ' closed)';
+            const pnlEl = document.getElementById('adaptiveRealPnl');
+            if (pnlEl) {
+              pnlEl.textContent = (s.adaptive.totalNetRealPnlUsd >= 0 ? '+' : '') + '$' + s.adaptive.totalNetRealPnlUsd.toFixed(4);
+              pnlEl.className = 'kpi-value mono ' + (s.adaptive.totalNetRealPnlUsd >= 0 ? 'up' : 'down');
+            }
+            const socketEl = document.getElementById('adaptiveSocketScore');
+            if (socketEl) {
+              socketEl.textContent = 'Socket: ' + s.adaptive.socketWinRate + '% (' + (s.adaptive.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.adaptive.totalNetTradePnlUsd.toFixed(2) + ')';
+            }
+          }
+
 
           // 🔵 Momentum V2 Lane Card
           if (s.v2) {
