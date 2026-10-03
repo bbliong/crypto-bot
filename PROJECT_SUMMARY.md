@@ -283,5 +283,177 @@ Dua unit service systemd aktif di level user (`~/.config/systemd/user/`):
 Bot membagi data ke dalam folder sesi 3 jam (WIB: 00-03, 03-06, 06-09, 09-12, 12-15, 15-18, 18-21, 21-24):
 1. **Deteksi Akhir Slot**: Saat waktu sesi berakhir, bot berhenti mengambil token baru.
 2. **Graceful Draining**: Menunggu seluruh posisi terbuka dan order in-flight selesai dieksekusi (maksimal 120 detik).
-3. **Auto-Archive SQLite**: Memanggil `syncSingleRunToSqlite()` untuk mengarsipkan seluruh metrik transaksi ke SQLite `data/crypto-runs.db`.
+3. **Auto-Archive SQLite**: Memanggil `syncSingleRunToSqlite()` untuk mengarsipkan seluruh metrik transaksi ke SQLite `data/crypto-bot.sqlite`.
 4. **Auto-Rotate**: Jeda 3 detik, lalu loop supervisor langsung otomatis membuka sesi 3 jam berikutnya tanpa menghentikan bot.
+
+---
+
+## 6. Rincian Lengkap Database SQLite (`data/crypto-bot.sqlite`)
+
+Sistem menggunakan SQLite bawaan Node.js (`node:sqlite` dengan mode WAL / Write-Ahead Logging) sebagai penyimpan data permanen berkecepatan tinggi.
+
+Terdapat 6 tabel utama di dalam database `data/crypto-bot.sqlite`:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                 DATABASE: crypto-bot.sqlite              │
+├─────────────────┬────────────────────────────────────────┤
+│ Tabel           │ Fungsi Utama                           │
+├─────────────────┼────────────────────────────────────────┤
+│ runs            │ Riwayat sesi 3-jam dan manifest        │
+│ trades          │ Sinyal & simulasi trade (7 lane)       │
+│ real_trades     │ Transaksi live on-chain Solana         │
+│ route_quotes    │ Polling quote AMM real-time 500ms      │
+│ app_settings    │ Konfigurasi runtime & AutoBuy          │
+│ token_metadata  │ Profil & kapitalisasi pasar token      │
+└─────────────────┴────────────────────────────────────────┘
+```
+
+---
+
+### A. Tabel `runs` (Manajemen Sesi)
+- **Tujuan**: Mencatat metadata setiap sesi pengamatan (3 jam per folder sesi).
+- **Kapan Dimasukkan / Diperbarui**:
+  - Dibuat saat sesi baru dimulai (`upsertRun`).
+  - Diperbarui saat sesi berakhir untuk merekam jumlah total trade (`trades_count`) dan status penutupan.
+- **Rincian Field**:
+  | Kolom | Tipe | Keterangan |
+  |---|---|---|
+  | `id` | `TEXT` [PK] | ID unik sesi (misal: `momentum-aggressive-2026-10-02T23-00-00-000Z`) |
+  | `path` | `TEXT` | Path folder sesi di disk (`research/...`) |
+  | `started_at` | `TEXT` | Timestamp ISO awal sesi dimulai |
+  | `friendly_label`| `TEXT` | Label jam WIB (misal: `06:00 - 09:00 WIB`) |
+  | `is_live` | `INTEGER` | `1` jika live auto-buy aktif, `0` jika paper mode |
+  | `trades_count` | `INTEGER` | Total transaksi yang tercatat dalam sesi ini |
+  | `manifest_json`| `TEXT` | JSON konfigurasi mesin browser, channel, dan setting worker |
+  | `strategy_json`| `TEXT` | JSON aturan strategi yang aktif pada sesi tersebut |
+  | `created_at` | `TEXT` | Waktu baris pertama kali dibuat di database |
+  | `updated_at` | `TEXT` | Waktu pembaruan terakhir data sesi |
+
+---
+
+### B. Tabel `trades` (Paper & Simulated Trades 7 Lane)
+- **Tujuan**: Merekam setiap posisi trading simulasi pada seluruh lane (Safe, Optimal, Wide, Swing, Wave, V2, V3) dari saat Buy hingga Sell.
+- **Kapan Dimasukkan / Diperbarui**:
+  - **Saat Entry (Buy)**: Baris dibuat dengan status `OPEN`, mencatat `entry_price`, `entry_time`, dan parameter lane.
+  - **Saat Exit (Sell)**: Baris di-update menjadi `CLOSED`, mengisi `exit_price`, `exit_time`, `exit_reason`, PnL, dan rute swap.
+- **Rincian Field**:
+  | Kolom | Tipe | Keterangan |
+  |---|---|---|
+  | `id` | `TEXT` [PK] | ID komposit unik (`runId:mint:lane:entryTime`) |
+  | `run_id` | `TEXT` | Relasi ke tabel `runs(id)` |
+  | `position_id` | `TEXT` | ID posisi internal bot |
+  | `mint` | `TEXT` | Alamat kontrak token Solana (CA) |
+  | `symbol` | `TEXT` | Ticker token (misal: `PEXRA`) |
+  | `name` | `TEXT` | Nama lengkap token |
+  | `lane` | `TEXT` | Kode lane (`aggressive-optimal`, `aggressive-wave`, dll.) |
+  | `lane_label` | `TEXT` | Label tampilan UI (misal: `Wave Maximizer`, `Optimal Aggressive`) |
+  | `worker` | `INTEGER` | Nomor worker Playwright yang mengeksekusi (1 atau 2) |
+  | `status` | `TEXT` | Status posisi: `OPEN` atau `CLOSED` |
+  | `entry_price` | `REAL` | Harga token saat sinyal beli valid (USD) |
+  | `entry_time` | `INTEGER` | Timestamp milidetik saat beli |
+  | `exit_price` | `REAL` | Harga token saat sinyal jual terpicu (USD) |
+  | `exit_time` | `INTEGER` | Timestamp milidetik saat jual |
+  | `duration_sec` | `INTEGER` | Lama waktu posisi terbuka (detik) |
+  | `exit_reason` | `TEXT` | Alasan keluar (`AGGRESSIVE_WAVE_TARGET_TP`, `AGGRESSIVE_RUNNER_TRAIL`, `AGGRESSIVE_HARD_STOP`, dll.) |
+  | `trade_return_percent`| `REAL` | Persentase profit/rugi berdasarkan harga WebSocket |
+  | `socket_return_percent`| `REAL` | Identik dengan return mentah WebSocket |
+  | `real_return_percent` | `REAL` | Return bersih setelah dipotong estimasi slippage & fee AMM Router |
+  | `trade_pnl_usd` | `REAL` | Keuntungan/kerugian kotor dalam USD |
+  | `swap_pnl_usd` | `REAL` | Keuntungan/kerugian bersih berdasarkan kuotasi rute AMM nyata |
+  | `is_win` | `INTEGER` | `1` jika profit $> 0$, `0` jika loss |
+  | `is_socket_win` | `INTEGER` | `1` jika return WebSocket $> 0$ |
+  | `is_real_win` | `INTEGER` | `1` jika return AMM riil $> 0$ |
+  | `swap_route_json` | `TEXT` | Detail JSON breakdown rute swap: input SOL, output token, slippage beli & jual |
+
+---
+
+### C. Tabel `real_trades` (Live On-Chain Solana Execution)
+- **Tujuan**: Merekam setiap transaksi uang riil yang dieksekusi di akun GMGN via dompet Solana browser.
+- **Kapan Dimasukkan / Diperbarui**:
+  - **Saat Beli Riil**: Dicatat saat klik beli live berhasil dikirim (`BROWSER_BUY_SUBMITTED`), mencatat TX Hash, Solscan URL, dan saldo terpotong.
+  - **Saat Jual Riil**: Di-update saat bot mengklik tombol sell di GMGN (`BROWSER_SELL_SUBMITTED`), mencatat income SOL yang diterima dan PnL riil dompet.
+- **Rincian Field**:
+  | Kolom | Tipe | Keterangan |
+  |---|---|---|
+  | `id` | `TEXT` [PK] | ID unik trade riil (`real:runId:mint:buyTime`) |
+  | `run_id` | `TEXT` | Relasi ke `runs(id)` |
+  | `mint` | `TEXT` | Alamat kontrak token (CA) |
+  | `symbol` / `name` | `TEXT` | Identitas token |
+  | `lane` / `lane_label` | `TEXT` | Lane pemicu pembelian live |
+  | `status` | `TEXT` | `HOLDING` (sedang dipegang) atau `CLOSED` (selesai dijual) |
+  | `buy_time` | `INTEGER` | Timestamp eksekusi beli di blockchain |
+  | `buy_ok` | `INTEGER` | `1` jika order sukses dikonfirmasi GMGN, `0` jika gagal |
+  | `buy_order_id` | `TEXT` | ID order dari router GMGN |
+  | `buy_hash` | `TEXT` | Signature transaksi on-chain Solana |
+  | `buy_solscan_url` | `TEXT` | Link verifikasi Solscan untuk transaksi beli |
+  | `buy_stake_usd` | `REAL` | Modal yang dialokasikan (misal: \$0.5) |
+  | `buy_token_price_usd`| `REAL` | Harga token saat order masuk |
+  | `buy_acquired_amount`| `TEXT` | Jumlah unit token yang berhasil dibeli |
+  | `sell_time` | `INTEGER` | Timestamp eksekusi jual di blockchain |
+  | `sell_ok` | `INTEGER` | `1` jika transaksi jual berhasil |
+  | `sell_order_id` / `sell_hash` | `TEXT` | ID order dan TX Hash Solana transaksi jual |
+  | `sell_solscan_url`| `TEXT` | Link Solscan untuk transaksi jual |
+  | `sell_token_price_usd`| `REAL` | Harga token saat penjualan berhasil |
+  | `duration_sec` | `INTEGER` | Lama waktu memegang token on-chain |
+  | `theory_return_percent`| `REAL` | Perkiraan persentase profit sebelum eksekusi |
+  | `actual_return_percent`| `REAL` | Persentase profit riil yang masuk ke dompet |
+  | `slippage_diff_percent`| `REAL` | Selisih slippage antara harga layar vs eksekusi on-chain |
+  | `wallet_buy_cost` | `REAL` | Total SOL/USD yang terpotong saat beli |
+  | `wallet_sold_income` | `REAL` | Total SOL/USD yang masuk kembali setelah jual |
+  | `wallet_pnl_usd` | `REAL` | Keuntungan/kerugian bersih riil di dompet pengguna |
+  | `wallet_snapshots_json`| `TEXT` | Snapshot saldo dompet sebelum & sesudah trade |
+  | `buy_payloads_json` / `sell_payloads_json` | `TEXT` | Payload API mentah GMGN untuk audit teknis |
+
+---
+
+### D. Tabel `route_quotes` (Polling Kuotasi Swap AMM 500ms)
+- **Tujuan**: Merekam hasil polling harga riil langsung dari endpoint AMM GMGN (`/defi/router/v1/sol/tx/get_swap_route`).
+- **Kapan Dimasukkan**:
+  - Dimasukkan **secara berkala (setiap 500ms)** saat sebuah token sedang aktif dipantau di tab worker Playwright.
+- **Rincian Field**:
+  | Kolom | Tipe | Keterangan |
+  |---|---|---|
+  | `id` | `INTEGER` [PK] | ID auto-increment |
+  | `run_id` | `TEXT` | Relasi ke sesi pengamatan |
+  | `observed_at` | `INTEGER` | Timestamp kuotasi diambil (ms) |
+  | `mint` | `TEXT` | Alamat kontrak token |
+  | `type` | `TEXT` | Tipe kuotasi: `QUOTE_BUY_COMPARISON` atau `QUOTE_SELL_COMPARISON` |
+  | `type_label` | `TEXT` | Label: `Buy Route` atau `Sell Route` |
+  | `signal_price_usd` | `REAL` | Harga token menurut WebSocket feed |
+  | `route_implied_token_price_usd` | `REAL` | Harga riil jika dieksekusi via pool AMM (setelah fee) |
+  | `slip_percent` | `REAL` | Persentase deviasi/slippage antara router vs feed WebSocket |
+  | `latency_ms` | `INTEGER` | Kecepatan respons endpoint router GMGN (milidetik) |
+  | `input_amount_base_units` | `TEXT` | Nilai input dalam satuan terkecil (lamports / token base) |
+  | `route_token_amount` | `REAL` | Jumlah token yang akan didapat / dijual |
+  | `raw_quote_json` | `TEXT` | Respons utuh JSON dari router GMGN (termasuk rute pool Raydium/Pump/Meteora) |
+
+---
+
+### E. Tabel `app_settings` (Konfigurasi Aplikasi)
+- **Tujuan**: Menyimpan pengaturan fleksibel bot yang dapat diubah langsung dari Dashboard Web tanpa restart service.
+- **Kapan Dimasukkan / Diperbarui**:
+  - Di-update seketika saat pengguna menekan tombol **"Simpan Pengaturan"** di tab AutoBuy atau memilih preset filter Market Cap di dashboard.
+- **Rincian Field**:
+  | Kolom | Tipe | Keterangan |
+  |---|---|---|
+  | `key` | `TEXT` [PK] | Kunci konfigurasi (misal: `autobuy_settings`, `feed_settings`) |
+  | `value` | `TEXT` | Nilai pengaturan dalam format string JSON |
+  | `updated_at` | `TEXT` | Timestamp ISO perubahan pengaturan |
+
+---
+
+### F. Tabel `token_metadata` (Kamus Metadata Token)
+- **Tujuan**: Menyimpan cache identitas token agar dashboard tidak perlu memanggil API GMGN berulang kali.
+- **Kapan Dimasukkan / Diperbarui**:
+  - Dimasukkan saat token pertama kali lolos screening awal di feed WebSocket.
+- **Rincian Field**:
+  | Kolom | Tipe | Keterangan |
+  |---|---|---|
+  | `mint` | `TEXT` [PK] | Alamat kontrak token |
+  | `symbol` | `TEXT` | Ticker (contoh: `SOL`, `PEXRA`) |
+  | `name` | `TEXT` | Nama token |
+  | `decimals` | `INTEGER` | Desimal token (biasanya 6 pada token Solana) |
+  | `market_cap_usd` | `REAL` | Kapitalisasi pasar token saat terdeteksi |
+  | `updated_at` | `INTEGER` | Timestamp data terakhir diperbarui |
+
