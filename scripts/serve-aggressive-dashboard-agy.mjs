@@ -3192,10 +3192,14 @@ function renderHtml() {
             <button onclick="setUnlimitedBuys()" class="btn-micro-action btn-micro-accent">♾️ Unlimited</button>
             <button onclick="resetCompletedBuys()" class="btn-micro-action">⟳ Reset (0)</button>
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 6px;">
             <div>
-              <span class="sub-label">Slippage %:</span>
-              <input type="number" id="cfgSlippage" min="1" max="50" class="config-input mono" value="15" title="Slippage %">
+              <span class="sub-label">Buy Slip %:</span>
+              <input type="number" id="cfgBuySlippage" min="1" max="50" class="config-input mono" value="9" title="Buy Slippage %">
+            </div>
+            <div>
+              <span class="sub-label">Sell Slip %:</span>
+              <input type="number" id="cfgSellSlippage" min="1" max="50" class="config-input mono" value="14" title="Sell Slippage %">
             </div>
             <div>
               <span class="sub-label">Priority SOL:</span>
@@ -3627,9 +3631,11 @@ function renderHtml() {
         const maxConcurrentInput = document.getElementById('cfgMaxConcurrent');
         if (maxConcurrentInput) maxConcurrentInput.value = cfg.maxActiveRealPositions || 1;
 
-        const slipInput = document.getElementById('cfgSlippage');
-        if (slipInput) slipInput.value = cfg.slippagePercent || 15;
+        const slipBuyInput = document.getElementById('cfgBuySlippage');
+        if (slipBuyInput) slipBuyInput.value = cfg.buySlippagePercent || cfg.slippagePercent || 9;
 
+        const slipSellInput = document.getElementById('cfgSellSlippage');
+        if (slipSellInput) slipSellInput.value = cfg.sellSlippagePercent || cfg.slippagePercent || 14;
         const gasInput = document.getElementById('cfgPriorityFee');
         if (gasInput) gasInput.value = cfg.priorityFeeSol || 0.0001;
       }
@@ -3658,7 +3664,8 @@ function renderHtml() {
       const rawConcurrent = document.getElementById('cfgMaxConcurrent')?.value;
       const parsedConcurrent = parseInt(rawConcurrent, 10);
       const maxConcurrent = (Number.isFinite(parsedConcurrent) && parsedConcurrent >= 1) ? parsedConcurrent : 1;
-      const slippage = parseFloat(document.getElementById('cfgSlippage')?.value) || 15;
+      const buySlip = parseFloat(document.getElementById('cfgBuySlippage')?.value) || 9;
+      const sellSlip = parseFloat(document.getElementById('cfgSellSlippage')?.value) || 14;
       const priorityFee = parseFloat(document.getElementById('cfgPriorityFee')?.value) || 0.0001;
       const isEnabled = document.getElementById('autoBuyToggle')?.checked || false;
 
@@ -3670,7 +3677,9 @@ function renderHtml() {
         stakeSol: mode === 'sol' ? amountVal : (currentAutoBuyCfg?.stakeSol || 0.03),
         maxBuys: maxBuys,
         maxActiveRealPositions: maxConcurrent,
-        slippagePercent: slippage,
+        buySlippagePercent: buySlip,
+        sellSlippagePercent: sellSlip,
+        slippagePercent: buySlip,
         priorityFeeSol: priorityFee,
         tipFeeSol: 0.0001,
         autoSell: true,
@@ -5091,7 +5100,7 @@ function renderHtml() {
       }
     });
 
-    ['cfgStakeAmount', 'cfgMaxBuys', 'cfgMaxConcurrent', 'cfgSlippage', 'cfgPriorityFee', 'cfgLane', 'cfgStakeMode'].forEach(id => {
+    ['cfgStakeAmount', 'cfgMaxBuys', 'cfgMaxConcurrent', 'cfgBuySlippage', 'cfgSellSlippage', 'cfgPriorityFee', 'cfgLane', 'cfgStakeMode'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener('focus', () => { isUserEditingAutoBuy = true; });
