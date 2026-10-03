@@ -457,3 +457,38 @@ Terdapat 6 tabel utama di dalam database `data/crypto-bot.sqlite`:
   | `market_cap_usd` | `REAL` | Kapitalisasi pasar token saat terdeteksi |
   | `updated_at` | `INTEGER` | Timestamp data terakhir diperbarui |
 
+---
+
+## 7. Sumber Pembacaan Data: Socket vs Swap pada Setiap Lane
+
+Salah satu keunggulan teknis sistem ini adalah memisahkan antara **kecepatan deteksi (Socket)** dan **keakuratan eksekusi harga riil (Swap Router)**.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        ARUS DATA: SOCKET VS SWAP                       │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1. WebSocket GMGN (0–50ms)   ──> Hitung Indikator & Trigger Sinyal    │
+│                                  (Entry, Target TP, Runner, Stop Loss) │
+│                                                                        │
+│ 2. Poller AMM GMGN (500ms)   ──> Pre-warm Rute Swap & Cek Slippage Riil │
+│    (/txproxy/v1/get_swap_route)  (Mengunci harga bersih yang masuk dompet)│
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Matriks Sumber Pembacaan per Lane:
+
+| Lane Strategi | Sinyal Entry (Buy) | Sinyal Exit (Sell / Stop) | Nilai Eksekusi / PnL Bersih |
+|---|---|---|---|
+| **🟢 Safe Aggressive** | **WebSocket** (Inflow 5s, Buyer count, Dev) | **WebSocket** (Stop -3%, BE +3.5%, Trail 5%) | **Swap Router AMM** (500ms Quote) |
+| **🟣 Aggressive Optimal** | **WebSocket** (Inflow $400, Flow20s, Top1) | **WebSocket** (Stop -3%, BE +3.5%, Trail 5%) | **Swap Router AMM** (500ms Quote) |
+| **🟠 Aggressive Wide** | **WebSocket** (Inflow $400, Flow20s, Top1) | **WebSocket** (Stop -6%, BE +3.5%, Trail 5%) | **Swap Router AMM** (500ms Quote) |
+| **🌊 Aggressive Swing 100k**| **WebSocket** (Inflow $400, Flow 70%, Top1)| **WebSocket** (Stop -4%, BE +3.5%, Trail 5%) | **Swap Router AMM** (500ms Quote) |
+| **⚡ Aggressive Wave** | **WebSocket + API Candle** (Flow 60% + ATH) | **WebSocket** (Target ATH +20..+150%, Trail) | **Swap Router AMM** (500ms Prewarm) |
+| **🔵 Momentum V2** | **WebSocket + Snapshot Holder** (2x Naik) | **WebSocket + Snapshot Holder** (Exit Paus) | **Swap Router AMM** (500ms Quote) |
+| **✨ Momentum V3** | **WebSocket + Snapshot Holder** | **WebSocket + Snapshot Holder** (Whale Flow)| **Swap Router AMM** (500ms Quote) |
+
+### Mengapa Sinyal Harus Membaca Socket Terlebih Dahulu?
+1. **Kecepatan Deteksi Tanpa Lag (<50ms)**: Token mic-cap di Solana bisa naik atau rug-pull dalam hitungan 2–3 detik. WebSocket memberikan setiap trade individu secara instan saat blok dikonfirmasi. Jika sinyal menunggu panggilan API Swap, bot akan terlambat 500ms–1500ms.
+2. **Peran Swap Router (Pre-warmed Route 500ms)**: Sembari WebSocket memantau harga, background worker terus menerus memanggil AMM router setiap 500ms. Begitu sinyal Socket mengatakan *SELL*, rute Swap terbaru **sudah siap tembak di memori (prewarmed)** tanpa perlu menunggu query baru, memangkas waktu eksekusi on-chain menjadi seketika.
+
+
