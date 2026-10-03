@@ -3151,7 +3151,7 @@ function renderHtml() {
           <select id="cfgLane" class="config-select">
             <option value="aggressive-optimal">🟣 Aggressive Optimal (Rekomendasi)</option>
             <option value="aggressive-swing-100k">🌊 Swing 100k ($10k-$100k MC)</option>
-            <option value="aggressive-wave">⚡ Aggressive Wave (Wave Maximizer: Min +20% Target, Trail Runner)</option>
+            <option value="aggressive-wave">⚡ Adaptive Wave V1 (Sangat Direkomendasikan: Real Win Rate 40%)</option>
             <option value="aggressive-safe">🟢 Safe Aggressive (Baseline)</option>
             <option value="aggressive-wide">🟠 Wide Aggressive (-6% Stop)</option>
             <option value="momentum-v2">🔵 Momentum V2 (2x Snapshot)</option>
