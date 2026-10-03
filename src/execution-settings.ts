@@ -5,6 +5,9 @@
  */
 export interface ExecutionSettings {
   slippagePercent: number;
+  buySlippagePercent?: number;
+  sellSlippagePercent?: number;
+  minSolReserve?: number;
   priorityFeeSol: number;
   tipFeeSol: number;
   maxAutoPriorityFeeSol: number;
@@ -13,6 +16,9 @@ export interface ExecutionSettings {
 
 export const DEFAULT_EXECUTION_SETTINGS: Readonly<ExecutionSettings> = Object.freeze({
   slippagePercent: 15,
+  buySlippagePercent: 9,
+  sellSlippagePercent: 14,
+  minSolReserve: 0.025,
   priorityFeeSol: 0.0001,
   tipFeeSol: 0.0001,
   maxAutoPriorityFeeSol: 0.0001,

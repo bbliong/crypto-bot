@@ -6,3 +6,5 @@ reports/
 config/local.yaml
 *.log
 research/
+.dashboard-tunnel-url
+dist/*.zip

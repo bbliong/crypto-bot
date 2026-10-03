@@ -13,7 +13,7 @@ import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, asse
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
-import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveExit, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_AGGRESSIVE_WAVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAggressiveExit, calculateDynamicWaveTarget, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 import { ResearchHolderStore, type ResearchTrackedHolder } from './research-holder-store.js';
@@ -33,6 +33,7 @@ const { values } = parseArgs({ options: {
   buySol: { type: 'string' },
   profileDir: { type: 'string', default: defaultProfileDir },
   profileName: { type: 'string', default: defaultProfileName }, output: { type: 'string' },
+  sessionSlotEndMs: { type: 'string' },
   prepareTradeUi: { type: 'boolean', default: true }, enableExtensions: { type: 'boolean', default: true },
   exitHoldSeconds: { type: 'string', default: '20' }, maxPaperBuys: { type: 'string' }, maxBuys: { type: 'string' },
   autoBuy: { type: 'boolean' },
@@ -49,26 +50,40 @@ const { values } = parseArgs({ options: {
   strategy: { type: 'string', default: 'momentum-v2' },
   topHolderDumpMinPercent: { type: 'string' },
   config: { type: 'string', default: 'config/rules.yaml' },
+  onlyLane: { type: 'string' },
+  lane: { type: 'string' },
 } });
 const loadedConfig = loadConfig(values.config);
+const feedSettingsFile = join(process.cwd(), 'config', 'feed-settings.json');
+let dynamicFeedSettings: { feedUrl?: string; minMarketCapUsd?: number; maxMarketCapUsd?: number } | null = null;
+if (existsSync(feedSettingsFile)) {
+  try {
+    dynamicFeedSettings = JSON.parse(readFileSync(feedSettingsFile, 'utf8'));
+    if (dynamicFeedSettings?.feedUrl) {
+      loadedConfig.feedUrl = dynamicFeedSettings.feedUrl;
+    }
+  } catch {}
+}
 if (!['legacy', 'flow-3', 'momentum-v2', 'momentum-v3', 'momentum-v2-v3', 'pump-band', 'momentum-aggressive'].includes(values.strategy!)) throw new Error('Unknown research strategy');
 const momentumAggressive = values.strategy === 'momentum-aggressive';
 const momentumComparison = values.strategy === 'momentum-v2-v3';
 const standaloneMomentumV2 = values.strategy === 'momentum-v2';
 const standaloneMomentumV3 = values.strategy === 'momentum-v3';
-const momentumV2 = standaloneMomentumV2 || momentumComparison;
-const momentumV3 = standaloneMomentumV3 || momentumComparison;
+const momentumV2 = standaloneMomentumV2 || momentumComparison || momentumAggressive;
+const momentumV3 = standaloneMomentumV3 || momentumComparison || momentumAggressive;
 const momentumResearch = momentumV2 || momentumV3 || momentumAggressive;
 const browserAutoTrade = Boolean(values.browserAutoTrade || values.browserBuyAuto);
 const browserTradingEnabled = values.browserBuyPrompt || browserAutoTrade;
 const quoteSimulationEnabled = Boolean(values.quoteSimulation);
-if (browserAutoTrade && !standaloneMomentumV2) throw new Error('--browserAutoTrade is only supported with standalone --strategy momentum-v2.');
+if (browserAutoTrade && !standaloneMomentumV2 && !momentumAggressive) throw new Error('--browserAutoTrade is only supported with standalone --strategy momentum-v2 or momentum-aggressive.');
 if (quoteSimulationEnabled && !momentumResearch) throw new Error('--quoteSimulation is only supported with momentum paper strategies.');
 if (browserAutoTrade) {
   values.orderOutcomeCapture = true;
-  values.controlOnly = true;
+  if (!momentumAggressive) {
+    values.controlOnly = true;
+  }
 }
-const r5BandEnabled = standaloneMomentumV2 && !values.controlOnly;
+const r5BandEnabled = (standaloneMomentumV2 || momentumAggressive) && !values.controlOnly;
 const flow3 = values.strategy === 'flow-3';
 const pumpBand = values.strategy === 'pump-band';
 const FLOW3_RULES = {
@@ -94,6 +109,7 @@ const config: Config = flow3 ? {
 const runSeconds = Number(values.seconds), detailSeconds = Number(pumpBand && values.detailSeconds === '600' ? '20' : values.detailSeconds);
 const workers = Number(values.workers), stopLossPercent = Number(values.stopLossPercent);
 const exitHoldSeconds = Number(values.exitHoldSeconds);
+let sessionDeadlineMs = Number.POSITIVE_INFINITY;
 const maxPaperBuys = values.maxPaperBuys !== undefined ? Number(values.maxPaperBuys) : values.maxBuys !== undefined ? Number(values.maxBuys) : null;
 const autoBuyEnabled = values.autoBuy !== undefined ? values.autoBuy : (config.autoBuy ?? false);
 if ((momentumResearch || flow3 || pumpBand) && autoBuyEnabled) throw new Error(`${values.strategy} is a paper research strategy; set autoBuy=false before testing it.`);
@@ -125,18 +141,27 @@ type TrackedHolder = ResearchTrackedHolder;
 type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
 const holderApiStatus = new Map<string, HolderApiStatus>();
 const developerHolderApiStatus = new Map<string, HolderApiStatus>();
-type PaperLane = 'control' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
+type PaperLane = 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'momentum-v2' | 'momentum-v3' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
 const PAPER_LANES = Object.freeze({
-  control: { id: 'control' as const, label: momentumAggressive ? 'momentum-aggressive' : standaloneMomentumV3 ? 'momentum-v3-control' : 'momentum-v2-control' },
+  control: { id: 'control' as const, label: momentumAggressive ? 'momentum-aggressive-safe' : standaloneMomentumV3 ? 'momentum-v3-control' : 'momentum-v2-control' },
+  aggressiveSafe: { id: 'aggressive-safe' as const, label: 'momentum-aggressive-safe' },
+  aggressiveOptimal: { id: 'aggressive-optimal' as const, label: 'momentum-aggressive-optimal' },
+  aggressiveWide: { id: 'aggressive-wide' as const, label: 'momentum-aggressive-wide' },
+  aggressiveSwing100k: { id: 'aggressive-swing-100k' as const, label: 'momentum-aggressive-swing-100k' },
+  aggressiveWave: { id: 'aggressive-wave' as const, label: 'momentum-aggressive-wave' },
+  momentumV2: { id: 'momentum-v2' as const, label: 'momentum-v2' },
+  momentumV3: { id: 'momentum-v3' as const, label: 'momentum-v3' },
   r5Band: { id: 'r5-band' as const, label: 'momentum-v2-r5-band' },
   v3: { id: 'v3-v8' as const, label: 'momentum-v3-v8' },
   v3ExitConfirmed: { id: 'v3-exit-confirmed' as const, label: 'momentum-v3-exit-confirmed' },
 });
 const v3PaperLane: PaperLane = momentumComparison ? PAPER_LANES.v3.id : PAPER_LANES.control.id;
-// GMGN stores the New Pair controls as a map keyed by its internal trend route.
-// Keep the user's selected launchpad set, but require the UI's minimum MC field
-// to be 5 (GMGN displays this as $5K).  This is only a feed pre-filter: all
-// later paper-entry checks still use live socket/detail evidence.
+const hasDynamicMcFilter = dynamicFeedSettings?.minMarketCapUsd != null || dynamicFeedSettings?.maxMarketCapUsd != null;
+const minMcUsd = dynamicFeedSettings?.minMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.minMarketCapUsd)) : (hasDynamicMcFilter ? '10000' : '');
+const maxMcUsd = dynamicFeedSettings?.maxMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.maxMarketCapUsd)) : (hasDynamicMcFilter ? '100000' : '');
+const minMcK = dynamicFeedSettings?.minMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.minMarketCapUsd / 1000)) : '10';
+const maxMcK = dynamicFeedSettings?.maxMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.maxMarketCapUsd / 1000)) : '100';
+
 const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
   __v: '20260922',
   '0bks': '1', '0pm': '1', '0bags_v2': '1', '0stonkfun': '1', '0ks': '1', '0ory': '1', '0bags': '1', 'lb': '1',
@@ -144,7 +169,12 @@ const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
   '0li': '1', '0bk': '1', '0zr': '1', '0sg': '1', '0an': '1', '0msa': '1', '0wdt': '1', '0heaven': '1',
   '0sugar': '1', '0tm': '1', '0bel': '1', '0tsfun': '1', '0tfun': '1', '0js': '1', '0Ms': '1', 'bp': '1',
   '0xtc': '1', 'ry': '1', '0mvc': '1', '0pla': '1', '0pra': '1', '0plpa': '1', '0po': '1',
-  '9mim': '20', '9im': '1',
+  ...(hasDynamicMcFilter ? {
+    '0mim': minMcUsd, '0mam': maxMcUsd, '0im': '1',
+    '9mim': minMcK, '9mam': maxMcK, '9im': '1',
+  } : {
+    '0im': '0', '9im': '0',
+  }),
 });
 async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise<void> {
   await browserContext.addInitScript(filter => {
@@ -157,6 +187,7 @@ async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
     } catch { /* replace an invalid saved value with a valid map */ }
     map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
+    map['/trend_sol'] = { ...(map['/trend_sol'] ?? {}), ...filter };
     localStorage.setItem(storageKey, JSON.stringify(map));
   }, GMGN_NEW_PAIR_SOL_FILTER);
 }
@@ -393,6 +424,68 @@ async function fetchWalletStat(page: Page, walletAddress: string, mint: string):
     }
   }, { walletAddress, mint }).catch(() => null);
 }
+async function fetchOnChainTokenBalance(walletAddress: string, mint: string): Promise<{ balanceBaseUnits: string; decimals: number } | null> {
+  const rpcs = [
+    process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana'
+  ];
+  for (const rpc of rpcs) {
+    try {
+      const res = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getTokenAccountsByOwner',
+          params: [
+            walletAddress,
+            { mint },
+            { encoding: 'jsonParsed' }
+          ]
+        }),
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as any;
+      const accounts = data?.result?.value;
+      if (Array.isArray(accounts) && accounts.length > 0) {
+        const info = accounts[0]?.account?.data?.parsed?.info?.tokenAmount;
+        if (info && typeof info.amount === 'string' && info.amount !== '0') {
+          return { balanceBaseUnits: info.amount, decimals: Number(info.decimals) || 6 };
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+async function fetchOnChainSolBalance(walletAddress: string): Promise<number | null> {
+  const rpcs = [
+    process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana'
+  ];
+  for (const rpc of rpcs) {
+    try {
+      const res = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getBalance',
+          params: [walletAddress]
+        }),
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as any;
+      if (typeof data?.result?.value === 'number') {
+        return data.result.value / 1_000_000_000;
+      }
+    } catch {}
+  }
+  return null;
+}
 function parseBalanceToBaseUnits(balanceStr: string, decimals = 6): string {
   if (!balanceStr || typeof balanceStr !== 'string') return '0';
   const clean = balanceStr.trim().replace(/,/g, '');
@@ -404,7 +497,112 @@ function parseBalanceToBaseUnits(balanceStr: string, decimals = 6): string {
   const combined = (whole + frac).replace(/^0+/, '') || '0';
   return combined;
 }
-const liveBrowserPositions = new Map<string, { inputAmount: string; tokenDecimals: number; confirmedAt: number; entryPriceUsd: number; isRealBalanceConfirmed: boolean; walletBalanceDecimal?: string }>();
+interface AutoBuySettings {
+  enabled: boolean;
+  activeLane: string;
+  stakeMode: 'usd' | 'sol';
+  stakeUsd: number;
+  stakeSol: number;
+  maxBuys: number;
+  buysCompleted: number;
+  maxActiveRealPositions: number;
+  slippagePercent: number;
+  buySlippagePercent: number;
+  sellSlippagePercent: number;
+  minSolReserve: number;
+  priorityFeeSol: number;
+  tipFeeSol: number;
+  maxAutoPriorityFeeSol: number;
+  antiMev: boolean;
+  autoSell: boolean;
+  updatedAt?: string;
+}
+
+let cachedAutoBuySettings: AutoBuySettings | null = null;
+let lastAutoBuySettingsReadAt = 0;
+
+function getAutoBuySettings(): AutoBuySettings {
+  const now = Date.now();
+  if (cachedAutoBuySettings && (now - lastAutoBuySettingsReadAt < 1000)) {
+    return cachedAutoBuySettings;
+  }
+  const configPath = join(process.cwd(), 'config', 'autobuy-settings.json');
+  try {
+    if (existsSync(configPath)) {
+      const data = JSON.parse(readFileSync(configPath, 'utf8'));
+      const baseSlip = Number(data.slippagePercent) || 15;
+      cachedAutoBuySettings = {
+        enabled: Boolean(data.enabled),
+        activeLane: data.activeLane || 'aggressive-safe',
+        stakeMode: data.stakeMode || 'usd',
+        stakeUsd: Number(data.stakeUsd) > 0 ? Number(data.stakeUsd) : 0.5,
+        stakeSol: Number(data.stakeSol) || 0.03,
+        maxBuys: Number.isFinite(Number(data.maxBuys)) ? Number(data.maxBuys) : 3,
+        buysCompleted: Number(data.buysCompleted) || 0,
+        maxActiveRealPositions: Number(data.maxActiveRealPositions) || 1,
+        slippagePercent: baseSlip,
+        buySlippagePercent: Number(data.buySlippagePercent) || 9,
+        sellSlippagePercent: Number(data.sellSlippagePercent) || 14,
+        minSolReserve: Number(data.minSolReserve) || 0.025,
+        priorityFeeSol: Number(data.priorityFeeSol) || 0.0001,
+        tipFeeSol: Number(data.tipFeeSol) || 0.0001,
+        maxAutoPriorityFeeSol: Number(data.maxAutoPriorityFeeSol) || 0.0001,
+        antiMev: Boolean(data.antiMev),
+        autoSell: data.autoSell !== false,
+        updatedAt: data.updatedAt,
+      };
+      lastAutoBuySettingsReadAt = now;
+      return cachedAutoBuySettings;
+    }
+  } catch {}
+  return {
+    enabled: false,
+    activeLane: 'aggressive-safe',
+    stakeMode: 'usd',
+    stakeUsd: 0.5,
+    stakeSol: 0.03,
+    maxBuys: 3,
+    buysCompleted: 0,
+    maxActiveRealPositions: 1,
+    slippagePercent: 15,
+    buySlippagePercent: 9,
+    sellSlippagePercent: 14,
+    minSolReserve: 0.025,
+    priorityFeeSol: 0.0001,
+    tipFeeSol: 0.0001,
+    maxAutoPriorityFeeSol: 0.0001,
+    antiMev: false,
+    autoSell: true,
+  };
+}
+
+function updateAutoBuyCompletedCount() {
+  const configPath = join(process.cwd(), 'config', 'autobuy-settings.json');
+  try {
+    const cur = getAutoBuySettings();
+    cur.buysCompleted = (cur.buysCompleted || 0) + 1;
+    if (cur.maxBuys > 0 && cur.buysCompleted >= cur.maxBuys) {
+      cur.enabled = false;
+      console.log(`[autobuy-quota-reached] Target maxBuys (${cur.maxBuys}) tercapai. AutoBuy otomatis dinonaktifkan.`);
+    }
+    cur.updatedAt = new Date().toISOString();
+    writeFileSync(configPath, JSON.stringify(cur, null, 2), 'utf8');
+    cachedAutoBuySettings = cur;
+  } catch {}
+}
+
+const liveBrowserPositions = new Map<string, {
+  inputAmount: string;
+  tokenDecimals: number;
+  confirmedAt: number;
+  entryPriceUsd: number;
+  isRealBalanceConfirmed: boolean;
+  walletBalanceDecimal?: string;
+  originLane?: string;
+  orderId?: string | null;
+  buyHash?: string | null;
+  stakeUsd?: number;
+}>();
 const liveTokenBalances = new Map<string, { balanceBaseUnits: string; balanceDecimal: string; decimals: number; updatedAt: number }>();
 function recordWalletStatSnapshot(data: Record<string, unknown>, stage: 'PRE_BUY' | 'POST_BUY' | 'PRE_SELL' | 'RETRY_SELL' | 'POST_SELL' | 'PASSIVE_CAPTURE' = 'POST_BUY') {
   if (typeof data.token_address === 'string' && typeof data.balance === 'string' && data.balance !== '' && data.balance !== '0') {
@@ -506,15 +704,17 @@ async function showBrowserOrderPrompt(page: Page, input: { side: 'BUY' | 'SELL';
     });
   })()`);
 }
-async function browserRoute(page: Page, input: { mint: string; fromAddress: string; inputLamports: string }) {
-  return page.evaluate(async value => {
+async function browserRoute(page: Page, input: { mint: string; fromAddress: string; inputLamports: string; slippage?: number }) {
+  const autoCfg = getAutoBuySettings();
+  const slipStr = String(input.slippage ?? autoCfg.buySlippagePercent ?? 9);
+  return page.evaluate(async ({ value, slip }) => {
     const params = new URLSearchParams({ web_from_source: 'token_poll', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
       token_in_address: 'So11111111111111111111111111111111111111112', token_out_address: value.mint, in_amount: value.inputLamports,
-      slippage: '15', is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
+      slippage: slip, is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
     const response = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
     const body = await response.json().catch(() => null);
     return { status: response.status, body };
-  }, input);
+  }, { value: input, slip: slipStr });
 }
 function quoteSummary(routeData: any) {
   const quote = routeData?.quote ?? {};
@@ -529,15 +729,17 @@ type RouteComparisonPosition = { inputAmount: string; tokenDecimals: number; rou
 const routeComparisonPositions = new Map<string, RouteComparisonPosition>();
 const routeComparisonBuyTasks = new Map<string, Promise<void>>();
 
-async function browserSellRoute(page: Page, input: { mint: string; fromAddress: string; inputAmount: string }) {
+async function browserSellRoute(page: Page, input: { mint: string; fromAddress: string; inputAmount: string; slippage?: number }) {
   if (page.isClosed()) return { status: 499, body: null };
-  return page.evaluate(async value => {
+  const autoCfg = getAutoBuySettings();
+  const slipStr = String(input.slippage ?? autoCfg.sellSlippagePercent ?? 14);
+  return page.evaluate(async ({ value, slip }) => {
     const params = new URLSearchParams({ web_from_source: 'token_poll', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
       token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', in_amount: value.inputAmount,
-      slippage: '15', is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
+      slippage: slip, is_anti_mev: 'false', fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001', legacy: 'true' });
     const response = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
     return { status: response.status, body: await response.json().catch(() => null) };
-  }, input).catch(() => ({ status: 500, body: null }));
+  }, { value: input, slip: slipStr }).catch(() => ({ status: 500, body: null }));
 }
 
 interface PrewarmedSellRoute {
@@ -614,12 +816,12 @@ function startPeriodicSellRoutePolling(
 
   void (async () => {
     while (!stopped && !page.isClosed()) {
-      // Guard: Ensure worker has not sold or closed position in the meantime
-      if (closedRoutePositions.has(positionId) || !routeComparisonPositions.has(positionId)) {
-        write('events.jsonl', { type: 'ORPHAN_POLL_PREVENTED', positionId, mint, observedAt: Date.now(), reason: 'POSITION_CLOSED_DURING_POLL' });
+      if (!routeComparisonPositions.has(positionId)) {
+        write('events.jsonl', { type: 'ORPHAN_POLL_PREVENTED', positionId, mint, observedAt: Date.now(), reason: 'NO_OPEN_BUY_POSITION' });
         stopPeriodicSellRoutePolling(positionId, 'DETECTED_ORPHAN_CLOSED');
         break;
       }
+      const isPostSell = closedRoutePositions.has(positionId);
 
       const pollStartedAt = Date.now();
       try {
@@ -677,11 +879,13 @@ function startPeriodicSellRoutePolling(
             netPnlUsd,
             netPnlPercent,
           };
-          prewarmedSellRoutes.set(positionId, prewarmed);
-          prewarmedSellRoutesByMint.set(mint, prewarmed);
+          if (!isPostSell) {
+            prewarmedSellRoutes.set(positionId, prewarmed);
+            prewarmedSellRoutesByMint.set(mint, prewarmed);
+          }
 
           write('quote-simulated-orders.jsonl', {
-            type: 'PERIODIC_SELL_ROUTE_QUOTE',
+            type: isPostSell ? 'PERIODIC_SELL_ROUTE_QUOTE_POST_EXIT' : 'PERIODIC_SELL_ROUTE_QUOTE',
             positionId,
             mint,
             observedAt,
@@ -692,7 +896,7 @@ function startPeriodicSellRoutePolling(
             inputAmountBaseUnits: inputAmount,
             tokenDecimals,
             quote: quoteSummary(data),
-            execution: 'ROUTE_PREWARM_POLL',
+            execution: isPostSell ? 'ROUTE_POST_SELL_MONITOR' : 'ROUTE_PREWARM_POLL',
           });
         }
       } catch {
@@ -700,7 +904,8 @@ function startPeriodicSellRoutePolling(
       }
 
       const elapsed = Date.now() - pollStartedAt;
-      const sleepMs = Math.max(100, pollIntervalMs - elapsed);
+      const currentInterval = isPostSell ? 1000 : pollIntervalMs;
+      const sleepMs = Math.max(100, currentInterval - elapsed);
       await delay(sleepMs);
     }
   })();
@@ -792,32 +997,39 @@ async function submitBrowserBuy(page: Page, input: { mint: string; fromAddress: 
   const fresh = freshRoute.body?.data;
   if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
   writeLiveRouteLedger('BUY', fresh, { mint: input.mint, inputAmount: input.inputLamports, tokenPriceUsd: input.tokenPriceUsd, solPriceUsd: input.solPriceUsd });
-  return page.evaluate(async ({ value, routeBody }) => {
+  const autoCfg = getAutoBuySettings();
+  const execSettings = {
+    slippage: Number(autoCfg.buySlippagePercent || autoCfg.slippagePercent) || 9,
+    tipFee: String(autoCfg.tipFeeSol || '0.0001'),
+    priorityFee: String(autoCfg.priorityFeeSol || '0.0001'),
+    antiMev: Boolean(autoCfg.antiMev),
+  };
+  return page.evaluate(async ({ value, routeBody, exec }) => {
     const quote = routeBody.data.quote;
     const swapInfo = quote.routePlan?.[0]?.swapInfo ?? {};
     const now = Date.now();
     const payload = {
       is_auto_tip_fee: false, is_auto_priority_fee: false, max_auto_fee: '0.001', token_in_chain: 'sol', token_out_chain: 'sol',
       from_address: value.fromAddress, token_in_address: 'So11111111111111111111111111111111111111112', token_out_address: value.mint,
-      is_anti_mev: false, token_in_price: String(value.solPriceUsd), token_out_price: String(value.tokenPriceUsd), chain: 'sol', retry_on_submit_failed: 0,
+      is_anti_mev: exec.antiMev, token_in_price: String(value.solPriceUsd), token_out_price: String(value.tokenPriceUsd), chain: 'sol', retry_on_submit_failed: 0,
       simulate_before_submit: false, input_token: 'So11111111111111111111111111111111111111112', output_token: value.mint, source: 'swap_web',
       decimals: quote.outDecimals ?? 6, swap_mode: 'ExactIn', input_amount: value.inputLamports, market_cap: value.marketCapUsd ?? 0,
-      priority_gas_price: '0.0001', gas_price: '0.0001', auto_slippage: false, slippage: 15, fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001',
+      priority_gas_price: exec.priorityFee, gas_price: exec.priorityFee, auto_slippage: false, slippage: exec.slippage, fee: '0.0002', tip_fee: exec.tipFee, priority_fee: exec.priorityFee,
       tx_build_info: { ok: true, fallback: false, error: { code: '', message: '', stage: 'browser_prompt_route', exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '' },
         summary: { totalMs: Number(quote.timeTaken ?? 0) * 1000, method: 'browser_prompt_route', entryCount: Array.isArray(quote.routePlan) ? quote.routePlan.length : 0 },
-        traceFields: { query: { userId: value.fromAddress, tokenIn: { address: 'So11111111111111111111111111111111111111112', decimals: 9, price: value.solPriceUsd }, tokenOut: { address: value.mint, decimals: quote.outDecimals ?? 6, price: value.tokenPriceUsd }, swapMode: 'ExactIn', slippage: 15, mc: value.marketCapUsd ?? 0, isAntiMev: false, fee: 0.0002, exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '', tipFee: 0.0001, priorityFee: 0.0001, amountIn: value.inputLamports, legacy: true }, serverTimeMs: now }, client_click_at_ms: now, order_type: 'browser_prompt_submit', ws_status: 'Stable', ws_latency_ms: 0, ws_chain_stat_ts: now, ws_route_info_ts: now },
+        traceFields: { query: { userId: value.fromAddress, tokenIn: { address: 'So11111111111111111111111111111111111111112', decimals: 9, price: value.solPriceUsd }, tokenOut: { address: value.mint, decimals: quote.outDecimals ?? 6, price: value.tokenPriceUsd }, swapMode: 'ExactIn', slippage: exec.slippage, mc: value.marketCapUsd ?? 0, isAntiMev: exec.antiMev, fee: 0.0002, exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '', tipFee: Number(exec.tipFee), priorityFee: Number(exec.priorityFee), amountIn: value.inputLamports, legacy: true }, serverTimeMs: now }, client_click_at_ms: now, order_type: 'browser_prompt_submit', ws_status: 'Stable', ws_latency_ms: 0, ws_chain_stat_ts: now, ws_route_info_ts: now },
     };
     const response = await fetch('/mrtapi/v2/swap_batch_order', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: value.authorization }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => null);
     return { ok: response.ok && body?.code === 0, status: response.status, code: body?.code ?? null, message: body?.message ?? body?.msg ?? null, orderId: body?.data?.order_id ?? null, hash: body?.data?.hash ?? null, acquiredAmount: quote.outAmount ?? null, acquiredDecimals: quote.outDecimals ?? null };
-  }, { value: input, routeBody: freshRoute.body });
+  }, { value: input, routeBody: freshRoute.body, exec: execSettings });
 }
 /** Passive sell-side counterpart to the buy comparison. It waits for the buy
  * quote so the sell route uses exactly the token amount GMGN quoted at entry. */
 function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<void> {
   if (!quoteSimulationEnabled) return Promise.resolve();
   closedRoutePositions.add(signal.positionId);
-  stopPeriodicSellRoutePolling(signal.positionId);
+  // Swap route polling continues until worker detail observation window ends
   const task = (async () => {
     await routeComparisonBuyTasks.get(signal.positionId);
     const position = routeComparisonPositions.get(signal.positionId);
@@ -885,7 +1097,7 @@ function scheduleSellRouteComparison(page: Page, signal: PaperSignal): Promise<v
 }
 async function submitBrowserSell(page: Page, input: { mint: string; fromAddress: string; authorization: string; inputAmount: string; tokenDecimals: number; tokenPriceUsd: number; solPriceUsd: number; marketCapUsd: number | null }, skipPrompt = false) {
   const prewarmed = prewarmedSellRoutesByMint.get(input.mint);
-  const isPrewarmedFresh = prewarmed && (Date.now() - prewarmed.quoteAt < 1500) && prewarmed.route?.body?.code === 0 && prewarmed.route?.body?.data?.quote;
+  const isPrewarmedFresh = prewarmed && (prewarmed.inputAmount === input.inputAmount) && (Date.now() - prewarmed.quoteAt < 1500) && prewarmed.route?.body?.code === 0 && prewarmed.route?.body?.data?.quote;
   const route = isPrewarmedFresh ? prewarmed.route : await browserSellRoute(page, input);
   const routeData = route.body?.data;
   if (route.status !== 200 || route.body?.code !== 0 || !routeData?.quote) return { ok: false, stage: 'route', status: route.status, code: route.body?.code ?? null, message: route.body?.msg ?? null };
@@ -898,28 +1110,61 @@ async function submitBrowserSell(page: Page, input: { mint: string; fromAddress:
   const fresh = freshRoute.body?.data;
   if (freshRoute.status !== 200 || freshRoute.body?.code !== 0 || !fresh?.quote) return { ok: false, stage: 'route_refresh', status: freshRoute.status, code: freshRoute.body?.code ?? null, message: freshRoute.body?.msg ?? null };
   writeLiveRouteLedger('SELL', fresh, { mint: input.mint, inputAmount: input.inputAmount, tokenPriceUsd: input.tokenPriceUsd, solPriceUsd: input.solPriceUsd });
-  return page.evaluate(async ({ value, routeBody }) => {
+  const autoCfg = getAutoBuySettings();
+  const execSettings = {
+    slippage: Number(autoCfg.sellSlippagePercent || autoCfg.slippagePercent) || 14,
+    tipFee: String(autoCfg.tipFeeSol || '0.0001'),
+    priorityFee: String(autoCfg.priorityFeeSol || '0.0001'),
+    antiMev: Boolean(autoCfg.antiMev),
+  };
+  return page.evaluate(async ({ value, routeBody, exec }) => {
     const quote = routeBody.data.quote, swapInfo = quote.routePlan?.[0]?.swapInfo ?? {}, now = Date.now();
     const payload = { is_auto_tip_fee: false, is_auto_priority_fee: false, max_auto_fee: '0.001', token_in_chain: 'sol', token_out_chain: 'sol', from_address: value.fromAddress,
-      token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', is_anti_mev: false, token_in_price: String(value.tokenPriceUsd), token_out_price: String(value.solPriceUsd), chain: 'sol', retry_on_submit_failed: 0,
+      token_in_address: value.mint, token_out_address: 'So11111111111111111111111111111111111111112', is_anti_mev: exec.antiMev, token_in_price: String(value.tokenPriceUsd), token_out_price: String(value.solPriceUsd), chain: 'sol', retry_on_submit_failed: 0,
       simulate_before_submit: false, input_token: value.mint, output_token: 'So11111111111111111111111111111111111111112', source: 'swap_web', decimals: value.tokenDecimals, swap_mode: 'ExactIn', input_amount: value.inputAmount, market_cap: value.marketCapUsd ?? 0,
-      priority_gas_price: '0.0001', gas_price: '0.0001', auto_slippage: false, slippage: 15, fee: '0.0002', tip_fee: '0.0001', priority_fee: '0.0001',
-      tx_build_info: { ok: true, fallback: false, error: { code: '', message: '', stage: 'browser_prompt_sell_route', exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '' }, summary: { totalMs: Number(quote.timeTaken ?? 0) * 1000, method: 'browser_prompt_sell_route', entryCount: Array.isArray(quote.routePlan) ? quote.routePlan.length : 0 }, traceFields: { query: { userId: value.fromAddress, tokenIn: { address: value.mint, decimals: value.tokenDecimals, price: value.tokenPriceUsd }, tokenOut: { address: 'So11111111111111111111111111111111111111112', decimals: 9, price: value.solPriceUsd }, swapMode: 'ExactIn', slippage: 15, mc: value.marketCapUsd ?? 0, isAntiMev: false, fee: 0.0002, exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '', tipFee: 0.0001, priorityFee: 0.0001, amountIn: value.inputAmount, legacy: true }, serverTimeMs: now }, client_click_at_ms: now, order_type: 'browser_prompt_sell_submit', ws_status: 'Stable', ws_latency_ms: 0, ws_chain_stat_ts: now, ws_route_info_ts: now },
+      priority_gas_price: exec.priorityFee, gas_price: exec.priorityFee, auto_slippage: false, slippage: exec.slippage, fee: '0.0002', tip_fee: exec.tipFee, priority_fee: exec.priorityFee,
+      tx_build_info: { ok: true, fallback: false, error: { code: '', message: '', stage: 'browser_prompt_sell_route', exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '' }, summary: { totalMs: Number(quote.timeTaken ?? 0) * 1000, method: 'browser_prompt_sell_route', entryCount: Array.isArray(quote.routePlan) ? quote.routePlan.length : 0 }, traceFields: { query: { userId: value.fromAddress, tokenIn: { address: value.mint, decimals: value.tokenDecimals, price: value.tokenPriceUsd }, tokenOut: { address: 'So11111111111111111111111111111111111111112', decimals: 9, price: value.solPriceUsd }, swapMode: 'ExactIn', slippage: exec.slippage, mc: value.marketCapUsd ?? 0, isAntiMev: exec.antiMev, fee: 0.0002, exchange: routeBody.data.exchange ?? '', pool: swapInfo.ammKey ?? '', tipFee: Number(exec.tipFee), priorityFee: Number(exec.priorityFee), amountIn: value.inputAmount, legacy: true }, serverTimeMs: now }, client_click_at_ms: now, order_type: 'browser_prompt_sell_submit', ws_status: 'Stable', ws_latency_ms: 0, ws_chain_stat_ts: now, ws_route_info_ts: now },
     };
     const response = await fetch('/mrtapi/v2/swap_batch_order', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: value.authorization }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => null);
     return { ok: response.ok && body?.code === 0, status: response.status, code: body?.code ?? null, message: body?.message ?? body?.msg ?? null, orderId: body?.data?.order_id ?? null, hash: body?.data?.hash ?? null };
-  }, { value: input, routeBody: freshRoute.body });
+  }, { value: input, routeBody: freshRoute.body, exec: execSettings });
 }
 async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeUsd: number, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
-  if (!browserTradingEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
+  if (!browserTradingEnabled) return;
+  if (Number.isFinite(sessionDeadlineMs) && Date.now() >= sessionDeadlineMs) {
+    write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, paperLane: signal.paperLane, observedAt: Date.now(), reason: 'SESSION_ROLLOVER_DRAINING' });
+    console.log('[browser-buy-blocked]', signal.mint, '3-Hour session window completed. Pausing new buys until next session.');
+    return;
+  }
   const orderSession = latestCapturedOrderSession();
   if (!orderSession) {
-    write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, observedAt: Date.now(), reason: 'NO_CAPTURED_ORDER_SESSION' });
+    write('events.jsonl', { type: 'BROWSER_BUY_SKIPPED', mint: signal.mint, paperLane: signal.paperLane, observedAt: Date.now(), reason: 'NO_CAPTURED_ORDER_SESSION' });
     return;
   }
   const solPriceUsd = await currentSolUsd(page);
   const inputLamports = Math.floor(stakeUsd / solPriceUsd * 1_000_000_000).toString();
+
+  // Solana Reserve Guard: Check if wallet has enough SOL to cover stake + fees + minimum safety reserve
+  const autoCfg = getAutoBuySettings();
+  const minReserveSol = autoCfg.minSolReserve || 0.025;
+  const currentSolBalance = await fetchOnChainSolBalance(orderSession.fromAddress);
+  const requiredOrderSol = (Number(inputLamports) / 1_000_000_000) + 0.005;
+  if (currentSolBalance !== null && currentSolBalance < (minReserveSol + requiredOrderSol)) {
+    write('events.jsonl', {
+      type: 'BROWSER_BUY_BLOCKED_LOW_SOL',
+      mint: signal.mint,
+      paperLane: signal.paperLane,
+      observedAt: Date.now(),
+      currentSolBalance,
+      minReserveSol,
+      requiredOrderSol,
+      reason: `Saldo SOL wallet (${currentSolBalance.toFixed(4)} SOL) di bawah batas aman minimum (${minReserveSol.toFixed(4)} SOL + order ${requiredOrderSol.toFixed(4)} SOL)`
+    });
+    console.warn(`[browser-buy-blocked-low-sol] ${signal.mint} dibatalkan: Saldo SOL (${currentSolBalance.toFixed(4)}) < batas aman (${(minReserveSol + requiredOrderSol).toFixed(4)} SOL)`);
+    return;
+  }
+
   let result = await submitBrowserBuy(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputLamports, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
   if (isExpiredBrowserAuthorization(result)) {
     write('events.jsonl', { type: 'BROWSER_AUTH_REFRESHING', side: 'BUY', mint: signal.mint, observedAt: Date.now(), reason: 'TOKEN_EXPIRED' });
@@ -929,24 +1174,47 @@ async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeU
     }
   }
   if (result.ok && 'acquiredAmount' in result && typeof result.acquiredAmount === 'string' && typeof result.acquiredDecimals === 'number') {
-    liveBrowserPositions.set(signal.mint, { inputAmount: result.acquiredAmount, tokenDecimals: result.acquiredDecimals, confirmedAt: Date.now(), entryPriceUsd: tokenPriceUsd, isRealBalanceConfirmed: false });
+    liveBrowserPositions.set(signal.mint, { inputAmount: result.acquiredAmount, tokenDecimals: result.acquiredDecimals, confirmedAt: Date.now(), entryPriceUsd: tokenPriceUsd, isRealBalanceConfirmed: false, originLane: signal.paperLane, orderId: (result as any).orderId ?? null, buyHash: (result as any).hash ?? null, stakeUsd });
   }
-  write('events.jsonl', { type: result.ok ? 'BROWSER_BUY_SUBMITTED' : 'BROWSER_BUY_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, stakeUsd, inputLamports, result });
+  write('events.jsonl', { type: result.ok ? 'BROWSER_BUY_SUBMITTED' : 'BROWSER_BUY_NOT_SUBMITTED', mint: signal.mint, paperLane: signal.paperLane, observedAt: Date.now(), signalId: signal.signalId, stakeUsd, inputLamports, result });
   write('live-trade-ledger.jsonl', {
-    type: 'LIVE_ORDER_SUBMITTED', side: 'BUY', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, observedAt: Date.now(),
+    type: 'LIVE_ORDER_SUBMITTED', side: 'BUY', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, paperLane: signal.paperLane, observedAt: Date.now(),
     orderId: (result as any).orderId ?? null, hash: (result as any).hash ?? null,
     acquiredAmount: (result as any).acquiredAmount ?? null, acquiredDecimals: (result as any).acquiredDecimals ?? null,
     ok: result.ok, status: result.status, code: result.code, message: result.message, stakeUsd, tokenPriceUsd,
   });
-  console.log(result.ok ? '[browser-buy-submitted]' : '[browser-buy-not-submitted]', signal.mint, result);
+  console.log(result.ok ? '[browser-buy-submitted]' : '[browser-buy-not-submitted]', signal.mint, `lane=${signal.paperLane}`, result);
   if (result.ok && orderSession.fromAddress) {
     void (async () => {
-      for (const delayMs of [1200, 1500, 2000]) {
+      // Sync exact on-chain balance immediately post-buy so SELL is never delayed
+      for (const delayMs of [400, 800, 1200, 1800, 2500]) {
         await delay(delayMs);
+        const onChain = await fetchOnChainTokenBalance(orderSession.fromAddress, signal.mint);
+        if (onChain && onChain.balanceBaseUnits !== '0') {
+          const pos = liveBrowserPositions.get(signal.mint);
+          if (pos) {
+            pos.inputAmount = onChain.balanceBaseUnits;
+            pos.tokenDecimals = onChain.decimals;
+            pos.isRealBalanceConfirmed = true;
+            console.log(`[post-buy-balance-confirmed] ${signal.mint} saldo on-chain terkonfirmasi: ${onChain.balanceBaseUnits} (dec: ${onChain.decimals})`);
+          }
+          break;
+        }
         const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
         if (wsData) {
           recordWalletStatSnapshot(wsData, 'POST_BUY');
           if (typeof wsData.balance === 'string' && wsData.balance !== '0' && Number(wsData.balance) > 0) {
+            const pos = liveBrowserPositions.get(signal.mint);
+            if (pos) {
+              const dec = typeof wsData.decimals === 'number' ? wsData.decimals : pos.tokenDecimals;
+              const realBaseUnits = parseBalanceToBaseUnits(wsData.balance, dec);
+              if (realBaseUnits !== '0') {
+                pos.inputAmount = realBaseUnits;
+                pos.tokenDecimals = dec;
+                pos.isRealBalanceConfirmed = true;
+                console.log(`[post-buy-walletstat-confirmed] ${signal.mint} saldo GMGN terkonfirmasi: ${realBaseUnits}`);
+              }
+            }
             break;
           }
         }
@@ -955,65 +1223,55 @@ async function promptAndSubmitBrowserBuy(page: Page, signal: PaperSignal, stakeU
   }
 }
 const browserSellDeferredBeforeBuy = new Set<string>();
+const inFlightBrowserBuys = new Map<string, string>(); // mint -> paperLane
 async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, tokenPriceUsd: number, marketCapUsd: number | null): Promise<void> {
-  if (!browserTradingEnabled || signal.paperLane !== PAPER_LANES.control.id) return;
+  if (!browserTradingEnabled) return;
   const position = liveBrowserPositions.get(signal.mint);
   if (!position) {
-    write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CONFIRMED_BROWSER_BUY' });
+    write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, paperLane: signal.paperLane, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CONFIRMED_BROWSER_BUY' });
     return;
   }
   const orderSession = latestCapturedOrderSession();
   if (!orderSession) {
-    write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CAPTURED_ORDER_SESSION' });
+    write('events.jsonl', { type: 'BROWSER_SELL_SKIPPED', mint: signal.mint, paperLane: signal.paperLane, observedAt: Date.now(), signalId: signal.signalId, reason: 'NO_CAPTURED_ORDER_SESSION' });
     return;
   }
 
-  // 1. Sync real token balance. If already confirmed post-buy, directly hit sell without network latency.
-  if (!position.isRealBalanceConfirmed) {
-    const cachedBalance = liveTokenBalances.get(signal.mint);
-    if (cachedBalance && cachedBalance.balanceBaseUnits !== '0') {
-      position.inputAmount = cachedBalance.balanceBaseUnits;
-      position.tokenDecimals = cachedBalance.decimals;
-      position.isRealBalanceConfirmed = true;
-    } else {
-      try {
-        const freshWs = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
-        if (freshWs) {
-          recordWalletStatSnapshot(freshWs, 'PRE_SELL');
-          if (typeof freshWs.balance === 'string' && freshWs.balance !== '0' && Number(freshWs.balance) > 0) {
-            const dec = typeof freshWs.decimals === 'number' ? freshWs.decimals : position.tokenDecimals;
-            const realBaseUnits = parseBalanceToBaseUnits(freshWs.balance, dec);
-            if (realBaseUnits !== '0') {
-              position.inputAmount = realBaseUnits;
-              position.tokenDecimals = dec;
-              position.isRealBalanceConfirmed = true;
-            }
-          }
-        }
-      } catch { /* Fallback to cached balance or initial estimate */ }
-    }
+  // 1. Submit SELL immediately - ensure brief settlement if buy was within last 600ms
+  const ageSinceBuy = Date.now() - position.confirmedAt;
+  if (ageSinceBuy < 600 && !position.isRealBalanceConfirmed) {
+    await delay(Math.max(100, 600 - ageSinceBuy));
   }
-
   const solPriceUsd = await currentSolUsd(page);
   let result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
 
-  // 2. Auto-retry if rejected due to token balance (40003701)
+  // 2. Emergency auto-retry ONLY if rejected due to token balance (40003701)
   if (!result.ok && (result.code === 40003701 || String(result.message).toLowerCase().includes('balance is less than available balance'))) {
-    console.warn(`[browser-sell-balance-retry] Sinyal sell ${signal.mint} ditolak karena selisih saldo (${result.message}). Mengambil saldo riil ulang...`);
-    await delay(1200);
-    const retryWs = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
-    if (retryWs) {
-      recordWalletStatSnapshot(retryWs, 'RETRY_SELL');
-      if (typeof retryWs.balance === 'string' && retryWs.balance !== '0' && Number(retryWs.balance) > 0) {
-        const dec = typeof retryWs.decimals === 'number' ? retryWs.decimals : position.tokenDecimals;
-        const correctedAmount = parseBalanceToBaseUnits(retryWs.balance, dec);
-        if (correctedAmount && correctedAmount !== '0' && correctedAmount !== position.inputAmount) {
-          console.warn(`[browser-sell-balance-retry] Mencoba sell ulang dengan saldo riil terkonfirmasi: ${retryWs.balance} (${correctedAmount} base units)`);
-          position.inputAmount = correctedAmount;
-          position.tokenDecimals = dec;
-          result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
+    console.warn(`[browser-sell-balance-retry] Sinyal sell ${signal.mint} ditolak karena selisih saldo (${result.message}). Mengambil saldo on-chain darurat via RPC...`);
+    prewarmedSellRoutesByMint.delete(signal.mint);
+    const onChainRetry = await fetchOnChainTokenBalance(orderSession.fromAddress, signal.mint);
+    let correctedAmount = onChainRetry && onChainRetry.balanceBaseUnits !== '0' ? onChainRetry.balanceBaseUnits : null;
+    let correctedDec = onChainRetry?.decimals ?? position.tokenDecimals;
+
+    // Fallback to GMGN walletstat if RPC was empty or unavailable
+    if (!correctedAmount) {
+      try {
+        const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
+        if (wsData && typeof wsData.balance === 'string' && wsData.balance !== '0' && Number(wsData.balance) > 0) {
+          correctedDec = typeof wsData.decimals === 'number' ? wsData.decimals : position.tokenDecimals;
+          const baseUnits = parseBalanceToBaseUnits(wsData.balance, correctedDec);
+          if (baseUnits !== '0') correctedAmount = baseUnits;
         }
-      }
+      } catch {}
+    }
+
+    if (correctedAmount && correctedAmount !== position.inputAmount) {
+      console.warn(`[browser-sell-balance-retry] Mencoba sell ulang dengan saldo terkonfirmasi: ${correctedAmount} (dec: ${correctedDec})`);
+      position.inputAmount = correctedAmount;
+      position.tokenDecimals = correctedDec;
+      position.isRealBalanceConfirmed = true;
+      await delay(300);
+      result = await submitBrowserSell(page, { mint: signal.mint, fromAddress: orderSession.fromAddress, authorization: orderSession.authorization, inputAmount: position.inputAmount, tokenDecimals: position.tokenDecimals, tokenPriceUsd, solPriceUsd, marketCapUsd }, browserAutoTrade);
     }
   }
 
@@ -1030,18 +1288,39 @@ async function promptAndSubmitBrowserSell(page: Page, signal: PaperSignal, token
     liveBrowserPositions.delete(signal.mint);
     liveTokenBalances.delete(signal.mint);
   }
-  write('events.jsonl', { type: result.ok ? 'BROWSER_SELL_SUBMITTED' : 'BROWSER_SELL_NOT_SUBMITTED', mint: signal.mint, observedAt: Date.now(), signalId: signal.signalId, inputAmount: position.inputAmount, result });
+  write('events.jsonl', { type: result.ok ? 'BROWSER_SELL_SUBMITTED' : 'BROWSER_SELL_NOT_SUBMITTED', mint: signal.mint, paperLane: signal.paperLane, originLane: position.originLane, observedAt: Date.now(), signalId: signal.signalId, inputAmount: position.inputAmount, result });
   write('live-trade-ledger.jsonl', {
-    type: 'LIVE_ORDER_SUBMITTED', side: 'SELL', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, observedAt: Date.now(),
+    type: 'LIVE_ORDER_SUBMITTED', side: 'SELL', mint: signal.mint, signalId: signal.signalId, positionId: signal.positionId, paperLane: signal.paperLane, originLane: position.originLane ?? signal.paperLane, observedAt: Date.now(),
     orderId: (result as any).orderId ?? null, hash: (result as any).hash ?? null,
     ok: result.ok, status: result.status, code: result.code, message: result.message, inputAmount: position.inputAmount, tokenPriceUsd,
+    buyHash: position.buyHash ?? null, buyOrderId: position.orderId ?? null, stakeUsd: position.stakeUsd ?? null,
   });
-  console.log(result.ok ? '[browser-sell-submitted]' : '[browser-sell-not-submitted]', signal.mint, result);
+  console.log(result.ok ? '[browser-sell-submitted]' : '[browser-sell-not-submitted]', signal.mint, `lane=${signal.paperLane}`, result);
   if (result.ok && orderSession.fromAddress) {
     void (async () => {
       await delay(3500);
       const wsData = await fetchWalletStat(page, orderSession.fromAddress, signal.mint);
       if (wsData) recordWalletStatSnapshot(wsData, 'POST_SELL');
+
+      // Auto-reclaim rent for the sold token account
+      try {
+        // @ts-ignore
+        const { reclaimRentForMint } = await import('../scripts/solana-rent-reclaimer.mjs');
+        const reclaimRes = await reclaimRentForMint(signal.mint);
+        if (reclaimRes.ok && reclaimRes.reclaimedSol > 0) {
+          console.log(`[auto-reclaim-rent] ✅ Berhasil me-reclaim +${reclaimRes.reclaimedSol.toFixed(6)} SOL untuk mint ${signal.mint}! Tx: ${reclaimRes.signatures?.[0]}`);
+          write('events.jsonl', {
+            type: 'RENT_RECLAIMED',
+            mint: signal.mint,
+            observedAt: Date.now(),
+            reclaimedSol: reclaimRes.reclaimedSol,
+            signatures: reclaimRes.signatures,
+            urls: reclaimRes.urls
+          });
+        }
+      } catch {
+        /* Silently ignore if private key is not configured */
+      }
     })();
   }
 }
@@ -1050,7 +1329,7 @@ const ownerSnapshots = new Map<string, OwnerSample[]>();
 function ownerEvidence(mint: string): OwnerSample[] {
   return ownerSnapshots.get(mint) ?? [];
 }
-const queue = new CandidateQueue(500, 10 * 60_000), inspected = new Set<string>(), lastHolderWrite = new Map<string, number>(), lastComparisonWrite = new Map<string, number>();
+const queue = new CandidateQueue(500, 10 * 60_000), inspected = new Set<string>(), lastInspectedAt = new Map<string, number>(), lastHolderWrite = new Map<string, number>(), lastComparisonWrite = new Map<string, number>();
 const pumpConsidered = new Set<string>();
 const pumpSlots: { state: 'idle' | 'assigned' | 'active'; mint: string | null }[] = Array.from({ length: workers }, () => ({ state: 'idle', mint: null }));
 const rejected = new Set<string>(), youngRejected = new Set<string>(), rejectionCounts = new Map<string, number>(), youngRejectionCounts = new Map<string, number>();
@@ -1791,9 +2070,13 @@ function attach(page: Page, feed: boolean, active: () => string | undefined) {
         console.log('[pump-band-assigned]', 'slot=' + (slotIndex + 1), candidate.metadata?.symbol ?? candidate.mint, '$' + marketCapUsd?.toFixed(2));
         continue;
       }
-      if (feed && !inspected.has(candidate.mint)) {
+      const lastSeenInspection = lastInspectedAt.get(candidate.mint) ?? 0;
+      const reInspectionAllowed = now - lastSeenInspection >= 60_000;
+      if (feed && reInspectionAllowed) {
         if (passesInitialScreen(candidate, now)) {
-          inspected.add(candidate.mint); queue.push(candidate.mint, now);
+          lastInspectedAt.set(candidate.mint, now);
+          inspected.add(candidate.mint);
+          queue.push(candidate.mint, now);
           write('screened-tokens.jsonl', { observedAt: now, mint: candidate.mint, metadata: candidate.metadata ?? null, fields: candidate.fields });
           console.log('[screened]', candidate.metadata?.symbol ?? candidate.mint, candidate.mint);
         } else recordRejectedScreen(candidate, now);
@@ -2004,7 +2287,11 @@ async function worker(index: number, deadline: number) {
     return next;
   };
   let page = await openDetailPage();
-  while (!stopping.signal.aborted && Date.now() < deadline) {
+  while (!stopping.signal.aborted) {
+    if (Date.now() >= deadline) {
+      console.log(`[worker-${index}] 3-Hour session window reached. Finishing active work without taking new tokens.`);
+      break;
+    }
     if (page.isClosed()) page = await openDetailPage();
     if (maxPaperBuys !== null && !momentumComparison && paperBuyCount >= maxPaperBuys) {
       const openPositions = simulatedEvents.filter(r => r.type === 'SIMULATED_BUY').length - simulatedEvents.filter(r => r.type === 'SIMULATED_SELL').length;
@@ -2020,7 +2307,7 @@ async function worker(index: number, deadline: number) {
     }
     const mint = queue.take();
     if (!mint) { await delay(200); continue; }
-    activeMint = mint; const startedAt = Date.now(), stopAt = Math.min(deadline, startedAt + detailSeconds * 1000); let openingPrice: number | null = null, stopLoss = false, operatorClosedDetail = false, simulation: SimulationPosition | null = null, simulationExit: SimulationExitReason | null = null, r5BandSimulation: SimulationPosition | null = null, r5BandExit: SimulationExitReason | null = null;
+    activeMint = mint; const startedAt = Date.now(), stopAt = startedAt + detailSeconds * 1000; let openingPrice: number | null = null, stopLoss = false, operatorClosedDetail = false, simulation: SimulationPosition | null = null, simulationExit: SimulationExitReason | null = null, r5BandSimulation: SimulationPosition | null = null, r5BandExit: SimulationExitReason | null = null;
     let peakObservedPrice = 0, observationAbortedDump: ObservationDumpDecision | null = null;
     const initialTrades = trades.get(mint) ?? [];
     if (initialTrades.length) {
@@ -2034,7 +2321,7 @@ async function worker(index: number, deadline: number) {
     const priceSamples: { observedAt: number; priceUsd: number }[] = []; let lastEntryBlockPriceAt = 0, lastTokenStatAt = 0, lastCandlePollAt = 0, lastDeveloperHoldersAt = 0, developerHolderPollMs = 30_000, candleDecision: ReturnType<typeof assessCandleHistory> | null = null, candleEntryFlow: ReturnType<typeof assessCandleEntryFlow> | null = null, latestCandles: McapCandle[] = [], candleBlockRecorded = false, trialLimitRecorded = false, blindProtectionBlockRecorded = false, holderDistributionBlockRecorded = false, lastHolderDistributionLogAt = 0;
     let lastMonitoringSnapshotAt = 0;
     let pendingMomentumExit: ReturnType<typeof assessMomentumExit> | ReturnType<typeof assessMomentumAggressiveExit> = null;
-    const momentumLaneStates = new Map<PaperLane, { position: SimulationPosition; riskState: ReturnType<typeof createMomentumPosition>; closed: boolean; whaleSellPendingAt: number | null }>();
+    const momentumLaneStates = new Map<PaperLane, { position: SimulationPosition; riskState: ReturnType<typeof createMomentumPosition>; closed: boolean; whaleSellPendingAt: number | null; closedAt?: number | null }>();
     let lastMomentumBlockAt = 0, lastR5BandBlockAt = 0;
     let lastTrackedPollAt = Date.now(), trackedPollDelayMs = 21_000;
     // A single socket trade can make a thin launch wick below the stop.  Keep
@@ -2042,8 +2329,9 @@ async function worker(index: number, deadline: number) {
     let entryCandleClose: number | null = null, hardStopPendingAt = 0, hardStopDistinctTicks = 0, hardStopLastPriceObservedAt = 0;
     let highestProfitPriceUsd = 0, lastProfitProgressAt = 0, dynamicTargetPercent = 30;
     let detailSolSpot: { usd: number; observedAt: number } | null = null;
-    write('events.jsonl', { type: 'DETAIL_STARTED', worker: index, mint, startedAt });
-    console.log('[detail-start]', 'worker=' + index, mint);
+    const tokenSymbol = candidates.get(mint)?.metadata?.symbol ?? (mint ? mint.slice(0, 6) : 'Unknown');
+    write('events.jsonl', { type: 'DETAIL_STARTED', worker: index, mint, symbol: tokenSymbol, startedAt });
+    console.log('[detail-start]', 'worker=' + index, tokenSymbol, mint);
     try {
       await page.goto(config.tokenUrlTemplate.replaceAll('{mint}', mint), { waitUntil: 'commit', timeout: config.workerTimeoutMs });
       if (quoteSimulationEnabled) {
@@ -2307,27 +2595,100 @@ async function worker(index: number, deadline: number) {
           const v2ControlBuyAllowed = momentumV2 && (browserPromptTestReason !== null || (baseBuyAllowed && (momentumEntry?.allowed ?? true)));
           const v3ControlBuyAllowed = momentumV3 && (momentumV3Entry?.allowed ?? false);
           const candidateMC = num(candidate, 'marketCapUsd');
-          const aggressiveMcAllowed = candidateMC === null || (candidateMC >= MOMENTUM_AGGRESSIVE_RULES.minMarketCap && candidateMC <= MOMENTUM_AGGRESSIVE_RULES.maxMarketCap);
-          const aggressiveControlBuyAllowed = momentumAggressive
-            && (momentumAggressiveEntry?.allowed ?? false)
-            && aggressiveMcAllowed;
+          const aggressiveMcAllowed = candidateMC === null || (candidateMC >= MOMENTUM_AGGRESSIVE_SAFE_RULES.minMarketCap && candidateMC <= MOMENTUM_AGGRESSIVE_SAFE_RULES.maxMarketCap);
+          const aggressiveSafeEntry = momentumAggressive
+            ? assessMomentumAggressiveSafeEntry(
+                momentumTape.get(mint) ?? [],
+                now,
+                holderDistribution,
+                devHoldingPct,
+                totalHolderSamples.get(mint) ?? [],
+                isYoungToken,
+                flow.buySharePercent
+              )
+            : null;
+          const aggressiveSafeBuyAllowed = momentumAggressive
+            && aggressiveMcAllowed
+            && (aggressiveSafeEntry?.allowed ?? false);
+          const aggressiveOptimalEntry = momentumAggressive
+            ? assessMomentumAggressiveOptimalEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, flow.buySharePercent)
+            : null;
+          const aggressiveOptimalBuyAllowed = momentumAggressive
+            && aggressiveMcAllowed
+            && (aggressiveOptimalEntry?.allowed ?? false);
+          const aggressiveWideEntry = momentumAggressive
+            ? assessMomentumAggressiveWideEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct)
+            : null;
+          const aggressiveWideBuyAllowed = momentumAggressive
+            && aggressiveMcAllowed
+            && (aggressiveWideEntry?.allowed ?? false);
+          const dynamicSwingMinMC = dynamicFeedSettings?.minMarketCapUsd ?? MOMENTUM_AGGRESSIVE_SWING_100K_RULES.minMarketCap;
+          const dynamicSwingMaxMC = dynamicFeedSettings?.maxMarketCapUsd ?? MOMENTUM_AGGRESSIVE_SWING_100K_RULES.maxMarketCap;
+          const swing100kMcAllowed = candidateMC === null || (candidateMC >= dynamicSwingMinMC && candidateMC <= dynamicSwingMaxMC);
+          const aggressiveSwing100kEntry = momentumAggressive
+            ? assessMomentumAggressiveSwing100kEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, candidateMC)
+            : null;
+          const aggressiveSwing100kBuyAllowed = momentumAggressive
+            && swing100kMcAllowed
+            && (aggressiveSwing100kEntry?.allowed ?? false);
+          const dynamicWaveMinMC = dynamicFeedSettings?.minMarketCapUsd ?? MOMENTUM_AGGRESSIVE_WAVE_RULES.minMarketCap;
+          const dynamicWaveMaxMC = dynamicFeedSettings?.maxMarketCapUsd ?? MOMENTUM_AGGRESSIVE_WAVE_RULES.maxMarketCap;
+          const waveMcAllowed = candidateMC === null || (candidateMC >= dynamicWaveMinMC && candidateMC <= dynamicWaveMaxMC);
+          const aggressiveWaveEntry = momentumAggressive
+            ? assessMomentumAggressiveWaveEntry(momentumTape.get(mint) ?? [], now, holderDistribution, devHoldingPct, top1Pct, candidateMC, flow.buySharePercent)
+            : null;
+          const aggressiveWaveBuyAllowed = momentumAggressive
+            && waveMcAllowed
+            && (aggressiveWaveEntry?.allowed ?? false);
           const r5BandBuyAllowed = r5BandEnabled && baseBuyAllowed && (r5BandEntry?.allowed ?? false);
           const laneAtPaperLimit = (paperLane: PaperLane) => maxPaperBuys !== null && simulatedEvents.filter(event => event.type === 'SIMULATED_BUY' && event.paperLane === paperLane).length >= maxPaperBuys;
-          const canOpenControl = (v2ControlBuyAllowed || aggressiveControlBuyAllowed) && !simulation && !laneAtPaperLimit(PAPER_LANES.control.id);
-          const canOpenV3 = v3ControlBuyAllowed && !momentumLaneStates.has(v3PaperLane) && !laneAtPaperLimit(v3PaperLane);
-          const canOpenV3ExitConfirmed = momentumComparison && v3ControlBuyAllowed
+          const requestedLane = (values.onlyLane || values.lane || '').trim();
+          const allowLane = (laneId: string) => !requestedLane || requestedLane === 'all' || requestedLane === laneId;
+          const aggressiveRawBuyAllowed = momentumAggressive
+            && aggressiveMcAllowed
+            && (momentumAggressiveEntry?.allowed ?? false);
+          const canOpenControl = allowLane(PAPER_LANES.control.id)
+            && (momentumAggressive ? aggressiveRawBuyAllowed : v2ControlBuyAllowed)
+            && !momentumLaneStates.has(PAPER_LANES.control.id)
+            && !laneAtPaperLimit(PAPER_LANES.control.id);
+          const canOpenAggressiveSafe = allowLane(PAPER_LANES.aggressiveSafe.id)
+            && aggressiveSafeBuyAllowed && !momentumLaneStates.has(PAPER_LANES.aggressiveSafe.id) && !laneAtPaperLimit(PAPER_LANES.aggressiveSafe.id);
+          const canOpenAggressiveOptimal = allowLane(PAPER_LANES.aggressiveOptimal.id)
+            && aggressiveOptimalBuyAllowed && !momentumLaneStates.has(PAPER_LANES.aggressiveOptimal.id) && !laneAtPaperLimit(PAPER_LANES.aggressiveOptimal.id);
+          const canOpenAggressiveWide = allowLane(PAPER_LANES.aggressiveWide.id)
+            && aggressiveWideBuyAllowed && !momentumLaneStates.has(PAPER_LANES.aggressiveWide.id) && !laneAtPaperLimit(PAPER_LANES.aggressiveWide.id);
+          const swingState = momentumLaneStates.get(PAPER_LANES.aggressiveSwing100k.id);
+          const swingCanReenter = !swingState || (swingState.closed && now - (swingState.closedAt ?? 0) >= 5_000);
+          const canOpenAggressiveSwing100k = allowLane(PAPER_LANES.aggressiveSwing100k.id)
+            && aggressiveSwing100kBuyAllowed && swingCanReenter && !laneAtPaperLimit(PAPER_LANES.aggressiveSwing100k.id);
+          const waveState = momentumLaneStates.get(PAPER_LANES.aggressiveWave.id);
+          const waveCanReenter = !waveState || (waveState.closed && now - (waveState.closedAt ?? 0) >= 5_000);
+          const canOpenAggressiveWave = allowLane(PAPER_LANES.aggressiveWave.id)
+            && aggressiveWaveBuyAllowed && waveCanReenter && !laneAtPaperLimit(PAPER_LANES.aggressiveWave.id);
+          const canOpenMomentumV2 = allowLane(PAPER_LANES.momentumV2.id)
+            && momentumAggressive && v2ControlBuyAllowed && (momentumEntry?.allowed ?? false) && !momentumLaneStates.has(PAPER_LANES.momentumV2.id) && !laneAtPaperLimit(PAPER_LANES.momentumV2.id);
+          const canOpenMomentumV3 = allowLane(PAPER_LANES.momentumV3.id)
+            && momentumAggressive && (v3ControlBuyAllowed || (v2ControlBuyAllowed && (momentumEntry?.allowed ?? false))) && !momentumLaneStates.has(PAPER_LANES.momentumV3.id) && !laneAtPaperLimit(PAPER_LANES.momentumV3.id);
+          const canOpenV3 = allowLane(v3PaperLane)
+            && !momentumAggressive && v3ControlBuyAllowed && !momentumLaneStates.has(v3PaperLane) && !laneAtPaperLimit(v3PaperLane);
+          const canOpenV3ExitConfirmed = allowLane(PAPER_LANES.v3ExitConfirmed.id)
+            && momentumComparison && v3ControlBuyAllowed
             && !momentumLaneStates.has(PAPER_LANES.v3ExitConfirmed.id)
             && !laneAtPaperLimit(PAPER_LANES.v3ExitConfirmed.id);
           // The variant may enter later than control when R5 first reaches its
           // band. It never opens a browser trade control or changes control's
           // position state.
-          const canOpenR5Band = r5BandBuyAllowed && !r5BandSimulation
-            && (maxPaperBuys === null || paperBuyCount < maxPaperBuys || canOpenControl);
+          const canOpenR5Band = allowLane(PAPER_LANES.r5Band.id)
+            && r5BandBuyAllowed && !momentumLaneStates.has(PAPER_LANES.r5Band.id) && !laneAtPaperLimit(PAPER_LANES.r5Band.id);
 
-          if (canOpenControl || canOpenV3 || canOpenR5Band) {
-            const effectiveStakeUsd = simulationStakeSol !== null
-              ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
-              : simulationStakeUsd;
+          if (canOpenControl || canOpenAggressiveSafe || canOpenAggressiveOptimal || canOpenAggressiveWide || canOpenAggressiveSwing100k || canOpenAggressiveWave || canOpenMomentumV2 || canOpenMomentumV3 || canOpenV3 || canOpenR5Band) {
+            const autoBuyCfg = getAutoBuySettings();
+            const configStakeUsd = Number(autoBuyCfg.stakeUsd) > 0 ? Number(autoBuyCfg.stakeUsd) : simulationStakeUsd;
+            const effectiveStakeUsd = autoBuyCfg.stakeMode === 'sol' && (detailSolSpot?.usd || solSpotCache?.usd || 150) > 0 && autoBuyCfg.stakeSol > 0
+              ? Number((autoBuyCfg.stakeSol * (detailSolSpot?.usd || solSpotCache?.usd || 150)).toFixed(4))
+              : (simulationStakeSol !== null
+                ? Number((simulationStakeSol * (solSpotCache?.usd ?? 150)).toFixed(4))
+                : configStakeUsd);
             const entryDecisionAt = momentumResearch ? Date.now() : now;
             const openMomentumLane = (paperLane: PaperLane, entryGate: any, entryReason?: string) => {
               const paperPosition = openSimulation(mint, entryDecisionAt, price, effectiveStakeUsd);
@@ -2339,22 +2700,67 @@ async function worker(index: number, deadline: number) {
                     ? 'MOMENTUM_V3_ENTRY_PASSED'
                     : paperLane === PAPER_LANES.v3.id
                       ? 'MOMENTUM_V3_ENTRY_PASSED'
-                      : momentumAggressive
-                        ? 'MOMENTUM_AGGRESSIVE_ENTRY_PASSED'
-                        : 'MOMENTUM_V2_ENTRY_PASSED'),
+                      : paperLane === PAPER_LANES.aggressiveWave.id
+                        ? 'MOMENTUM_AGGRESSIVE_WAVE_ENTRY_PASSED'
+                        : paperLane === PAPER_LANES.aggressiveSwing100k.id
+                        ? 'MOMENTUM_AGGRESSIVE_SWING_100K_ENTRY_PASSED'
+                        : paperLane === PAPER_LANES.aggressiveWide.id
+                          ? 'MOMENTUM_AGGRESSIVE_WIDE_ENTRY_PASSED'
+                          : paperLane === PAPER_LANES.aggressiveOptimal.id
+                            ? 'MOMENTUM_AGGRESSIVE_OPTIMAL_ENTRY_PASSED'
+                            : paperLane === PAPER_LANES.aggressiveSafe.id
+                              ? 'MOMENTUM_AGGRESSIVE_SAFE_ENTRY_PASSED'
+                              : paperLane === PAPER_LANES.momentumV2.id
+                                ? 'MOMENTUM_V2_ENTRY_PASSED'
+                                : paperLane === PAPER_LANES.momentumV3.id
+                                  ? 'MOMENTUM_V3_ENTRY_PASSED'
+                                  : momentumAggressive
+                                    ? 'MOMENTUM_AGGRESSIVE_ENTRY_PASSED'
+                                    : 'MOMENTUM_V2_ENTRY_PASSED'),
                 marketTradeAt: lastMomentumTick?.occurredAt ?? null, priceReceivedAt: lastMomentumTick?.observedAt ?? priceObservedAt,
                 decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
               });
-              write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal); scheduleSimulatedOrder(entrySignal, paperPosition.stakeUsd);
-              scheduleBuyRouteComparison(page, entrySignal, paperPosition.stakeUsd, detailSolSpot);
-              void promptAndSubmitBrowserBuy(page, entrySignal, paperPosition.stakeUsd, price, num(candidate, 'marketCapUsd')).catch(error => {
-                write('events.jsonl', { type: 'BROWSER_BUY_ERROR', mint, observedAt: Date.now(), signalId: entrySignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
-              });
-              const riskState = createMomentumPosition(entryDecisionAt, price, lastMomentumTick?.occurredAt ?? entryDecisionAt);
-              momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false, whaleSellPendingAt: null });
+              write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal); scheduleSimulatedOrder(entrySignal, effectiveStakeUsd);
+              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
+                scheduleBuyRouteComparison(page, entrySignal, effectiveStakeUsd, detailSolSpot);
+
+                const currentAutoBuyCfg = getAutoBuySettings();
+                const isAutoBuyLane = (currentAutoBuyCfg.activeLane === 'all' || currentAutoBuyCfg.activeLane === paperLane);
+                const quotaAvailable = (currentAutoBuyCfg.maxBuys <= 0 || (currentAutoBuyCfg.buysCompleted || 0) < currentAutoBuyCfg.maxBuys);
+                const belowConcurrencyLimit = liveBrowserPositions.size < (currentAutoBuyCfg.maxActiveRealPositions || 1);
+                const shouldExecuteRealBuy = browserTradingEnabled && currentAutoBuyCfg.enabled && isAutoBuyLane && quotaAvailable && belowConcurrencyLimit;
+
+                if (shouldExecuteRealBuy) {
+                  const effectiveStake = effectiveStakeUsd;
+                  inFlightBrowserBuys.set(mint, paperLane);
+
+                  void promptAndSubmitBrowserBuy(page, entrySignal, effectiveStake, price, num(candidate, 'marketCapUsd')).then(() => {
+                    updateAutoBuyCompletedCount();
+                  }).catch(error => {
+                    write('events.jsonl', { type: 'BROWSER_BUY_ERROR', mint, paperLane, observedAt: Date.now(), signalId: entrySignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+                  }).finally(() => {
+                    inFlightBrowserBuys.delete(mint);
+                  });
+                } else if (paperLane === PAPER_LANES.control.id && !momentumAggressive && browserTradingEnabled && !currentAutoBuyCfg.enabled) {
+                  inFlightBrowserBuys.set(mint, paperLane);
+                  void promptAndSubmitBrowserBuy(page, entrySignal, effectiveStakeUsd, price, num(candidate, 'marketCapUsd')).catch(error => {
+                    write('events.jsonl', { type: 'BROWSER_BUY_ERROR', mint, observedAt: Date.now(), signalId: entrySignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+                  }).finally(() => {
+                    inFlightBrowserBuys.delete(mint);
+                  });
+                }
+              }
+              const waveTargetAnalysis = paperLane === PAPER_LANES.aggressiveWave.id
+                ? calculateDynamicWaveTarget(latestCandles, candidateMC)
+                : null;
+              if (waveTargetAnalysis) {
+                console.log('[wave-target-analysis]', candidate?.metadata?.symbol ?? mint, `target=+${waveTargetAnalysis.targetPercent}%`, waveTargetAnalysis.rationale);
+              }
+              const riskState = createMomentumPosition(entryDecisionAt, price, lastMomentumTick?.occurredAt ?? entryDecisionAt, waveTargetAnalysis?.targetPercent);
+              momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false, whaleSellPendingAt: null, closedAt: null });
               writeSimulation({ type: 'SIMULATED_BUY', paperLane, mint, worker: index, observedAt: entryDecisionAt, timing: entrySignal, positionId: entrySignal.positionId,
                 entryPriceUsd: price, stakeUsd: paperPosition.stakeUsd, quantity: paperPosition.quantity,
-                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
+                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, aggressiveSafe: momentumAggressive ? aggressiveSafeEntry : null, aggressiveOptimal: momentumAggressive ? aggressiveOptimalEntry : null, aggressiveWide: momentumAggressive ? aggressiveWideEntry : null, aggressiveSwing100k: momentumAggressive ? aggressiveSwing100kEntry : null, aggressiveWave: momentumAggressive ? aggressiveWaveEntry : null, aggressiveWaveTarget: waveTargetAnalysis, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
                 assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper lane only; no GMGN order is submitted.' } });
               return paperPosition;
             };
@@ -2367,33 +2773,123 @@ async function worker(index: number, deadline: number) {
                   browserPromptTestReason ?? (momentumAggressive ? 'MOMENTUM_AGGRESSIVE_ENTRY_PASSED' : undefined)
                 );
               }
+              if (canOpenAggressiveSafe) {
+                paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.aggressiveSafe.id,
+                  aggressiveSafeEntry,
+                  'MOMENTUM_AGGRESSIVE_SAFE_ENTRY_PASSED'
+                );
+              }
+              if (canOpenAggressiveOptimal) {
+                if (!canOpenAggressiveSafe) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.aggressiveOptimal.id,
+                  aggressiveOptimalEntry,
+                  'MOMENTUM_AGGRESSIVE_OPTIMAL_ENTRY_PASSED'
+                );
+              }
+              if (canOpenAggressiveWide) {
+                if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.aggressiveWide.id,
+                  aggressiveWideEntry,
+                  'MOMENTUM_AGGRESSIVE_WIDE_ENTRY_PASSED'
+                );
+              }
+              if (canOpenAggressiveSwing100k) {
+                if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.aggressiveSwing100k.id,
+                  aggressiveSwing100kEntry,
+                  'MOMENTUM_AGGRESSIVE_SWING_100K_ENTRY_PASSED'
+                );
+              }
+              if (canOpenAggressiveWave) {
+                if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide && !canOpenAggressiveSwing100k) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.aggressiveWave.id,
+                  aggressiveWaveEntry,
+                  'MOMENTUM_AGGRESSIVE_WAVE_ENTRY_PASSED'
+                );
+              }
+              if (canOpenMomentumV2) {
+                if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide && !canOpenAggressiveSwing100k && !canOpenAggressiveWave) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.momentumV2.id,
+                  momentumEntry,
+                  'MOMENTUM_V2_ENTRY_PASSED'
+                );
+              }
+              if (canOpenMomentumV3) {
+                if (!canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide && !canOpenMomentumV2) paperBuyCount++;
+                openMomentumLane(
+                  PAPER_LANES.momentumV3.id,
+                  momentumV3Entry ?? momentumEntry,
+                  'MOMENTUM_V3_ENTRY_PASSED'
+                );
+              }
+              if (canOpenAggressiveSafe && !canOpenAggressiveOptimal && momentumAggressive && aggressiveOptimalEntry && !aggressiveOptimalEntry.allowed) {
+                write('events.jsonl', {
+                  type: 'SIMULATION_BUY_LANE_FILTERED',
+                  mint,
+                  worker: index,
+                  observedAt: now,
+                  paperLane: PAPER_LANES.aggressiveOptimal.id,
+                  reasons: aggressiveOptimalEntry.reasons,
+                  devHoldingPct,
+                  holderDistribution,
+                  top1Percent: top1Pct,
+                  buyShare20s: flow.buySharePercent,
+                  note: 'Candidate opened Safe Aggressive but was rejected by Optimal Aggressive filter.'
+                });
+                console.log('[sim-buy-filtered]', candidate?.metadata?.symbol ?? mint, 'aggressive-optimal', aggressiveOptimalEntry.reasons.join(', '));
+              }
               if (canOpenV3) {
-                if (!canOpenControl) paperBuyCount++;
+                if (!canOpenControl && !canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide) paperBuyCount++;
                 openMomentumLane(v3PaperLane, momentumEntry, 'MOMENTUM_V3_ENTRY_PASSED');
               }
               if (canOpenV3ExitConfirmed) openMomentumLane(PAPER_LANES.v3ExitConfirmed.id, momentumEntry, 'MOMENTUM_V3_ENTRY_PASSED');
-              if (canOpenR5Band) r5BandSimulation = openMomentumLane(PAPER_LANES.r5Band.id, r5BandEntry);
+              if (canOpenR5Band) {
+                if (!canOpenControl && !canOpenAggressiveSafe && !canOpenAggressiveOptimal && !canOpenAggressiveWide && !canOpenMomentumV2 && !canOpenMomentumV3) paperBuyCount++;
+                r5BandSimulation = openMomentumLane(PAPER_LANES.r5Band.id, r5BandEntry, 'MOMENTUM_V2_R5_BAND_ENTRY_PASSED');
+              }
               if (!paperRiskListeners.has(mint)) paperRiskListeners.set(mint, tick => {
                 for (const [paperLane, state] of momentumLaneStates) {
                   if (state.closed) continue;
-                  if (browserTradingEnabled && paperLane === PAPER_LANES.control.id) {
-                    const livePosition = liveBrowserPositions.get(mint);
+                  const livePosition = liveBrowserPositions.get(mint);
+                  const isInFlightBuy = inFlightBrowserBuys.get(mint) === paperLane;
+                  const isRealLaneMatch = (livePosition?.originLane === paperLane) || isInFlightBuy || (paperLane === PAPER_LANES.control.id);
+                  if (browserTradingEnabled && isRealLaneMatch) {
                     if (!livePosition) {
-                      if (!browserSellDeferredBeforeBuy.has(mint)) {
-                        browserSellDeferredBeforeBuy.add(mint);
-                        write('events.jsonl', { type: 'BROWSER_SELL_DEFERRED', mint, observedAt: tick.observedAt, reason: 'WAITING_FOR_BROWSER_BUY_SUBMISSION' });
+                      if (isInFlightBuy) {
+                        if (!browserSellDeferredBeforeBuy.has(mint)) {
+                          browserSellDeferredBeforeBuy.add(mint);
+                          write('events.jsonl', { type: 'BROWSER_SELL_DEFERRED', mint, paperLane, observedAt: tick.observedAt, reason: 'WAITING_FOR_BROWSER_BUY_CONFIRMATION' });
+                        }
+                        continue;
                       }
-                      continue;
-                    }
-                    if (state.riskState.openedAt < livePosition.confirmedAt) {
-                      state.riskState = createMomentumPosition(livePosition.confirmedAt, livePosition.entryPriceUsd, tick.occurredAt);
+                    } else if (state.riskState.openedAt < livePosition.confirmedAt) {
+                      state.riskState = createMomentumPosition(livePosition.confirmedAt, livePosition.entryPriceUsd, tick.occurredAt, state.riskState.dynamicTargetPercent);
                       browserSellDeferredBeforeBuy.delete(mint);
-                      write('events.jsonl', { type: 'BROWSER_SELL_ARMED', mint, observedAt: tick.observedAt, buyConfirmedAt: livePosition.confirmedAt, entryPriceUsd: livePosition.entryPriceUsd });
+                      write('events.jsonl', { type: 'BROWSER_SELL_ARMED', mint, paperLane, observedAt: tick.observedAt, buyConfirmedAt: livePosition.confirmedAt, entryPriceUsd: livePosition.entryPriceUsd });
                       continue;
                     }
                   }
                   const decision = momentumAggressive
-                    ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [])
+                    ? (paperLane === PAPER_LANES.aggressiveWave.id
+                        ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_WAVE_RULES)
+                        : paperLane === PAPER_LANES.aggressiveSwing100k.id
+                        ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_SWING_100K_RULES)
+                        : paperLane === PAPER_LANES.aggressiveWide.id
+                          ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_WIDE_RULES)
+                          : paperLane === PAPER_LANES.aggressiveOptimal.id
+                            ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_OPTIMAL_RULES)
+                            : paperLane === PAPER_LANES.aggressiveSafe.id
+                              ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_SAFE_RULES)
+                              : (paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id)
+                                ? assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint))
+                                : assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_RULES))
                     : assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
                   if (!decision) continue;
                   if (decision.reason || tick.observedAt - lastMonitoringSnapshotAt >= 5_000) {
@@ -2407,7 +2903,7 @@ async function worker(index: number, deadline: number) {
                   // Only its exit differs: a non-dev whale sell exits immediately
                   // when underwater/unsupported, while a profitable, supported
                   // position may wait for two bearish confirmations after 5 seconds.
-                  if (paperLane === PAPER_LANES.v3ExitConfirmed.id) {
+                  if (paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) {
                     const holderDelta = decision.holders.steps.reduce((total, step) => total + step.delta, 0);
                     const sellUsd = decision.metrics.sellUsd ?? 0;
                     const buyUsd = decision.metrics.buyUsd ?? 0;
@@ -2463,18 +2959,25 @@ async function worker(index: number, deadline: number) {
                     }
                   }
                   if (!exitReason) continue;
+                  const exitDecisionAt = Date.now();
                   state.closed = true;
+                  state.closedAt = exitDecisionAt;
                   if (paperLane === PAPER_LANES.control.id) { simulationExit = exitReason; pendingMomentumExit = decision; }
                   else if (paperLane === PAPER_LANES.r5Band.id) r5BandExit = exitReason;
-                  const exitDecisionAt = Date.now();
                   const exitSignal = paperSignal({ side: 'SELL', paperLane, runId, mint, positionId: `${mint}:${state.position.openedAt}:${paperLane}`, worker: index,
                     reason: exitReason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
                     decisionAt: exitDecisionAt, paperRecordedAt: Date.now(), priceUsd: decision.priceUsd });
                   write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
-                  scheduleSellRouteComparison(page, exitSignal);
-                  void promptAndSubmitBrowserSell(page, exitSignal, decision.priceUsd, num(candidates.get(mint), 'marketCapUsd')).catch(error => {
-                    write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
-                  });
+                  if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
+                    scheduleSellRouteComparison(page, exitSignal);
+                    const realPos = liveBrowserPositions.get(mint);
+                    const isRealPositionMatch = realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
+                    if (isRealPositionMatch && browserTradingEnabled) {
+                      void promptAndSubmitBrowserSell(page, exitSignal, decision.priceUsd, num(candidates.get(mint), 'marketCapUsd')).catch(error => {
+                        write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, paperLane, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+                      });
+                    }
+                  }
                   writeSimulationExit(state.position, paperLane, mint, exitDecisionAt, decision.priceUsd, exitReason, candidates.get(mint)?.metadata ?? null, { ...decision, reason: exitReason, customExitPolicy }, exitSignal);
                 }
               });
@@ -2512,7 +3015,7 @@ async function worker(index: number, deadline: number) {
                 console.log('[paper-only]', candidate?.metadata?.symbol ?? mint, 'Simulated buy opened; real UI buy click skipped (autoBuy=false)');
               }
             }
-            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
+            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenAggressiveSafe && PAPER_LANES.aggressiveSafe.id, canOpenAggressiveOptimal && PAPER_LANES.aggressiveOptimal.id, canOpenAggressiveWide && PAPER_LANES.aggressiveWide.id, canOpenAggressiveSwing100k && PAPER_LANES.aggressiveSwing100k.id, canOpenAggressiveWave && PAPER_LANES.aggressiveWave.id, canOpenMomentumV2 && PAPER_LANES.momentumV2.id, canOpenMomentumV3 && PAPER_LANES.momentumV3.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
           } else if (maxPaperBuys !== null && (v2ControlBuyAllowed || v3ControlBuyAllowed) && !trialLimitRecorded) {
             trialLimitRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
@@ -2555,7 +3058,7 @@ async function worker(index: number, deadline: number) {
             lastEntryBlockPriceAt = priceObservedAt;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', mint, worker: index, observedAt: now, priceUsd: price, tradeFlow20s: flow, note: 'No paper buy: the last 20 seconds lack at least 5 trades with buy USD at least sell USD.' });
           }
-          if (momentumV2 && !r5BandSimulation && baseBuyAllowed && r5BandEntry && !r5BandEntry.allowed && now - lastR5BandBlockAt >= 5_000) {
+          if ((momentumV2 || momentumAggressive) && !r5BandSimulation && baseBuyAllowed && r5BandEntry && !r5BandEntry.allowed && now - lastR5BandBlockAt >= 5_000) {
             lastR5BandBlockAt = now;
             write('events.jsonl', { type: 'SIMULATION_BUY_BLOCKED', paperLane: PAPER_LANES.r5Band.id, mint, worker: index, observedAt: now, priceUsd: price,
               reason: r5BandEntry.reasons.join(', '), momentum: r5BandEntry,
@@ -2777,11 +3280,41 @@ async function worker(index: number, deadline: number) {
               decisionAt: endedAt, paperRecordedAt: Date.now(), priceUsd: closePrice });
             write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
             await scheduleSellRouteComparison(page, exitSignal);
+            const realPos = liveBrowserPositions.get(mint);
+            const isRealPositionMatch = realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
+            if (isRealPositionMatch && browserTradingEnabled) {
+              await promptAndSubmitBrowserSell(page, exitSignal, closePrice, num(candidate, 'marketCapUsd')).catch(error => {
+                write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, paperLane, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+              });
+            }
             const result = writeSimulationExit(state.position, paperLane, mint, endedAt, closePrice, 'OBSERVATION_END', candidate.metadata ?? null,
               { priceSource: finalTick?.priceUsd === closePrice ? 'last observed detail socket tick' : 'fresh candidate price', priceObservedAt: finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? null }, exitSignal);
             if (paperLane === PAPER_LANES.control.id) simulationExit = 'OBSERVATION_END';
             else if (paperLane === PAPER_LANES.r5Band.id) r5BandExit = 'OBSERVATION_END';
             console.log('[sim-sell]', candidate.metadata?.symbol ?? mint, paperLane, 'OBSERVATION_END', 'pnl=$' + result.pnlUsd.toFixed(6));
+          }
+          const orphanedRealPos = liveBrowserPositions.get(mint);
+          if (orphanedRealPos && browserTradingEnabled) {
+            const targetLane = (orphanedRealPos.originLane || 'momentum-v3') as PaperSignal['paperLane'];
+            const safetyClosePrice = closePrice || orphanedRealPos.entryPriceUsd;
+            const safetyExitSignal = paperSignal({
+              side: 'SELL',
+              paperLane: targetLane,
+              runId,
+              mint,
+              positionId: `${mint}:${orphanedRealPos.confirmedAt}:${targetLane}`,
+              worker: index,
+              reason: 'OBSERVATION_END_SAFETY_SELL',
+              marketTradeAt: finalTick?.observedAt ?? null,
+              priceReceivedAt: finalObservedAt,
+              decisionAt: endedAt,
+              paperRecordedAt: Date.now(),
+              priceUsd: safetyClosePrice
+            });
+            write('events.jsonl', { type: 'ORPHAN_SAFETY_SELL_TRIGGERED', mint, paperLane: targetLane, observedAt: Date.now() });
+            await promptAndSubmitBrowserSell(page, safetyExitSignal, safetyClosePrice, num(candidate, 'marketCapUsd')).catch(error => {
+              write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, paperLane: targetLane, observedAt: Date.now(), signalId: safetyExitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
+            });
           }
         } else if (simulation && !simulationExit && closePrice) {
           simulationExit = 'OBSERVATION_END'; const result = writeSimulationExit(simulation, PAPER_LANES.control.id, mint, endedAt, closePrice, simulationExit, candidate.metadata ?? null, { priceSource: finalTick?.priceUsd === closePrice ? 'last observed detail socket tick' : 'fresh candidate price', priceObservedAt: finalTick?.observedAt ?? candidate.fields.priceUsd?.observedAt ?? null }); console.log('[sim-sell]', candidate.metadata?.symbol ?? mint, simulationExit, 'pnl=$' + result.pnlUsd.toFixed(6));
@@ -2846,6 +3379,13 @@ async function worker(index: number, deadline: number) {
             note: 'Detail tab was closed by the operator; the worker will create one replacement tab for the next candidate.' });
         }
       }
+      // Wait for any live browser position to finish selling before navigating away
+      if (liveBrowserPositions.has(mint) && !page.isClosed()) {
+        const holdStart = Date.now();
+        while (liveBrowserPositions.has(mint) && (Date.now() - holdStart < 15000) && !stopping.signal.aborted && !page.isClosed()) {
+          await delay(250);
+        }
+      }
       // In an order-capture session the completed token must remain visible for
       // the operator's manual Sell. Ordinary research workers or auto-traders clear the tab.
       if ((!values.orderCapture || browserAutoTrade) && !page.isClosed()) await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
@@ -2863,11 +3403,22 @@ async function main() {
       : momentumV3 ? { ...MOMENTUM_V3_RULES, exits: MOMENTUM_RULES }
       : momentumV2 ? MOMENTUM_RULES : flow3 ? FLOW3_RULES : null,
     ...(momentumResearch ? { paperLanes: {
-      [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: momentumAggressive ? MOMENTUM_AGGRESSIVE_RULES : standaloneMomentumV3 ? MOMENTUM_V3_RULES : { minimumReturn5s: MOMENTUM_RULES.minimumReturn5s, maximumReturn5s: MOMENTUM_RULES.maximumReturn5s } },
+      ...(momentumAggressive ? {
+        [PAPER_LANES.control.id]: { label: 'Raw Aggressive (Baseline)', entry: MOMENTUM_AGGRESSIVE_RULES },
+        [PAPER_LANES.aggressiveSafe.id]: { label: PAPER_LANES.aggressiveSafe.label, entry: MOMENTUM_AGGRESSIVE_SAFE_RULES },
+        [PAPER_LANES.aggressiveOptimal.id]: { label: PAPER_LANES.aggressiveOptimal.label, entry: MOMENTUM_AGGRESSIVE_OPTIMAL_RULES },
+        [PAPER_LANES.aggressiveWide.id]: { label: PAPER_LANES.aggressiveWide.label, entry: MOMENTUM_AGGRESSIVE_WIDE_RULES },
+        [PAPER_LANES.aggressiveSwing100k.id]: { label: PAPER_LANES.aggressiveSwing100k.label, entry: MOMENTUM_AGGRESSIVE_SWING_100K_RULES },
+        [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_AGGRESSIVE_WAVE_RULES },
+        [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES },
+        [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } },
+      } : {
+        [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: standaloneMomentumV3 ? MOMENTUM_V3_RULES : { minimumReturn5s: MOMENTUM_RULES.minimumReturn5s, maximumReturn5s: MOMENTUM_RULES.maximumReturn5s } },
+      }),
       ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES } } : {}),
       ...(momentumComparison ? { [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES,
         exit: { nonDevWhaleSell: 'immediate when P/L <= 0 or buy flow/holder growth is not supportive; otherwise pending 5 seconds, then sell with 2 of: sell USD >= 1.5x buy USD, 5s price <= -2%, holder delta <= 0', devSell: 'immediate', profitLock: 'hold while buy USD > sell USD, holder delta > 0, price 5s > 0; exit on 5% drawdown' } } } : {}),
-      ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}),
+      ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {})
     }, timing: {
       signalFile: 'trade-signals.jsonl',
       paperOrderFile: 'paper-orders.jsonl',
@@ -2882,15 +3433,17 @@ async function main() {
     } } : {}),
     storage: { holderSnapshots: 'research.sqlite (holder_api_observations + changed holder_snapshots + holder_balances)', legacyTrackedHoldersJsonl: false },
     note: 'Thresholds are research hypotheses; replay does not establish profitability.' }, null, 2));
-  if (pumpBand) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: 'pump-band', startedAt: new Date().toISOString(),
-    purpose: 'Playwright paper buy/sell test of the pump-band rules. No real GMGN trade controls are used.', workers, detailSeconds,
-    scheduling: 'No queue. Only a fresh eligible token with an empty detail slot is assigned.',
-    feedRules: { minimumMarketCapUsd: PUMP_BAND_RULES.minimumMarketCapUsd, maximumMarketCapUsd: PUMP_BAND_RULES.maximumMarketCapUsd },
-    simulation: { stakeUsd: simulationStakeUsd, buyPrice: 'first fresh transaction pu after detail open',
-      sellSignal: '20% drawdown from observed pu peak or observation window end', maximumExitPriceAgeMs: 5_000,
-      feeUsd: 0, slippagePercent: 0, maxPaperBuys }, tradePreparation: { enabled: false, autoBuyEnabled: false } }, null, 2));
-  else
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumResearch ? { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: momentumAggressive ? MOMENTUM_AGGRESSIVE_RULES : standaloneMomentumV3 ? MOMENTUM_V3_RULES : undefined }, ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES }, [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: 'immediate when underwater or flow/holders do not support holding; otherwise 5-second confirmation with 2 of 3 bearish signals', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}) } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
+  if (pumpBand) {
+    if (!existsSync(join(output, 'manifest.json'))) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: 'pump-band', startedAt: new Date().toISOString(),
+      purpose: 'Playwright paper buy/sell test of the pump-band rules. No real GMGN trade controls are used.', workers, detailSeconds,
+      scheduling: 'No queue. Only a fresh eligible token with an empty detail slot is assigned.',
+      feedRules: { minimumMarketCapUsd: PUMP_BAND_RULES.minimumMarketCapUsd, maximumMarketCapUsd: PUMP_BAND_RULES.maximumMarketCapUsd },
+      simulation: { stakeUsd: simulationStakeUsd, buyPrice: 'first fresh transaction pu after detail open',
+        sellSignal: '20% drawdown from observed price peak or observation window end', maximumExitPriceAgeMs: 5_000,
+        feeUsd: 0, slippagePercent: 0, maxPaperBuys }, tradePreparation: { enabled: false, autoBuyEnabled: false } }, null, 2));
+  } else {
+    if (!existsSync(join(output, 'manifest.json'))) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumResearch ? { ...(momentumAggressive ? { [PAPER_LANES.control.id]: { label: 'Raw Aggressive (Baseline)', entry: MOMENTUM_AGGRESSIVE_RULES }, [PAPER_LANES.aggressiveSafe.id]: { label: PAPER_LANES.aggressiveSafe.label, entry: MOMENTUM_AGGRESSIVE_SAFE_RULES }, [PAPER_LANES.aggressiveOptimal.id]: { label: PAPER_LANES.aggressiveOptimal.label, entry: MOMENTUM_AGGRESSIVE_OPTIMAL_RULES }, [PAPER_LANES.aggressiveWide.id]: { label: PAPER_LANES.aggressiveWide.label, entry: MOMENTUM_AGGRESSIVE_WIDE_RULES }, [PAPER_LANES.aggressiveSwing100k.id]: { label: PAPER_LANES.aggressiveSwing100k.label, entry: MOMENTUM_AGGRESSIVE_SWING_100K_RULES }, [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_AGGRESSIVE_WAVE_RULES }, [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES }, [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: standaloneMomentumV3 ? MOMENTUM_V3_RULES : undefined } }), ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES }, [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: 'immediate when underwater or flow/holders do not support holding; otherwise 5-second confirmation with 2 of 3 bearish signals', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}) } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
+  }
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
   await installGmgnNewPairFilter(context);
@@ -2901,11 +3454,24 @@ async function main() {
   console.log('[research-start]', output, 'workers=' + workers, 'detailSeconds=' + detailSeconds, simulationStakeSol !== null ? ('stakeSol=' + simulationStakeSol) : ('stakeUsd=$' + simulationStakeUsd));
   const feed = context.pages()[0] ?? await context.newPage(); attach(feed, true, () => undefined);
   await feed.goto(config.feedUrl, { waitUntil: 'commit', timeout: config.workerTimeoutMs });
-  const deadline = runSeconds === 0 ? Number.POSITIVE_INFINITY : Date.now() + runSeconds * 1000;
-  const timer = runSeconds === 0 ? null : setTimeout(() => stopping.abort(), runSeconds * 1000);
+  const sessionSlotEnd = values.sessionSlotEndMs ? Number(values.sessionSlotEndMs) : NaN;
+  sessionDeadlineMs = Number.isFinite(sessionSlotEnd)
+    ? sessionSlotEnd
+    : (runSeconds === 0 ? Number.POSITIVE_INFINITY : Date.now() + runSeconds * 1000);
+  const deadline = sessionDeadlineMs;
+  const timer = Number.isFinite(deadline) ? setTimeout(() => stopping.abort(), Math.max(1000, deadline - Date.now() + 180_000)) : null;
   await Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline)));
   await Promise.allSettled([...pendingPaperOrders]);
   if (timer) clearTimeout(timer);
+
+  // Graceful Draining: Wait for any lingering in-flight buy or active position to finish
+  if (inFlightBrowserBuys.size > 0 || liveBrowserPositions.size > 0) {
+    console.log(`[SESSION-DRAIN] Waiting for ${inFlightBrowserBuys.size} in-flight buy(s) and ${liveBrowserPositions.size} open position(s) to settle...`);
+    const drainStart = Date.now();
+    while ((inFlightBrowserBuys.size > 0 || liveBrowserPositions.size > 0) && (Date.now() - drainStart < 120_000)) {
+      await delay(1000);
+    }
+  }
   const simulated = simulatedEvents;
   const summarizeLane = (paperLane: PaperLane) => {
     const buys = simulated.filter(row => row.type === 'SIMULATED_BUY' && row.paperLane === paperLane);
@@ -2918,8 +3484,24 @@ async function main() {
       exitsByReason: Object.fromEntries(sells.reduce((map, row) => map.set(row.reason ?? 'UNKNOWN', (map.get(row.reason ?? 'UNKNOWN') ?? 0) + 1), new Map<string, number>())),
     };
   };
-  const lanes = { [PAPER_LANES.control.id]: summarizeLane(PAPER_LANES.control.id), ...(momentumComparison ? { [PAPER_LANES.v3.id]: summarizeLane(PAPER_LANES.v3.id), [PAPER_LANES.v3ExitConfirmed.id]: summarizeLane(PAPER_LANES.v3ExitConfirmed.id) } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: summarizeLane(PAPER_LANES.r5Band.id) } : {}) };
-  const controlSummary = lanes[PAPER_LANES.control.id];
+  const lanes: Record<string, ReturnType<typeof summarizeLane>> = {
+    ...(momentumAggressive ? {
+      [PAPER_LANES.aggressiveSafe.id]: summarizeLane(PAPER_LANES.aggressiveSafe.id),
+      [PAPER_LANES.aggressiveOptimal.id]: summarizeLane(PAPER_LANES.aggressiveOptimal.id),
+      [PAPER_LANES.aggressiveWide.id]: summarizeLane(PAPER_LANES.aggressiveWide.id),
+      [PAPER_LANES.aggressiveSwing100k.id]: summarizeLane(PAPER_LANES.aggressiveSwing100k.id),
+      [PAPER_LANES.aggressiveWave.id]: summarizeLane(PAPER_LANES.aggressiveWave.id),
+      [PAPER_LANES.momentumV2.id]: summarizeLane(PAPER_LANES.momentumV2.id),
+      [PAPER_LANES.momentumV3.id]: summarizeLane(PAPER_LANES.momentumV3.id),
+    } : {
+      [PAPER_LANES.control.id]: summarizeLane(PAPER_LANES.control.id),
+    }),
+    ...(momentumComparison ? { [PAPER_LANES.v3.id]: summarizeLane(PAPER_LANES.v3.id), [PAPER_LANES.v3ExitConfirmed.id]: summarizeLane(PAPER_LANES.v3ExitConfirmed.id) } : {}),
+    ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: summarizeLane(PAPER_LANES.r5Band.id) } : {})
+  };
+  const controlSummary = momentumAggressive
+    ? lanes[PAPER_LANES.aggressiveOptimal.id] || lanes[PAPER_LANES.aggressiveWave.id] || lanes[PAPER_LANES.aggressiveSwing100k.id] || lanes[PAPER_LANES.aggressiveWide.id] || lanes[PAPER_LANES.aggressiveSafe.id]
+    : lanes[PAPER_LANES.control.id];
   writeFileSync(join(output, 'simulation-summary.json'), JSON.stringify({ observedAt: Date.now(), ...controlSummary, lanes,
     holderStorage: { api: holderStore.counts(), socket: holderStore.socketCounts() },
     assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));
@@ -2927,6 +3509,13 @@ async function main() {
   await refreshLatestReport();
   write('events.jsonl', { type: 'RUN_COMPLETE', observedAt: Date.now(), sockets, received, screened: inspected.size, rejected: rejected.size, rejectionCounts: Object.fromEntries(rejectionCounts), youngRejected: youngRejected.size, youngRejectionCounts: Object.fromEntries(youngRejectionCounts), simulation: { lanes } });
   console.log('[research-complete]', 'sockets=' + sockets, 'frames=' + received, 'screened=' + inspected.size, 'rejected=' + rejected.size, 'youngRejected=' + youngRejected.size);
+  try {
+    const { syncSingleRunToSqlite } = await import(new URL('../../scripts/crypto-db.mjs', import.meta.url).href);
+    syncSingleRunToSqlite(output);
+    console.log(`[SESSION-ARCHIVED] 3-Hour Session Successfully Archived to SQLite: ${output}`);
+  } catch (err) {
+    console.error('[SESSION-ARCHIVE-ERROR] Failed to auto-sync run to SQLite:', err);
+  }
   await context.close();
   holderStore.close();
 }

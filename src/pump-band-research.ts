@@ -508,7 +508,7 @@ async function main() {
       const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? '{}');
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
     } catch { /* replace malformed storage below */ }
-    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), __v: '20260922', '9mim': '20', '9im': '1' };
+    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), __v: '20260922', '0mim': '20000', '0im': '1', '9mim': '20', '9im': '1' };
     localStorage.setItem(key, JSON.stringify(map));
   });
   const feed = context.pages()[0] ?? await context.newPage(); attachFeed(feed);

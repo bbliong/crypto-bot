@@ -144,14 +144,14 @@ test('assessMomentumAggressiveEntry and assessMomentumAggressiveExit perform as 
 
   const pos = createMomentumPosition(now, 1.02);
   
-  // Test profit trail: price surges to +5%, then drops to +3%
-  const surgeTick = { id: '4', observedAt: 12000, occurredAt: 12000, priceUsd: 1.071, side: 'buy', wallet: 'w4', usd: 50, tokens: 46 };
+  // Test breakeven stop: price surges to +9% (>= 8.0%), then drops to +2.9% (<= +3.5%)
+  const surgeTick = { id: '4', observedAt: 12000, occurredAt: 12000, priceUsd: 1.112, side: 'buy', wallet: 'w4', usd: 50, tokens: 46 };
   const d1 = assessMomentumAggressiveExit(pos, surgeTick, [...tape, surgeTick]);
   assert.equal(d1?.reason, null);
 
-  const pullTick = { id: '5', observedAt: 13000, occurredAt: 13000, priceUsd: 1.045, side: 'sell', wallet: 'w5', usd: 50, tokens: 47 };
+  const pullTick = { id: '5', observedAt: 13000, occurredAt: 13000, priceUsd: 1.050, side: 'sell', wallet: 'w5', usd: 50, tokens: 47 };
   const d2 = assessMomentumAggressiveExit(pos, pullTick, [...tape, surgeTick, pullTick]);
-  assert.equal(d2?.reason, 'AGGRESSIVE_PROFIT_TRAIL');
+  assert.equal(d2?.reason, 'AGGRESSIVE_BREAKEVEN_STOP');
 
   // Test runner tier: position reaches +20% (runner tier), slight pullback of 3% does NOT exit, but 9% pullback exits with AGGRESSIVE_RUNNER_TRAIL
   const posRunner = createMomentumPosition(now, 1.00);

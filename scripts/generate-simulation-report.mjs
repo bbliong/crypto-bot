@@ -151,6 +151,8 @@ const paperLane = row => row?.paperLane ?? 'control';
 const paperLaneLabel = lane => lane === 'r5-band' ? 'R5-band 5%–<10%'
   : lane === 'v3-v8' ? 'V3 (V8)'
   : lane === 'v3-exit-confirmed' ? 'V3 Exit Confirmed'
+  : lane === 'aggressive-safe' ? 'Safe Aggressive'
+  : lane === 'aggressive-optimal' ? 'Optimal Aggressive'
   : (isMomentumAggressive ? 'Mode Agresif (Sniper)' : isMomentumV3 ? 'Kontrol V3 (V8)' : 'Kontrol V2');
 const buys = rows.filter(row => row.type === 'SIMULATED_BUY');
 const sells = rows.filter(row => row.type === 'SIMULATED_SELL');

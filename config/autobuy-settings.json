@@ -1,0 +1,20 @@
+{
+  "enabled": false,
+  "activeLane": "momentum-v2",
+  "stakeMode": "usd",
+  "stakeUsd": 0.5,
+  "stakeSol": 0.03,
+  "maxBuys": 0,
+  "buysCompleted": 57,
+  "maxActiveRealPositions": 2,
+  "slippagePercent": 15,
+  "buySlippagePercent": 9,
+  "sellSlippagePercent": 14,
+  "minSolReserve": 0.025,
+  "priorityFeeSol": 0.0001,
+  "tipFeeSol": 0.0001,
+  "maxAutoPriorityFeeSol": 0.0001,
+  "antiMev": false,
+  "autoSell": true,
+  "updatedAt": "2026-10-02T04:57:50.486Z"
+}

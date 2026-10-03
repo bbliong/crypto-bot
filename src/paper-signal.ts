@@ -1,7 +1,7 @@
 export type PaperSignal = {
   type: 'PAPER_TRADE_SIGNAL';
   side: 'BUY' | 'SELL';
-  paperLane: 'control' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
+  paperLane: 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'momentum-v2' | 'momentum-v3' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
   runId: string;
   mint: string;
   positionId: string;
@@ -31,7 +31,7 @@ export type PaperOrderEvent = {
   signalId: string;
   positionId: string;
   side: 'BUY' | 'SELL';
-  paperLane: 'control' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
+  paperLane: 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'momentum-v2' | 'momentum-v3' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
   mint: string;
   decisionAt: number;
   plannedOrderAt: number;
