@@ -2,6 +2,8 @@
 
 Tanggal analisis: 3 Oktober 2026. ID: `codex-guarded-wave-v1`.
 
+Lanjutan: [audit seluruh arsip dan Codex Flow Wave v2](CODEX_FLOW_WAVE_V2_ALL_HISTORY.md), termasuk payload quote mentah dan skenario stake $5. Dokumen ini tetap merekam hasil eksperimen v1; hasil/parameter kedua versi tidak boleh dicampur.
+
 **Status: implementasi penelitian offline/paper, belum terhubung ke collector atau AutoBuy. Belum ada formula yang lolos validasi.** Versi Gemini/AGY, `adaptive-wave.ts`, lane Wave yang sudah ada, konfigurasi live, dan dashboard tidak diedit oleh pekerjaan ini.
 
 ## 1. Jawaban hasil satu hari

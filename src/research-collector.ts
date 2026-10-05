@@ -2688,15 +2688,15 @@ async function worker(index: number, deadline: number) {
           const canOpenAggressiveWide = allowLane(PAPER_LANES.aggressiveWide.id)
             && aggressiveWideBuyAllowed && !momentumLaneStates.has(PAPER_LANES.aggressiveWide.id) && !laneAtPaperLimit(PAPER_LANES.aggressiveWide.id);
           const swingState = momentumLaneStates.get(PAPER_LANES.aggressiveSwing100k.id);
-          const swingCanReenter = !swingState || (swingState.closed && now - (swingState.closedAt ?? 0) >= 5_000);
+          const swingCanReenter = !swingState;
           const canOpenAggressiveSwing100k = allowLane(PAPER_LANES.aggressiveSwing100k.id)
             && aggressiveSwing100kBuyAllowed && swingCanReenter && !laneAtPaperLimit(PAPER_LANES.aggressiveSwing100k.id);
           const waveState = momentumLaneStates.get(PAPER_LANES.aggressiveWave.id);
-          const waveCanReenter = !waveState || (waveState.closed && now - (waveState.closedAt ?? 0) >= 5_000);
+          const waveCanReenter = !waveState;
           const canOpenAggressiveWave = allowLane(PAPER_LANES.aggressiveWave.id)
             && aggressiveWaveBuyAllowed && waveCanReenter && !laneAtPaperLimit(PAPER_LANES.aggressiveWave.id);
           const adaptiveWaveState = momentumLaneStates.get(PAPER_LANES.adaptiveWave.id);
-          const adaptiveWaveCanReenter = !adaptiveWaveState || (adaptiveWaveState.closed && now - (adaptiveWaveState.closedAt ?? 0) >= 5_000);
+          const adaptiveWaveCanReenter = !adaptiveWaveState;
           const canOpenAdaptiveWave = allowLane(PAPER_LANES.adaptiveWave.id)
             && adaptiveWaveBuyAllowed && adaptiveWaveCanReenter && !laneAtPaperLimit(PAPER_LANES.adaptiveWave.id);
           const canOpenMomentumV2 = allowLane(PAPER_LANES.momentumV2.id)

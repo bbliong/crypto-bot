@@ -5,7 +5,7 @@
   "stakeUsd": 5,
   "stakeSol": 0.03,
   "maxBuys": 0,
-  "buysCompleted": 57,
+  "buysCompleted": 71,
   "maxActiveRealPositions": 2,
   "slippagePercent": 9,
   "buySlippagePercent": 9,
@@ -16,5 +16,5 @@
   "maxAutoPriorityFeeSol": 0.0001,
   "antiMev": false,
   "autoSell": true,
-  "updatedAt": "2026-10-03T09:13:00.600Z"
+  "updatedAt": "2026-10-04T23:20:02.620Z"
 }
