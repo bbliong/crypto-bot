@@ -160,23 +160,23 @@ const v3PaperLane: PaperLane = momentumComparison ? PAPER_LANES.v3.id : PAPER_LA
 const hasDynamicMcFilter = dynamicFeedSettings?.minMarketCapUsd != null || dynamicFeedSettings?.maxMarketCapUsd != null;
 const minMcUsd = dynamicFeedSettings?.minMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.minMarketCapUsd)) : (hasDynamicMcFilter ? '10000' : '');
 const maxMcUsd = dynamicFeedSettings?.maxMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.maxMarketCapUsd)) : (hasDynamicMcFilter ? '100000' : '');
-const minMcK = dynamicFeedSettings?.minMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.minMarketCapUsd / 1000)) : '10';
-const maxMcK = dynamicFeedSettings?.maxMarketCapUsd != null ? String(Math.round(dynamicFeedSettings.maxMarketCapUsd / 1000)) : '100';
 
-const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
-  __v: '20260922',
-  '0bks': '1', '0pm': '1', '0bags_v2': '1', '0stonkfun': '1', '0ks': '1', '0ory': '1', '0bags': '1', 'lb': '1',
-  '0stx': '1', '0tren_ch': '1', '0pf': '1', '0pfa': '1', '0pma': '1', '0vi': '1', '0swarms': '1', '0meo': '1',
-  '0li': '1', '0bk': '1', '0zr': '1', '0sg': '1', '0an': '1', '0msa': '1', '0wdt': '1', '0heaven': '1',
-  '0sugar': '1', '0tm': '1', '0bel': '1', '0tsfun': '1', '0tfun': '1', '0js': '1', '0Ms': '1', 'bp': '1',
-  '0xtc': '1', 'ry': '1', '0mvc': '1', '0pla': '1', '0pra': '1', '0plpa': '1', '0po': '1',
-  ...(hasDynamicMcFilter ? {
-    '0mim': minMcUsd, '0mam': maxMcUsd, '0im': '1',
-    '9mim': minMcK, '9mam': maxMcK, '9im': '1',
-  } : {
-    '0im': '0', '9im': '0',
-  }),
-});
+// GMGN Trenches stores market-cap ranges in USD even though the UI labels the
+// inputs in K. Its current route key is trenches2_sol; the three layouts use
+// the prefixes 4 (New), 2 (Almost bonded), and 3 (Migrated).
+const GMGN_TRENCHES_SOL_FILTER = Object.freeze(
+  hasDynamicMcFilter
+    ? {
+      '4mim': minMcUsd, '4mam': maxMcUsd,
+      '2mim': minMcUsd, '2mam': maxMcUsd,
+      '3mim': minMcUsd, '3mam': maxMcUsd,
+    }
+    : {
+      '4mim': '', '4mam': '',
+      '2mim': '', '2mam': '',
+      '3mim': '', '3mam': '',
+    },
+);
 const goldenEntryEnabled = dynamicFeedSettings?.goldenEntryEnabled === true;
 async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise<void> {
   await browserContext.addInitScript(filter => {
@@ -188,10 +188,9 @@ async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise
       const parsed: unknown = raw ? JSON.parse(raw) : {};
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
     } catch { /* replace an invalid saved value with a valid map */ }
-    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
-    map['/trend_sol'] = { ...(map['/trend_sol'] ?? {}), ...filter };
+    map.trenches2_sol = { ...(map.trenches2_sol ?? {}), ...filter };
     localStorage.setItem(storageKey, JSON.stringify(map));
-  }, GMGN_NEW_PAIR_SOL_FILTER);
+  }, GMGN_TRENCHES_SOL_FILTER);
 }
 
 
