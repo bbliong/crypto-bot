@@ -4,7 +4,7 @@
   "mcPreset": "10k-100k",
   "minMarketCapUsd": 10000,
   "maxMarketCapUsd": 100000,
-  "updatedAt": "2026-10-05T06:59:39.060Z",
+  "updatedAt": "2026-10-05T08:37:09.476Z",
   "restart": true,
   "goldenEntryEnabled": false
 }

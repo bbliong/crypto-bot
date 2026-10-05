@@ -297,6 +297,16 @@ export function upsertTrade(trade) {
   );
 }
 
+export function countTrades(runId, options = {}) {
+  const db = initCryptoDb();
+  let sql = 'SELECT COUNT(*) as total FROM trades WHERE run_id = ?';
+  const params = [runId];
+  if (options.status) { sql += ' AND status = ?'; params.push(options.status); }
+  if (options.lane && options.lane !== 'all') { sql += ' AND lane = ?'; params.push(options.lane); }
+  const row = db.prepare(sql).get(...params);
+  return row ? (row.total || 0) : 0;
+}
+
 export function getTrades(runId, options = {}) {
   const db = initCryptoDb();
   let sql = 'SELECT * FROM trades WHERE run_id = ?';
@@ -316,6 +326,10 @@ export function getTrades(runId, options = {}) {
   if (options.limit) {
     sql += ' LIMIT ?';
     params.push(options.limit);
+    if (options.offset) {
+      sql += ' OFFSET ?';
+      params.push(options.offset);
+    }
   }
 
   const rows = db.prepare(sql).all(...params);

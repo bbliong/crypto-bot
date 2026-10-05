@@ -9,6 +9,7 @@ import {
   getRuns as getSqliteRuns,
   upsertRun as upsertSqliteRun,
   getTrades as getSqliteTrades,
+  countTrades as countSqliteTrades,
   upsertTrade as upsertSqliteTrade,
   getRealTrades as getSqliteRealTrades,
   upsertRealTrade as upsertSqliteRealTrade,
@@ -5566,20 +5567,30 @@ const server = createServer(async (req, res) => {
     const page = Math.max(1, parseInt(url.searchParams.get('page'), 10) || 1);
     const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 25));
     try {
-      const fullData = await getAggressiveDashboardData(targetRun);
-      let trades = fullData.closedTrades || [];
-      if (lane !== 'all') {
-        trades = trades.filter(t => t.lane === lane);
+      // Resolve run ID — use current live run if not specified
+      let runId = targetRun;
+      if (!runId) {
+        const allRuns = findAggressiveRuns();
+        runId = allRuns[0]?.id || null;
       }
-      const total = trades.length;
+
+      if (!runId) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, run: null, lane, page: 1, limit, total: 0, totalPages: 1, trades: [] }));
+        return;
+      }
+
+      // Fast path: query SQLite directly with pagination — no file I/O needed
+      const total = countSqliteTrades(runId, { status: 'CLOSED', lane });
       const totalPages = Math.ceil(total / limit) || 1;
       const pageIndex = Math.min(page, totalPages);
-      const start = (pageIndex - 1) * limit;
-      const pageTrades = trades.slice(start, start + limit);
+      const offset = (pageIndex - 1) * limit;
+      const pageTrades = getSqliteTrades(runId, { status: 'CLOSED', lane, limit, offset });
+
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({
         ok: true,
-        run: fullData.currentRunId,
+        run: runId,
         lane,
         page: pageIndex,
         limit,
@@ -5593,6 +5604,7 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
+
 
   if (pathname === '/api/route-quotes') {
     const targetRun = url.searchParams.get('run');
