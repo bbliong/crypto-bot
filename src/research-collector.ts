@@ -187,8 +187,8 @@ const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
 });
 
 // Helper to generate a golden filter for a specific prefix
-function createGoldenFilter(prefix, hasMc, minMc, maxMc) {
-  const f = {};
+function createGoldenFilter(prefix: string, hasMc: boolean, minMc: string, maxMc: string) {
+  const f: Record<string, string> = {};
   f[prefix + 'pf'] = '1'; f[prefix + 'ry'] = '1'; f[prefix + 'msa'] = '1';
   const badDexes = ['pm', 'lb', 'bks', 'bags_v2', 'bags', 'tren_ch', 'stonkfun', 'vi', 'stx', 'ks', 'ory', 'swarms', 'meo', 'bk', 'zr', 'sg', 'an', 'heaven', 'sugar', 'tm', 'bel', 'tsfun', 'js', 'Ms', 'bp', 'mvc', 'pma', 'pfa', 'stonkfun_cc'];
   for (const dex of badDexes) f[prefix + dex] = '0';
@@ -222,8 +222,6 @@ async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise
     map['/completed_sol'] = { ...(map['/completed_sol'] ?? {}), ...filter };
     localStorage.setItem(storageKey, JSON.stringify(map));
   }, GMGN_NEW_PAIR_SOL_FILTER);
-}
-  });
 }
 
 
@@ -2451,7 +2449,7 @@ async function worker(index: number, deadline: number) {
         const candidate = candidates.get(mint);
         
         // INTERNAL GOLDEN ENTRY HARD-FILTER (100 HOLDERS)
-        if (goldenEntryEnabled && (candidate?.fields?.holders?.value ?? 0) < 100) {
+        if (goldenEntryEnabled && (Number(candidate?.fields?.holders?.value) || 0) < 100) {
           // Drop it instantly if it has less than 100 holders
           momentumTape.delete(mint);
           continue;
