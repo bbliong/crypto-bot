@@ -175,14 +175,9 @@ const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
     '1mim': minMcUsd, '1mam': maxMcUsd, '1im': '1',
     '2mim': minMcUsd, '2mam': maxMcUsd, '2im': '1',
     '3mim': minMcUsd, '3mam': maxMcUsd, '3im': '1',
-    '4mim': minMcUsd, '4mam': maxMcUsd, '4im': '1',
-    '5mim': minMcUsd, '5mam': maxMcUsd, '5im': '1',
-    '6mim': minMcUsd, '6mam': maxMcUsd, '6im': '1',
-    '7mim': minMcUsd, '7mam': maxMcUsd, '7im': '1',
-    '8mim': minMcUsd, '8mam': maxMcUsd, '8im': '1',
     '9mim': minMcK, '9mam': maxMcK, '9im': '1',
   } : {
-    '0im': '0', '1im': '0', '2im': '0', '3im': '0', '4im': '0', '5im': '0', '6im': '0', '7im': '0', '8im': '0', '9im': '0',
+    '0im': '0', '1im': '0', '2im': '0', '3im': '0', '9im': '0',
   }),
 });
 
@@ -215,11 +210,9 @@ async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise
       const parsed: unknown = raw ? JSON.parse(raw) : {};
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
     } catch { /* replace an invalid saved value with a valid map */ }
-    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
     map['/trend_sol'] = { ...(map['/trend_sol'] ?? {}), ...filter };
+    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
     map['/trend3_sol'] = { ...(map['/trend3_sol'] ?? {}), ...filter };
-    map['/completing_sol'] = { ...(map['/completing_sol'] ?? {}), ...filter };
-    map['/completed_sol'] = { ...(map['/completed_sol'] ?? {}), ...filter };
     localStorage.setItem(storageKey, JSON.stringify(map));
   }, GMGN_NEW_PAIR_SOL_FILTER);
 }
