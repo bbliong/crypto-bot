@@ -172,34 +172,12 @@ const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
   '0xtc': '1', 'ry': '1', '0mvc': '1', '0pla': '1', '0pra': '1', '0plpa': '1', '0po': '1',
   ...(hasDynamicMcFilter ? {
     '0mim': minMcUsd, '0mam': maxMcUsd, '0im': '1',
-    '1mim': minMcUsd, '1mam': maxMcUsd, '1im': '1',
-    '2mim': minMcUsd, '2mam': maxMcUsd, '2im': '1',
-    '3mim': minMcUsd, '3mam': maxMcUsd, '3im': '1',
     '9mim': minMcK, '9mam': maxMcK, '9im': '1',
   } : {
-    '0im': '0', '1im': '0', '2im': '0', '3im': '0', '9im': '0',
+    '0im': '0', '9im': '0',
   }),
 });
-
-// Helper to generate a golden filter for a specific prefix
-function createGoldenFilter(prefix: string, hasMc: boolean, minMc: string, maxMc: string) {
-  const f: Record<string, string> = {};
-  f[prefix + 'pf'] = '1'; f[prefix + 'ry'] = '1'; f[prefix + 'msa'] = '1';
-  const badDexes = ['pm', 'lb', 'bks', 'bags_v2', 'bags', 'tren_ch', 'stonkfun', 'vi', 'stx', 'ks', 'ory', 'swarms', 'meo', 'bk', 'zr', 'sg', 'an', 'heaven', 'sugar', 'tm', 'bel', 'tsfun', 'js', 'Ms', 'bp', 'mvc', 'pma', 'pfa', 'stonkfun_cc'];
-  for (const dex of badDexes) f[prefix + dex] = '0';
-  f[prefix + 'nwt'] = '1'; f[prefix + 'hs'] = '1'; f[prefix + 'ch'] = '1'; f[prefix + 'cc'] = '1';
-  f[prefix + 'mihc'] = '100'; f[prefix + 'min24h'] = '180'; f[prefix + 'miv24h'] = '15000';
-  if (hasMc) {
-    f[prefix + 'mim'] = minMc; f[prefix + 'mam'] = maxMc; f[prefix + 'im'] = '1';
-  } else {
-    f[prefix + 'im'] = '0';
-  }
-  return f;
-}
-
-
 const goldenEntryEnabled = dynamicFeedSettings?.goldenEntryEnabled === true;
-
 async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise<void> {
   await browserContext.addInitScript(filter => {
     if (location.hostname !== 'gmgn.ai') return;
@@ -210,9 +188,8 @@ async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise
       const parsed: unknown = raw ? JSON.parse(raw) : {};
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
     } catch { /* replace an invalid saved value with a valid map */ }
-    map['/trend_sol'] = { ...(map['/trend_sol'] ?? {}), ...filter };
     map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
-    map['/trend3_sol'] = { ...(map['/trend3_sol'] ?? {}), ...filter };
+    map['/trend_sol'] = { ...(map['/trend_sol'] ?? {}), ...filter };
     localStorage.setItem(storageKey, JSON.stringify(map));
   }, GMGN_NEW_PAIR_SOL_FILTER);
 }
