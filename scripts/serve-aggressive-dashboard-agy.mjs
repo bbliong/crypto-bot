@@ -3118,6 +3118,7 @@ function renderHtml() {
           <label class="config-label">🌐 URL Screener GMGN (Pilihan Cepat)</label>
           <select id="cfgFeedUrlSelect" class="config-select" onchange="onFeedUrlPresetChange(this.value)">
             <option value="https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=new_pair">⚡ New Pair (Ref: bFC8902n) - Rekomendasi</option>
+            <option value="https://gmgn.ai/?chain=sol&ref=bFC8902n">⚔️ Trenches 1m (Wajib untuk Golden Entry!)</option>
             <option value="https://gmgn.ai/trend?chain=sol&tab=new_pair">⚡ New Pair (Standar GMGN)</option>
             <option value="https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=trending">🔥 Trending Pairs (Ref: bFC8902n)</option>
             <option value="https://gmgn.ai/trend?chain=sol&tab=trending">🔥 Trending Pairs (Standar GMGN)</option>
@@ -3143,6 +3144,33 @@ function renderHtml() {
             Rentang aktif: Min $10,000 USD — Max $100,000 USD
           </div>
         </div>
+        
+        <!-- Card 3: Golden Entry Toggle -->
+        <div class="config-card" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.4);">
+          <label class="config-label" style="color: #facc15; font-size: 0.85rem;">
+            🏆 Filter "Golden Entry" (High Momentum)
+          </label>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+            <input type="checkbox" id="cfgGoldenEntry" style="width: 18px; height: 18px; cursor: pointer;">
+            <span style="font-size: 0.8rem; font-weight: 700; color: #f8fafc; cursor: pointer;" onclick="document.getElementById('cfgGoldenEntry').click()">Aktifkan Hard-Filter Bot (Tolak < 100 Holders)</span>
+          </div>
+          <div class="config-hint" style="color: #facc15; margin-top: 12px; margin-bottom: 8px; line-height: 1.4;">
+            <b>Setel GMGN secara Manual:</b> Klik tombol <i>Import/Export</i> di browser GMGN lalu paste teks JSON di bawah ini agar layar tidak banjir koin sampah:
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <!-- Completing JSON -->
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <textarea id="cfgGoldenJsonCompleting" readonly style="flex: 1; height: 35px; background: rgba(0,0,0,0.5); border: 1px solid #475569; color: #94a3b8; font-size: 0.7rem; border-radius: 4px; padding: 6px; resize: none; cursor: text; word-break: break-all;" title="Untuk Tab ALMOST BONDED">{ "currentPage": "Completing", "network": "sol", "dex": { "Pump.fun": true, "pump_mayhem": false, "letsbonk": false, "bonkers": false, "bags_v2": false, "bags": false, "tren_ch": false, "stonkfun": false, "stonkfun_cc": false, "virtuals": false, "stoxes": false, "kickstart": false, "orynth": false, "swarms": false, "memoo": false, "liquid": false, "bankr": false, "zora": false, "surge": false, "anoncoin": false, "moonshot_app": true, "wendotdev": false, "heaven": false, "sugar": false, "token_mill": false, "believe": false, "trendsfun": false, "trends_fun": false, "jup_studio": false, "Moonshot": false, "boop": false, "ray_launchpad": true, "meteora_virtual_curve": false }, "quote": { "sol_sol": true, "sol_usdc": true, "sol_usd1": true, "sol_zora": true, "sol_rwa": true, "sol_others": true }, "metricsRange": { "progress": { "min": "", "max": "" }, "created": { "min": "", "max": "" }, "liquidity": { "min": "", "max": "" }, "usd_market_cap": { "min": "10000", "max": "100000" }, "top_10_holder_rate": { "min": "", "max": "" }, "creator_balance_rate": { "min": "", "max": "" }, "bundler_rate": { "min": "", "max": "" }, "private_vault_hold_rate": { "min": "", "max": "" }, "entrapment_ratio": { "min": "", "max": "" }, "fresh_wallet_rate": { "min": "", "max": "" }, "visiting_count": { "min": "", "max": "" }, "top70_sniper_hold_rate": { "min": "", "max": "" }, "rug_ratio": { "min": "", "max": "" }, "x_following": { "min": "", "max": "" }, "x_follower": { "min": "", "max": "" }, "total_fee": { "min": "", "max": "" }, "renowned_count": { "min": "", "max": "" }, "creator_created_open_count": { "min": "", "max": "" }, "creator_created_count": { "min": "", "max": "" }, "creator_created_open_ratio": { "min": "", "max": "" }, "holders": { "min": "100", "max": "" }, "bot_count": { "min": "", "max": "" }, "bot_degen_rate": { "min": "", "max": "" }, "rat_trader_amount_rate": { "min": "", "max": "" }, "twitter_rename_count": { "min": "", "max": "" }, "callout_count": { "min": "", "max": "" }, "tg_call_count": { "min": "", "max": "" }, "volume_24h": { "min": "", "max": "" }, "net_buy_24h": { "min": "", "max": "" }, "swaps_24h": { "min": "180", "max": "" }, "buys_24h": { "min": "", "max": "" }, "sells_24h": { "min": "", "max": "" }, "smart_degen_count": { "min": "", "max": "" }, "start_live_time": { "min": "", "max": "" } }, "tweetAgeRange": { "tweet_age": { "min": "", "max": "" } }, "metricsSelect": { "is_burnt": false, "creator_close": false, "creator_hold": false, "img_not_duplicate": false, "social_not_duplicate": false, "token_burnt": false, "renounced_mint": false, "renounced_freeze_account": false, "is_token_live_v2": false, "is_token_end_live": false, "not_wash_trading": false, "dev_team_sell_all": false, "no_suspected_insider": false, "is_og": false, "offchain": false, "uxento": false, "rapid": false }, "social": { "has_social": false, "twitter_is_tweet": false, "dexscr_ad": false, "dexscr_trending_bar": false, "dexscr_boost": false, "dexscr_update_link": false, "cto_flag": false, "has_twitter": false, "has_website": false, "has_telegram": false, "has_youtube": false, "has_tiktok": false, "has_instagram": false }, "inputKeywords": {} }</textarea>
+              <button class="config-btn" style="padding: 0 16px; height: 35px; background: #f59e0b; color: #fff; font-weight: bold; font-size: 0.75rem;" onclick="const t = document.getElementById('cfgGoldenJsonCompleting'); t.select(); document.execCommand('copy'); alert('JSON ALMOST BONDED disalin!');">COPY ALMOST BONDED</button>
+            </div>
+            <!-- NewCreations JSON -->
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <textarea id="cfgGoldenJsonNew" readonly style="flex: 1; height: 35px; background: rgba(0,0,0,0.5); border: 1px solid #475569; color: #94a3b8; font-size: 0.7rem; border-radius: 4px; padding: 6px; resize: none; cursor: text; word-break: break-all;" title="Untuk Tab NEW">{ "currentPage": "NewCreations", "network": "sol", "dex": { "Pump.fun": true, "pump_mayhem": false, "letsbonk": false, "bonkers": false, "bags_v2": false, "bags": false, "tren_ch": false, "stonkfun": false, "stonkfun_cc": false, "virtuals": false, "stoxes": false, "kickstart": false, "orynth": false, "swarms": false, "memoo": false, "liquid": false, "bankr": false, "zora": false, "surge": false, "anoncoin": false, "moonshot_app": true, "wendotdev": false, "heaven": false, "sugar": false, "token_mill": false, "believe": false, "trendsfun": false, "trends_fun": false, "jup_studio": false, "Moonshot": false, "boop": false, "xstocks": false, "ray_launchpad": true, "meteora_virtual_curve": false, "pool_ray": true, "pool_meteora": false, "pool_pump_amm": true, "pool_orca": false }, "quote": { "sol_sol": true, "sol_usdc": true, "sol_usd1": true, "sol_zora": true, "sol_rwa": true, "sol_others": true }, "metricsRange": { "progress": { "min": "", "max": "" }, "created": { "min": "", "max": "" }, "liquidity": { "min": "", "max": "" }, "usd_market_cap": { "min": "", "max": "" }, "top_10_holder_rate": { "min": "", "max": "" }, "creator_balance_rate": { "min": "", "max": "" }, "bundler_rate": { "min": "", "max": "" }, "private_vault_hold_rate": { "min": "", "max": "" }, "entrapment_ratio": { "min": "", "max": "" }, "fresh_wallet_rate": { "min": "", "max": "" }, "visiting_count": { "min": "", "max": "" }, "top70_sniper_hold_rate": { "min": "", "max": "" }, "rug_ratio": { "min": "", "max": "" }, "x_following": { "min": "", "max": "" }, "x_follower": { "min": "", "max": "" }, "total_fee": { "min": "", "max": "" }, "renowned_count": { "min": "", "max": "" }, "creator_created_open_count": { "min": "", "max": "" }, "creator_created_count": { "min": "", "max": "" }, "creator_created_open_ratio": { "min": "", "max": "" }, "holders": { "min": "", "max": "" }, "bot_count": { "min": "", "max": "" }, "bot_degen_rate": { "min": "", "max": "" }, "rat_trader_amount_rate": { "min": "", "max": "" }, "twitter_rename_count": { "min": "", "max": "" }, "callout_count": { "min": "", "max": "" }, "tg_call_count": { "min": "", "max": "" }, "volume_24h": { "min": "", "max": "" }, "net_buy_24h": { "min": "", "max": "" }, "swaps_24h": { "min": "", "max": "" }, "buys_24h": { "min": "", "max": "" }, "sells_24h": { "min": "", "max": "" }, "smart_degen_count": { "min": "", "max": "" }, "start_live_time": { "min": "", "max": "" } }, "tweetAgeRange": { "tweet_age": { "min": "", "max": "" } }, "metricsSelect": { "is_burnt": false, "creator_close": false, "creator_hold": false, "img_not_duplicate": false, "social_not_duplicate": false, "token_burnt": false, "renounced_mint": false, "renounced_freeze_account": false, "is_token_live_v2": false, "is_token_end_live": false, "not_wash_trading": false, "dev_team_sell_all": false, "no_suspected_insider": false, "is_og": false, "offchain": false, "uxento": false, "rapid": false }, "social": { "has_social": false, "twitter_is_tweet": false, "dexscr_ad": false, "dexscr_trending_bar": false, "dexscr_boost": false, "dexscr_update_link": false, "cto_flag": false, "has_twitter": false, "has_website": false, "has_telegram": false, "has_youtube": false, "has_tiktok": false, "has_instagram": false }, "inputKeywords": {} }</textarea>
+              <button class="config-btn" style="padding: 0 16px; height: 35px; background: #38bdf8; color: #fff; font-weight: bold; font-size: 0.75rem;" onclick="const t = document.getElementById('cfgGoldenJsonNew'); t.select(); document.execCommand('copy'); alert('JSON NEW disalin!');">COPY TAB NEW</button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -3866,6 +3894,8 @@ function renderHtml() {
           if (mcSelect && cfg.mcPreset) {
             mcSelect.value = cfg.mcPreset;
           }
+          const goldenToggle = document.getElementById('cfgGoldenEntry');
+          if (goldenToggle) goldenToggle.checked = !!cfg.goldenEntryEnabled;
           const mcDisplay = document.getElementById('cfgMcDetailDisplay');
           if (mcDisplay && cfg.mcPreset && CLIENT_MC_PRESET_MAP[cfg.mcPreset]) {
             mcDisplay.textContent = 'Rentang aktif: ' + CLIENT_MC_PRESET_MAP[cfg.mcPreset].label;
@@ -3888,6 +3918,7 @@ function renderHtml() {
         const mcPresetSelect = document.getElementById('cfgMcPreset');
         const feedUrl = feedUrlSelect ? feedUrlSelect.value : '';
         const mcPreset = mcPresetSelect ? mcPresetSelect.value : '10k-100k';
+        const goldenEntryEnabled = document.getElementById('cfgGoldenEntry') ? document.getElementById('cfgGoldenEntry').checked : false;
 
         const res = await fetch('/api/feed-config', {
           method: 'POST',
@@ -3896,6 +3927,7 @@ function renderHtml() {
             feedUrl,
             feedUrlPreset: feedUrl,
             mcPreset,
+            goldenEntryEnabled,
             restart: true,
           })
         });

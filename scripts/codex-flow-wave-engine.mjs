@@ -23,7 +23,7 @@ function tapeMetrics(tape,now){
     sellUsd:sum(x5.filter(t=>t.side==='sell'),usd),sellers:new Set(x5.filter(t=>t.side==='sell'&&t.wallet).map(t=>t.wallet)).size,
     collapse1s:(()=>{const p=asOf(tape,now-1000,'observedAt');return p&&now-1000-p.observedAt<=1000?(price/p.priceUsd-1)*100:null;})()};
 }
-export function prepareFlowWaveSession(data,s,globalSol){
+export function prepareFlowWaveSession(data,s,globalSol,{entries=FLOW_WAVE_ENTRIES}={}){
   const d=data.tokens[s.mint],ticks=receivedTicks(d,s),fields=name=>d.fields.filter(f=>f.name===name);
   const created=fields('createdAt'),mcs=fields('marketCapUsd'),prices=fields('priceUsd'),counts=fields('holders');
   const frames=[],signals=[],arms=new Map(),signaled=new Set(),tape=[];
@@ -49,7 +49,7 @@ export function prepareFlowWaveSession(data,s,globalSol){
       countFresh:countAt!=null&&now-countAt<=30000,majorSell,devSell30};
     frames.push(f);
     if(now>s.start+60000)continue;
-    for(const profile of FLOW_WAVE_ENTRIES){
+    for(const profile of entries){
       if(signaled.has(profile.id))continue;
       const allowed=flowWaveEntryAllowed(f,profile);
       const result=confirmCodexSetup(arms.get(profile.id)??null,allowed,now,m.price,m.tickId);

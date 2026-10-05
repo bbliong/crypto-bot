@@ -55,7 +55,7 @@ const { values } = parseArgs({ options: {
 } });
 const loadedConfig = loadConfig(values.config);
 const feedSettingsFile = join(process.cwd(), 'config', 'feed-settings.json');
-let dynamicFeedSettings: { feedUrl?: string; minMarketCapUsd?: number; maxMarketCapUsd?: number } | null = null;
+let dynamicFeedSettings: { feedUrl?: string; minMarketCapUsd?: number; maxMarketCapUsd?: number; goldenEntryEnabled?: boolean } | null = null;
 if (existsSync(feedSettingsFile)) {
   try {
     dynamicFeedSettings = JSON.parse(readFileSync(feedSettingsFile, 'utf8'));
@@ -177,21 +177,33 @@ const GMGN_NEW_PAIR_SOL_FILTER = Object.freeze({
     '0im': '0', '9im': '0',
   }),
 });
-async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise<void> {
-  await browserContext.addInitScript(filter => {
-    if (location.hostname !== 'gmgn.ai') return;
-    const storageKey = 'filter_query_map';
-    let map: Record<string, Record<string, string>> = {};
-    try {
-      const raw = localStorage.getItem(storageKey);
-      const parsed: unknown = raw ? JSON.parse(raw) : {};
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed as Record<string, Record<string, string>>;
-    } catch { /* replace an invalid saved value with a valid map */ }
-    map['/trend2_sol'] = { ...(map['/trend2_sol'] ?? {}), ...filter };
-    map['/trend_sol'] = { ...(map['/trend_sol'] ?? {}), ...filter };
-    localStorage.setItem(storageKey, JSON.stringify(map));
-  }, GMGN_NEW_PAIR_SOL_FILTER);
+
+// Helper to generate a golden filter for a specific prefix
+function createGoldenFilter(prefix, hasMc, minMc, maxMc) {
+  const f = {};
+  f[prefix + 'pf'] = '1'; f[prefix + 'ry'] = '1'; f[prefix + 'msa'] = '1';
+  const badDexes = ['pm', 'lb', 'bks', 'bags_v2', 'bags', 'tren_ch', 'stonkfun', 'vi', 'stx', 'ks', 'ory', 'swarms', 'meo', 'bk', 'zr', 'sg', 'an', 'heaven', 'sugar', 'tm', 'bel', 'tsfun', 'js', 'Ms', 'bp', 'mvc', 'pma', 'pfa', 'stonkfun_cc'];
+  for (const dex of badDexes) f[prefix + dex] = '0';
+  f[prefix + 'nwt'] = '1'; f[prefix + 'hs'] = '1'; f[prefix + 'ch'] = '1'; f[prefix + 'cc'] = '1';
+  f[prefix + 'mihc'] = '100'; f[prefix + 'min24h'] = '180'; f[prefix + 'miv24h'] = '15000';
+  if (hasMc) {
+    f[prefix + 'mim'] = minMc; f[prefix + 'mam'] = maxMc; f[prefix + 'im'] = '1';
+  } else {
+    f[prefix + 'im'] = '0';
+  }
+  return f;
 }
+
+
+const goldenEntryEnabled = dynamicFeedSettings?.goldenEntryEnabled === true;
+
+async function installGmgnNewPairFilter(browserContext: BrowserContext): Promise<void> {
+  // GMGN has migrated to a cloud-synced React state.
+  // We no longer attempt to hack localStorage as it causes race conditions with their cloud API.
+  // Users must configure the GMGN UI manually (or use the internal hard-filter below).
+}
+
+
 type SimulatedEvent = { type: 'SIMULATED_BUY' | 'SIMULATED_SELL' | 'SIMULATION_HOLD'; paperLane?: PaperLane; pnlUsd?: number; reason?: string };
 
 type MomentumV3EntryDecision = {
@@ -2414,6 +2426,14 @@ async function worker(index: number, deadline: number) {
         }
         now = Date.now();
         const candidate = candidates.get(mint);
+        
+        // INTERNAL GOLDEN ENTRY HARD-FILTER (100 HOLDERS)
+        if (goldenEntryEnabled && (candidate?.fields?.holders?.value ?? 0) < 100) {
+          // Drop it instantly if it has less than 100 holders
+          momentumTape.delete(mint);
+          continue;
+        }
+
         const lastMomentumTick = cleanTape(momentumTape.get(mint) ?? [], now).filter(t => t.priceUsd !== null && t.priceUsd > 0).at(-1);
         const price = momentumResearch ? lastMomentumTick?.priceUsd ?? null : num(candidate, 'priceUsd');
         const priceObservedAt = momentumResearch ? lastMomentumTick?.observedAt ?? 0 : candidate?.fields.priceUsd?.observedAt ?? 0;
