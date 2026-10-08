@@ -8,6 +8,7 @@ import { fetchWalletActivityPair } from './wallet-activity-poll.js';
 import { LOG_CHUNK_MS, RotatingJsonlWriter } from './rotating-jsonl.js';
 import { DistributionTargetRuntime } from './distribution-target-runtime.js';
 import { DistributionProfit4Runtime, atomicProfit4Json } from './distribution-profit4-runtime.js';
+import { getBrowserBuySwapRoute, getBrowserDualSellSwapRoute, DEFAULT_SWAP_WALLET } from './browser-swap-route.js';
 
 type Transfer = { wallet: string; mint: string; symbol?: string; timestamp?: number; priceUsd?: number; amount?: string; from?: string; tx?: string };
 type Watch = { transfer: Transfer };
@@ -51,6 +52,41 @@ const context = await chromium.launchPersistentContext(values.profileDir!, { cha
 const controller = context.pages()[0] ?? await context.newPage();
 const details = new Map<string, { page: Page; watch: Watch }>();
 const seen = new Set<string>();
+
+if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
+  targetLane.setSwapProbeHandlers({
+    getBuyQuote: async (mint: string) => {
+      let page: Page | undefined;
+      for (const item of details.values()) {
+        if (item.watch.transfer.mint === mint && !item.page.isClosed()) {
+          page = item.page;
+          break;
+        }
+      }
+      if (!page) return null;
+      try {
+        return await getBrowserBuySwapRoute(page, mint, DEFAULT_SWAP_WALLET, 5.0, 145.0, 15);
+      } catch (err: any) {
+        return { status: 500, latencyMs: 0, ok: false, error: err?.message || 'BUY_PROBE_ERROR' };
+      }
+    },
+    getSellQuotes: async (mint: string, inputTokensBaseUnits, decimals) => {
+      let page: Page | undefined;
+      for (const item of details.values()) {
+        if (item.watch.transfer.mint === mint && !item.page.isClosed()) {
+          page = item.page;
+          break;
+        }
+      }
+      if (!page) return null;
+      try {
+        return await getBrowserDualSellSwapRoute(page, mint, DEFAULT_SWAP_WALLET, inputTokensBaseUnits ?? '1000000000', decimals ?? 6, 15, 1000);
+      } catch {
+        return null;
+      }
+    },
+  });
+}
 writeFileSync(join(output, 'manifest.json'), JSON.stringify({ addresses, pollMilliseconds, requestGapMs: pollMilliseconds, requestMode: 'sequential', maxTabs: 1 + maxDetails, maxDetails, startedAt: new Date().toISOString(), storage: { format: 'jsonl', directory: 'chunks', chunkMinutes: LOG_CHUNK_MS / 60_000, timezone: 'Asia/Jakarta' }, purpose: 'One controller address tab plus at most one token detail tab per monitored wallet. Each detail remains open until its receiving wallet sells the same mint. Read-only; no order is submitted.' }, null, 2));
 let stopping = false;
 const wait = async (ms: number) => {
