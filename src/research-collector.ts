@@ -13,7 +13,7 @@ import { assessBlindProtection, assessCandleEntryFlow, assessCandleHistory, asse
 import { DEFAULT_EXECUTION_SETTINGS } from './execution-settings.js';
 import { amountInput, applyExecutionSettings, clickTradeButton, fetchSolUsdSpot, fetchSolUsdSpotInBrowser, selectSellPercent, selectTradeSide, usdcToSol } from './gmgn-trade-ui.js';
 import type { Candidate, Config } from './model.js';
-import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_AGGRESSIVE_WAVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAdaptiveWaveEntry, assessMomentumAdaptiveWaveExit, MOMENTUM_ADAPTIVE_WAVE_RULES, assessMomentumAggressiveExit, calculateDynamicWaveTarget, assessMomentumEntry, assessMomentumExit, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
+import { MOMENTUM_AGGRESSIVE_RULES, MOMENTUM_AGGRESSIVE_SAFE_RULES, MOMENTUM_AGGRESSIVE_OPTIMAL_RULES, MOMENTUM_AGGRESSIVE_WIDE_RULES, MOMENTUM_AGGRESSIVE_SWING_100K_RULES, MOMENTUM_AGGRESSIVE_WAVE_RULES, MOMENTUM_R5_BAND, MOMENTUM_RULES, MOMENTUM_V2_BALANCED_FLOW_V1_RULES, MOMENTUM_V3_CALM_V1_RULES, MOMENTUM_V3_RULES, assessMomentumAggressiveEntry, assessMomentumAggressiveSafeEntry, assessMomentumAggressiveOptimalEntry, assessMomentumAggressiveWideEntry, assessMomentumAggressiveSwing100kEntry, assessMomentumAggressiveWaveEntry, assessMomentumAdaptiveWaveEntry, assessMomentumAdaptiveWaveExit, MOMENTUM_ADAPTIVE_WAVE_RULES, assessMomentumAggressiveExit, assessMomentumEntry, assessMomentumExit, assessMomentumV2BalancedFlowEntry, assessMomentumV3CalmEntry, calculateDynamicWaveTarget, cleanTape, createMomentumPosition, type HolderSample, type OwnerSample, type TapeTrade } from './momentum-strategy.js';
 import { paperOrderEvent, paperSignal, type PaperSignal } from './paper-signal.js';
 import { PUMP_BAND_RULES, isInPumpBand, latestPricedTradeInFrame } from './pump-band.js';
 import { ResearchHolderStore, type ResearchTrackedHolder } from './research-holder-store.js';
@@ -141,7 +141,7 @@ type TrackedHolder = ResearchTrackedHolder;
 type HolderApiStatus = { status: number; count: number; observedAt: number; source: 'network_intercept' | 'replayed_xhr' };
 const holderApiStatus = new Map<string, HolderApiStatus>();
 const developerHolderApiStatus = new Map<string, HolderApiStatus>();
-type PaperLane = 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'adaptive-wave' | 'momentum-v2' | 'momentum-v3' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
+type PaperLane = 'control' | 'aggressive-safe' | 'aggressive-optimal' | 'aggressive-wide' | 'aggressive-swing-100k' | 'aggressive-wave' | 'adaptive-wave' | 'momentum-v2' | 'momentum-v3' | 'momentum-v3-calm-v1' | 'momentum-v2-balanced-flow-v1' | 'r5-band' | 'v3-v8' | 'v3-exit-confirmed';
 const PAPER_LANES = Object.freeze({
   control: { id: 'control' as const, label: momentumAggressive ? 'momentum-aggressive-safe' : standaloneMomentumV3 ? 'momentum-v3-control' : 'momentum-v2-control' },
   aggressiveSafe: { id: 'aggressive-safe' as const, label: 'momentum-aggressive-safe' },
@@ -152,6 +152,8 @@ const PAPER_LANES = Object.freeze({
   adaptiveWave: { id: 'adaptive-wave' as const, label: 'momentum-adaptive-wave-v1' },
   momentumV2: { id: 'momentum-v2' as const, label: 'momentum-v2' },
   momentumV3: { id: 'momentum-v3' as const, label: 'momentum-v3' },
+  momentumV3CalmV1: { id: 'momentum-v3-calm-v1' as const, label: 'momentum-v3-calm-v1 (paper only)' },
+  momentumV2BalancedFlowV1: { id: 'momentum-v2-balanced-flow-v1' as const, label: 'momentum-v2-balanced-flow-v1 (paper only)' },
   r5Band: { id: 'r5-band' as const, label: 'momentum-v2-r5-band' },
   v3: { id: 'v3-v8' as const, label: 'momentum-v3-v8' },
   v3ExitConfirmed: { id: 'v3-exit-confirmed' as const, label: 'momentum-v3-exit-confirmed' },
@@ -2605,6 +2607,12 @@ async function worker(index: number, deadline: number) {
             : null;
           const v2ControlBuyAllowed = momentumV2 && (browserPromptTestReason !== null || (baseBuyAllowed && (momentumEntry?.allowed ?? true)));
           const v3ControlBuyAllowed = momentumV3 && (momentumV3Entry?.allowed ?? false);
+          const momentumV3CalmEntry = momentumAggressive && v3ControlBuyAllowed
+            ? assessMomentumV3CalmEntry(momentumTape.get(mint) ?? [], now)
+            : null;
+          const momentumV2BalancedFlowEntry = momentumAggressive && v2ControlBuyAllowed && (momentumEntry?.allowed ?? false)
+            ? assessMomentumV2BalancedFlowEntry(momentumTape.get(mint) ?? [], now, flow.buySharePercent)
+            : null;
           const candidateMC = num(candidate, 'marketCapUsd');
           const aggressiveMcAllowed = candidateMC === null || (candidateMC >= MOMENTUM_AGGRESSIVE_SAFE_RULES.minMarketCap && candidateMC <= MOMENTUM_AGGRESSIVE_SAFE_RULES.maxMarketCap);
           const aggressiveSafeEntry = momentumAggressive
@@ -2693,6 +2701,14 @@ async function worker(index: number, deadline: number) {
             && momentumAggressive && v2ControlBuyAllowed && (momentumEntry?.allowed ?? false) && !momentumLaneStates.has(PAPER_LANES.momentumV2.id) && !laneAtPaperLimit(PAPER_LANES.momentumV2.id);
           const canOpenMomentumV3 = allowLane(PAPER_LANES.momentumV3.id)
             && momentumAggressive && (v3ControlBuyAllowed || (v2ControlBuyAllowed && (momentumEntry?.allowed ?? false))) && !momentumLaneStates.has(PAPER_LANES.momentumV3.id) && !laneAtPaperLimit(PAPER_LANES.momentumV3.id);
+          // These lanes are comparison-only. They never participate in the
+          // browser/auto-buy path below, even if live configuration says "all".
+          const canOpenMomentumV3CalmV1 = allowLane(PAPER_LANES.momentumV3CalmV1.id)
+            && momentumAggressive && (momentumV3CalmEntry?.allowed ?? false)
+            && !momentumLaneStates.has(PAPER_LANES.momentumV3CalmV1.id) && !laneAtPaperLimit(PAPER_LANES.momentumV3CalmV1.id);
+          const canOpenMomentumV2BalancedFlowV1 = allowLane(PAPER_LANES.momentumV2BalancedFlowV1.id)
+            && momentumAggressive && (momentumV2BalancedFlowEntry?.allowed ?? false)
+            && !momentumLaneStates.has(PAPER_LANES.momentumV2BalancedFlowV1.id) && !laneAtPaperLimit(PAPER_LANES.momentumV2BalancedFlowV1.id);
           const canOpenV3 = allowLane(v3PaperLane)
             && !momentumAggressive && v3ControlBuyAllowed && !momentumLaneStates.has(v3PaperLane) && !laneAtPaperLimit(v3PaperLane);
           const canOpenV3ExitConfirmed = allowLane(PAPER_LANES.v3ExitConfirmed.id)
@@ -2705,7 +2721,7 @@ async function worker(index: number, deadline: number) {
           const canOpenR5Band = allowLane(PAPER_LANES.r5Band.id)
             && r5BandBuyAllowed && !momentumLaneStates.has(PAPER_LANES.r5Band.id) && !laneAtPaperLimit(PAPER_LANES.r5Band.id);
 
-          if (canOpenControl || canOpenAggressiveSafe || canOpenAggressiveOptimal || canOpenAggressiveWide || canOpenAggressiveSwing100k || canOpenAggressiveWave || canOpenAdaptiveWave || canOpenMomentumV2 || canOpenMomentumV3 || canOpenV3 || canOpenR5Band) {
+          if (canOpenControl || canOpenAggressiveSafe || canOpenAggressiveOptimal || canOpenAggressiveWide || canOpenAggressiveSwing100k || canOpenAggressiveWave || canOpenAdaptiveWave || canOpenMomentumV2 || canOpenMomentumV3 || canOpenMomentumV3CalmV1 || canOpenMomentumV2BalancedFlowV1 || canOpenV3 || canOpenR5Band) {
             const autoBuyCfg = getAutoBuySettings();
             const configStakeUsd = Number(autoBuyCfg.stakeUsd) > 0 ? Number(autoBuyCfg.stakeUsd) : simulationStakeUsd;
             const effectiveStakeUsd = autoBuyCfg.stakeMode === 'sol' && (detailSolSpot?.usd || solSpotCache?.usd || 150) > 0 && autoBuyCfg.stakeSol > 0
@@ -2720,6 +2736,10 @@ async function worker(index: number, deadline: number) {
                 side: 'BUY', paperLane, runId, mint, positionId: `${mint}:${paperPosition.openedAt}:${paperLane}`, worker: index,
                 reason: entryReason ?? (paperLane === PAPER_LANES.r5Band.id
                   ? 'MOMENTUM_V2_R5_BAND_ENTRY_PASSED'
+                  : paperLane === PAPER_LANES.momentumV3CalmV1.id
+                    ? 'MOMENTUM_V3_CALM_V1_ENTRY_PASSED'
+                    : paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id
+                      ? 'MOMENTUM_V2_BALANCED_FLOW_V1_ENTRY_PASSED'
                   : paperLane === v3PaperLane && !momentumV2
                     ? 'MOMENTUM_V3_ENTRY_PASSED'
                     : paperLane === PAPER_LANES.v3.id
@@ -2745,14 +2765,15 @@ async function worker(index: number, deadline: number) {
                 decisionAt: entryDecisionAt, paperRecordedAt: Date.now(), priceUsd: price,
               });
               write('trade-signals.jsonl', entrySignal); schedulePaperOrder(entrySignal); scheduleSimulatedOrder(entrySignal, effectiveStakeUsd);
-              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
+              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id || paperLane === PAPER_LANES.r5Band.id) {
                 scheduleBuyRouteComparison(page, entrySignal, effectiveStakeUsd, detailSolSpot);
 
                 const currentAutoBuyCfg = getAutoBuySettings();
                 const isAutoBuyLane = (currentAutoBuyCfg.activeLane === 'all' || currentAutoBuyCfg.activeLane === paperLane);
                 const quotaAvailable = (currentAutoBuyCfg.maxBuys <= 0 || (currentAutoBuyCfg.buysCompleted || 0) < currentAutoBuyCfg.maxBuys);
                 const belowConcurrencyLimit = liveBrowserPositions.size < (currentAutoBuyCfg.maxActiveRealPositions || 1);
-                const shouldExecuteRealBuy = browserTradingEnabled && currentAutoBuyCfg.enabled && isAutoBuyLane && quotaAvailable && belowConcurrencyLimit;
+                const paperOnlyComparisonLane = paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id;
+                const shouldExecuteRealBuy = !paperOnlyComparisonLane && browserTradingEnabled && currentAutoBuyCfg.enabled && isAutoBuyLane && quotaAvailable && belowConcurrencyLimit;
 
                 if (shouldExecuteRealBuy) {
                   const effectiveStake = effectiveStakeUsd;
@@ -2784,7 +2805,7 @@ async function worker(index: number, deadline: number) {
               momentumLaneStates.set(paperLane, { position: paperPosition, riskState, closed: false, whaleSellPendingAt: null, closedAt: null });
               writeSimulation({ type: 'SIMULATED_BUY', paperLane, mint, worker: index, observedAt: entryDecisionAt, timing: entrySignal, positionId: entrySignal.positionId,
                 entryPriceUsd: price, stakeUsd: paperPosition.stakeUsd, quantity: paperPosition.quantity,
-                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, aggressiveSafe: momentumAggressive ? aggressiveSafeEntry : null, aggressiveOptimal: momentumAggressive ? aggressiveOptimalEntry : null, aggressiveWide: momentumAggressive ? aggressiveWideEntry : null, aggressiveSwing100k: momentumAggressive ? aggressiveSwing100kEntry : null, aggressiveWave: momentumAggressive ? aggressiveWaveEntry : null, adaptiveWave: momentumAggressive ? adaptiveWaveEntry : null, aggressiveWaveTarget: waveTargetAnalysis, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
+                entryGate: { momentum: entryGate, aggressive: momentumAggressive ? momentumAggressiveEntry : null, aggressiveSafe: momentumAggressive ? aggressiveSafeEntry : null, aggressiveOptimal: momentumAggressive ? aggressiveOptimalEntry : null, aggressiveWide: momentumAggressive ? aggressiveWideEntry : null, aggressiveSwing100k: momentumAggressive ? aggressiveSwing100kEntry : null, aggressiveWave: momentumAggressive ? aggressiveWaveEntry : null, adaptiveWave: momentumAggressive ? adaptiveWaveEntry : null, momentumV3CalmV1: momentumV3CalmEntry, momentumV2BalancedFlowV1: momentumV2BalancedFlowEntry, aggressiveWaveTarget: waveTargetAnalysis, strictHolderPreBuy: momentumAggressive ? strictHolderPreBuy : null, v3: (paperLane === v3PaperLane || paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.momentumV3CalmV1.id) ? momentumV3Entry : null, realtime: entry, candleHistory: candleDecision, candleEntryFlow, earlyCandleRising, singleCandleOverride, blindProtection, holderDistribution, tradeFlow20s: flow }, metadata: candidate?.metadata ?? null,
                 assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper lane only; no GMGN order is submitted.' } });
               return paperPosition;
             };
@@ -2861,6 +2882,20 @@ async function worker(index: number, deadline: number) {
                   'MOMENTUM_V3_ENTRY_PASSED'
                 );
               }
+              if (canOpenMomentumV3CalmV1) {
+                openMomentumLane(
+                  PAPER_LANES.momentumV3CalmV1.id,
+                  momentumV3CalmEntry,
+                  'MOMENTUM_V3_CALM_V1_ENTRY_PASSED'
+                );
+              }
+              if (canOpenMomentumV2BalancedFlowV1) {
+                openMomentumLane(
+                  PAPER_LANES.momentumV2BalancedFlowV1.id,
+                  momentumV2BalancedFlowEntry,
+                  'MOMENTUM_V2_BALANCED_FLOW_V1_ENTRY_PASSED'
+                );
+              }
               if (canOpenAggressiveSafe && !canOpenAggressiveOptimal && momentumAggressive && aggressiveOptimalEntry && !aggressiveOptimalEntry.allowed) {
                 write('events.jsonl', {
                   type: 'SIMULATION_BUY_LANE_FILTERED',
@@ -2891,7 +2926,8 @@ async function worker(index: number, deadline: number) {
                   if (state.closed) continue;
                   const livePosition = liveBrowserPositions.get(mint);
                   const isInFlightBuy = inFlightBrowserBuys.get(mint) === paperLane;
-                  const isRealLaneMatch = (livePosition?.originLane === paperLane) || isInFlightBuy || (paperLane === PAPER_LANES.control.id);
+                  const paperOnlyComparisonLane = paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id;
+                  const isRealLaneMatch = !paperOnlyComparisonLane && ((livePosition?.originLane === paperLane) || isInFlightBuy || (paperLane === PAPER_LANES.control.id));
                   if (browserTradingEnabled && isRealLaneMatch) {
                     if (!livePosition) {
                       if (isInFlightBuy) {
@@ -2921,7 +2957,7 @@ async function worker(index: number, deadline: number) {
                             ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_OPTIMAL_RULES)
                             : paperLane === PAPER_LANES.aggressiveSafe.id
                               ? assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_SAFE_RULES)
-                              : (paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id)
+                              : (paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id || paperLane === PAPER_LANES.r5Band.id)
                                 ? assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint))
                                 : assessMomentumAggressiveExit(state.riskState, tick, momentumTape.get(mint) ?? [], MOMENTUM_AGGRESSIVE_RULES))
                     : assessMomentumExit(state.riskState, tick, momentumTape.get(mint) ?? [], totalHolderSamples.get(mint) ?? [], ownerEvidence(mint));
@@ -2937,7 +2973,7 @@ async function worker(index: number, deadline: number) {
                   // Only its exit differs: a non-dev whale sell exits immediately
                   // when underwater/unsupported, while a profitable, supported
                   // position may wait for two bearish confirmations after 5 seconds.
-                  if (paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id) {
+                  if (paperLane === PAPER_LANES.v3ExitConfirmed.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.momentumV3CalmV1.id) {
                     const holderDelta = decision.holders.steps.reduce((total: number, step: any) => total + step.delta, 0);
                     const sellUsd = decision.metrics.sellUsd ?? 0;
                     const buyUsd = decision.metrics.buyUsd ?? 0;
@@ -3002,10 +3038,11 @@ async function worker(index: number, deadline: number) {
                     reason: exitReason, marketTradeAt: tick.occurredAt, priceReceivedAt: tick.observedAt,
                     decisionAt: exitDecisionAt, paperRecordedAt: Date.now(), priceUsd: decision.priceUsd });
                   write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
-              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.r5Band.id) {
+              if (paperLane === PAPER_LANES.control.id || paperLane === PAPER_LANES.aggressiveSafe.id || paperLane === PAPER_LANES.aggressiveOptimal.id || paperLane === PAPER_LANES.aggressiveWide.id || paperLane === PAPER_LANES.aggressiveSwing100k.id || paperLane === PAPER_LANES.aggressiveWave.id || paperLane === PAPER_LANES.adaptiveWave.id || paperLane === PAPER_LANES.momentumV2.id || paperLane === PAPER_LANES.momentumV3.id || paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id || paperLane === PAPER_LANES.r5Band.id) {
                     scheduleSellRouteComparison(page, exitSignal);
                     const realPos = liveBrowserPositions.get(mint);
-                    const isRealPositionMatch = realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
+                    const paperOnlyComparisonLane = paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id;
+                    const isRealPositionMatch = !paperOnlyComparisonLane && realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
                     if (isRealPositionMatch && browserTradingEnabled) {
                       void promptAndSubmitBrowserSell(page, exitSignal, decision.priceUsd, num(candidates.get(mint), 'marketCapUsd')).catch(error => {
                         write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, paperLane, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
@@ -3049,7 +3086,7 @@ async function worker(index: number, deadline: number) {
                 console.log('[paper-only]', candidate?.metadata?.symbol ?? mint, 'Simulated buy opened; real UI buy click skipped (autoBuy=false)');
               }
             }
-            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenAggressiveSafe && PAPER_LANES.aggressiveSafe.id, canOpenAggressiveOptimal && PAPER_LANES.aggressiveOptimal.id, canOpenAggressiveWide && PAPER_LANES.aggressiveWide.id, canOpenAggressiveSwing100k && PAPER_LANES.aggressiveSwing100k.id, canOpenAggressiveWave && PAPER_LANES.aggressiveWave.id, canOpenAdaptiveWave && PAPER_LANES.adaptiveWave.id, canOpenMomentumV2 && PAPER_LANES.momentumV2.id, canOpenMomentumV3 && PAPER_LANES.momentumV3.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
+            console.log('[sim-buy]', candidate?.metadata?.symbol ?? mint, 'lanes=' + [canOpenControl && PAPER_LANES.control.id, canOpenAggressiveSafe && PAPER_LANES.aggressiveSafe.id, canOpenAggressiveOptimal && PAPER_LANES.aggressiveOptimal.id, canOpenAggressiveWide && PAPER_LANES.aggressiveWide.id, canOpenAggressiveSwing100k && PAPER_LANES.aggressiveSwing100k.id, canOpenAggressiveWave && PAPER_LANES.aggressiveWave.id, canOpenAdaptiveWave && PAPER_LANES.adaptiveWave.id, canOpenMomentumV2 && PAPER_LANES.momentumV2.id, canOpenMomentumV3 && PAPER_LANES.momentumV3.id, canOpenMomentumV3CalmV1 && PAPER_LANES.momentumV3CalmV1.id, canOpenMomentumV2BalancedFlowV1 && PAPER_LANES.momentumV2BalancedFlowV1.id, canOpenV3 && v3PaperLane, canOpenV3ExitConfirmed && PAPER_LANES.v3ExitConfirmed.id, canOpenR5Band && PAPER_LANES.r5Band.id].filter(Boolean).join(','), 'stake=$' + effectiveStakeUsd, 'price=' + price, earlyCandleRising.allowed ? '(early-candle-rising)' : '');
           } else if (maxPaperBuys !== null && (v2ControlBuyAllowed || v3ControlBuyAllowed) && !trialLimitRecorded) {
             trialLimitRecorded = true;
             write('events.jsonl', { type: 'SIMULATION_BUY_SKIPPED_TRIAL_LIMIT', mint, worker: index, observedAt: now, maxPaperBuys, paperBuyCount,
@@ -3315,7 +3352,8 @@ async function worker(index: number, deadline: number) {
             write('trade-signals.jsonl', exitSignal); schedulePaperOrder(exitSignal); scheduleSimulatedOrder(exitSignal, state.position.stakeUsd);
             await scheduleSellRouteComparison(page, exitSignal);
             const realPos = liveBrowserPositions.get(mint);
-            const isRealPositionMatch = realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
+            const paperOnlyComparisonLane = paperLane === PAPER_LANES.momentumV3CalmV1.id || paperLane === PAPER_LANES.momentumV2BalancedFlowV1.id;
+            const isRealPositionMatch = !paperOnlyComparisonLane && realPos && (realPos.originLane ? realPos.originLane === paperLane : paperLane === PAPER_LANES.control.id);
             if (isRealPositionMatch && browserTradingEnabled) {
               await promptAndSubmitBrowserSell(page, exitSignal, closePrice, num(candidate, 'marketCapUsd')).catch(error => {
                 write('events.jsonl', { type: 'BROWSER_SELL_ERROR', mint, paperLane, observedAt: Date.now(), signalId: exitSignal.signalId, message: error instanceof Error ? error.message : 'unknown' });
@@ -3425,7 +3463,7 @@ async function worker(index: number, deadline: number) {
       if ((!values.orderCapture || browserAutoTrade) && !page.isClosed()) await page.goto('about:blank', { waitUntil: 'commit', timeout: config.workerTimeoutMs }).catch(() => {});
     }
   }
-  await page.close().catch(() => {});
+  await Promise.race([page.close().catch(() => {}), delay(5000)]);
 }
 async function main() {
   writeFileSync(join(output, 'strategy.json'), JSON.stringify({ strategy: values.strategy, autoBuyEnabled, quoteSimulationEnabled,
@@ -3446,6 +3484,8 @@ async function main() {
         [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_AGGRESSIVE_WAVE_RULES }, [PAPER_LANES.adaptiveWave.id]: { label: PAPER_LANES.adaptiveWave.label, entry: MOMENTUM_ADAPTIVE_WAVE_RULES },
         [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES },
         [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } },
+        [PAPER_LANES.momentumV3CalmV1.id]: { label: PAPER_LANES.momentumV3CalmV1.label, paperOnly: true, parentExit: PAPER_LANES.momentumV3.id, entry: MOMENTUM_V3_CALM_V1_RULES },
+        [PAPER_LANES.momentumV2BalancedFlowV1.id]: { label: PAPER_LANES.momentumV2BalancedFlowV1.label, paperOnly: true, parentExit: PAPER_LANES.momentumV2.id, entry: MOMENTUM_V2_BALANCED_FLOW_V1_RULES },
       } : {
         [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: standaloneMomentumV3 ? MOMENTUM_V3_RULES : { minimumReturn5s: MOMENTUM_RULES.minimumReturn5s, maximumReturn5s: MOMENTUM_RULES.maximumReturn5s } },
       }),
@@ -3478,6 +3518,20 @@ async function main() {
   } else {
     if (!existsSync(join(output, 'manifest.json'))) writeFileSync(join(output, 'manifest.json'), JSON.stringify({ runId, strategy: values.strategy, startedAt: new Date().toISOString(), purpose: 'Research-only collector with paper buy/sell simulation and non-submitting GMGN UI preparation.', workers, detailSeconds, stopLossPercent, paperLanes: momentumResearch ? { ...(momentumAggressive ? { [PAPER_LANES.control.id]: { label: 'Raw Aggressive (Baseline)', entry: MOMENTUM_AGGRESSIVE_RULES }, [PAPER_LANES.aggressiveSafe.id]: { label: PAPER_LANES.aggressiveSafe.label, entry: MOMENTUM_AGGRESSIVE_SAFE_RULES }, [PAPER_LANES.aggressiveOptimal.id]: { label: PAPER_LANES.aggressiveOptimal.label, entry: MOMENTUM_AGGRESSIVE_OPTIMAL_RULES }, [PAPER_LANES.aggressiveWide.id]: { label: PAPER_LANES.aggressiveWide.label, entry: MOMENTUM_AGGRESSIVE_WIDE_RULES }, [PAPER_LANES.aggressiveSwing100k.id]: { label: PAPER_LANES.aggressiveSwing100k.label, entry: MOMENTUM_AGGRESSIVE_SWING_100K_RULES }, [PAPER_LANES.aggressiveWave.id]: { label: PAPER_LANES.aggressiveWave.label, entry: MOMENTUM_AGGRESSIVE_WAVE_RULES }, [PAPER_LANES.adaptiveWave.id]: { label: PAPER_LANES.adaptiveWave.label, entry: MOMENTUM_ADAPTIVE_WAVE_RULES }, [PAPER_LANES.momentumV2.id]: { label: PAPER_LANES.momentumV2.label, entry: MOMENTUM_RULES }, [PAPER_LANES.momentumV3.id]: { label: PAPER_LANES.momentumV3.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: '5-second confirmation with 2 of 3 bearish signals when profitable & supported; otherwise immediate', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : { [PAPER_LANES.control.id]: { label: PAPER_LANES.control.label, entry: standaloneMomentumV3 ? MOMENTUM_V3_RULES : undefined } }), ...(momentumComparison ? { [PAPER_LANES.v3.id]: { label: PAPER_LANES.v3.label, entry: MOMENTUM_V3_RULES }, [PAPER_LANES.v3ExitConfirmed.id]: { label: PAPER_LANES.v3ExitConfirmed.label, entry: MOMENTUM_V3_RULES, exit: { nonDevWhaleSell: 'immediate when underwater or flow/holders do not support holding; otherwise 5-second confirmation with 2 of 3 bearish signals', devSell: 'immediate', profitLock: 'hold bullish flow; 5% trail' } } } : {}), ...(r5BandEnabled ? { [PAPER_LANES.r5Band.id]: { label: PAPER_LANES.r5Band.label, entry: MOMENTUM_R5_BAND } } : {}) } : null, tradePreparation: { enabled: values.prepareTradeUi && !flow3, buyStakeUsdc: simulationStakeUsd, sellPercent: 100, exitHoldSeconds, maxPaperBuys, enableExtensions: values.enableExtensions, executionSettings: DEFAULT_EXECUTION_SETTINGS, note: flow3 ? 'Flow-3 is paper-only and does not prepare or click GMGN trade controls.' : 'The collector fills GMGN controls but never clicks Buy or Sell.' }, simulation: { stakeUsd: simulationStakeUsd, maxPaperBuys, entryStability: { priceWindowSeconds: 5, minimumFreshPriceUpdates: 3, maximumPriceDropPercent: 2, maximumConsecutiveDeclines: 2, actionWhenBlocked: 'Continue detail observation without paper buy' }, mcapCandleHistory: { endpoint: '/api/v1/token_mcap_candles/sol/{mint}', resolution: '1m', limit: 501, pumpThenDump: { largestGreenCandlePercent: 100, peakToLastDrawdownPercent: -20 }, consecutiveRedCandles: 3 }, targetPercent: 40, trailingStartPercent: 20, trailingDrawdownPercent: 10, stopLossPercent: 20, sellPressure: { windowSeconds: 5, completedWindows: true, minimumTrades: 10, minimumUniqueSellers: 3, minimumSellSharePercent: 70, minimumPriceReturnPercent: -5, consecutiveWindows: 2 }, holderGrowthRecovery: { priceReturnMinPercent: -20, priceReturnMaxPercent: -10, minimumHolderGrowthAbsolute: 5, holderUpdateFreshSeconds: 5, buyUsdAtLeastSellUsd: true, holdSeconds: 10 }, executionSettings: DEFAULT_EXECUTION_SETTINGS }, feedRules: { minimumAgeSeconds: config.minimumAgeSeconds, maximumAgeSeconds: config.maximumAgeSeconds, minimumLiquidityUsd: config.minimumLiquidityUsd, maximumLiquidityUsd: config.maximumLiquidityUsd, maximumTop10Percent: config.maximumTop10Percent } }, null, 2));
   }
+  // Keep the legacy manifest writer above compatible with the two newer
+  // comparison cohorts, including when a run folder is resumed.
+  if (momentumAggressive) {
+    const manifestPath = join(output, 'manifest.json');
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { paperLanes?: Record<string, unknown> };
+      manifest.paperLanes = {
+        ...(manifest.paperLanes ?? {}),
+        [PAPER_LANES.momentumV3CalmV1.id]: { label: PAPER_LANES.momentumV3CalmV1.label, paperOnly: true, parentExit: PAPER_LANES.momentumV3.id, entry: MOMENTUM_V3_CALM_V1_RULES },
+        [PAPER_LANES.momentumV2BalancedFlowV1.id]: { label: PAPER_LANES.momentumV2BalancedFlowV1.label, paperOnly: true, parentExit: PAPER_LANES.momentumV2.id, entry: MOMENTUM_V2_BALANCED_FLOW_V1_RULES },
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    } catch { /* The primary manifest writer retains its existing behavior. */ }
+  }
   scheduleReportRefresh();
   context = await chromium.launchPersistentContext(values.profileDir, { channel: config.browserChannel || undefined, headless: false, viewport: null, args: ['--start-maximized', '--profile-directory=' + values.profileName], ignoreDefaultArgs: values.enableExtensions ? ['--disable-extensions'] : undefined });
   await installGmgnNewPairFilter(context);
@@ -3493,10 +3547,26 @@ async function main() {
     ? sessionSlotEnd
     : (runSeconds === 0 ? Number.POSITIVE_INFINITY : Date.now() + runSeconds * 1000);
   const deadline = sessionDeadlineMs;
-  const timer = Number.isFinite(deadline) ? setTimeout(() => stopping.abort(), Math.max(1000, deadline - Date.now() + 180_000)) : null;
-  await Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline)));
-  await Promise.allSettled([...pendingPaperOrders]);
-  if (timer) clearTimeout(timer);
+  const hardDeadlineMs = Number.isFinite(deadline) ? Math.max(10_000, deadline - Date.now() + 180_000) : null;
+  const hardDeadlineTimer = hardDeadlineMs !== null
+    ? setTimeout(() => {
+        console.warn('[research-collector] Hard deadline exceeded (deadline + 3m). Forcing session shutdown...');
+        stopping.abort();
+        try { holderStore.close(); } catch {}
+        process.exit(0);
+      }, hardDeadlineMs)
+    : null;
+  if (hardDeadlineTimer) hardDeadlineTimer.unref();
+
+  await Promise.race([
+    Promise.allSettled(Array.from({ length: workers }, (_, index) => worker(index + 1, deadline))),
+    new Promise(resolve => setTimeout(resolve, Math.max(15_000, (deadline - Date.now()) + 90_000))),
+  ]);
+  await Promise.race([
+    Promise.allSettled([...pendingPaperOrders]),
+    new Promise(resolve => setTimeout(resolve, 15_000)),
+  ]);
+  if (hardDeadlineTimer) clearTimeout(hardDeadlineTimer);
 
   // Graceful Draining: Wait for any lingering in-flight buy or active position to finish
   if (inFlightBrowserBuys.size > 0 || liveBrowserPositions.size > 0) {
@@ -3528,6 +3598,8 @@ async function main() {
       [PAPER_LANES.adaptiveWave.id]: summarizeLane(PAPER_LANES.adaptiveWave.id),
       [PAPER_LANES.momentumV2.id]: summarizeLane(PAPER_LANES.momentumV2.id),
       [PAPER_LANES.momentumV3.id]: summarizeLane(PAPER_LANES.momentumV3.id),
+      [PAPER_LANES.momentumV3CalmV1.id]: summarizeLane(PAPER_LANES.momentumV3CalmV1.id),
+      [PAPER_LANES.momentumV2BalancedFlowV1.id]: summarizeLane(PAPER_LANES.momentumV2BalancedFlowV1.id),
     } : {
       [PAPER_LANES.control.id]: summarizeLane(PAPER_LANES.control.id),
     }),
@@ -3541,17 +3613,17 @@ async function main() {
     holderStorage: { api: holderStore.counts(), socket: holderStore.socketCounts() },
     assumptions: { feeUsd: 0, slippagePercent: 0, note: 'Paper simulation only; it does not represent executable net proceeds.' } }, null, 2));
   if (reportRefreshTimer) clearTimeout(reportRefreshTimer);
-  await refreshLatestReport();
+  await refreshLatestReport().catch(() => {});
   write('events.jsonl', { type: 'RUN_COMPLETE', observedAt: Date.now(), sockets, received, screened: inspected.size, rejected: rejected.size, rejectionCounts: Object.fromEntries(rejectionCounts), youngRejected: youngRejected.size, youngRejectionCounts: Object.fromEntries(youngRejectionCounts), simulation: { lanes } });
   console.log('[research-complete]', 'sockets=' + sockets, 'frames=' + received, 'screened=' + inspected.size, 'rejected=' + rejected.size, 'youngRejected=' + youngRejected.size);
   try {
-    const { syncSingleRunToSqlite } = await import(new URL('../../scripts/crypto-db.mjs', import.meta.url).href);
-    syncSingleRunToSqlite(output);
-    console.log(`[SESSION-ARCHIVED] 3-Hour Session Successfully Archived to SQLite: ${output}`);
-  } catch (err) {
-    console.error('[SESSION-ARCHIVE-ERROR] Failed to auto-sync run to SQLite:', err);
-  }
-  await context.close();
-  holderStore.close();
+    await Promise.race([context.close(), delay(5000)]);
+  } catch {}
+  try { holderStore.close(); } catch {}
+  process.exit(0);
 }
-main().catch(error => { holderStore.close(); console.error(error); process.exitCode = 1; });
+main().catch(error => {
+  try { holderStore.close(); } catch {}
+  console.error(error);
+  process.exit(1);
+});

@@ -10,7 +10,6 @@ import {
   upsertRun as upsertSqliteRun,
   getTrades as getSqliteTrades,
   countTrades as countSqliteTrades,
-  upsertTrade as upsertSqliteTrade,
   getRealTrades as getSqliteRealTrades,
   upsertRealTrade as upsertSqliteRealTrade,
   getRouteQuotes as getSqliteRouteQuotes,
@@ -18,6 +17,11 @@ import {
   setSetting as setSqliteSetting,
   getWibSlot,
 } from './crypto-db.mjs';
+
+import { createLiveTradesReader } from './live-dashboard-trades.mjs';
+import { buildRunCashflow, renderSimulationPage } from './simulation-cashflow.mjs';
+
+const getLiveClosedTrades = createLiveTradesReader();
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const projectRoot = join(__dirname, '..');
@@ -416,16 +420,27 @@ async function getSolanaBalance(walletAddress) {
   return { sol: 0, lamports: 0, solPriceUsd: 117.71, usdValue: 0, error: 'Semua RPC timeout' };
 }
 
+const walletAddressByAuditFile = new Map();
+
+function walletAddressFromAuditFile(auditFile) {
+  const cached = walletAddressByAuditFile.get(auditFile);
+  if (cached) return cached;
+  if (!existsSync(auditFile)) return null;
+  try {
+    const text = readFileSync(auditFile, 'utf8');
+    const match = text.match(/\/smartmoney\/sol\/walletstat\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
+    if (match?.[1]) {
+      walletAddressByAuditFile.set(auditFile, match[1]);
+      return match[1];
+    }
+  } catch {}
+  return null;
+}
+
 function getActiveWalletAddress(runDir) {
   if (runDir) {
-    const auditFile = join(runDir, 'order-api-audit.jsonl');
-    if (existsSync(auditFile)) {
-      try {
-        const text = readFileSync(auditFile, 'utf8');
-        const match = text.match(/\/smartmoney\/sol\/walletstat\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
-        if (match && match[1]) return match[1];
-      } catch {}
-    }
+    const address = walletAddressFromAuditFile(join(runDir, 'order-api-audit.jsonl'));
+    if (address) return address;
   }
   try {
     if (existsSync(researchDir)) {
@@ -434,11 +449,8 @@ function getActiveWalletAddress(runDir) {
         .sort((a, b) => b.name.localeCompare(a.name));
       for (const e of entries.slice(0, 5)) {
         const f = join(researchDir, e.name, 'order-api-audit.jsonl');
-        if (existsSync(f)) {
-          const text = readFileSync(f, 'utf8');
-          const match = text.match(/\/smartmoney\/sol\/walletstat\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
-          if (match && match[1]) return match[1];
-        }
+        const address = walletAddressFromAuditFile(f);
+        if (address) return address;
       }
     }
   } catch {}
@@ -474,7 +486,7 @@ async function getReclaimableRentInfo(walletAddress) {
   }
 }
 
-function getRealExecutedTrades(runDir, closedTrades = [], metadataByMint = new Map(), isLive = false) {
+function getRealExecutedTrades(runDir, closedTrades = [], metadataByMint = new Map(), isLive = false, { includePayloads = true, persist = true } = {}) {
   const runId = basename(runDir);
   const ledgerPath = join(runDir, 'live-trade-ledger.jsonl');
 
@@ -495,7 +507,7 @@ function getRealExecutedTrades(runDir, closedTrades = [], metadataByMint = new M
 
   const ledgerRows = readJsonLines(ledgerPath);
   const eventRows = readJsonLines(eventsPath);
-  const payloadRows = existsSync(payloadsPath) ? readJsonLines(payloadsPath) : [];
+  const payloadRows = includePayloads && existsSync(payloadsPath) ? readJsonLines(payloadsPath) : [];
 
   const buyOrders = [];
   const sellOrders = [];
@@ -576,7 +588,7 @@ function getRealExecutedTrades(runDir, closedTrades = [], metadataByMint = new M
     const symbol = snapSymbol || meta.symbol || buy.symbol || (mint ? mint.slice(0, 6) : 'Unknown');
     const name = snapName || meta.name || symbol;
     const lane = buy.originLane || buy.paperLane || 'aggressive-optimal';
-    const laneLabel = lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
+    const laneLabel = lane === 'momentum-v3-calm-v1' ? 'Momentum V3 Calm V1 (Paper)' : lane === 'momentum-v2-balanced-flow-v1' ? 'Momentum V2 Balanced Flow V1 (Paper)' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
 
     const matchingSell = sellOrders.find(s => s.mint === mint && s.observedAt >= buy.observedAt);
     const paperTrade = closedTrades.find(c => c.mint === mint && (c.lane === lane || !c.lane));
@@ -641,9 +653,11 @@ function getRealExecutedTrades(runDir, closedTrades = [], metadataByMint = new M
       walletSnapshots: snaps,
     };
     realTrades.push(tradeItem);
-    try {
-      upsertSqliteRealTrade(tradeItem);
-    } catch {}
+    if (persist) {
+      try {
+        upsertSqliteRealTrade(tradeItem);
+      } catch {}
+    }
   }
 
   if (realTrades.length === 0) {
@@ -660,8 +674,15 @@ function getRealExecutedTrades(runDir, closedTrades = [], metadataByMint = new M
 
 let cachedDashboardResult = new Map();
 
-async function getAggressiveDashboardData(targetRunId) {
-  const cacheKey = targetRunId || '__latest__';
+async function getAggressiveDashboardData(targetRunId, {
+  includeLiveExecutionDetails = true,
+  includeLivePayloads = true,
+  includeLiveWallet = true,
+  includeLiveRent = true,
+} = {}) {
+  // LIVE overview and tables do not need payload/audit-derived details or a
+  // wallet lookup. Keep that work for explicit transaction-detail/API requests.
+  const cacheKey = `${targetRunId || '__latest__'}:${includeLiveExecutionDetails ? 'execution' : 'no-execution'}:${includeLivePayloads ? 'payloads' : 'no-payloads'}:${includeLiveWallet ? 'wallet' : 'no-wallet'}:${includeLiveRent ? 'rent' : 'no-rent'}`;
   const cached = cachedDashboardResult.get(cacheKey);
   const now = Date.now();
   if (cached && (now - cached.time < 1200)) {
@@ -675,8 +696,8 @@ async function getAggressiveDashboardData(targetRunId) {
 
   if (!selectedRun || !existsSync(selectedRun.path)) {
     const autoBuyCfg = readAutoBuyConfig();
-    const walletAddress = getActiveWalletAddress();
-    const walletBalance = await getSolanaBalance(walletAddress);
+    const walletAddress = includeLiveWallet ? getActiveWalletAddress() : null;
+    const walletBalance = includeLiveWallet ? await getSolanaBalance(walletAddress) : null;
     return {
       availableRuns: allRuns.map(r => ({ id: r.id, startedAt: r.startedAt, friendlyLabel: r.friendlyLabel, isLive: r.isLive, tradesCount: r.tradesCount })),
       currentRunId: null,
@@ -694,7 +715,7 @@ async function getAggressiveDashboardData(targetRunId) {
         config: autoBuyCfg,
         walletAddress,
         walletBalance,
-        rentInfo: await getReclaimableRentInfo(walletAddress),
+        rentInfo: includeLiveRent && includeLiveWallet ? await getReclaimableRentInfo(walletAddress) : null,
         activeRealPositionsCount: 0,
       },
       realTrades: [],
@@ -750,6 +771,8 @@ async function getAggressiveDashboardData(targetRunId) {
       const adaptiveTrades = closedTrades.filter(t => t.lane === 'adaptive-wave');
       const v2Trades = closedTrades.filter(t => t.lane === 'momentum-v2');
       const v3Trades = closedTrades.filter(t => t.lane === 'momentum-v3');
+      const calmV3Trades = closedTrades.filter(t => t.lane === 'momentum-v3-calm-v1');
+      const balancedFlowV2Trades = closedTrades.filter(t => t.lane === 'momentum-v2-balanced-flow-v1');
       const r5Trades = closedTrades.filter(t => t.lane === 'r5-band');
 
       const rawSummary = summarizeTradesFast(rawTrades);
@@ -760,6 +783,8 @@ async function getAggressiveDashboardData(targetRunId) {
       const waveSummary = summarizeTradesFast(waveTrades);
       const v2Summary = summarizeTradesFast(v2Trades);
       const v3Summary = summarizeTradesFast(v3Trades);
+      const calmV3Summary = summarizeTradesFast(calmV3Trades);
+      const balancedFlowV2Summary = summarizeTradesFast(balancedFlowV2Trades);
       const r5Summary = summarizeTradesFast(r5Trades);
       const overallSummary = summarizeTradesFast(closedTrades);
 
@@ -794,6 +819,8 @@ async function getAggressiveDashboardData(targetRunId) {
           adaptive: { ...summarizeTradesFast(adaptiveTrades), dumpPreventedCount: 0 },
           v2: { ...v2Summary, dumpPreventedCount: 0 },
           v3: { ...v3Summary, dumpPreventedCount: 0 },
+          calmV3: { ...calmV3Summary, paperOnly: true },
+          balancedFlowV2: { ...balancedFlowV2Summary, paperOnly: true },
           r5: { ...r5Summary, dumpPreventedCount: 0 },
           avgLatencyMs: 0,
           avgSlippagePct: 5.43,
@@ -887,7 +914,7 @@ async function getAggressiveDashboardData(targetRunId) {
 
   for (const buy of buys) {
     const lane = buy.paperLane || 'control';
-    const laneLabel = lane === 'adaptive-wave' ? 'Adaptive Wave V1' : lane === 'aggressive-wave' ? 'Wave Scalper Aggressive' : lane === 'aggressive-swing-100k' ? 'Swing 100k Aggressive' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
+    const laneLabel = lane === 'momentum-v3-calm-v1' ? 'Momentum V3 Calm V1 (Paper)' : lane === 'momentum-v2-balanced-flow-v1' ? 'Momentum V2 Balanced Flow V1 (Paper)' : lane === 'adaptive-wave' ? 'Adaptive Wave V1' : lane === 'aggressive-wave' ? 'Wave Scalper Aggressive' : lane === 'aggressive-swing-100k' ? 'Swing 100k Aggressive' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
     const posId = buy.positionId || `${buy.mint}:${buy.observedAt}:${lane}`;
     const sell = sellsByPosition.get(posId) || sells.find(s => s.mint === buy.mint && ((s.paperLane || 'control') === lane)) || sellsByMint.get(buy.mint);
     const buyQuotes = quotesByPosition.get(posId)
@@ -899,6 +926,8 @@ async function getAggressiveDashboardData(targetRunId) {
       || quotesByPosition.get(`${buy.mint}:${buy.observedAt}:aggressive-wave`)
       || quotesByPosition.get(`${buy.mint}:${buy.observedAt}:momentum-v2`)
       || quotesByPosition.get(`${buy.mint}:${buy.observedAt}:momentum-v3`)
+      || quotesByPosition.get(`${buy.mint}:${buy.observedAt}:momentum-v3-calm-v1`)
+      || quotesByPosition.get(`${buy.mint}:${buy.observedAt}:momentum-v2-balanced-flow-v1`)
       || quotesByPosition.get(`${buy.mint}:${buy.observedAt}:r5-band`)
       || quotesByMint.get(buy.mint)
       || [];
@@ -926,23 +955,35 @@ async function getAggressiveDashboardData(targetRunId) {
       const tradePnlUsd = stakeUsd * (socketReturn / 100);
       totalNetTradePnlUsd += tradePnlUsd;
 
-      // Real return considers exact live GMGN quote amounts (USD/SOL in vs out)
-      let realReturn = socketReturn - 3.5;
-      let hasExactSwapFill = false;
+      // Fees & slippage deductions
+      const solPrice = Number(buyQuote?.detailSolSpotUsd || sellQuote?.detailSolSpotUsd) || 120;
+      const networkFeeSol = 0.000410; // 0.000205 SOL network & priority fee / tip per leg (2 legs)
+      const networkFeeUsd = Number((networkFeeSol * solPrice).toFixed(4));
+
+      let slippagePct = 3.5;
+      let slippageLossUsd = stakeUsd * 0.035;
+      let netRealPnlUsd = 0;
+      let netReturnPercent = 0;
+
       const inUsd = Number(buyQuote?.quote?.amountInUsd || 0);
       const outUsd = Number(sellQuote?.quote?.amountOutUsd || 0);
-      if (inUsd > 0 && outUsd > 0) {
-        realReturn = ((outUsd / inUsd) - 1) * 100;
-        hasExactSwapFill = true;
+      const hasExactSwapFill = inUsd > 0 && outUsd > 0;
+
+      if (hasExactSwapFill) {
+        const routeReturn = ((outUsd / inUsd) - 1) * 100;
+        slippagePct = Math.max(0, socketReturn - routeReturn);
+        slippageLossUsd = Math.max(0, tradePnlUsd - (outUsd - inUsd));
+        netRealPnlUsd = (outUsd - inUsd) - networkFeeUsd;
+        netReturnPercent = (netRealPnlUsd / stakeUsd) * 100;
+      } else {
+        netRealPnlUsd = tradePnlUsd - slippageLossUsd - networkFeeUsd;
+        netReturnPercent = (netRealPnlUsd / stakeUsd) * 100;
       }
 
-      const isRealWin = realReturn > 0;
-      if (isRealWin) realWins++; else realLosses++;
-
-      const swapPnlUsd = hasExactSwapFill
-        ? (outUsd - inUsd)
-        : (sell.pnlUsd ?? (stakeUsd * (realReturn / 100)));
-      totalNetRealPnlUsd += swapPnlUsd;
+      const totalDeductionUsd = slippageLossUsd + networkFeeUsd;
+      const isNetWin = netRealPnlUsd > 0;
+      if (isNetWin) realWins++; else realLosses++;
+      totalNetRealPnlUsd += netRealPnlUsd;
 
       const inSol = buyQuote?.inputAmountBaseUnits ? (Number(buyQuote.inputAmountBaseUnits) / 1e9).toFixed(4) + ' SOL' : null;
       const outSol = sellQuote?.quote?.outAmount ? (Number(sellQuote.quote.outAmount) / 1e9).toFixed(4) + ' SOL' : null;
@@ -980,13 +1021,22 @@ async function getAggressiveDashboardData(targetRunId) {
         exitReason: sell.exitReason || sell.reason || 'UNKNOWN',
         tradeReturnPercent: socketReturn,
         socketReturnPercent: socketReturn,
-        realReturnPercent: realReturn,
-        tradePnlUsd,
-        swapPnlUsd,
-        pnlUsd: tradePnlUsd,
-        isWin: isSocketWin,
+        realReturnPercent: Number(netReturnPercent.toFixed(2)),
+        netReturnPercent: Number(netReturnPercent.toFixed(2)),
+        tradePnlUsd: Number(tradePnlUsd.toFixed(4)),
+        grossPnlUsd: Number(tradePnlUsd.toFixed(4)),
+        swapPnlUsd: Number(netRealPnlUsd.toFixed(4)),
+        netRealPnlUsd: Number(netRealPnlUsd.toFixed(4)),
+        pnlUsd: Number(netRealPnlUsd.toFixed(4)),
+        slippagePct: Number(slippagePct.toFixed(2)),
+        slippageLossUsd: Number(slippageLossUsd.toFixed(4)),
+        networkFeeUsd: Number(networkFeeUsd.toFixed(4)),
+        networkFeeSol,
+        totalDeductionUsd: Number(totalDeductionUsd.toFixed(4)),
+        isWin: isNetWin,
         isSocketWin,
-        isRealWin,
+        isRealWin: isNetWin,
+        isNetWin,
         swapRoute: swapRouteDetail,
       });
     } else {
@@ -1088,11 +1138,15 @@ async function getAggressiveDashboardData(targetRunId) {
     const total = tradeList.length;
     let sWins = 0, sLosses = 0, sPnl = 0;
     let rWins = 0, rLosses = 0, rPnl = 0;
+    let totalDeductions = 0, totalFeeUsd = 0, totalSlippageUsd = 0;
     for (const t of tradeList) {
       if (t.isSocketWin) sWins++; else sLosses++;
-      sPnl += (t.tradePnlUsd || 0);
-      if (t.isRealWin) rWins++; else rLosses++;
-      rPnl += (t.swapPnlUsd || 0);
+      sPnl += (t.tradePnlUsd || t.grossPnlUsd || 0);
+      if (t.isNetWin ?? t.isRealWin) rWins++; else rLosses++;
+      rPnl += (t.netRealPnlUsd ?? t.swapPnlUsd ?? 0);
+      totalDeductions += (t.totalDeductionUsd || 0);
+      totalFeeUsd += (t.networkFeeUsd || 0);
+      totalSlippageUsd += (t.slippageLossUsd || 0);
     }
     return {
       closedTrades: total,
@@ -1104,6 +1158,9 @@ async function getAggressiveDashboardData(targetRunId) {
       realLosses: rLosses,
       realWinRate: total > 0 ? Number(((rWins / total) * 100).toFixed(1)) : 0,
       totalNetRealPnlUsd: Number(rPnl.toFixed(4)),
+      totalDeductionUsd: Number(totalDeductions.toFixed(4)),
+      totalFeeUsd: Number(totalFeeUsd.toFixed(4)),
+      totalSlippageUsd: Number(totalSlippageUsd.toFixed(4)),
     };
   }
 
@@ -1115,7 +1172,9 @@ async function getAggressiveDashboardData(targetRunId) {
   const waveTrades = closedTrades.filter(t => t.lane === 'aggressive-wave');
       const adaptiveTrades = closedTrades.filter(t => t.lane === 'adaptive-wave');
   const v2Trades = closedTrades.filter(t => t.lane === 'momentum-v2');
-  const v3Trades = closedTrades.filter(t => t.lane === 'momentum-v3');
+      const v3Trades = closedTrades.filter(t => t.lane === 'momentum-v3');
+      const calmV3Trades = closedTrades.filter(t => t.lane === 'momentum-v3-calm-v1');
+      const balancedFlowV2Trades = closedTrades.filter(t => t.lane === 'momentum-v2-balanced-flow-v1');
   const r5Trades = closedTrades.filter(t => t.lane === 'r5-band');
   const rawSummary = summarizeTrades(rawTrades);
   const safeSummary = summarizeTrades(safeTrades);
@@ -1124,7 +1183,9 @@ async function getAggressiveDashboardData(targetRunId) {
   const swing100kSummary = summarizeTrades(swing100kTrades);
   const waveSummary = summarizeTrades(waveTrades);
   const v2Summary = summarizeTrades(v2Trades);
-  const v3Summary = summarizeTrades(v3Trades);
+      const v3Summary = summarizeTrades(v3Trades);
+      const calmV3Summary = summarizeTrades(calmV3Trades);
+      const balancedFlowV2Summary = summarizeTrades(balancedFlowV2Trades);
   const r5Summary = summarizeTrades(r5Trades);
   const overallSummary = summarizeTrades(closedTrades);
 
@@ -1167,9 +1228,20 @@ async function getAggressiveDashboardData(targetRunId) {
     };
   });
 
-  const walletAddress = getActiveWalletAddress(runDir);
-  const walletBalance = await getSolanaBalance(walletAddress);
-  const realTrades = getRealExecutedTrades(runDir, closedTrades, metadataByMint, true);
+  const skipLiveExecutionDetails = isLive && !includeLiveExecutionDetails;
+  const skipLiveWallet = isLive && !includeLiveWallet;
+  const skipLiveRent = isLive && !includeLiveRent;
+  const walletAddress = skipLiveWallet ? null : getActiveWalletAddress(runDir);
+  const walletBalance = skipLiveWallet ? null : await getSolanaBalance(walletAddress);
+  // SQLite is a read-only historical snapshot during LIVE. It is adequate for
+  // the count badge, while on-demand endpoints retain payload reconstruction.
+  const realTrades = skipLiveExecutionDetails
+    ? getSqliteRealTrades(selectedRun.id)
+    : getRealExecutedTrades(runDir, closedTrades, metadataByMint, true, {
+      includePayloads: !isLive || includeLivePayloads,
+      // A read-only LIVE response must not create SQLite writes as a side effect.
+      persist: !isLive || includeLivePayloads,
+    });
   const allRealTrades = getSqliteRealTrades();
 
   const result = {
@@ -1190,6 +1262,9 @@ async function getAggressiveDashboardData(targetRunId) {
       realLosses: overallSummary.realLosses,
       realWinRate,
       totalNetRealPnlUsd: overallSummary.totalNetRealPnlUsd,
+      totalDeductionUsd: overallSummary.totalDeductionUsd,
+      totalFeeUsd: overallSummary.totalFeeUsd,
+      totalSlippageUsd: overallSummary.totalSlippageUsd,
       raw: rawSummary,
       safe: { ...safeSummary, dumpPreventedCount },
       optimal: { ...optimalSummary, dumpPreventedCount },
@@ -1199,6 +1274,8 @@ async function getAggressiveDashboardData(targetRunId) {
           adaptive: { ...summarizeTrades(adaptiveTrades), dumpPreventedCount: 0 },
       v2: { ...v2Summary, dumpPreventedCount: 0 },
       v3: { ...v3Summary, dumpPreventedCount: 0 },
+      calmV3: { ...calmV3Summary, paperOnly: true },
+      balancedFlowV2: { ...balancedFlowV2Summary, paperOnly: true },
       r5: { ...r5Summary, dumpPreventedCount: 0 },
       avgLatencyMs,
       avgSlippagePct,
@@ -1217,7 +1294,7 @@ async function getAggressiveDashboardData(targetRunId) {
       config: autoBuyCfg,
       walletAddress,
       walletBalance,
-      rentInfo: await getReclaimableRentInfo(walletAddress),
+      rentInfo: skipLiveWallet || skipLiveRent ? null : await getReclaimableRentInfo(walletAddress),
       activeRealPositionsCount: realTrades.filter(t => t.status === 'HOLDING').length,
     },
     realTrades,
@@ -2713,6 +2790,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="safeRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="safeSocketScore" class="kpi-sub" style="color: #34d399;">Socket: 0.0% ($0.00)</div>
+            <div id="safeDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="safeTrapNote" style="font-size: 0.66rem; color: #a7f3d0; border-top: 1px dashed rgba(52, 211, 153, 0.3); padding-top: 5px;">
@@ -2736,6 +2814,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="optimalRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="optimalSocketScore" class="kpi-sub" style="color: #c084fc;">Socket: 0.0% ($0.00)</div>
+            <div id="optimalDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="optimalTrapNote" style="font-size: 0.66rem; color: #e9d5ff; border-top: 1px dashed rgba(168, 85, 247, 0.3); padding-top: 5px;">
@@ -2759,6 +2838,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="wideRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="wideSocketScore" class="kpi-sub" style="color: #fbbf24;">Socket: 0.0% ($0.00)</div>
+            <div id="wideDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="wideTrapNote" style="font-size: 0.66rem; color: #fde68a; border-top: 1px dashed rgba(245, 158, 11, 0.3); padding-top: 5px;">
@@ -2782,6 +2862,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="swingRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="swingSocketScore" class="kpi-sub" style="color: #38bdf8;">Socket: 0.0% ($0.00)</div>
+            <div id="swingDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="swingTrapNote" style="font-size: 0.66rem; color: #bae6fd; border-top: 1px dashed rgba(56, 189, 248, 0.3); padding-top: 5px;">
@@ -2805,6 +2886,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="waveRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="waveSocketScore" class="kpi-sub" style="color: #2dd4bf;">Socket: 0.0% ($0.00)</div>
+            <div id="waveDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="waveTrapNote" style="font-size: 0.66rem; color: #99f6e4; border-top: 1px dashed rgba(45, 212, 191, 0.3); padding-top: 5px;">
@@ -2828,6 +2910,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="adaptiveRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="adaptiveSocketScore" class="kpi-sub" style="color: #34d399;">Socket: 0.0% ($0.00)</div>
+            <div id="adaptiveDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="adaptiveTrapNote" style="font-size: 0.66rem; color: #a7f3d0; border-top: 1px dashed rgba(52, 211, 153, 0.3); padding-top: 5px;">
@@ -2851,6 +2934,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="v2RealPnl" class="kpi-value mono">$0.0000</div>
             <div id="v2SocketScore" class="kpi-sub" style="color: #60a5fa;">Socket: 0.0% ($0.00)</div>
+            <div id="v2DeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="v2TrapNote" style="font-size: 0.66rem; color: #bfdbfe; border-top: 1px dashed rgba(59, 130, 246, 0.3); padding-top: 5px;">
@@ -2874,11 +2958,37 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="v3RealPnl" class="kpi-value mono">$0.0000</div>
             <div id="v3SocketScore" class="kpi-sub" style="color: #c084fc;">Socket: 0.0% ($0.00)</div>
+            <div id="v3DeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="v3TrapNote" style="font-size: 0.66rem; color: #e9d5ff; border-top: 1px dashed rgba(192, 132, 252, 0.3); padding-top: 5px;">
           ⚡ Rules: Hold Whale Sell 5s jika Buy Flow Dominan | Runner Trailing | Target +40%
         </div>
+      </div>
+
+      <!-- Paper-only comparison lanes: never eligible for a live order. -->
+      <div class="lane-card lane-card-v3">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 800; font-size: 0.88rem; color: #c084fc;">🧊 V3 CALM V1</span>
+          <span class="tag tag-lane-v3">Paper only · V3 exit</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div><div class="kpi-label">Real Win Rate</div><div id="calmV3RealWinRate" class="kpi-value mono">0.0%</div><div id="calmV3RealScore" class="kpi-sub">0W / 0L</div></div>
+          <div><div class="kpi-label">Net Real Profit ($)</div><div id="calmV3RealPnl" class="kpi-value mono">$0.0000</div><div id="calmV3SocketScore" class="kpi-sub" style="color: #c084fc;">Socket: 0.0% ($0.00)</div><div id="calmV3DeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div></div>
+        </div>
+        <div style="font-size: 0.66rem; color: #e9d5ff; border-top: 1px dashed rgba(192, 132, 252, 0.3); padding-top: 5px;">🧊 V3 normal gate + 3–4 buyer dalam 5s + volatilitas &lt;1%</div>
+      </div>
+
+      <div class="lane-card lane-card-v2">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 800; font-size: 0.88rem; color: #93c5fd;">⚖️ V2 BALANCED FLOW V1</span>
+          <span class="tag tag-lane-v2">Paper only · V2 exit</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div><div class="kpi-label">Real Win Rate</div><div id="balancedFlowV2RealWinRate" class="kpi-value mono">0.0%</div><div id="balancedFlowV2RealScore" class="kpi-sub">0W / 0L</div></div>
+          <div><div class="kpi-label">Net Real Profit ($)</div><div id="balancedFlowV2RealPnl" class="kpi-value mono">$0.0000</div><div id="balancedFlowV2SocketScore" class="kpi-sub" style="color: #60a5fa;">Socket: 0.0% ($0.00)</div><div id="balancedFlowV2DeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div></div>
+        </div>
+        <div style="font-size: 0.66rem; color: #bfdbfe; border-top: 1px dashed rgba(59, 130, 246, 0.3); padding-top: 5px;">⚖️ V2 normal gate + buy-share 5s 80–&lt;90% + flow 20s 75–&lt;85%</div>
       </div>
 
       <!-- Momentum R5 Band Lane Card -->
@@ -2897,6 +3007,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="r5RealPnl" class="kpi-value mono">$0.0000</div>
             <div id="r5SocketScore" class="kpi-sub" style="color: #facc15;">Socket: 0.0% ($0.00)</div>
+            <div id="r5DeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="r5TrapNote" style="font-size: 0.66rem; color: #fef08a; border-top: 1px dashed rgba(250, 204, 21, 0.3); padding-top: 5px;">
@@ -2920,6 +3031,7 @@ function renderHtml() {
             <div class="kpi-label">Net Real Profit ($)</div>
             <div id="rawRealPnl" class="kpi-value mono">$0.0000</div>
             <div id="rawSocketScore" class="kpi-sub" style="color: #60a5fa;">Socket: 0.0% ($0.00)</div>
+            <div id="rawDeductionScore" class="kpi-sub" style="color: #f87171; font-size: 0.63rem;">Potongan: -$0.0000</div>
           </div>
         </div>
         <div id="rawNote" style="font-size: 0.66rem; color: #bfdbfe; border-top: 1px dashed rgba(96, 165, 250, 0.3); padding-top: 5px;">
@@ -2936,15 +3048,20 @@ function renderHtml() {
         <div class="kpi-sub" id="realScore">0W / 0L (Gabungan)</div>
         <div class="kpi-sub" id="socketScoreCompare" style="color: #60a5fa; margin-top: 2px;">📈 Chart Socket: 0.0% (0W/0L)</div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Total Net Real Profit ($)</div>
+      <div class="kpi-card" style="border: 1px solid rgba(52, 211, 153, 0.4); background: rgba(6, 78, 59, 0.15);">
+        <div class="kpi-label" style="color: #6ee7b7;">Total Net Real Profit ($) Bersih</div>
         <div class="kpi-value" id="netRealPnl">$0.0000</div>
-        <div class="kpi-sub">Hasil swap SELL dikurangi modal BUY</div>
+        <div class="kpi-sub" id="netRealPnlSub" style="color: #a7f3d0;">Sudah dipotong Slippage & Gas SOL</div>
+      </div>
+      <div class="kpi-card" style="border: 1px solid rgba(244, 63, 94, 0.4); background: rgba(244, 63, 94, 0.08);">
+        <div class="kpi-label" style="color: #fda4af;">Total Biaya & Slippage Terpotong</div>
+        <div class="kpi-value down mono" id="totalDeductionPnl">-$0.0000</div>
+        <div class="kpi-sub" id="deductionBreakdown" style="color: #fca5a5;">Slippage AMM + Gas/Tip SOL</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Chart Socket PnL (Pembanding)</div>
+        <div class="kpi-label">Chart Socket PnL (Kotor)</div>
         <div class="kpi-value" id="netTradePnl">$0.0000</div>
-        <div class="kpi-sub">Kenaikan harga grafik tanpa slippage pool</div>
+        <div class="kpi-sub">Kenaikan harga grafik sebelum potongan</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">AMM Route Slippage</div>
@@ -3021,6 +3138,8 @@ function renderHtml() {
           <button id="btnFilterSafe" class="btn-filter" onclick="setLaneFilter('aggressive-safe')">🟢 Safe</button>
           <button id="btnFilterV2" class="btn-filter" onclick="setLaneFilter('momentum-v2')">🔵 V2</button>
           <button id="btnFilterV3" class="btn-filter" onclick="setLaneFilter('momentum-v3')">✨ V3</button>
+          <button id="btnFilterCalmV3" class="btn-filter" onclick="setLaneFilter('momentum-v3-calm-v1')">🧊 V3 Calm (Paper)</button>
+          <button id="btnFilterBalancedV2" class="btn-filter" onclick="setLaneFilter('momentum-v2-balanced-flow-v1')">⚖️ V2 Flow (Paper)</button>
           <button id="btnFilterR5" class="btn-filter" onclick="setLaneFilter('r5-band')">🟡 R5 Band</button>
           <button id="btnFilterRaw" class="btn-filter" onclick="setLaneFilter('control')">⚪ Raw</button>
         </div>
@@ -3036,15 +3155,16 @@ function renderHtml() {
               <th>Waktu & Durasi</th>
               <th>Harga Entry → Exit</th>
               <th>Alasan Exit</th>
-              <th>Return % (Swap vs Socket)</th>
+              <th>Return % (Bersih vs Kotor)</th>
+              <th>Potongan (Slip + Gas SOL)</th>
               <th>🟢 Rute Swap BUY (In → Out)</th>
               <th>🔴 Rute Swap SELL (In → Out)</th>
-              <th>Net Profit ($) Riil</th>
-              <th>Status Riil</th>
+              <th>Keuntungan / Kerugian ($) Bersih</th>
+              <th>Status Bersih</th>
             </tr>
           </thead>
           <tbody id="closedTradesBody">
-            <tr><td colspan="11" class="empty-state">Belum ada trade yang ditutup pada sesi ini.</td></tr>
+            <tr><td colspan="12" class="empty-state">Belum ada trade yang ditutup pada sesi ini.</td></tr>
           </tbody>
         </table>
         <div class="pagination-bar" id="closedPaginationBar">
@@ -4039,12 +4159,23 @@ function renderHtml() {
     }
 
     function renderClosedTradeRow(t) {
-      const realClass = t.realReturnPercent >= 0 ? 'up' : 'down';
-      const socketClass = t.socketReturnPercent >= 0 ? 'up' : 'down';
-      const tradePnlVal = t.tradePnlUsd != null ? t.tradePnlUsd : t.pnlUsd;
-      const swapPnlVal = t.swapPnlUsd != null ? t.swapPnlUsd : t.pnlUsd;
-      const swapPnlClass = swapPnlVal >= 0 ? 'up' : 'down';
-      const laneBadge = t.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : t.lane === 'aggressive-wave'
+      const netReturnVal = t.netReturnPercent != null ? t.netReturnPercent : (t.realReturnPercent != null ? t.realReturnPercent : 0);
+      const netClass = netReturnVal >= 0 ? 'up' : 'down';
+      const socketReturnVal = t.socketReturnPercent != null ? t.socketReturnPercent : (t.tradeReturnPercent || 0);
+      const grossPnlVal = t.grossPnlUsd != null ? t.grossPnlUsd : (t.tradePnlUsd != null ? t.tradePnlUsd : 0);
+      const rawSwapPnlVal = t.swapPnlUsd != null ? t.swapPnlUsd : (t.pnlUsd || 0);
+      const feeVal = t.networkFeeUsd != null ? t.networkFeeUsd : 0.0492;
+      const netPnlVal = t.netRealPnlUsd != null ? t.netRealPnlUsd : (rawSwapPnlVal - feeVal);
+      const netPnlClass = netPnlVal >= 0 ? 'up' : 'down';
+
+      const slipLossVal = t.slippageLossUsd != null ? t.slippageLossUsd : Math.max(0, grossPnlVal - rawSwapPnlVal);
+      const deductionVal = t.totalDeductionUsd != null ? t.totalDeductionUsd : (slipLossVal + feeVal);
+      const slipPctVal = t.slippagePct != null ? t.slippagePct : Math.max(0, socketReturnVal - (t.realReturnPercent || 0));
+
+      const isNetWin = t.isNetWin != null ? t.isNetWin : (netPnlVal > 0);
+      const isSocketWin = t.isSocketWin != null ? t.isSocketWin : (grossPnlVal > 0);
+
+      const laneBadge = t.lane === 'momentum-v3-calm-v1' ? '<span class="tag tag-lane-v3">V3 CALM · PAPER</span>' : t.lane === 'momentum-v2-balanced-flow-v1' ? '<span class="tag tag-lane-v2">V2 FLOW · PAPER</span>' : t.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : t.lane === 'aggressive-wave'
         ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
         : t.lane === 'aggressive-swing-100k'
         ? '<span class="tag tag-lane-swing">SWING 100K</span>'
@@ -4061,11 +4192,11 @@ function renderHtml() {
         : t.lane === 'aggressive-safe'
         ? '<span class="tag tag-lane-safe">SAFE</span>'
         : '<span class="tag tag-lane-raw">RAW</span>';
-      const badge = t.isRealWin
-        ? '<span class="tag tag-win">REAL WIN</span>'
-        : '<span class="tag tag-loss">REAL LOSS</span>';
-      const badgeNote = (!t.isRealWin && t.isSocketWin)
-        ? '<div style="font-size: 0.68rem; color: #f59e0b; margin-top: 3px; font-weight: 600;">⚠️ Chart Win, Pool Slip</div>'
+      const badge = isNetWin
+        ? '<span class="tag tag-win">NET PROFIT</span>'
+        : '<span class="tag tag-loss">NET LOSS</span>';
+      const badgeNote = (!isNetWin && isSocketWin)
+        ? '<div style="font-size: 0.67rem; color: #f59e0b; margin-top: 3px; font-weight: 600;">⚠️ Tergerus Slip/Fee</div>'
         : '';
       
       const sr = t.swapRoute;
@@ -4109,14 +4240,19 @@ function renderHtml() {
         '</td>' +
         '<td>' + exitReasonBadge(t.exitReason) + '</td>' +
         '<td>' +
-          '<div class="mono ' + realClass + '" style="font-size: 0.82rem; font-weight: 800;">' + (t.realReturnPercent >= 0 ? '+' : '') + t.realReturnPercent.toFixed(2) + '%</div>' +
-          '<div class="mono" style="font-size: 0.65rem; color: #60a5fa; margin-top: 1px;">📈 Chart: ' + (t.socketReturnPercent >= 0 ? '+' : '') + t.socketReturnPercent.toFixed(2) + '%</div>' +
+          '<div class="mono ' + netClass + '" style="font-size: 0.84rem; font-weight: 800;">' + (netReturnVal >= 0 ? '+' : '') + netReturnVal.toFixed(2) + '%</div>' +
+          '<div class="mono" style="font-size: 0.65rem; color: #94a3b8; margin-top: 1px;">📈 Chart: ' + (socketReturnVal >= 0 ? '+' : '') + socketReturnVal.toFixed(2) + '%</div>' +
+        '</td>' +
+        '<td class="mono" style="font-size: 0.72rem; line-height: 1.35;">' +
+          '<div style="color: #f87171; font-weight: 700;">-$' + deductionVal.toFixed(4) + '</div>' +
+          '<div style="font-size: 0.63rem; color: #fda4af;">Slip: -$' + slipLossVal.toFixed(4) + ' (' + slipPctVal.toFixed(1) + '%)</div>' +
+          '<div style="font-size: 0.63rem; color: #94a3b8;">Gas SOL: -$' + feeVal.toFixed(4) + '</div>' +
         '</td>' +
         '<td>' + buyCell + '</td>' +
         '<td>' + sellCell + '</td>' +
         '<td>' +
-          '<div class="mono ' + swapPnlClass + '" style="font-size: 0.82rem; font-weight: 800;">' + (swapPnlVal >= 0 ? '+' : '') + '$' + swapPnlVal.toFixed(4) + '</div>' +
-          '<div class="mono" style="font-size: 0.65rem; color: #60a5fa; margin-top: 1px;">📈 Chart: ' + (tradePnlVal >= 0 ? '+' : '') + '$' + tradePnlVal.toFixed(4) + '</div>' +
+          '<div class="mono ' + netPnlClass + '" style="font-size: 0.86rem; font-weight: 800;">' + (netPnlVal >= 0 ? '+' : '') + '$' + netPnlVal.toFixed(4) + '</div>' +
+          '<div class="mono" style="font-size: 0.65rem; color: #94a3b8; margin-top: 2px;">Kotor: ' + (grossPnlVal >= 0 ? '+' : '') + '$' + grossPnlVal.toFixed(4) + '</div>' +
         '</td>' +
         '<td>' + badge + badgeNote + '</td>' +
       '</tr>';
@@ -4129,7 +4265,7 @@ function renderHtml() {
       if (!tbody) return;
 
       if (totalClosedTrades === 0 || cachedDisplayedClosed.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="empty-state">Belum ada trade yang ditutup pada sesi ini' + (currentLaneFilter !== 'all' ? ' untuk lane ini' : '') + '.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" class="empty-state">Belum ada trade yang ditutup pada sesi ini' + (currentLaneFilter !== 'all' ? ' untuk lane ini' : '') + '.</td></tr>';
         const info = document.getElementById('closedPageInfo');
         if (info) info.textContent = 'Menampilkan 0 dari 0 transaksi';
         const pageLabel = document.getElementById('closedCurrentPageLabel');
@@ -4165,7 +4301,7 @@ function renderHtml() {
     }
 
     function renderRealTradeRow(t) {
-      const laneBadge = t.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : t.lane === 'aggressive-wave'
+      const laneBadge = t.lane === 'momentum-v3-calm-v1' ? '<span class="tag tag-lane-v3">V3 CALM · PAPER</span>' : t.lane === 'momentum-v2-balanced-flow-v1' ? '<span class="tag tag-lane-v2">V2 FLOW · PAPER</span>' : t.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : t.lane === 'aggressive-wave'
         ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
         : t.lane === 'aggressive-swing-100k'
         ? '<span class="tag tag-lane-swing">SWING 100K</span>'
@@ -4589,7 +4725,7 @@ function renderHtml() {
           const estRealReturn = p.floatingReturnPercent - 5.4;
           const estClass = estRealReturn >= 0 ? 'up' : 'down';
           const stagPct = Math.max(0, Math.min(100, (p.stagnationCountdownSec / 12) * 100));
-          const laneBadge = p.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : p.lane === 'aggressive-wave'
+          const laneBadge = p.lane === 'momentum-v3-calm-v1' ? '<span class="tag tag-lane-v3">V3 CALM · PAPER</span>' : p.lane === 'momentum-v2-balanced-flow-v1' ? '<span class="tag tag-lane-v2">V2 FLOW · PAPER</span>' : p.lane === 'adaptive-wave' ? '<span class="tag tag-lane-adaptive">ADAPTIVE V1</span>' : p.lane === 'aggressive-wave'
             ? '<span class="tag tag-lane-wave">WAVE SCALPER</span>'
             : p.lane === 'aggressive-swing-100k'
             ? '<span class="tag tag-lane-swing">SWING 100K</span>'
@@ -4646,6 +4782,8 @@ function renderHtml() {
       const btnSafe = document.getElementById('btnFilterSafe');
       const btnV2 = document.getElementById('btnFilterV2');
       const btnV3 = document.getElementById('btnFilterV3');
+      const btnCalmV3 = document.getElementById('btnFilterCalmV3');
+      const btnBalancedV2 = document.getElementById('btnFilterBalancedV2');
       const btnR5 = document.getElementById('btnFilterR5');
       const btnRaw = document.getElementById('btnFilterRaw');
       if (btnAll) btnAll.className = 'btn-filter' + (lane === 'all' ? ' active' : '');
@@ -4658,6 +4796,8 @@ function renderHtml() {
       if (btnSafe) btnSafe.className = 'btn-filter' + (lane === 'aggressive-safe' ? ' active' : '');
       if (btnV2) btnV2.className = 'btn-filter' + (lane === 'momentum-v2' ? ' active' : '');
       if (btnV3) btnV3.className = 'btn-filter' + (lane === 'momentum-v3' ? ' active' : '');
+      if (btnCalmV3) btnCalmV3.className = 'btn-filter' + (lane === 'momentum-v3-calm-v1' ? ' active' : '');
+      if (btnBalancedV2) btnBalancedV2.className = 'btn-filter' + (lane === 'momentum-v2-balanced-flow-v1' ? ' active' : '');
       if (btnR5) btnR5.className = 'btn-filter' + (lane === 'r5-band' ? ' active' : '');
       if (btnRaw) btnRaw.className = 'btn-filter' + (lane === 'control' ? ' active' : '');
       if (lastSummaryData) {
@@ -4795,6 +4935,10 @@ function renderHtml() {
             if (rawSocketEl) {
               rawSocketEl.textContent = 'Socket: ' + s.raw.socketWinRate + '% (' + (s.raw.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.raw.totalNetTradePnlUsd.toFixed(2) + ')';
             }
+            const rawDedEl = document.getElementById('rawDeductionScore');
+            if (rawDedEl) {
+              rawDedEl.textContent = 'Potongan: -$' + (s.raw.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+            }
           }
 
           // 🟢 Safe Lane Card
@@ -4814,6 +4958,10 @@ function renderHtml() {
             const safeSocketEl = document.getElementById('safeSocketScore');
             if (safeSocketEl) {
               safeSocketEl.textContent = 'Socket: ' + s.safe.socketWinRate + '% (' + (s.safe.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.safe.totalNetTradePnlUsd.toFixed(2) + ')';
+            }
+            const safeDedEl = document.getElementById('safeDeductionScore');
+            if (safeDedEl) {
+              safeDedEl.textContent = 'Potongan: -$' + (s.safe.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
             }
           }
 
@@ -4835,6 +4983,10 @@ function renderHtml() {
             if (optSocketEl) {
               optSocketEl.textContent = 'Socket: ' + s.optimal.socketWinRate + '% (' + (s.optimal.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.optimal.totalNetTradePnlUsd.toFixed(2) + ')';
             }
+            const optDedEl = document.getElementById('optimalDeductionScore');
+            if (optDedEl) {
+              optDedEl.textContent = 'Potongan: -$' + (s.optimal.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+            }
           }
 
           // 🟠 Wide Lane Card
@@ -4854,6 +5006,10 @@ function renderHtml() {
             const wideSocketEl = document.getElementById('wideSocketScore');
             if (wideSocketEl) {
               wideSocketEl.textContent = 'Socket: ' + s.wide.socketWinRate + '% (' + (s.wide.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.wide.totalNetTradePnlUsd.toFixed(2) + ')';
+            }
+            const wideDedEl = document.getElementById('wideDeductionScore');
+            if (wideDedEl) {
+              wideDedEl.textContent = 'Potongan: -$' + (s.wide.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
             }
           }
 
@@ -4875,6 +5031,10 @@ function renderHtml() {
             if (swSocketEl) {
               swSocketEl.textContent = 'Socket: ' + s.swing100k.socketWinRate + '% (' + (s.swing100k.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.swing100k.totalNetTradePnlUsd.toFixed(2) + ')';
             }
+            const swDedEl = document.getElementById('swingDeductionScore');
+            if (swDedEl) {
+              swDedEl.textContent = 'Potongan: -$' + (s.swing100k.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+            }
           }
 
           // ⚡ Wave Scalper Lane Card
@@ -4895,6 +5055,10 @@ function renderHtml() {
             if (waveSocketEl) {
               waveSocketEl.textContent = 'Socket: ' + s.wave.socketWinRate + '% (' + (s.wave.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.wave.totalNetTradePnlUsd.toFixed(2) + ')';
             }
+            const waveDedEl = document.getElementById('waveDeductionScore');
+            if (waveDedEl) {
+              waveDedEl.textContent = 'Potongan: -$' + (s.wave.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+            }
           }
           if (s.adaptive) {
             const wrEl = document.getElementById('adaptiveRealWinRate');
@@ -4912,6 +5076,10 @@ function renderHtml() {
             const socketEl = document.getElementById('adaptiveSocketScore');
             if (socketEl) {
               socketEl.textContent = 'Socket: ' + s.adaptive.socketWinRate + '% (' + (s.adaptive.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.adaptive.totalNetTradePnlUsd.toFixed(2) + ')';
+            }
+            const adDedEl = document.getElementById('adaptiveDeductionScore');
+            if (adDedEl) {
+              adDedEl.textContent = 'Potongan: -$' + (s.adaptive.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
             }
           }
 
@@ -4934,6 +5102,10 @@ function renderHtml() {
             if (v2SocketEl) {
               v2SocketEl.textContent = 'Socket: ' + s.v2.socketWinRate + '% (' + (s.v2.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.v2.totalNetTradePnlUsd.toFixed(2) + ')';
             }
+            const v2DedEl = document.getElementById('v2DeductionScore');
+            if (v2DedEl) {
+              v2DedEl.textContent = 'Potongan: -$' + (s.v2.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+            }
           }
 
           // ✨ Momentum V3 Lane Card
@@ -4954,7 +5126,35 @@ function renderHtml() {
             if (v3SocketEl) {
               v3SocketEl.textContent = 'Socket: ' + s.v3.socketWinRate + '% (' + (s.v3.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.v3.totalNetTradePnlUsd.toFixed(2) + ')';
             }
+            const v3DedEl = document.getElementById('v3DeductionScore');
+            if (v3DedEl) {
+              v3DedEl.textContent = 'Potongan: -$' + (s.v3.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+            }
           }
+
+          // Paper-only comparison cards deliberately use the same accounting
+          // fields as the established lanes, but never represent live orders.
+          const updatePaperOnlyLaneCard = (lane, idPrefix) => {
+            if (!lane) return;
+            const winRateEl = document.getElementById(idPrefix + 'RealWinRate');
+            if (winRateEl) {
+              winRateEl.textContent = lane.realWinRate + '%';
+              winRateEl.className = 'kpi-value mono ' + (lane.realWinRate > 0 ? 'up' : (lane.closedTrades > 0 ? 'down' : ''));
+            }
+            const scoreEl = document.getElementById(idPrefix + 'RealScore');
+            if (scoreEl) scoreEl.textContent = lane.realWins + 'W / ' + lane.realLosses + 'L (' + lane.closedTrades + ' closed)';
+            const pnlEl = document.getElementById(idPrefix + 'RealPnl');
+            if (pnlEl) {
+              pnlEl.textContent = (lane.totalNetRealPnlUsd >= 0 ? '+' : '') + '$' + lane.totalNetRealPnlUsd.toFixed(4);
+              pnlEl.className = 'kpi-value mono ' + (lane.totalNetRealPnlUsd >= 0 ? 'up' : 'down');
+            }
+            const socketEl = document.getElementById(idPrefix + 'SocketScore');
+            if (socketEl) socketEl.textContent = 'Socket: ' + lane.socketWinRate + '% (' + (lane.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + lane.totalNetTradePnlUsd.toFixed(2) + ')';
+            const dedEl = document.getElementById(idPrefix + 'DeductionScore');
+            if (dedEl) dedEl.textContent = 'Potongan: -$' + (lane.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
+          };
+          updatePaperOnlyLaneCard(s.calmV3, 'calmV3');
+          updatePaperOnlyLaneCard(s.balancedFlowV2, 'balancedFlowV2');
 
           // 🟡 Momentum R5 Band Lane Card
           if (s.r5) {
@@ -4973,6 +5173,10 @@ function renderHtml() {
             const r5SocketEl = document.getElementById('r5SocketScore');
             if (r5SocketEl) {
               r5SocketEl.textContent = 'Socket: ' + s.r5.socketWinRate + '% (' + (s.r5.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + s.r5.totalNetTradePnlUsd.toFixed(2) + ')';
+            }
+            const r5DedEl = document.getElementById('r5DeductionScore');
+            if (r5DedEl) {
+              r5DedEl.textContent = 'Potongan: -$' + (s.r5.totalDeductionUsd || 0).toFixed(4) + ' (Slip+Gas)';
             }
           }
 
@@ -4994,6 +5198,19 @@ function renderHtml() {
           if (pnlEl) {
             pnlEl.textContent = (s.totalNetRealPnlUsd >= 0 ? '+' : '') + '$' + s.totalNetRealPnlUsd.toFixed(4);
             pnlEl.className = 'kpi-value ' + (s.totalNetRealPnlUsd >= 0 ? 'up' : 'down');
+          }
+          const netRealSubEl = document.getElementById('netRealPnlSub');
+          if (netRealSubEl) {
+            netRealSubEl.textContent = 'Kotor: ' + (s.totalNetTradePnlUsd >= 0 ? '+' : '') + '$' + (s.totalNetTradePnlUsd || 0).toFixed(2) + ' · Potongan: -$' + (s.totalDeductionUsd || 0).toFixed(4);
+          }
+
+          const totalDedEl = document.getElementById('totalDeductionPnl');
+          if (totalDedEl) {
+            totalDedEl.textContent = '-$' + (s.totalDeductionUsd || 0).toFixed(4);
+          }
+          const dedBreakdownEl = document.getElementById('deductionBreakdown');
+          if (dedBreakdownEl) {
+            dedBreakdownEl.textContent = 'Slip: -$' + (s.totalSlippageUsd || 0).toFixed(4) + ' · Gas: -$' + (s.totalFeeUsd || 0).toFixed(4);
           }
 
           const netTradePnlEl = document.getElementById('netTradePnl');
@@ -5534,7 +5751,12 @@ const server = createServer(async (req, res) => {
   if (pathname === '/api/summary') {
     const targetRun = url.searchParams.get('run');
     try {
-      const fullData = await getAggressiveDashboardData(targetRun);
+      const fullData = await getAggressiveDashboardData(targetRun, {
+        includeLiveExecutionDetails: false,
+        includeLivePayloads: false,
+        includeLiveWallet: false,
+        includeLiveRent: false,
+      });
       const summaryData = {
         ok: true,
         availableRuns: fullData.availableRuns,
@@ -5567,12 +5789,10 @@ const server = createServer(async (req, res) => {
     const page = Math.max(1, parseInt(url.searchParams.get('page'), 10) || 1);
     const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 25));
     try {
-      // Resolve run ID — use current live run if not specified
+      // Resolve run ID
+      const allRuns = findAggressiveRuns();
       let runId = targetRun;
-      if (!runId) {
-        const allRuns = findAggressiveRuns();
-        runId = allRuns[0]?.id || null;
-      }
+      if (!runId) runId = allRuns[0]?.id || null;
 
       if (!runId) {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -5580,24 +5800,28 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // Fast path: query SQLite directly with pagination — no file I/O needed
-      const total = countSqliteTrades(runId, { status: 'CLOSED', lane });
+      const selectedRun = allRuns.find(r => r.id === runId);
+      const isLiveRun = selectedRun?.isLive === true;
+      let liveTrades;
+      if (isLiveRun) {
+        const autoBuyCfg = readAutoBuyConfig();
+        const stakeUsd = Number(autoBuyCfg.stakeUsd) > 0 ? Number(autoBuyCfg.stakeUsd) : 0.5;
+        liveTrades = getLiveClosedTrades(selectedRun.path, stakeUsd);
+        if (lane !== 'all') liveTrades = liveTrades.filter(t => t.lane === lane);
+      }
+
+      // Archived trades retain SQL filtering/pagination; LIVE never queries the
+      // trade table or invokes the full dashboard/payload/wallet aggregation.
+      const total = isLiveRun ? liveTrades.length : countSqliteTrades(runId, { status: 'CLOSED', lane });
       const totalPages = Math.ceil(total / limit) || 1;
       const pageIndex = Math.min(page, totalPages);
       const offset = (pageIndex - 1) * limit;
-      const pageTrades = getSqliteTrades(runId, { status: 'CLOSED', lane, limit, offset });
+      const pageTrades = isLiveRun
+        ? liveTrades.slice(offset, offset + limit)
+        : getSqliteTrades(runId, { status: 'CLOSED', lane, limit, offset });
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({
-        ok: true,
-        run: runId,
-        lane,
-        page: pageIndex,
-        limit,
-        total,
-        totalPages,
-        trades: pageTrades,
-      }));
+      res.end(JSON.stringify({ ok: true, run: runId, lane, page: pageIndex, limit, total, totalPages, trades: pageTrades }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -5612,7 +5836,11 @@ const server = createServer(async (req, res) => {
     const page = Math.max(1, parseInt(url.searchParams.get('page'), 10) || 1);
     const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 20));
     try {
-      const fullData = await getAggressiveDashboardData(targetRun);
+      const fullData = await getAggressiveDashboardData(targetRun, {
+        includeLiveExecutionDetails: false,
+        includeLivePayloads: false,
+        includeLiveWallet: false,
+      });
       let quotes = fullData.routeQuotes || [];
       if (type === 'BUY') {
         quotes = quotes.filter(q => q.isBuy);
@@ -5648,7 +5876,10 @@ const server = createServer(async (req, res) => {
     const page = Math.max(1, parseInt(url.searchParams.get('page'), 10) || 1);
     const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 10));
     try {
-      const fullData = await getAggressiveDashboardData(targetRun);
+      const fullData = await getAggressiveDashboardData(targetRun, {
+        includeLivePayloads: false,
+        includeLiveWallet: false,
+      });
       const list = (scope === 'all') ? (fullData.allRealTrades || []) : (fullData.realTrades || []);
       const total = list.length;
       const totalPages = Math.ceil(total / limit) || 1;
@@ -5719,6 +5950,45 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === '/api/simulation-runs') {
+    const runs = findAggressiveRuns().map(({ id, startedAt, friendlyLabel, isLive, tradesCount }) => ({
+      id, startedAt, friendlyLabel, isLive, tradesCount,
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, selectedRun: runs[0]?.id ?? null, runs }));
+    return;
+  }
+
+  if (pathname === '/api/simulation-data') {
+    const runId = url.searchParams.get('run');
+    const capital = Number(url.searchParams.get('capital') ?? 20);
+    const stake = Number(url.searchParams.get('stake') ?? 5);
+    const lane = url.searchParams.get('lane') ?? 'all';
+    const runs = findAggressiveRuns();
+    const selectedRun = runs.find(run => run.id === runId) ?? runs[0];
+    if (!selectedRun) {
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: 'Run simulasi tidak ditemukan' }));
+      return;
+    }
+    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(stake) || stake <= 0) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: 'Modal dan stake harus lebih dari nol' }));
+      return;
+    }
+    try {
+      const simulation = buildRunCashflow(selectedRun.path, { startingCashUsd: capital, stakeUsd: stake, lane });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, run: {
+        id: selectedRun.id, startedAt: selectedRun.startedAt, friendlyLabel: selectedRun.friendlyLabel, isLive: selectedRun.isLive,
+      }, simulation }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : 'Gagal menghitung simulasi' }));
+    }
+    return;
+  }
+
   if (pathname === '/comparison' || pathname === '/audit-eksekusi' || pathname === '/perbandingan') {
     const compFile = join(projectRoot, 'reports', 'perbandingan-socket-swap-real.html');
     if (existsSync(compFile)) {
@@ -5728,7 +5998,13 @@ const server = createServer(async (req, res) => {
     }
   }
 
-  if (pathname === '/simulation' || pathname === '/simulation-20usd' || pathname === '/cashflow') {
+  if (pathname === '/simulation') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(renderSimulationPage());
+    return;
+  }
+
+  if (pathname === '/simulation-20usd' || pathname === '/cashflow') {
     const simFile = join(projectRoot, 'reports', 'simulation-cashflow-20usd.html');
     if (existsSync(simFile)) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });

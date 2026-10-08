@@ -28,6 +28,19 @@ export const MOMENTUM_V3_RULES = Object.freeze({
     'HOLDER_DISTRIBUTION_RISK',
   ],
 });
+// Narrow paper-only comparison hypotheses. Their exit behavior deliberately
+// stays with the parent V3/V2 lane; only the entry cohort differs.
+export const MOMENTUM_V3_CALM_V1_RULES = Object.freeze({
+  version: 'momentum-v3-calm-v1',
+  minimumBuyers: 3,
+  maximumBuyersExclusive: 5,
+  maximumVolatilityPercentExclusive: 1,
+});
+export const MOMENTUM_V2_BALANCED_FLOW_V1_RULES = Object.freeze({
+  version: 'momentum-v2-balanced-flow-v1',
+  buyShare5s: [0.80, 0.90] as const,
+  buyShare20sPercent: [75, 85] as const,
+});
 export type MomentumEntryBand = { id: string; minimumReturn5s: number; maximumReturn5s: number };
 export type TapeTrade = { id: string; observedAt: number; occurredAt: number; priceUsd: number | null;
   side: 'buy' | 'sell'; wallet: string | null; usd: number | null; tokens: number | null };
@@ -97,6 +110,34 @@ export function assessMomentumEntry(tape: TapeTrade[], holders: HolderSample[], 
   if (m.topBuyerShare === null || m.topBuyerShare > MOMENTUM_RULES.maximumBuyerShare) reasons.push('MOMENTUM_SINGLE_BUYER_DOMINANCE');
   if (early && !h.sustained) reasons.push('EARLY_HOLDERS_NEED_TWO_GROWING_SNAPSHOTS');
   return { allowed: reasons.length === 0, reasons, metrics: m, holders: h, version: MOMENTUM_RULES.version, band: band ?? null };
+}
+
+/** Extra cohort gate; the caller must also enforce the ordinary V3 gate. */
+export function assessMomentumV3CalmEntry(tape: TapeTrade[], now: number) {
+  const metrics = momentumMetrics(tape, now), reasons: string[] = [];
+  if (!metrics.ready) reasons.push('CALM_V1_INSUFFICIENT_FRESH_HISTORY');
+  if (metrics.buyers < MOMENTUM_V3_CALM_V1_RULES.minimumBuyers || metrics.buyers >= MOMENTUM_V3_CALM_V1_RULES.maximumBuyersExclusive) {
+    reasons.push('CALM_V1_BUYERS_NOT_3_TO_4');
+  }
+  if (!Number.isFinite(metrics.volatilityPercent) || metrics.volatilityPercent >= MOMENTUM_V3_CALM_V1_RULES.maximumVolatilityPercentExclusive) {
+    reasons.push('CALM_V1_VOLATILITY_NOT_BELOW_1');
+  }
+  return { allowed: reasons.length === 0, reasons, metrics, version: MOMENTUM_V3_CALM_V1_RULES.version };
+}
+
+/** Extra cohort gate; the caller must also enforce the ordinary V2 gate. */
+export function assessMomentumV2BalancedFlowEntry(tape: TapeTrade[], now: number, buyShare20sPercent: number | null) {
+  const metrics = momentumMetrics(tape, now), reasons: string[] = [];
+  const [minBuyShare5s, maxBuyShare5s] = MOMENTUM_V2_BALANCED_FLOW_V1_RULES.buyShare5s;
+  const [minBuyShare20s, maxBuyShare20s] = MOMENTUM_V2_BALANCED_FLOW_V1_RULES.buyShare20sPercent;
+  if (!metrics.ready) reasons.push('BALANCED_FLOW_V1_INSUFFICIENT_FRESH_HISTORY');
+  if (metrics.buyShare === null || metrics.buyShare < minBuyShare5s || metrics.buyShare >= maxBuyShare5s) {
+    reasons.push('BALANCED_FLOW_V1_BUY_SHARE_5S_NOT_80_TO_90');
+  }
+  if (buyShare20sPercent === null || buyShare20sPercent < minBuyShare20s || buyShare20sPercent >= maxBuyShare20s) {
+    reasons.push('BALANCED_FLOW_V1_BUY_SHARE_20S_NOT_75_TO_85');
+  }
+  return { allowed: reasons.length === 0, reasons, metrics, buyShare20sPercent, version: MOMENTUM_V2_BALANCED_FLOW_V1_RULES.version };
 }
 
 export const MOMENTUM_AGGRESSIVE_RULES = Object.freeze({

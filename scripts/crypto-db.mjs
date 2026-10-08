@@ -698,7 +698,7 @@ export function syncSingleRunToSqlite(runDir, isLive = false) {
 
     for (const buy of buys) {
       const lane = buy.paperLane || 'control';
-      const laneLabel = lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
+      const laneLabel = lane === 'momentum-v3-calm-v1' ? 'Momentum V3 Calm V1 (Paper)' : lane === 'momentum-v2-balanced-flow-v1' ? 'Momentum V2 Balanced Flow V1 (Paper)' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
       const posId = buy.positionId || `${buy.mint}:${buy.observedAt}:${lane}`;
       const sell = sellsByPos.get(posId) || sells.find(s => s.mint === buy.mint && ((s.paperLane || 'control') === lane)) || sellsByMint.get(buy.mint);
 
@@ -897,7 +897,7 @@ export function syncSingleRunToSqlite(runDir, isLive = false) {
       const symbol = snaps.find(s => s.symbol)?.symbol || meta.symbol || buy.symbol || mint.slice(0, 6);
       const name = snaps.find(s => s.name)?.name || meta.name || symbol;
       const lane = buy.originLane || buy.paperLane || 'aggressive-optimal';
-      const laneLabel = lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
+      const laneLabel = lane === 'momentum-v3-calm-v1' ? 'Momentum V3 Calm V1 (Paper)' : lane === 'momentum-v2-balanced-flow-v1' ? 'Momentum V2 Balanced Flow V1 (Paper)' : lane === 'r5-band' ? 'Momentum R5 Band' : lane === 'momentum-v3' ? 'Momentum V3' : lane === 'momentum-v2' ? 'Momentum V2' : lane === 'aggressive-wide' ? 'Wide Aggressive' : lane === 'aggressive-optimal' ? 'Optimal Aggressive' : lane === 'aggressive-safe' ? 'Safe Aggressive' : 'Raw Aggressive';
 
       const matchingSell = sellOrders.find(s => s.mint === mint && s.observedAt >= buy.observedAt);
       const postBuySnap = snaps.find(s => s.stage === 'POST_BUY');

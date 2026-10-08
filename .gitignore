@@ -8,3 +8,5 @@ config/local.yaml
 research/
 .dashboard-tunnel-url
 dist/*.zip
+*.png
+filter_analysis_results.json

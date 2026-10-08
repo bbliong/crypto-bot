@@ -173,7 +173,23 @@ async function startSupervisor() {
         },
       });
 
+      const maxRuntimeMs = Math.max(30_000, (slot.slotEndUtcMs - Date.now()) + 240_000);
+      const watchdog = setTimeout(() => {
+        if (currentChild && !currentChild.killed) {
+          console.warn(`\n[Supervisor Watchdog] ⚠️ Sesi ${slot.friendlyLabel} melampaui batas waktu window + 4 menit. Menghentikan proses anak secara graceful...`);
+          currentChild.kill('SIGTERM');
+          setTimeout(() => {
+            if (currentChild && !currentChild.killed) {
+              console.warn(`[Supervisor Watchdog] ⚠️ Proses anak tidak merespons SIGTERM, mengirim SIGKILL...`);
+              currentChild.kill('SIGKILL');
+            }
+          }, 5000).unref();
+        }
+      }, maxRuntimeMs);
+      watchdog.unref();
+
       currentChild.on('close', code => {
+        clearTimeout(watchdog);
         currentChild = null;
         resolve(code ?? 0);
       });
@@ -181,7 +197,8 @@ async function startSupervisor() {
 
     console.log(`\n[Supervisor] Sesi ${slot.friendlyLabel} selesai dengan exit code: ${exitCode}`);
 
-    // Auto-sync SQLite
+    // The supervisor owns archive sync. The collector only flushes its run files
+    // before exiting, so this executes exactly once per completed child run.
     try {
       const syncResult = syncSingleRunToSqlite(fullOutputDir);
       console.log(`[Supervisor] ✅ Auto-archive SQLite berhasil untuk ${outputDir}:`, syncResult);

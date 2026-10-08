@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessMomentumEntry, assessMomentumExit, createMomentumPosition, holderGrowth, momentumMetrics, MOMENTUM_R5_BAND, type TapeTrade } from '../src/momentum-strategy.js';
+import { assessMomentumEntry, assessMomentumExit, assessMomentumV2BalancedFlowEntry, assessMomentumV3CalmEntry, createMomentumPosition, holderGrowth, momentumMetrics, MOMENTUM_R5_BAND, type TapeTrade } from '../src/momentum-strategy.js';
 const tick = (at: number, price: number, extra: Partial<TapeTrade> = {}): TapeTrade => ({ id: String(at), observedAt: at, occurredAt: at, priceUsd: price, side: 'buy', wallet: `w${at % 3}`, usd: 20, tokens: 1, ...extra });
 const rising = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i));
 test('momentum measures five seconds, ignores future/out-of-order frames and one-tick history', () => {
@@ -29,6 +29,13 @@ test('R5-band lane keeps the base gates and waits for momentum from 5% through b
   assert.ok(assessMomentumEntry(slow, holders, 10000, false, MOMENTUM_R5_BAND).reasons.includes('MOMENTUM_R5_BELOW_BAND'));
   const fast = Array.from({ length: 11 }, (_, i) => tick(i * 1000, 100 + i * 3));
   assert.ok(assessMomentumEntry(fast, holders, 10000, false, MOMENTUM_R5_BAND).reasons.includes('MOMENTUM_R5_ABOVE_BAND'));
+});
+test('calm V3 and balanced-flow V2 cohorts enforce their declared entry bands', () => {
+  assert.equal(assessMomentumV3CalmEntry(rising, 10000).allowed, true);
+  assert.equal(assessMomentumV3CalmEntry(rising.map(t => ({ ...t, wallet: 'same-wallet' })), 10000).allowed, false);
+  const balancedTape = rising.map((t, i) => i === 9 ? { ...t, side: 'sell' as const } : t);
+  assert.equal(assessMomentumV2BalancedFlowEntry(balancedTape, 10000, 80).allowed, true);
+  assert.ok(assessMomentumV2BalancedFlowEntry(balancedTape, 10000, 90).reasons.includes('BALANCED_FLOW_V1_BUY_SHARE_20S_NOT_75_TO_85'));
 });
 test('hard stop needs distinct evidence; gap exits record actual price, never an invented -20% fill', () => {
   const p = createMomentumPosition(1000, 100), one = tick(2000, 79);

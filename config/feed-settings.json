@@ -1,10 +1,10 @@
 {
-  "feedUrl": "https://gmgn.ai/?chain=sol&ref=bFC8902n",
-  "feedUrlPreset": "https://gmgn.ai/?chain=sol&ref=bFC8902n",
-  "mcPreset": "10k-100k",
-  "minMarketCapUsd": 10000,
-  "maxMarketCapUsd": 100000,
-  "updatedAt": "2026-10-05T08:37:09.476Z",
+  "feedUrl": "https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=new_pair",
+  "feedUrlPreset": "https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=new_pair",
+  "mcPreset": "all",
+  "minMarketCapUsd": 0,
+  "maxMarketCapUsd": 10000000,
+  "updatedAt": "2026-10-06T06:12:15.571Z",
   "restart": true,
   "goldenEntryEnabled": false
 }

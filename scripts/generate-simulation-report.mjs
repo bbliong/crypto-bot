@@ -151,8 +151,16 @@ const paperLane = row => row?.paperLane ?? 'control';
 const paperLaneLabel = lane => lane === 'r5-band' ? 'R5-band 5%–<10%'
   : lane === 'v3-v8' ? 'V3 (V8)'
   : lane === 'v3-exit-confirmed' ? 'V3 Exit Confirmed'
+  : lane === 'momentum-v3-calm-v1' ? 'Momentum V3 Calm V1 (Paper)'
+  : lane === 'momentum-v2-balanced-flow-v1' ? 'Momentum V2 Balanced Flow V1 (Paper)'
+  : lane === 'momentum-v3' ? 'Momentum V3'
+  : lane === 'momentum-v2' ? 'Momentum V2'
   : lane === 'aggressive-safe' ? 'Safe Aggressive'
   : lane === 'aggressive-optimal' ? 'Optimal Aggressive'
+  : lane === 'aggressive-wide' ? 'Wide Aggressive'
+  : lane === 'aggressive-swing-100k' ? 'Swing 100k Aggressive'
+  : lane === 'aggressive-wave' ? 'Wave Scalper Aggressive'
+  : lane === 'adaptive-wave' ? 'Adaptive Wave V1'
   : (isMomentumAggressive ? 'Mode Agresif (Sniper)' : isMomentumV3 ? 'Kontrol V3 (V8)' : 'Kontrol V2');
 const buys = rows.filter(row => row.type === 'SIMULATED_BUY');
 const sells = rows.filter(row => row.type === 'SIMULATED_SELL');
@@ -358,7 +366,8 @@ const laneLedgerTable = lane => {
   const totalCell = values => `<b>Untung ${values.completed ? usd(values.profit) : '—'}</b><br><span class="down">Rugi ${values.completed ? usd(values.loss) : '—'}</span><br><span class="${moneyClass(values.net)}">Net ${values.completed ? usd(values.net) : '—'}</span>`;
   return `<section class="lane-ledger"><h2>${paperLaneLabel(lane)}</h2><p class="muted">Paper memakai harga socket pada sinyal. Quote memakai route GMGN pada saat sinyal, tanpa submit order. Harga dan P/L quote hanya final jika quote BUY serta SELL sama-sama tersedia.</p><div class="scroll"><table class="ledger-table"><thead><tr><th>Token</th><th>Harga Paper Buy</th><th>Harga Quote Buy<br><small>(route GMGN)</small></th><th>Harga Paper Sell</th><th>Harga Quote Sell<br><small>(route GMGN)</small></th><th>P/L Paper</th><th>P/L Quote<br><small>(estimasi route)</small></th></tr></thead><tbody>${laneLedgerRows(lane) || '<tr><td colspan="7" class="muted">Belum ada transaksi pada lane ini.</td></tr>'}</tbody><tfoot><tr><th colspan="4">Total ${paperLaneLabel(lane)} · ${totals.positions} posisi</th><th>Transaksi selesai<br>Paper: ${totals.paper.completed}<br>Quote lengkap: ${totals.quote.completed}</th><th>${totalCell(totals.paper)}</th><th>${totalCell(totals.quote)}</th></tr></tfoot></table></div></section>`;
 };
-const momentumLaneDashboardHtml = `<div class="lane-ledger-intro"><b>${isMomentumComparison ? 'Komparasi transaksi V2, V3, dan V3 Exit Confirmed' : isMomentumV3 ? 'Transaksi Momentum V3' : 'Komparasi transaksi per lane'}</b><br><span class="muted">Setiap lane memakai data socket/detail yang sama. Lane V3 Exit Confirmed memakai entry V3 yang sama, tetapi menunda exit whale non-dev selama 5 detik untuk konfirmasi. Paper = harga socket; Quote = estimasi route swap GMGN pada waktu sinyal lane tersebut. Tidak ada order nyata yang dikirim.</span></div>${laneLedgerTable('control')}${isMomentumComparison ? laneLedgerTable('v3-v8') + laneLedgerTable('v3-exit-confirmed') : isMomentumV3 ? '' : laneLedgerTable('r5-band')}`;
+const aggressiveComparisonLanes = ['control', 'aggressive-safe', 'aggressive-optimal', 'aggressive-wide', 'aggressive-swing-100k', 'aggressive-wave', 'adaptive-wave', 'momentum-v2', 'momentum-v3', 'momentum-v3-calm-v1', 'momentum-v2-balanced-flow-v1', 'r5-band'];
+const momentumLaneDashboardHtml = `<div class="lane-ledger-intro"><b>${isMomentumAggressive ? 'Komparasi seluruh lane agresif, termasuk dua lane paper baru' : isMomentumComparison ? 'Komparasi transaksi V2, V3, dan V3 Exit Confirmed' : isMomentumV3 ? 'Transaksi Momentum V3' : 'Komparasi transaksi per lane'}</b><br><span class="muted">Setiap lane memakai data socket/detail yang sama. Calm V1 dan Balanced Flow V1 hanya paper; keduanya tidak dapat mengirim order nyata. Paper = harga socket; Quote = estimasi route swap GMGN pada waktu sinyal lane tersebut.</span></div>${isMomentumAggressive ? aggressiveComparisonLanes.map(laneLedgerTable).join('') : laneLedgerTable('control') + (isMomentumComparison ? laneLedgerTable('v3-v8') + laneLedgerTable('v3-exit-confirmed') : isMomentumV3 ? '' : laneLedgerTable('r5-band'))}`;
 
 const comparisonTradeRows = buys.filter(buy => paperLane(buy) === 'control').slice().reverse().map(buy => {
   const sell = buy.positionId ? sellsByPosition.get(buy.positionId) : sellsByMint.get(buy.mint);
@@ -530,7 +539,7 @@ const profit = sells.filter(row => row.pnlUsd > 0).reduce((sum, row) => sum + ro
 const loss = sells.filter(row => row.pnlUsd < 0).reduce((sum, row) => sum + row.pnlUsd, 0);
 const totalPnl = sells.reduce((sum, row) => sum + (row.pnlUsd ?? 0), 0);
 const open = buys.length - sells.length - unpricedByMint.size;
-const reportLanes = isMomentumComparison ? ['control', 'v3-v8', 'v3-exit-confirmed'] : ['control', 'r5-band'];
+const reportLanes = isMomentumAggressive ? aggressiveComparisonLanes : isMomentumComparison ? ['control', 'v3-v8', 'v3-exit-confirmed'] : ['control', 'r5-band'];
 const laneSummary = summary?.lanes ?? Object.fromEntries(reportLanes.map(lane => {
   const laneBuys = buys.filter(row => paperLane(row) === lane), laneSells = sells.filter(row => paperLane(row) === lane);
   return [lane, { positionsOpened: laneBuys.length, positionsClosed: laneSells.length, openAtEnd: laneBuys.length - laneSells.length,
@@ -542,8 +551,8 @@ const laneFinancials = Object.fromEntries(reportLanes.map(lane => {
   const loss = laneSells.filter(row => row.pnlUsd < 0).reduce((sum, row) => sum + row.pnlUsd, 0);
   return [lane, { profit, loss, pnl: profit + loss }];
 }));
-const laneComparisonHtml = ((strategy?.strategy === 'momentum-v2' && !singleLaneMode) || isMomentumComparison) ? `<h2>Hasil per lane paper</h2><div class="scroll"><table><thead><tr><th>Lane</th><th>Entry</th><th>Exit</th><th>Masih terbuka</th><th>Menang / kalah</th><th>Keuntungan</th><th>Kerugian</th><th>P/L sinyal</th></tr></thead><tbody>${Object.entries(laneSummary).map(([lane, value]) => { const financial = laneFinancials[lane] ?? { profit: 0, loss: value.totalPnlUsd ?? 0, pnl: value.totalPnlUsd ?? 0 }; return `<tr><td><b>${paperLaneLabel(lane)}</b></td><td>${value.positionsOpened ?? 0}</td><td>${value.positionsClosed ?? 0}</td><td>${value.openAtEnd ?? 0}</td><td>${value.profitable ?? 0} / ${value.losing ?? 0}</td><td class="up">${usd(financial.profit)}</td><td class="down">${usd(financial.loss)}</td><td class="${financial.pnl > 0 ? 'up' : financial.pnl < 0 ? 'down' : ''}">${usd(financial.pnl)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
-const allLanes = (strategy?.strategy === 'momentum-v2' && !singleLaneMode) || isMomentumComparison;
+const laneComparisonHtml = ((strategy?.strategy === 'momentum-v2' && !singleLaneMode) || isMomentumComparison || isMomentumAggressive) ? `<h2>Hasil per lane paper</h2><div class="scroll"><table><thead><tr><th>Lane</th><th>Entry</th><th>Exit</th><th>Masih terbuka</th><th>Menang / kalah</th><th>Keuntungan</th><th>Kerugian</th><th>P/L sinyal</th></tr></thead><tbody>${Object.entries(laneSummary).map(([lane, value]) => { const financial = laneFinancials[lane] ?? { profit: 0, loss: value.totalPnlUsd ?? 0, pnl: value.totalPnlUsd ?? 0 }; return `<tr><td><b>${paperLaneLabel(lane)}</b></td><td>${value.positionsOpened ?? 0}</td><td>${value.positionsClosed ?? 0}</td><td>${value.openAtEnd ?? 0}</td><td>${value.profitable ?? 0} / ${value.losing ?? 0}</td><td class="up">${usd(financial.profit)}</td><td class="down">${usd(financial.loss)}</td><td class="${financial.pnl > 0 ? 'up' : financial.pnl < 0 ? 'down' : ''}">${usd(financial.pnl)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+const allLanes = (strategy?.strategy === 'momentum-v2' && !singleLaneMode) || isMomentumComparison || isMomentumAggressive;
 const liveRealizedTrades = [...walletstatByMint.values()].filter(w => w.grossPnlUsd !== null && Number(w.historySoldIncomeUsd) > 0);
 const totalLivePnl = liveRealizedTrades.reduce((acc, w) => acc + (w.grossPnlUsd ?? 0), 0);
 const liveProfitCount = liveRealizedTrades.filter(w => (w.grossPnlUsd ?? 0) > 0).length;
