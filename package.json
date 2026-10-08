@@ -35,7 +35,9 @@
     "dashboard:data": "node scripts/run.mjs dashboard:data",
     "dashboard:serve": "node scripts/serve-dashboard.mjs",
     "test": "node scripts/run.mjs test",
-    "typecheck": "node scripts/run.mjs typecheck"
+    "typecheck": "node scripts/run.mjs typecheck",
+    "wallet:profit4-watch": "node scripts/run-profit4-watch.mjs",
+    "dashboard:profit4": "node --import tsx scripts/serve-profit4-dashboard.mjs"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.15",
