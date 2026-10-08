@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
@@ -11,8 +11,8 @@ const readJson = (file, fallback) => { try { return JSON.parse(readFileSync(file
 const alive = pid => { if (!Number.isSafeInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch { return false; } };
 const json = (res, code, body) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(body));
 export function createHolder149Dashboard({ root = defaultRoot,
-  profileDir = process.env.HOLDER149_PROFILE_DIR ?? join(root, 'profiles', 'holder149-watch'),
-  profileName = process.env.HOLDER149_PROFILE_NAME ?? 'Profile 12',
+  profileDir = process.env.HOLDER149_PROFILE_DIR ?? (existsSync(join(root, 'profiles', 'holder149-vps')) ? join(root, 'profiles', 'holder149-vps') : join(root, 'profiles', 'holder149-watch')),
+  profileName = process.env.HOLDER149_PROFILE_NAME ?? (existsSync(join(root, 'profiles', 'holder149-vps')) ? 'Default' : 'Profile 12'),
   manageWorker = (process.env.HOLDER149_MANAGE_WORKER ?? 'on') === 'on' } = {}) {
   if (typeof profileDir !== 'string' || !profileDir.trim() || typeof profileName !== 'string' || !profileName.trim())
     throw new Error('Konfigurasi profil Chrome tidak valid.');
@@ -67,7 +67,8 @@ export function createHolder149Dashboard({ root = defaultRoot,
       '--profileDir', profileDir, '--profileName', profileName, '--batchMilliseconds', '3000'];
     const fd = openSync(join(dataRoot, 'worker.log'), 'a');
     let child;
-    try { child = spawn(process.execPath, args, { cwd: root, detached: true, windowsHide: true, stdio: ['ignore', fd, fd] }); }
+    const env = { ...process.env, DISPLAY: process.env.DISPLAY || ':99' };
+    try { child = spawn(process.execPath, args, { cwd: root, detached: true, windowsHide: true, env, stdio: ['ignore', fd, fd] }); }
     finally { closeSync(fd); }
     if (!Number.isSafeInteger(child.pid)) throw new Error('Proses worker gagal dibuat.');
     const record = { pid: child.pid, mode: 'holder149-watch', startedAt: new Date().toISOString(), status: 'starting',
@@ -89,15 +90,22 @@ export function createHolder149Dashboard({ root = defaultRoot,
   }
   return createServer(async (req, res) => {
     try {
-      const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
-      if (req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`)
+      let path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+      if (path === '/holder149') {
+        return res.writeHead(302, { Location: '/holder149/' }).end();
+      }
+      if (path.startsWith('/holder149/')) {
+        path = path.slice('/holder149'.length);
+      }
+      if (req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`)
         return json(res, 403, { error: 'Origin tidak diizinkan.' });
       if (req.method === 'GET' && path === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(readFileSync(join(root, 'dist', 'holder149-monitor-dashboard.html')));
       if (req.method === 'GET' && path === '/api/state') {
         const current = readJson(controlFile, null), active = alive(current?.pid);
         const worker = current ? { ...current, active, details: active ? current.details ?? [] : [],
           status: active ? current.status : current.status === 'failed' ? 'failed' : 'stopped' } : { active: false, status: 'stopped', details: [] };
-        return json(res, 200, { mode: 'HOLDER149', managementEnabled: manageWorker, wallets: wallets(), worker });
+        const holderStats = readJson(join(dataRoot, 'holder-stats.json'), null);
+        return json(res, 200, { mode: 'HOLDER149', managementEnabled: manageWorker, wallets: wallets(), worker, holderStats });
       }
       if (req.method === 'POST' && ['/api/worker/start', '/api/worker/stop'].includes(path)) {
         if (!manageWorker) return json(res, 403, { error: 'Worker dikelola service server. Gunakan systemctl untuk start/stop.' });
@@ -115,6 +123,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const port = Number(process.env.HOLDER149_DASHBOARD_PORT ?? 4176);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port dashboard tidak valid.');
   const server = createHolder149Dashboard();
+  const host = process.env.HOLDER149_DASHBOARD_HOST ?? '0.0.0.0';
   server.on('error', error => { console.error(error.message); process.exitCode = 1; });
-  server.listen(port, '127.0.0.1', () => console.log(`Holder149 dashboard: http://127.0.0.1:${port}`));
+  server.listen(port, host, () => console.log(`Holder149 dashboard: http://${host}:${port}`));
 }

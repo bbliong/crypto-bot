@@ -2,7 +2,8 @@ import { register } from 'tsx/esm/api';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 process.chdir(fileURLToPath(new URL('../', import.meta.url)));
-process.argv.push('--paperLane', 'profit4', '--dataDir', 'data/profit4-watch');
+if (!process.argv.includes('--paperLane')) process.argv.push('--paperLane', 'profit4');
+if (!process.argv.includes('--dataDir')) process.argv.push('--dataDir', 'data/profit4-watch');
 register();
 try { await import('../src/distribution-watch-four-tabs.ts'); }
 catch (error) {

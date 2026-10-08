@@ -1,0 +1,8 @@
+cr.bbliong.io {
+    handle /holder149* {
+        reverse_proxy 127.0.0.1:4176
+    }
+    handle {
+        reverse_proxy 127.0.0.1:4180
+    }
+}

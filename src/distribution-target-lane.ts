@@ -1,7 +1,7 @@
 /** Read-only paper strategy; neither signals nor fills call an order API. */
 export const DISTRIBUTION_TARGET_LANE = 'distribution-target-20-25';
 export type TargetRules = {
-  version: string; paperOnly: true; enabled: boolean; targetPercent: 20 | 25;
+  version: string; paperOnly: true; enabled: boolean; targetPercent: number;
   observationSeconds: number; minTransferAgeSeconds: number; maxTransferLagSeconds: number;
   maxEntryWaitSeconds: number; confirmSeconds: number; minBuySharePercent: number;
   minMeaningfulBuyUsd: number; minMeaningfulBuyers: number; maxBuyerSharePercent: number;
@@ -24,7 +24,7 @@ export const DEFAULT_TARGET_RULES: TargetRules = {
 };
 export function validateTargetRules(value: unknown): TargetRules {
   const r = value as TargetRules;
-  if (!r || r.paperOnly !== true || ![20, 25].includes(r.targetPercent)) throw new Error('Lane hanya paper, target harus 20 atau 25.');
+  if (!r || r.paperOnly !== true || typeof r.targetPercent !== 'number' || r.targetPercent <= 0) throw new Error('Lane hanya paper, targetPercent harus positif.');
   for (const k of Object.keys(DEFAULT_TARGET_RULES) as (keyof TargetRules)[]) {
     if (typeof DEFAULT_TARGET_RULES[k] === 'number' && (!Number.isFinite(r[k]) || Number(r[k]) < 0)) throw new Error(`Rule invalid: ${k}`);
   }
@@ -46,6 +46,9 @@ export type TargetFacts = {
   buyShareUsdPercent: number | null; meaningfulBuyUsd: number; meaningfulBuyers: number;
   topBuyerSharePercent: number | null; sellUsd: number; largestSellUsd: number;
   riskWalletsPresent: string[];
+  peakPrice?: number | null;
+  troughPrice?: number | null;
+  bounceFromTroughPercent?: number | null;
 };
 const median = (rows: number[]) => {
   if (!rows.length) return null;
@@ -59,6 +62,7 @@ export class TargetObservation {
   firstAt: number | null = null;
   private firstPrice: number | null = null;
   private peak = 0;
+  private trough = Infinity;
   private ids = new Map<string, number>();
   constructor(readonly transferAt: number) {}
   trade(t: TargetTrade) {
@@ -94,7 +98,14 @@ export class TargetObservation {
     const quotes = rows.filter(t => t.at > now - 1000 && now - t.timestamp * 1000 <= 5000);
     const last = rows.at(-1);
     const price = median(quotes.map(t => t.price)) ?? (last && now - last.at <= 2000 && now - last.timestamp * 1000 <= 5000 ? last.price : null);
-    if (price !== null) this.peak = Math.max(this.peak, price);
+    if (price !== null) {
+      if (price > this.peak) {
+        this.peak = price;
+        this.trough = price; // reset trough when a new peak is reached
+      } else if (price < this.trough) {
+        this.trough = price;
+      }
+    }
     const a = median(recent.map(t => t.price)), b = median(before.map(t => t.price));
     const currentCount = this.counts.filter(t => t.at <= now && now - t.at <= 15000).at(-1);
     const priorCount = this.counts.filter(t => t.at <= now - 15000 && now - 15000 - t.at <= 15000).at(-1);
@@ -108,6 +119,9 @@ export class TargetObservation {
       (this.holders.get(r.wallet)?.filter(h => h.at <= now).at(-1)?.amount ?? 0) > 0
       || rows.some(t => t.wallet === r.wallet && t.at > now - 30000)
     )).map(r => r.wallet);
+    const bounceFromTroughPercent = (price !== null && Number.isFinite(this.trough) && this.trough > 0 && price >= this.trough)
+      ? ((price - this.trough) / this.trough) * 100
+      : null;
     return { now, firstAt: this.firstAt !== null && this.firstAt <= now ? this.firstAt : null, transferAt: this.transferAt,
       price, priceAt: price !== null ? last?.at ?? null : null,
       momentumPercent: a !== null && b !== null && b > 0 ? (a / b - 1) * 100 : null,
@@ -117,7 +131,10 @@ export class TargetObservation {
       buyShareUsdPercent: buyUsd + sellUsd > 0 ? buyUsd / (buyUsd + sellUsd) * 100 : null,
       meaningfulBuyUsd: meaningfulUsd, meaningfulBuyers: buyers.size,
       topBuyerSharePercent: meaningfulUsd > 0 ? Math.max(0, ...buyers.values()) / meaningfulUsd * 100 : null,
-      sellUsd, largestSellUsd: Math.max(0, ...sell.map(t => t.usd ?? 0)), riskWalletsPresent: [...new Set(present)] };
+      sellUsd, largestSellUsd: Math.max(0, ...sell.map(t => t.usd ?? 0)), riskWalletsPresent: [...new Set(present)],
+      peakPrice: this.peak > 0 ? this.peak : null,
+      troughPrice: Number.isFinite(this.trough) ? this.trough : null,
+      bounceFromTroughPercent };
   }
 }
 export function assessTargetEntry(f: TargetFacts, r: TargetRules): string[] {
@@ -146,6 +163,7 @@ export type TargetPolicy = {
   trailingEnabled?: boolean;
   flowExitEnabled?: boolean;
   entryReasons?: (facts: TargetFacts) => string[];
+  overrideEntryReasons?: (facts: TargetFacts, rules: TargetRules) => string[];
   exitReason?: (facts: TargetFacts, netReturnPercent: number) => string | null;
 };
 export class DistributionTargetLane {
@@ -168,7 +186,12 @@ export class DistributionTargetLane {
     this.rules = Object.freeze(validateTargetRules(rules));
     this.policy = Object.freeze({ ...policy });
   }
-  private entryReasons(f: TargetFacts) { return [...assessTargetEntry(f, this.rules), ...(this.policy.entryReasons?.(f) ?? [])]; }
+  private entryReasons(f: TargetFacts) {
+    if (this.policy.overrideEntryReasons) {
+      return this.policy.overrideEntryReasons(f, this.rules);
+    }
+    return [...assessTargetEntry(f, this.rules), ...(this.policy.entryReasons?.(f) ?? [])];
+  }
   private event(type: string, now: number, data: Record<string, unknown> = {}) {
     this.emit({ type, observedAt: now, paperLane: this.policy.paperLane ?? DISTRIBUTION_TARGET_LANE, version: this.rules.version, mint: this.mint, paperOnly: true, policyName: this.policy.name, ...data });
   }

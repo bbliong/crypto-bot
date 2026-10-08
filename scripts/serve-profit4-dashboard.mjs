@@ -85,8 +85,10 @@ export function createProfit4Dashboard({ root = defaultRoot } = {}) {
     const addresses = config().addresses;
     const stopFile = join(data, 'stop-request.json'); if (existsSync(stopFile)) unlinkSync(stopFile);
     const fd = openSync(join(data, 'worker.log'), 'a'); let child;
+    const profileDir = process.env.PROFIT4_PROFILE_DIR ?? (existsSync(join(root, 'profiles', 'research-vps')) ? join(root, 'profiles', 'research-vps') : join(root, 'profiles', 'research-aria-tele01'));
+    const profileName = process.env.PROFIT4_PROFILE_NAME ?? (existsSync(join(root, 'profiles', 'research-vps')) ? 'Default' : 'Profile 12');
     try { child = spawn(process.execPath, [join(root, 'scripts', 'run-profit4-watch.mjs'), '--addresses', addresses.join(','),
-      '--profileDir', join(root, 'profiles', 'research-aria-tele01'), '--profileName', 'Profile 12', '--pollMilliseconds', '500'],
+      '--profileDir', profileDir, '--profileName', profileName, '--pollMilliseconds', '500'],
       { cwd: root, detached: true, windowsHide: true, stdio: ['ignore', fd, fd] }); } finally { closeSync(fd); }
     const record = { pid: child.pid, mode: 'profit4-watch', status: 'starting', startedAt: Date.now(), addresses, paperOnly: true, rounds: 1, run: null };
     writeFileSync(controlFile, JSON.stringify(record));

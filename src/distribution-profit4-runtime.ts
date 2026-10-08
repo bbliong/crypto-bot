@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DistributionProfit4Lane, PROFIT4_LANE, PROFIT4_RULES, PROFIT4_TARGET_PERCENT } from './distribution-profit4-lane.js';
+import { DistributionBounceLane, BOUNCE_DUMP_LANE, BOUNCE_RULES, BOUNCE_TARGET_PERCENT } from './distribution-bounce-lane.js';
 import { TargetObservation, type TargetEvent, type TargetFacts, type TargetTrade } from './distribution-target-lane.js';
 
 type Transfer = { mint: string; wallet: string; symbol?: string; timestamp?: number };
@@ -8,26 +9,35 @@ export function atomicProfit4Json(path: string, value: unknown) {
   const temp = `${path}.${process.pid}.tmp`; writeFileSync(temp, JSON.stringify(value)); renameSync(temp, path);
 }
 export class DistributionProfit4Runtime {
-  private states = new Map<string, { transfer: Transfer; observation: TargetObservation; lane: DistributionProfit4Lane;
+  private states = new Map<string, { transfer: Transfer; observation: TargetObservation; lane: DistributionProfit4Lane | DistributionBounceLane;
     facts: TargetFacts | null; active: boolean; lastDecision: unknown; lastEvent: TargetEvent | null }>();
   private lastEvaluationAt = -Infinity;
   private bought: Set<string>;
   private recentEvents: TargetEvent[] = [];
   private readonly boughtFile: string;
+  readonly laneType: 'profit4' | 'bounce';
+  readonly targetPercent: number;
+  readonly laneRules: typeof PROFIT4_RULES | typeof BOUNCE_RULES;
+  readonly laneName: string;
+
   constructor(private readonly run: string, private readonly write: (name: string, value: unknown) => void,
-    private readonly dataDirectory: string) {
+    private readonly dataDirectory: string, laneType: 'profit4' | 'bounce' = 'profit4') {
+    this.laneType = laneType;
+    this.targetPercent = laneType === 'bounce' ? BOUNCE_TARGET_PERCENT : PROFIT4_TARGET_PERCENT;
+    this.laneRules = laneType === 'bounce' ? BOUNCE_RULES : PROFIT4_RULES;
+    this.laneName = laneType === 'bounce' ? BOUNCE_DUMP_LANE : PROFIT4_LANE;
     this.boughtFile = join(dataDirectory, 'bought-mints.json');
     const saved = existsSync(this.boughtFile) ? JSON.parse(readFileSync(this.boughtFile, 'utf8')) : { mints: [] };
     if (!Array.isArray(saved.mints) || saved.mints.some((s: unknown) => typeof s !== 'string')) throw new Error('Ledger bought-mints tidak valid.');
     this.bought = new Set(saved.mints);
-    this.write('profit4-events.jsonl', { type: 'PAPER_LANE_READY', observedAt: Date.now(), paperLane: PROFIT4_LANE,
-      rules: PROFIT4_RULES, targetPercent: PROFIT4_TARGET_PERCENT, execution: 'PAPER_QUOTE', rounds: 1 });
+    this.write('profit4-events.jsonl', { type: 'PAPER_LANE_READY', observedAt: Date.now(), paperLane: this.laneName,
+      rules: this.laneRules, targetPercent: this.targetPercent, execution: 'PAPER_QUOTE', rounds: 1 });
     this.persist(Date.now());
   }
   register(transfer: Transfer, now: number) {
     if (this.states.has(transfer.mint)) return;
     const observation = new TargetObservation((transfer.timestamp ?? now / 1000) * 1000);
-    const lane = new DistributionProfit4Lane(transfer.mint, event => {
+    const onEvent = (event: TargetEvent) => {
       const state = this.states.get(transfer.mint);
       if (state) {
         state.lastEvent = event;
@@ -42,7 +52,12 @@ export class DistributionProfit4Runtime {
       const record = { ...small, transfer };
       this.recentEvents.push(record); if (this.recentEvents.length > 60) this.recentEvents.shift();
       this.write('profit4-events.jsonl', record);
-    });
+    };
+
+    const lane = this.laneType === 'bounce'
+      ? new DistributionBounceLane(transfer.mint, onEvent)
+      : new DistributionProfit4Lane(transfer.mint, onEvent);
+
     this.states.set(transfer.mint, { transfer, observation, lane, facts: null, active: true, lastDecision: null, lastEvent: null });
     if (this.bought.has(transfer.mint)) lane.end(now, 'ONE_ROUND_ALREADY_ENTERED');
     else if (!Number.isFinite(transfer.timestamp) || !transfer.timestamp || transfer.timestamp * 1000 > now + 2000) lane.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
@@ -69,7 +84,7 @@ export class DistributionProfit4Runtime {
     for (const state of this.states.values()) {
       if (!state.active) continue;
       const facts = state.observation.facts(now, []); state.facts = facts;
-      if (state.lane.entryAt === null && facts.firstAt !== null && now - facts.firstAt > PROFIT4_RULES.maxEntryWaitSeconds * 1000)
+      if (state.lane.entryAt === null && facts.firstAt !== null && now - facts.firstAt > this.laneRules.maxEntryWaitSeconds * 1000)
         state.lane.end(now, 'ENTRY_WINDOW_EXPIRED');
       else state.lane.step(facts);
     }
@@ -82,13 +97,13 @@ export class DistributionProfit4Runtime {
   }
   shutdown(now: number) { for (const mint of this.states.keys()) this.end(mint, now, 'WORKER_STOPPED'); }
   private persist(now: number) {
-    atomicProfit4Json(join(this.run, 'profit4-state.json'), { observedAt: now, paperLane: PROFIT4_LANE, rounds: 1,
-      execution: 'PAPER_QUOTE', status: 'EXPERIMENTAL', targetPercent: PROFIT4_TARGET_PERCENT, rules: PROFIT4_RULES,
+    atomicProfit4Json(join(this.run, 'profit4-state.json'), { observedAt: now, paperLane: this.laneName, rounds: 1,
+      execution: 'PAPER_QUOTE', status: 'EXPERIMENTAL', targetPercent: this.targetPercent, rules: this.laneRules,
       recentEvents: this.recentEvents,
       positions: [...this.states.values()].map(s => ({ ...s.transfer, captureActive: s.active,
-        phase: s.lane.phase, version: s.lane.rules.version, targetPercent: PROFIT4_TARGET_PERCENT,
+        phase: s.lane.phase, version: s.lane.rules.version, targetPercent: this.targetPercent,
         entryAt: s.lane.entryAt, entryPrice: s.lane.entryPrice, exitAt: s.lane.exitAt, exitPrice: s.lane.exitPrice,
-        netReturnPercent: s.lane.netReturnPercent, pnlUsd: s.lane.netReturnPercent === null ? null : s.lane.netReturnPercent / 100 * PROFIT4_RULES.stakeUsd,
+        netReturnPercent: s.lane.netReturnPercent, pnlUsd: s.lane.netReturnPercent === null ? null : s.lane.netReturnPercent / 100 * this.laneRules.stakeUsd,
         estimatedOpenNetPercent: s.lane.entryAt !== null && s.lane.exitAt === null && s.active && s.facts?.price !== null && s.facts?.price !== undefined
           ? s.lane.net(s.facts.price) : null, lastDecision: s.lastDecision,
         lastEvent: s.lastEvent ? { type: s.lastEvent.type, observedAt: s.lastEvent.observedAt, reason: s.lastEvent.reason, reasons: s.lastEvent.reasons } : null,

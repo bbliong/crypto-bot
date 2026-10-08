@@ -37,6 +37,7 @@
     "test": "node scripts/run.mjs test",
     "typecheck": "node scripts/run.mjs typecheck",
     "wallet:profit4-watch": "node scripts/run-profit4-watch.mjs",
+    "wallet:bounce-watch": "node scripts/run-bounce-watch.mjs",
     "dashboard:profit4": "node --import tsx scripts/serve-profit4-dashboard.mjs"
   },
   "dependencies": {

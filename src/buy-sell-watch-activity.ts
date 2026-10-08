@@ -60,6 +60,60 @@ export function latestActivityBuy(body: unknown, wallet: string): WalletBuy | un
   return walletBuys({ data: { activities: [activities[0]] } }, wallet)[0];
 }
 
+export function walletOpenPositions(body: unknown, wallet: string): WalletBuy[] {
+  const activities = walkActivity(body);
+  const byMint = new Map<string, Array<{
+    side: string;
+    mint: string;
+    symbol?: string;
+    timestamp: number;
+    priceUsd?: number;
+    amount?: string;
+    tx?: string;
+  }>>();
+
+  for (const row of activities) {
+    const f = activityFields(row);
+    if (!validMint(f.mint) || !Number.isFinite(f.timestamp) || f.timestamp <= 0) continue;
+    if (!byMint.has(f.mint)) byMint.set(f.mint, []);
+    const priceUsd = Number(row.price_usd ?? row.pu);
+    byMint.get(f.mint)!.push({
+      side: f.side,
+      mint: f.mint,
+      symbol: (f.token as { symbol?: string } | undefined)?.symbol,
+      timestamp: f.timestamp,
+      priceUsd: Number.isFinite(priceUsd) ? priceUsd : undefined,
+      amount: String(row.token_amount ?? row.ba ?? ''),
+      tx: String(row.tx_hash ?? row.h ?? '')
+    });
+  }
+
+  const openBuys: WalletBuy[] = [];
+  for (const [mint, rows] of byMint) {
+    rows.sort((a, b) => a.timestamp - b.timestamp);
+    let openBuy: typeof rows[0] | null = null;
+    for (const r of rows) {
+      if (r.side === 'buy') {
+        openBuy = r;
+      } else if (r.side === 'sell' && openBuy) {
+        openBuy = null;
+      }
+    }
+    if (openBuy) {
+      openBuys.push({
+        wallet,
+        mint,
+        symbol: openBuy.symbol,
+        timestamp: openBuy.timestamp,
+        priceUsd: openBuy.priceUsd,
+        amount: openBuy.amount,
+        tx: openBuy.tx
+      });
+    }
+  }
+  return openBuys.sort((a, b) => b.timestamp - a.timestamp);
+}
+
 export function detailWalletSell(body: unknown, buy: WalletBuy): Record<string, unknown> | undefined {
   const packet = body as { channel?: string; data?: unknown[] } | null;
   if (!packet || !['token_activity', 'token_activity_info_all'].includes(packet.channel ?? '') || !Array.isArray(packet.data)) return;

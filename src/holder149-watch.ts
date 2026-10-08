@@ -7,8 +7,17 @@ import { decodeFrame, validMint } from './parser.js';
 import { BuySellCaptureStorage } from './buy-sell-capture-storage.js';
 import { CohortCursor, Holder149Engine, type CohortDetail, type CohortEvent } from './holder149-engine.js';
 import { prepareHolder149Profile } from './holder149-profile.js';
+import { HolderProfiler } from './holder149-profiler.js';
 
-export type Holder149Options = { walletsFile: string; dataDir: string; profileDir: string; profileName: string; batchMilliseconds: number };
+export type Holder149Options = {
+  walletsFile: string;
+  dataDir: string;
+  profileDir: string;
+  profileName: string;
+  batchMilliseconds: number;
+  maxDetails?: number;
+  maxBuyAgeSeconds?: number;
+};
 export function loadHolder149Wallets(file: string): string[] {
   const { addresses } = JSON.parse(readFileSync(file, 'utf8'));
   if (!Array.isArray(addresses) || addresses.length !== 149 || addresses.some(address => !validMint(address)) || new Set(addresses).size !== 149)
@@ -39,15 +48,23 @@ export async function runHolder149Watch(options: Holder149Options) {
   let lastBatch: string[] = [], lastBatchAt: string | null = null, lastPollAt: string | null = null;
   let context: Awaited<ReturnType<typeof chromium.launchPersistentContext>> | undefined;
   const abort = new AbortController();
+  const maxDetails = options.maxDetails ?? 3;
   const metadata = { mode: 'holder149-watch', pid: process.pid, startedAt, run, addresses: wallets,
-    batchSize: 3, batchMilliseconds: options.batchMilliseconds, maxDetails: 3, maxTabs: 4,
+    batchSize: 3, batchMilliseconds: options.batchMilliseconds, maxDetails, maxTabs: maxDetails + 1,
     profileDir: options.profileDir, profileName: options.profileName, walletsFile: resolve(options.walletsFile),
     simulationEnabled: false, activityResponsesSaved: false, captureChunkMinutes: 30 };
+  const statsFile = join(dataRoot, 'holder-stats.json');
+  const profiler = new HolderProfiler(wallets);
+  profiler.load(statsFile);
   function control() {
     const temp = `${controlFile}.${process.pid}.tmp`;
+    const snap = profiler.snapshot();
+    const tier1Count = snap.filter(s => s.tier === 'tier1').length;
+    const tier2Count = snap.filter(s => s.tier === 'tier2').length;
+    const tier3Count = snap.filter(s => s.tier === 'tier3').length;
     writeFileSync(temp, JSON.stringify({ ...metadata, status, stopping, updatedAt: new Date().toISOString(),
       lastError, retryAt, lastBatch, lastBatchAt, lastPollAt, nextIndex: cursor.index, round: cursor.round,
-      metrics, details: engine.snapshot(), finished, events }, null, 2));
+      tier1Count, tier2Count, tier3Count, metrics, details: engine.snapshot(), finished, events }, null, 2));
     renameSync(temp, controlFile);
   }
   function event(value: CohortEvent) {
@@ -55,10 +72,23 @@ export async function runHolder149Watch(options: Holder149Options) {
     if (value.type === 'BUY_SKIPPED_CAPACITY') metrics.skippedCapacity++;
     if (value.type === 'TRACKED_WALLET_SOLD') {
       metrics.soldSignals++;
-      // No separate Buy/Sell activity log: just compact lifecycle metadata.
-      finished.unshift({ observedAt: value.observedAt, wallet: value.wallet, mint: value.mint,
-        symbol: (value.buy as { symbol?: string })?.symbol, reason: 'wallet_sold', source: value.source });
-      finished.length = Math.min(finished.length, 20);
+      const buyPrice = (value.buy as { priceUsd?: number })?.priceUsd;
+      const sellPrice = value.sellPriceUsd as number | undefined;
+      const pnl = value.pnlPercent as number | undefined;
+      const holdSec = value.holdDurationSeconds as number | undefined;
+      finished.unshift({
+        observedAt: value.observedAt, wallet: value.wallet, mint: value.mint,
+        symbol: (value.buy as { symbol?: string })?.symbol, reason: 'wallet_sold', source: value.source,
+        buyPriceUsd: buyPrice, sellPriceUsd: sellPrice, pnlPercent: pnl, holdDurationSeconds: holdSec
+      });
+      finished.length = Math.min(finished.length, 30);
+      profiler.recordLiveTrade({
+        wallet: String(value.wallet), mint: String(value.mint),
+        symbol: (value.buy as { symbol?: string })?.symbol,
+        buyPriceUsd: buyPrice, sellPriceUsd: sellPrice, pnlPercent: pnl,
+        holdDurationSeconds: holdSec, source: String(value.source)
+      });
+      profiler.save(statsFile);
     }
     const { sell: _sell, ...small } = value;
     events.unshift(small);
@@ -109,7 +139,7 @@ export async function runHolder149Watch(options: Holder149Options) {
       resources.delete(detail.id);
       pendingPages.delete(detail.id);
     },
-  });
+  }, maxDetails, Date.now, wallet => profiler.getProfitScore(wallet), options.maxBuyAgeSeconds);
   const stop = () => { if (stopping) return; stopping = true; engine.stopping = true; abort.abort(); void context?.close().catch(() => {}); };
   const stopRequested = () => {
     try { return JSON.parse(readFileSync(stopFile, 'utf8')).pid === process.pid; } catch { return false; }
@@ -120,7 +150,7 @@ export async function runHolder149Watch(options: Holder149Options) {
     execution: 'READ_ONLY', purpose: '149 historical holder candidates; 3 parallel activity GETs per batch, max 3 unique token details. Newest unfiltered Buy only. No activity response storage; socket detail frames only.' }, null, 2));
   try {
     if (resolve(options.profileDir) === resolve('profiles/holder149-watch') && options.profileName === 'Profile 12') await prepareHolder149Profile();
-    else mkdirSync(options.profileDir, { recursive: true });
+    if (process.platform === 'linux' && !process.env.DISPLAY) process.env.DISPLAY = ':99';
     context = await chromium.launchPersistentContext(options.profileDir, { channel: 'chrome', headless: false, viewport: null,
       args: ['--start-maximized', `--profile-directory=${options.profileName}`] });
     const controller = context.pages()[0] ?? await context.newPage();
@@ -148,7 +178,7 @@ export async function runHolder149Watch(options: Holder149Options) {
           }, `/vas/api/v1/wallet_activity/sol?${query}`);
           metrics.successfulRequests++; lastPollAt = new Date().toISOString();
           await engine.activity(wallet, body);
-          // body is deliberately not written, logged or retained.
+          profiler.recordActivities(wallet, body);
         } catch (error) {
           if (stopping || controller.isClosed()) return;
           metrics.errors++;
@@ -159,6 +189,17 @@ export async function runHolder149Watch(options: Holder149Options) {
         }
       }));
       if (stopping || controller.isClosed() || stopRequested()) break;
+      if (metrics.batches % 5 === 0) {
+        profiler.save(statsFile);
+        if (cursor.priorityQueue.length === 0) {
+          // Priority: Hot Tier 1 wallets (<30m active), ordered by profitability (Smart Money & high Win Rate first)
+          const prioritized = profiler.snapshot()
+            .filter(s => s.tier === 'tier1')
+            .sort((a, b) => profiler.getProfitScore(b.wallet) - profiler.getProfitScore(a.wallet))
+            .map(s => s.wallet);
+          if (prioritized.length > 0) cursor.injectPriority(prioritized.slice(0, 9));
+        }
+      }
       backoff = rateLimited ? Math.min(60_000, backoff ? backoff * 2 : 15_000) : 0;
       const wait = backoff || Math.max(0, options.batchMilliseconds - (Date.now() - batchStart));
       retryAt = backoff ? new Date(Date.now() + wait).toISOString() : null;
@@ -174,7 +215,7 @@ export async function runHolder149Watch(options: Holder149Options) {
   } finally {
     stopping = true; engine.stopping = true;
     await context?.close().catch(() => {});
-    await engine.shutdown(); storage.close();
+    await engine.shutdown(); storage.close(); profiler.save(statsFile);
     process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop);
     try { if (JSON.parse(readFileSync(controlFile, 'utf8')).pid === process.pid) control(); } catch {}
     if (stopRequested() && existsSync(stopFile)) rmSync(stopFile);
@@ -184,11 +225,21 @@ export async function main() {
   const { values } = parseArgs({ options: {
     walletsFile: { type: 'string', default: 'config/holder149-wallets.json' },
     dataDir: { type: 'string', default: 'data/holder149-watch' },
-    profileDir: { type: 'string', default: 'profiles/holder149-watch' },
-    profileName: { type: 'string', default: 'Profile 12' },
+    profileDir: { type: 'string', default: existsSync('profiles/holder149-vps') ? 'profiles/holder149-vps' : 'profiles/holder149-watch' },
+    profileName: { type: 'string', default: existsSync('profiles/holder149-vps') ? 'Default' : 'Profile 12' },
     batchMilliseconds: { type: 'string', default: '3000' },
+    maxDetails: { type: 'string', default: '2' },
   } });
   const batchMilliseconds = Number(values.batchMilliseconds);
   if (!Number.isInteger(batchMilliseconds) || batchMilliseconds < 3000) throw new Error('Jeda batch minimal 3000ms.');
-  await runHolder149Watch({ walletsFile: values.walletsFile!, dataDir: values.dataDir!, profileDir: values.profileDir!, profileName: values.profileName!, batchMilliseconds });
+  const maxDetails = Number(values.maxDetails ?? '2');
+  await runHolder149Watch({
+    walletsFile: values.walletsFile!,
+    dataDir: values.dataDir!,
+    profileDir: values.profileDir!,
+    profileName: values.profileName!,
+    batchMilliseconds,
+    maxDetails,
+    maxBuyAgeSeconds: 600 // 10 minutes filter in live runner
+  });
 }

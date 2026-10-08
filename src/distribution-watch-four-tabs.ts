@@ -12,9 +12,10 @@ import { DistributionProfit4Runtime, atomicProfit4Json } from './distribution-pr
 type Transfer = { wallet: string; mint: string; symbol?: string; timestamp?: number; priceUsd?: number; amount?: string; from?: string; tx?: string };
 type Watch = { transfer: Transfer };
 const defaults = ['5bmpgSv6LHyfX6EQ9XnreapgW2VoaDJNAK8mRSNZGZoT', '3dKvjSVXCa2s5ysv5MGtjQ8CF4XZ6MKKTds2uGotXpwD', '2dVDVvzH4D3ihpUTbiG9yNSEsQBs8iFNRifcZP6TLqVK'];
-const { values } = parseArgs({ options: { addresses: { type: 'string', default: defaults.join(',') }, pollMilliseconds: { type: 'string', default: '500' }, profileDir: { type: 'string', default: 'profiles/research-aria-tele01' }, profileName: { type: 'string', default: 'Profile 12' }, paperLane: { type: 'string', default: 'target' }, dataDir: { type: 'string', default: 'data/distribution-watch' } } });
-if (!['target', 'profit4'].includes(values.paperLane!)) throw new Error('paperLane tidak valid.');
-const profit4 = values.paperLane === 'profit4';
+const { values } = parseArgs({ options: { addresses: { type: 'string', default: defaults.join(',') }, pollMilliseconds: { type: 'string', default: '500' }, profileDir: { type: 'string', default: 'profiles/research-vps' }, profileName: { type: 'string', default: 'Default' }, paperLane: { type: 'string', default: 'target' }, dataDir: { type: 'string', default: 'data/distribution-watch' } } });
+if (!['target', 'profit4', 'bounce'].includes(values.paperLane!)) throw new Error('paperLane tidak valid.');
+const isPaperRunner = values.paperLane === 'profit4' || values.paperLane === 'bounce';
+const profit4 = isPaperRunner;
 const addresses = [...new Set(values.addresses!.split(',').map(x => x.trim()).filter(Boolean))];
 const pollMilliseconds = Number(values.pollMilliseconds);
 if (!addresses.length || addresses.some(x => !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(x))) throw new Error('Harus ada minimal satu address wallet Solana yang valid.');
@@ -32,12 +33,14 @@ if (profit4 && existsSync(controlFile)) {
   const previous = JSON.parse(readFileSync(controlFile, 'utf8'));
   if (previous.pid !== process.pid && Number.isInteger(previous.pid)) {
     let active = false; try { process.kill(previous.pid, 0); active = true; } catch {}
-    if (active) throw new Error('Worker Profit4 sudah berjalan. Gunakan dashboard untuk restart.');
+    if (active) throw new Error('Worker Profit4/Bounce sudah berjalan. Gunakan dashboard untuk restart.');
   }
 }
 const logWriter = new RotatingJsonlWriter(output);
 const write = (name: string, value: unknown) => logWriter.write(name, value);
-const targetLane = profit4 ? new DistributionProfit4Runtime(output, write, dataDirectory) : new DistributionTargetRuntime(output, write);
+const targetLane = isPaperRunner
+  ? new DistributionProfit4Runtime(output, write, dataDirectory, values.paperLane === 'bounce' ? 'bounce' : 'profit4')
+  : new DistributionTargetRuntime(output, write);
 process.once('exit', () => logWriter.close());
 const walk = (value: unknown, out: Record<string, unknown>[] = []): Record<string, unknown>[] => { if (Array.isArray(value)) value.forEach(x => walk(x, out)); else if (value && typeof value === 'object') { const row = value as Record<string, unknown>; out.push(row); Object.values(row).forEach(x => walk(x, out)); } return out; };
 function fields(row: Record<string, unknown>) { const token = row.token as Record<string, unknown> | undefined; return { event: String(row.event_type ?? row.e ?? '').toLowerCase(), mint: String(token?.address ?? row.token_address ?? row.a ?? ''), timestamp: Number(row.timestamp ?? row.t) || 0, token }; }
@@ -91,9 +94,11 @@ function attachDetailSocket(page: Page, wallet: string) {
           wallet: trade.wallet, usd: trade.usd ?? null, signature: trade.signature });
         if (profit4 && trade.side === 'sell' && trade.wallet === wallet && (trade.timestamp ?? 0) >= (state.watch.transfer.timestamp ?? Infinity)) {
           write('watch-events.jsonl', { type: 'TRACKED_WALLET_SOLD', observedAt, trackedWallet: wallet, transfer: state.watch.transfer, sell: trade, source: 'socket' });
-          details.delete(wallet);
-          if (![...details.values()].some(d => d.watch.transfer.mint === trade.mint)) targetLane.end(trade.mint, observedAt, 'TRACKED_WALLET_SOLD_AND_DETAIL_CLOSED');
-          void page.close(); break;
+          if (values.paperLane !== 'bounce') {
+            details.delete(wallet);
+            if (![...details.values()].some(d => d.watch.transfer.mint === trade.mint)) targetLane.end(trade.mint, observedAt, 'TRACKED_WALLET_SOLD_AND_DETAIL_CLOSED');
+            void page.close(); break;
+          }
         }
       }
     });
@@ -168,11 +173,13 @@ while (!controller.isClosed() && !stopping) {
       });
       if (sell) {
         write('watch-events.jsonl', { type: 'TRACKED_WALLET_SOLD', observedAt: Date.now(), trackedWallet: wallet, transfer: tracked.watch.transfer, sell });
-        details.delete(wallet);
-        if (![...details.values()].some(d => d.watch.transfer.mint === tracked.watch.transfer.mint)) targetLane.end(tracked.watch.transfer.mint, Date.now(), 'TRACKED_WALLET_SOLD_AND_DETAIL_CLOSED');
-        await tracked.page.close();
-        await wait(pollMilliseconds);
-        continue;
+        if (values.paperLane !== 'bounce') {
+          details.delete(wallet);
+          if (![...details.values()].some(d => d.watch.transfer.mint === tracked.watch.transfer.mint)) targetLane.end(tracked.watch.transfer.mint, Date.now(), 'TRACKED_WALLET_SOLD_AND_DETAIL_CLOSED');
+          await tracked.page.close();
+          await wait(pollMilliseconds);
+          continue;
+        }
       }
     }
     const candidate = latestUnsold(result.body, wallet); if (candidate) await openOrReplaceDetail(candidate);
