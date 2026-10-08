@@ -103,8 +103,9 @@ export function createProfit4Dashboard({ root = defaultRoot } = {}) {
   }
   return createServer(async (req, res) => {
     try {
-      const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
-      if (req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Origin tidak diizinkan.' });
+      const rawPath = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+      const path = rawPath.startsWith('/profit4') ? (rawPath.slice('/profit4'.length) || '/') : rawPath;
+      if (req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) return json(res, 403, { error: 'Origin tidak diizinkan.' });
       if (req.method === 'GET' && path === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
       if (req.method === 'GET' && path === '/api/state') {
         const current = read(controlFile), worker = current ? { ...current, active: alive(current.pid) } : { active: false, status: 'stopped' };
@@ -133,9 +134,10 @@ export function createProfit4Dashboard({ root = defaultRoot } = {}) {
   });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const port = Number(process.env.PROFIT4_DASHBOARD_PORT ?? 4176);
+  const port = Number(process.env.PROFIT4_DASHBOARD_PORT ?? 4178);
+  const host = process.env.PROFIT4_DASHBOARD_HOST ?? '0.0.0.0';
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port tidak valid.');
   const server = createProfit4Dashboard();
   server.on('error', e => { console.error(e.message); process.exitCode = 1; });
-  server.listen(port, '127.0.0.1', () => console.log(`Profit4 paper dashboard: http://127.0.0.1:${port}`));
+  server.listen(port, host, () => console.log(`Profit4 paper dashboard: http://${host}:${port}`));
 }

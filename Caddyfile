@@ -2,6 +2,9 @@ cr.bbliong.io {
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }
+    handle /profit4* {
+        reverse_proxy 127.0.0.1:4178
+    }
     handle {
         reverse_proxy 127.0.0.1:4180
     }
