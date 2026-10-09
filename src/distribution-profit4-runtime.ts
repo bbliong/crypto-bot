@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DistributionProfit4Lane, PROFIT4_LANE, PROFIT4_RULES, PROFIT4_TARGET_PERCENT } from './distribution-profit4-lane.js';
-import { DistributionBounceLane, DistributionBounceLaneV2, BOUNCE_DUMP_LANE, BOUNCE_DUMP_LANE_V2, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_TARGET_PERCENT } from './distribution-bounce-lane.js';
+import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, BOUNCE_DUMP_LANE, BOUNCE_DUMP_LANE_V2, BOUNCE_DUMP_LANE_V3, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_TARGET_PERCENT, BOUNCE_TARGET_PERCENT_V3 } from './distribution-bounce-lane.js';
 import { TargetObservation, type TargetEvent, type TargetFacts, type TargetTrade } from './distribution-target-lane.js';
 import type { SwapRouteResult, DualSellSwapResult } from './browser-swap-route.js';
 
@@ -20,10 +20,10 @@ type RuntimeState = {
   key: string;
   transfer: Transfer;
   observation: TargetObservation;
-  lane: DistributionProfit4Lane | DistributionBounceLane | DistributionBounceLaneV2;
+  lane: DistributionProfit4Lane | DistributionBounceLane | DistributionBounceLaneV2 | DistributionBounceLaneV3;
   facts: TargetFacts | null;
   active: boolean;
-  laneLabel: 'V1' | 'V2' | 'P4';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'P4';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -138,7 +138,7 @@ export class DistributionProfit4Runtime {
     const observation = new TargetObservation((transfer.timestamp ?? now / 1000) * 1000);
     this.observations.set(transfer.mint, observation);
 
-    const makeOnEvent = (laneKey: string, laneLabel: 'V1' | 'V2' | 'P4') => (event: TargetEvent) => {
+    const makeOnEvent = (laneKey: string, laneLabel: 'V1' | 'V2' | 'V3' | 'P4') => (event: TargetEvent) => {
       const state = this.states.get(laneKey);
       if (state) {
         state.lastEvent = event;
@@ -170,11 +170,14 @@ export class DistributionProfit4Runtime {
     if (this.laneType === 'bounce') {
       const keyV1 = `${transfer.mint}:v1`;
       const keyV2 = `${transfer.mint}:v2`;
+      const keyV3 = `${transfer.mint}:v3`;
       const laneV1 = new DistributionBounceLane(transfer.mint, makeOnEvent(keyV1, 'V1'));
       const laneV2 = new DistributionBounceLaneV2(transfer.mint, makeOnEvent(keyV2, 'V2'));
+      const laneV3 = new DistributionBounceLaneV3(transfer.mint, makeOnEvent(keyV3, 'V3'));
 
       this.states.set(keyV1, { key: keyV1, transfer, observation, lane: laneV1, facts: null, active: true, laneLabel: 'V1', version: BOUNCE_RULES.version, lastDecision: null, lastEvent: null });
       this.states.set(keyV2, { key: keyV2, transfer, observation, lane: laneV2, facts: null, active: true, laneLabel: 'V2', version: BOUNCE_RULES_V2.version, lastDecision: null, lastEvent: null });
+      this.states.set(keyV3, { key: keyV3, transfer, observation, lane: laneV3, facts: null, active: true, laneLabel: 'V3', version: BOUNCE_RULES_V3.version, lastDecision: null, lastEvent: null });
 
       const invalidTime = !Number.isFinite(transfer.timestamp) || !transfer.timestamp || transfer.timestamp * 1000 > now + 2000;
       if (this.bought.has(`${transfer.mint}:v1`)) laneV1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
@@ -182,6 +185,9 @@ export class DistributionProfit4Runtime {
 
       if (this.bought.has(`${transfer.mint}:v2`)) laneV2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
       else if (invalidTime) laneV2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+      if (this.bought.has(`${transfer.mint}:v3`)) laneV3.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+      else if (invalidTime) laneV3.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
     } else {
       const key = transfer.mint;
       const lane = new DistributionProfit4Lane(transfer.mint, makeOnEvent(key, 'P4'));

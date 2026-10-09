@@ -239,3 +239,147 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
     super.step(f);
   }
 }
+
+export const BOUNCE_DUMP_LANE_V3 = 'distribution-bounce-dump-v3';
+export const BOUNCE_TARGET_PERCENT_V3 = 20; // Target keuntungan +18% s/d +20% net
+
+export const BOUNCE_RULES_V3: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-bounce-dump-v3',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: BOUNCE_TARGET_PERCENT_V3,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 600,
+  confirmSeconds: 1,
+  minBuySharePercent: 50,
+  minMeaningfulBuyUsd: 3,
+  minMeaningfulBuyers: 8, // Broad demand: minimal 8 buyers riil
+  maxBuyerSharePercent: 100,
+  minMomentumPercent: 0,
+  maxMomentumPercent: 50,
+  maxEntryReturnPercent: 100,
+  maxDrawdownPercent: 99,
+  stopLossPercent: 10, // Stop loss terukur -10%
+  trailingStartPercent: 14,
+  trailingDrawdownPercent: 4,
+  maxHoldSeconds: 240, // 4 menit batas hold
+  executionDelayMs: 1000,
+  maxFillWaitMs: 5000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
+export class DistributionBounceLaneV3 extends DistributionTargetLane {
+  private dumpObserved = false;
+  private maxDrawdownSeen = 0;
+  private entryTime: number | null = null;
+  private entryBuyPrice: number | null = null;
+  private peakNetSeen = -Infinity;
+  private lastPriceMoveTime: number | null = null;
+  private lastPriceMove: number | null = null;
+
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, { ...BOUNCE_RULES_V3 }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT_V3, version: 'distribution-bounce-dump-v3' }), {
+      name: 'dump-bounce-v3',
+      paperLane: BOUNCE_DUMP_LANE_V3,
+      trailingEnabled: false,
+      flowExitEnabled: false,
+      overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
+        const reasons: string[] = [];
+        if (!r.enabled) reasons.push('LANE_DISABLED');
+        if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
+        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+
+        // V3 Guard 1: Token harus pernah mengalami DUMP PARAH (>= 60%)
+        const dd = f.drawdownPercent ?? 0;
+        if (dd >= 60) this.dumpObserved = true;
+        if (dd > this.maxDrawdownSeen) this.maxDrawdownSeen = dd;
+        if (!this.dumpObserved && this.maxDrawdownSeen < 60) {
+          reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // V3 Guard 2: EARLY REVERSAL ZONE ONLY (4% <= bounce <= 15%)
+        // Menolak jika belum memantul (<4%) ATAU sudah memantul terlalu tinggi (>15%) agar tidak beli di pucuk
+        const bounce = f.bounceFromTroughPercent ?? 0;
+        if (bounce < 4.0) {
+          reasons.push('BOUNCE_FROM_TROUGH_TOO_SMALL');
+        } else if (bounce > 15.0) {
+          reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+        }
+
+        // V3 Guard 3: GENUINE BROAD BUYERS (minimal 8 pembeli riil)
+        // Menolak token manipulasi wash trading 1-3 wallet (seperti LEGO & Muse AI)
+        if ((f.meaningfulBuyers ?? 0) < 8) {
+          reasons.push('INSUFFICIENT_BUYERS');
+        }
+
+        // V3 Guard 4: RECOVERY FLOW & SELL PRESSURE
+        if ((f.buyShareUsdPercent ?? 0) < 50 || (f.meaningfulBuyUsd ?? 0) < 3) {
+          reasons.push('BUY_FLOW_NOT_RECOVERED');
+        }
+        if (f.sellUsd > (f.meaningfulBuyUsd ?? 1) * 3 && f.sellUsd > 100) {
+          reasons.push('SELL_PRESSURE_OVERWHELMING');
+        }
+
+        // V3 Guard 5: HOLDER HEALTH
+        if (f.holderGrowth15s !== null && f.holderGrowth15s < 0) {
+          reasons.push('HOLDERS_DECLINING');
+        }
+
+        return reasons;
+      },
+      exitReason: (f: TargetFacts, net: number) => {
+        // V3 Target Take Profit: +18% s/d +20% (eksekusi cepat sebelum tersenggol dump)
+        if (net >= 18) {
+          return 'TARGET_BOUNCE_20';
+        }
+
+        // V3 Early Profit Lock: Kunci keuntungan jika floating sudah >= +14%
+        if (net > this.peakNetSeen) this.peakNetSeen = net;
+        if (this.peakNetSeen >= 14 && (this.peakNetSeen - net >= 3.5 || net <= 8)) {
+          return 'PROFIT_LOCK_14_EXIT';
+        }
+
+        // V3 Emergency Exit: Order sell tunggal besar >= $200 saat posisi terbuka
+        if (f.largestSellUsd >= 200 && net > -8) {
+          return 'EMERGENCY_WHALE_SELL_EXIT';
+        }
+
+        // V3 Stagnation Cut: Jika sudah hold >= 60s dan tidak bergerak dalam 45s terakhir
+        if (this.entryTime !== null && f.price !== null) {
+          const holdSeconds = (f.now - this.entryTime) / 1000;
+          if (this.lastPriceMove === null || Math.abs(f.price - this.lastPriceMove) / (this.lastPriceMove || 1) >= 0.01) {
+            this.lastPriceMove = f.price;
+            this.lastPriceMoveTime = f.now;
+          }
+          const stagnationTimeMs = this.lastPriceMoveTime ? f.now - this.lastPriceMoveTime : 0;
+          if (holdSeconds >= 60 && stagnationTimeMs >= 45_000 && net < 5) {
+            return 'STAGNANT_NO_MOVEMENT_AFTER_DUMP';
+          }
+        }
+
+        return null;
+      },
+    });
+  }
+
+  override step(f: TargetFacts) {
+    if (this.entryAt !== null && this.entryTime === null) {
+      this.entryTime = this.entryAt;
+      this.entryBuyPrice = this.entryPrice;
+      this.lastPriceMoveTime = this.entryAt;
+      this.lastPriceMove = this.entryPrice;
+    }
+    if (f.priceAt !== null && f.priceAt > f.now) {
+      f = { ...f, price: null, priceAt: null };
+    }
+    super.step(f);
+  }
+}
+

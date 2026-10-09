@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DistributionBounceLane, DistributionBounceLaneV2, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
+import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
 import type { TargetEvent, TargetFacts } from '../src/distribution-target-lane.js';
 
 const mockFacts = (now = 100000, price = 1, extra: Partial<TargetFacts> = {}): TargetFacts => ({
@@ -149,4 +149,60 @@ test('DistributionBounceLaneV2 triggers profit lock 20 exit when peak >= 20% rev
   lane.step(mockFacts(104000, 0.46, { largestSellUsd: 10 }));
   assert.equal(lane.phase, 'CLOSED');
   assert.equal(events.at(-1)?.reason, 'PROFIT_LOCK_20_EXIT');
+});
+
+test('DistributionBounceLaneV3 rejects overextended bounce > 15% and insufficient buyers < 8', () => {
+  const events: TargetEvent[] = [];
+  const laneOverextended = new DistributionBounceLaneV3('mint-v3-over', e => events.push(e));
+
+  // Overextended bounce: 20% from trough
+  laneOverextended.step(mockFacts(100000, 0.48, {
+    drawdownPercent: 60,
+    bounceFromTroughPercent: 20.0,
+    meaningfulBuyers: 10,
+    buyShareUsdPercent: 70,
+  }));
+  assert.equal(laneOverextended.phase, 'WATCHING');
+  assert.equal(events.some(e => e.type === 'PAPER_BUY'), false);
+
+  // Insufficient buyers: only 3 buyers (wash trade)
+  const laneFewBuyers = new DistributionBounceLaneV3('mint-v3-few', e => events.push(e));
+  laneFewBuyers.step(mockFacts(100000, 0.42, {
+    drawdownPercent: 60,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 70,
+  }));
+  assert.equal(laneFewBuyers.phase, 'WATCHING');
+  assert.equal(events.some(e => e.type === 'PAPER_BUY'), false);
+});
+
+test('DistributionBounceLaneV3 takes quick profit at 18-20% gain', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV3('mint-v3-win', e => events.push(e));
+
+  // Entry in early bounce zone (6% from trough) with 12 buyers
+  lane.step(mockFacts(100000, 0.40, {
+    drawdownPercent: 60,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 12,
+    buyShareUsdPercent: 70,
+    meaningfulBuyUsd: 15,
+  }));
+  lane.step(mockFacts(101000, 0.40, {
+    drawdownPercent: 60,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 12,
+    buyShareUsdPercent: 70,
+    meaningfulBuyUsd: 15,
+  }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Price surges to 0.49 (+22.5% net) -> Take Profit 20 triggers
+  lane.step(mockFacts(102000, 0.49));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(103000, 0.49));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_20');
 });
