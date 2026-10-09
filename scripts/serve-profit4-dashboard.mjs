@@ -34,16 +34,25 @@ export function profit4Snapshot(root, worker) {
     }
     for (const e of state.recentEvents ?? []) recentEvents.push({ ...e, run: dir.name });
   }
-  const entries = positions.filter(p => p.entryAt !== null), closed = entries.filter(p => p.netReturnPercent !== null);
-  return { positions, runs, recentEvents: recentEvents.sort((a, b) => b.observedAt - a.observedAt).slice(0, 50), summary: {
-    tokensObserved: new Set(positions.map(p => p.mint)).size, entries: entries.length, closed: closed.length,
-    profit: closed.filter(p => p.netReturnPercent > 0).length, loss: closed.filter(p => p.netReturnPercent < 0).length,
-    open: entries.filter(p => ['OPEN', 'EXIT_PENDING'].includes(p.phase)).length,
-    missing: entries.filter(p => p.phase === 'CENSORED').length,
-    realizedPnlUsd: closed.reduce((n, p) => n + p.pnlUsd, 0),
-    meanNetPercent: closed.length ? closed.reduce((n, p) => n + p.netReturnPercent, 0) / closed.length : null,
-    winRatePercent: closed.length ? closed.filter(p => p.netReturnPercent > 0).length / closed.length * 100 : null,
-  } };
+  function summarize(items) {
+    const ent = items.filter(p => p.entryAt !== null), cls = ent.filter(p => p.netReturnPercent !== null);
+    return {
+      tokensObserved: new Set(items.map(p => p.mint)).size, entries: ent.length, closed: cls.length,
+      profit: cls.filter(p => p.netReturnPercent > 0).length, loss: cls.filter(p => p.netReturnPercent < 0).length,
+      open: ent.filter(p => ['OPEN', 'EXIT_PENDING'].includes(p.phase)).length,
+      missing: ent.filter(p => p.phase === 'CENSORED').length,
+      realizedPnlUsd: cls.reduce((n, p) => n + (p.pnlUsd || 0), 0),
+      meanNetPercent: cls.length ? cls.reduce((n, p) => n + (p.netReturnPercent || 0), 0) / cls.length : null,
+      winRatePercent: cls.length ? cls.filter(p => p.netReturnPercent > 0).length / cls.length * 100 : null,
+    };
+  }
+  const v1Positions = positions.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2')));
+  const v2Positions = positions.filter(p => (p.version || '').includes('v2') || p.laneLabel === 'V2');
+  return { positions, runs, recentEvents: recentEvents.sort((a, b) => b.observedAt - a.observedAt).slice(0, 60),
+    summary: summarize(positions),
+    summaryV1: summarize(v1Positions),
+    summaryV2: summarize(v2Positions),
+  };
 }
 export function createProfit4Dashboard({ root = defaultRoot } = {}) {
   const data = join(root, 'data', 'profit4-watch'), configFile = join(data, 'dashboard-config.json'), controlFile = join(data, 'worker-control.json');

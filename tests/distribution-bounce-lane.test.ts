@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DistributionBounceLane, BOUNCE_RULES, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
+import { DistributionBounceLane, DistributionBounceLaneV2, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
 import type { TargetEvent, TargetFacts } from '../src/distribution-target-lane.js';
 
 const mockFacts = (now = 100000, price = 1, extra: Partial<TargetFacts> = {}): TargetFacts => ({
@@ -85,4 +85,68 @@ test('DistributionBounceLane exits when stagnant without movement after dump', (
   lane.step(mockFacts(201000, 0.401));
   assert.equal(lane.phase, 'CLOSED');
   assert.equal(events.at(-1)?.reason, 'STAGNANT_NO_MOVEMENT_AFTER_DUMP');
+});
+
+test('DistributionBounceLaneV2 blocks entry if whale sell >= 300 USD is present', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV2('mint-v2-whale', e => events.push(e));
+
+  // Bounce conditions met, but whale sell is $350
+  lane.step(mockFacts(100000, 0.42, {
+    drawdownPercent: 60,
+    bounceFromTroughPercent: 5.0,
+    buyShareUsdPercent: 70,
+    meaningfulBuyUsd: 15,
+    largestSellUsd: 350,
+  }));
+  lane.step(mockFacts(101000, 0.42, {
+    drawdownPercent: 60,
+    bounceFromTroughPercent: 5.0,
+    buyShareUsdPercent: 70,
+    meaningfulBuyUsd: 15,
+    largestSellUsd: 350,
+  }));
+
+  assert.equal(lane.phase, 'WATCHING');
+  assert.equal(events.some(e => e.type === 'PAPER_BUY'), false);
+});
+
+test('DistributionBounceLaneV2 triggers emergency exit on large whale sell >= 250 USD during hold', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV2('mint-v2-dump', e => events.push(e));
+
+  // Valid entry (clean sell flow)
+  lane.step(mockFacts(100000, 0.4, { drawdownPercent: 60, bounceFromTroughPercent: 5, largestSellUsd: 20 }));
+  lane.step(mockFacts(101000, 0.4, { drawdownPercent: 60, bounceFromTroughPercent: 5, largestSellUsd: 20 }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Whale sells $300 while holding
+  lane.step(mockFacts(102000, 0.41, { largestSellUsd: 300 }));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(103000, 0.41));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'LARGE_SELL_WHALE_DUMP_EXIT');
+});
+
+test('DistributionBounceLaneV2 triggers profit lock 20 exit when peak >= 20% reverses', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV2('mint-v2-lock', e => events.push(e));
+
+  // Entry at 0.40
+  lane.step(mockFacts(100000, 0.40, { drawdownPercent: 60, bounceFromTroughPercent: 5, largestSellUsd: 10 }));
+  lane.step(mockFacts(101000, 0.40, { drawdownPercent: 60, bounceFromTroughPercent: 5, largestSellUsd: 10 }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Price surges to 0.50 (+25% gain) -> peak records +25%
+  lane.step(mockFacts(102000, 0.50, { largestSellUsd: 10 }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Price pulls back to 0.47 (+17.5% gain, pulled back 7.5% from peak >= 20%)
+  lane.step(mockFacts(103000, 0.47, { largestSellUsd: 10 }));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(104000, 0.46, { largestSellUsd: 10 }));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'PROFIT_LOCK_20_EXIT');
 });

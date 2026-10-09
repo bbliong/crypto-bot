@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DistributionProfit4Lane, PROFIT4_LANE, PROFIT4_RULES, PROFIT4_TARGET_PERCENT } from './distribution-profit4-lane.js';
-import { DistributionBounceLane, BOUNCE_DUMP_LANE, BOUNCE_RULES, BOUNCE_TARGET_PERCENT } from './distribution-bounce-lane.js';
+import { DistributionBounceLane, DistributionBounceLaneV2, BOUNCE_DUMP_LANE, BOUNCE_DUMP_LANE_V2, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_TARGET_PERCENT } from './distribution-bounce-lane.js';
 import { TargetObservation, type TargetEvent, type TargetFacts, type TargetTrade } from './distribution-target-lane.js';
 import type { SwapRouteResult, DualSellSwapResult } from './browser-swap-route.js';
 
@@ -17,11 +17,14 @@ export function atomicProfit4Json(path: string, value: unknown) {
 }
 
 type RuntimeState = {
+  key: string;
   transfer: Transfer;
   observation: TargetObservation;
-  lane: DistributionProfit4Lane | DistributionBounceLane;
+  lane: DistributionProfit4Lane | DistributionBounceLane | DistributionBounceLaneV2;
   facts: TargetFacts | null;
   active: boolean;
+  laneLabel: 'V1' | 'V2' | 'P4';
+  version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
   swapBuy?: SwapRouteResult | null;
@@ -34,6 +37,7 @@ type RuntimeState = {
 
 export class DistributionProfit4Runtime {
   private states = new Map<string, RuntimeState>();
+  private observations = new Map<string, TargetObservation>();
   private lastEvaluationAt = -Infinity;
   private bought: Set<string>;
   private recentEvents: TargetEvent[] = [];
@@ -55,7 +59,7 @@ export class DistributionProfit4Runtime {
     if (!Array.isArray(saved.mints) || saved.mints.some((s: unknown) => typeof s !== 'string')) throw new Error('Ledger bought-mints tidak valid.');
     this.bought = new Set(saved.mints);
     this.write('profit4-events.jsonl', { type: 'PAPER_LANE_READY', observedAt: Date.now(), paperLane: this.laneName,
-      rules: this.laneRules, targetPercent: this.targetPercent, execution: 'PAPER_QUOTE', rounds: 1 });
+      rules: this.laneRules, targetPercent: this.targetPercent, execution: 'PAPER_QUOTE', rounds: 1, dualLanes: laneType === 'bounce' ? ['V1', 'V2'] : ['P4'] });
     this.persist(Date.now());
   }
 
@@ -64,18 +68,20 @@ export class DistributionProfit4Runtime {
   }
 
   private triggerSwapBuy(mint: string) {
-    const state = this.states.get(mint);
-    if (!state || state.swapBuyPending || state.swapBuy || !this.swapHandlers?.getBuyQuote) return;
-    state.swapBuyPending = true;
+    const statesForMint = [...this.states.values()].filter(s => s.transfer.mint === mint);
+    if (!statesForMint.length || statesForMint.some(s => s.swapBuyPending) || statesForMint.some(s => s.swapBuy) || !this.swapHandlers?.getBuyQuote) return;
+    statesForMint.forEach(s => { s.swapBuyPending = true; });
     this.swapHandlers.getBuyQuote(mint).then(quote => {
-      state.swapBuyPending = false;
+      statesForMint.forEach(s => {
+        s.swapBuyPending = false;
+        if (quote) s.swapBuy = quote;
+      });
       if (quote) {
-        state.swapBuy = quote;
         this.write('profit4-events.jsonl', {
           type: 'SWAP_BUY_QUOTE',
           mint,
           observedAt: Date.now(),
-          transfer: state.transfer,
+          transfer: statesForMint[0].transfer,
           quote: quote.quote,
           impliedPriceUsd: quote.impliedPriceUsd,
           latencyMs: quote.latencyMs,
@@ -85,11 +91,11 @@ export class DistributionProfit4Runtime {
         });
         this.persist(Date.now());
       }
-    }).catch(() => { state.swapBuyPending = false; });
+    }).catch(() => { statesForMint.forEach(s => { s.swapBuyPending = false; }); });
   }
 
-  private triggerSwapSell(mint: string) {
-    const state = this.states.get(mint);
+  private triggerSwapSell(key: string) {
+    const state = this.states.get(key);
     if (!state || state.swapSellPending || state.swapSell1 || !this.swapHandlers?.getSellQuotes) return;
     state.swapSellPending = true;
     const outAmount = state.swapBuy?.quote?.outAmount;
@@ -102,7 +108,7 @@ export class DistributionProfit4Runtime {
     tokenUnits = tokenUnits || '1000000000';
     const decimals = state.swapBuy?.quote?.outDecimals ?? 6;
 
-    this.swapHandlers.getSellQuotes(mint, tokenUnits, decimals).then(dual => {
+    this.swapHandlers.getSellQuotes(state.transfer.mint, tokenUnits, decimals).then(dual => {
       state.swapSellPending = false;
       if (dual) {
         state.swapSell1 = dual.quote1;
@@ -110,7 +116,8 @@ export class DistributionProfit4Runtime {
         state.swapSellDeltaPct = dual.priceDeltaPct;
         this.write('profit4-events.jsonl', {
           type: 'SWAP_SELL_QUOTES',
-          mint,
+          mint: state.transfer.mint,
+          laneLabel: state.laneLabel,
           observedAt: Date.now(),
           transfer: state.transfer,
           quote1: dual.quote1.quote,
@@ -127,10 +134,12 @@ export class DistributionProfit4Runtime {
   }
 
   register(transfer: Transfer, now: number) {
-    if (this.states.has(transfer.mint)) return;
+    if (this.observations.has(transfer.mint)) return;
     const observation = new TargetObservation((transfer.timestamp ?? now / 1000) * 1000);
-    const onEvent = (event: TargetEvent) => {
-      const state = this.states.get(transfer.mint);
+    this.observations.set(transfer.mint, observation);
+
+    const makeOnEvent = (laneKey: string, laneLabel: 'V1' | 'V2' | 'P4') => (event: TargetEvent) => {
+      const state = this.states.get(laneKey);
       if (state) {
         state.lastEvent = event;
         if (event.type === 'PAPER_ENTRY_DECISION') state.lastDecision = { allowed: event.allowed, reasons: event.reasons, observedAt: event.observedAt };
@@ -139,18 +148,18 @@ export class DistributionProfit4Runtime {
         this.triggerSwapBuy(transfer.mint);
       }
       if (event.type === 'PAPER_BUY') {
-        this.bought.add(transfer.mint);
-        // A restart cannot create another round on a mint already entered.
+        this.bought.add(this.laneType === 'bounce' ? `${transfer.mint}:${laneLabel.toLowerCase()}` : transfer.mint);
         atomicProfit4Json(this.boughtFile, { updatedAt: event.observedAt, mints: [...this.bought] });
         this.triggerSwapBuy(transfer.mint);
       }
       if (event.type === 'PAPER_EXIT_SIGNAL' || event.type === 'PAPER_SELL') {
-        this.triggerSwapSell(transfer.mint);
+        this.triggerSwapSell(laneKey);
       }
       const { facts: _facts, ...small } = event;
       const record = {
         ...small,
         transfer,
+        laneLabel,
         ...(state?.swapBuy?.impliedPriceUsd ? { swapBuyPrice: state.swapBuy.impliedPriceUsd } : {}),
         ...(state?.swapSell2?.impliedPriceUsd ? { swapSellPrice2: state.swapSell2.impliedPriceUsd } : {}),
       };
@@ -158,63 +167,95 @@ export class DistributionProfit4Runtime {
       this.write('profit4-events.jsonl', record);
     };
 
-    const lane = this.laneType === 'bounce'
-      ? new DistributionBounceLane(transfer.mint, onEvent)
-      : new DistributionProfit4Lane(transfer.mint, onEvent);
+    if (this.laneType === 'bounce') {
+      const keyV1 = `${transfer.mint}:v1`;
+      const keyV2 = `${transfer.mint}:v2`;
+      const laneV1 = new DistributionBounceLane(transfer.mint, makeOnEvent(keyV1, 'V1'));
+      const laneV2 = new DistributionBounceLaneV2(transfer.mint, makeOnEvent(keyV2, 'V2'));
 
-    this.states.set(transfer.mint, { transfer, observation, lane, facts: null, active: true, lastDecision: null, lastEvent: null });
-    if (this.bought.has(transfer.mint)) lane.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-    else if (!Number.isFinite(transfer.timestamp) || !transfer.timestamp || transfer.timestamp * 1000 > now + 2000) lane.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+      this.states.set(keyV1, { key: keyV1, transfer, observation, lane: laneV1, facts: null, active: true, laneLabel: 'V1', version: BOUNCE_RULES.version, lastDecision: null, lastEvent: null });
+      this.states.set(keyV2, { key: keyV2, transfer, observation, lane: laneV2, facts: null, active: true, laneLabel: 'V2', version: BOUNCE_RULES_V2.version, lastDecision: null, lastEvent: null });
+
+      const invalidTime = !Number.isFinite(transfer.timestamp) || !transfer.timestamp || transfer.timestamp * 1000 > now + 2000;
+      if (this.bought.has(`${transfer.mint}:v1`)) laneV1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+      else if (invalidTime) laneV1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+      if (this.bought.has(`${transfer.mint}:v2`)) laneV2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+      else if (invalidTime) laneV2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+    } else {
+      const key = transfer.mint;
+      const lane = new DistributionProfit4Lane(transfer.mint, makeOnEvent(key, 'P4'));
+      this.states.set(key, { key, transfer, observation, lane, facts: null, active: true, laneLabel: 'P4', version: PROFIT4_RULES.version, lastDecision: null, lastEvent: null });
+      if (this.bought.has(transfer.mint)) lane.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+      else if (!Number.isFinite(transfer.timestamp) || !transfer.timestamp || transfer.timestamp * 1000 > now + 2000) lane.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+    }
     this.persist(now);
   }
-  trade(mint: string, trade: TargetTrade) { this.states.get(mint)?.observation.trade(trade); }
+
+  trade(mint: string, trade: TargetTrade) { this.observations.get(mint)?.trade(trade); }
   holderFrame(mint: string, body: unknown, at: number) {
-    const state = this.states.get(mint), frame = body as { channel?: string; data?: any[] } | null;
-    if (!state || !Array.isArray(frame?.data)) return;
+    const obs = this.observations.get(mint), frame = body as { channel?: string; data?: any[] } | null;
+    if (!obs || !Array.isArray(frame?.data)) return;
     for (const row of frame.data) {
       if ((row.ta ?? row.token_address ?? row.a ?? mint) !== mint) continue;
       if (frame.channel === 'token_general_stat_num' && row.t === 'holder_count' && Number.isFinite(Number(row.v))) {
-        state.observation.count({ at, count: Number(row.v) });
+        obs.count({ at, count: Number(row.v) });
       } else if (frame.channel === 'token_holding' || frame.channel === 'token_tag_holding') {
         for (const holder of row.h ?? []) if (holder.wa && Number.isFinite(Number(holder.b))) {
-          state.observation.holding(holder.wa, { at, amount: Number(holder.b), sells: Number.isFinite(holder.ts) ? holder.ts : null });
+          obs.holding(holder.wa, { at, amount: Number(holder.b), sells: Number.isFinite(holder.ts) ? holder.ts : null });
         }
       }
     }
   }
+
   evaluate(now: number) {
     if (now - this.lastEvaluationAt < 1000) return;
     this.lastEvaluationAt = now;
     for (const state of this.states.values()) {
       if (!state.active) continue;
       const facts = state.observation.facts(now, []); state.facts = facts;
-      if (state.lane.entryAt === null && facts.firstAt !== null && now - facts.firstAt > this.laneRules.maxEntryWaitSeconds * 1000)
+      if (state.lane.entryAt === null && facts.firstAt !== null && now - facts.firstAt > state.lane.rules.maxEntryWaitSeconds * 1000)
         state.lane.end(now, 'ENTRY_WINDOW_EXPIRED');
       else {
         state.lane.step(facts);
         if (state.lane.phase === 'ENTRY_PENDING') {
           this.triggerSwapBuy(state.transfer.mint);
         } else if (state.lane.phase === 'EXIT_PENDING') {
-          this.triggerSwapSell(state.transfer.mint);
+          this.triggerSwapSell(state.key);
         }
       }
     }
     this.persist(now);
   }
+
   end(mint: string, now: number, reason: string) {
-    const state = this.states.get(mint);
-    if (state) { state.lane.end(now, reason); state.active = false; }
+    for (const state of this.states.values()) {
+      if (state.transfer.mint === mint && state.active) {
+        state.lane.end(now, reason);
+        state.active = false;
+      }
+    }
     this.persist(now);
   }
-  shutdown(now: number) { for (const mint of this.states.keys()) this.end(mint, now, 'WORKER_STOPPED'); }
+
+  shutdown(now: number) {
+    for (const state of this.states.values()) {
+      if (state.active) {
+        state.lane.end(now, 'WORKER_STOPPED');
+        state.active = false;
+      }
+    }
+    this.persist(now);
+  }
+
   private persist(now: number) {
     atomicProfit4Json(join(this.run, 'profit4-state.json'), { observedAt: now, paperLane: this.laneName, rounds: 1,
       execution: 'PAPER_QUOTE', status: 'EXPERIMENTAL', targetPercent: this.targetPercent, rules: this.laneRules,
       recentEvents: this.recentEvents,
       positions: [...this.states.values()].map(s => ({ ...s.transfer, captureActive: s.active,
-        phase: s.lane.phase, version: s.lane.rules.version, targetPercent: this.targetPercent,
+        laneLabel: s.laneLabel, phase: s.lane.phase, version: s.lane.rules.version, targetPercent: this.targetPercent,
         entryAt: s.lane.entryAt, entryPrice: s.lane.entryPrice, exitAt: s.lane.exitAt, exitPrice: s.lane.exitPrice,
-        netReturnPercent: s.lane.netReturnPercent, pnlUsd: s.lane.netReturnPercent === null ? null : s.lane.netReturnPercent / 100 * this.laneRules.stakeUsd,
+        netReturnPercent: s.lane.netReturnPercent, pnlUsd: s.lane.netReturnPercent === null ? null : s.lane.netReturnPercent / 100 * s.lane.rules.stakeUsd,
         estimatedOpenNetPercent: s.lane.entryAt !== null && s.lane.exitAt === null && s.active && s.facts?.price !== null && s.facts?.price !== undefined
           ? s.lane.net(s.facts.price) : null, lastDecision: s.lastDecision,
         lastEvent: s.lastEvent ? { type: s.lastEvent.type, observedAt: s.lastEvent.observedAt, reason: s.lastEvent.reason, reasons: s.lastEvent.reasons } : null,
