@@ -48,10 +48,36 @@ export function profit4Snapshot(root, worker) {
   }
   const v1Positions = positions.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2')));
   const v2Positions = positions.filter(p => (p.version || '').includes('v2') || p.laneLabel === 'V2');
+  const hourMap = new Map();
+  for (const p of positions) {
+    const time = p.entryAt ?? p.lastEvent?.observedAt ?? (p.timestamp ? p.timestamp * 1000 : null);
+    if (!time) continue;
+    const hour = Math.floor(time / 3600000) * 3600000;
+    if (!hourMap.has(hour)) hourMap.set(hour, []);
+    hourMap.get(hour).push(p);
+  }
+  const hourlyComparison = Array.from(hourMap.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([hour, items]) => {
+      const v1 = items.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2')));
+      const v2 = items.filter(p => (p.version || '').includes('v2') || p.laneLabel === 'V2');
+      const d = new Date(hour), endD = new Date(hour + 3600000);
+      const dayStr = d.toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit' });
+      const startH = d.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false });
+      const endH = endD.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false });
+      return {
+        hourTimestamp: hour,
+        label: `${dayStr} ${startH} - ${endH} WIB`,
+        v1: summarize(v1),
+        v2: summarize(v2),
+        total: summarize(items),
+      };
+    });
   return { positions, runs, recentEvents: recentEvents.sort((a, b) => b.observedAt - a.observedAt).slice(0, 60),
     summary: summarize(positions),
     summaryV1: summarize(v1Positions),
     summaryV2: summarize(v2Positions),
+    hourlyComparison,
   };
 }
 export function createProfit4Dashboard({ root = defaultRoot } = {}) {
