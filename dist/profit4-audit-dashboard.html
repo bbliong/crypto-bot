@@ -1,0 +1,3098 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Audit Keamanan Bot & Token · Profit4</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0c121a;
+      --panel: #141d29;
+      --panel-alt: #101824;
+      --edge: #273447;
+      --muted: #94a4ba;
+      --text: #e9eff8;
+      --green: #5bdeb1;
+      --red: #ff8090;
+      --blue: #8fb8ff;
+      --yellow: #f5c862;
+      --purple: #c084fc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    main {
+      max-width: 1680px;
+      margin: auto;
+      padding: 24px;
+    }
+    h1 { font-size: 28px; letter-spacing: -0.5px; margin: 4px 0; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    p { color: var(--muted); line-height: 1.6; margin: 4px 0; }
+    header, .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .eyebrow {
+      color: var(--yellow);
+      font-size: 11px;
+      letter-spacing: 2px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button, input, select {
+      font: inherit;
+      border: 1px solid var(--edge);
+      background: #1a2738;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+    button { cursor: pointer; transition: all 0.15s ease; }
+    button:hover { border-color: var(--blue); }
+    button.primary { background: var(--green); color: #092219; font-weight: 700; }
+    button.active { background: var(--blue); color: #09172e; font-weight: 700; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 99px;
+      background: #203047;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge.win { background: #133a2e; color: var(--green); border: 1px solid #1f644e; }
+    .badge.loss { background: #3b1d26; color: var(--red); border: 1px solid #6b2839; }
+    .badge.warn { background: #3a2c13; color: var(--yellow); border: 1px solid #634b1c; }
+    .badge.purple { background: #2f1d44; color: var(--purple); border: 1px solid #582e85; }
+    .good { color: var(--green); }
+    .bad { color: var(--red); }
+    .warn { color: var(--yellow); }
+    .muted { color: var(--muted); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .card .value { font-size: 24px; font-weight: 700; margin: 6px 0; }
+    .card small { color: var(--muted); font-size: 11px; display: block; line-height: 1.4; }
+    .panel { margin-bottom: 16px; }
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .compare-card {
+      background: var(--panel-alt);
+      border: 1px solid var(--edge);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .compare-card .title { font-weight: 600; font-size: 13px; margin-bottom: 10px; }
+    .compare-card .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      font-size: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .compare-card .stat-row:last-child { border-bottom: none; }
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 12px;
+      max-height: 700px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      white-space: nowrap;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--edge);
+      font-size: 12px;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      cursor: pointer;
+      position: sticky;
+      top: 0;
+      background: #141d29;
+      z-index: 2;
+      user-select: none;
+    }
+    th:hover { color: var(--text); }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .search-input { min-width: 260px; flex: 1; }
+    .tag-flag {
+      display: inline-block;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+    .tag-flag.danger { background: #471521; color: var(--red); border: 1px solid #752033; }
+    .tag-flag.safe { background: #103325; color: var(--green); border: 1px solid #1a5c40; }
+    @media(max-width: 1200px) {
+      .cards { grid-template-columns: repeat(3, 1fr); }
+      .compare-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media(max-width: 768px) {
+      main { padding: 14px; }
+      .cards { grid-template-columns: repeat(2, 1fr); }
+      .compare-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">AUDIT & FORENSIK TOKEN SOLANA · PUMP.FUN</div>
+      <h1>Perbandingan Bot, Sniper, & Keamanan GMGN <span class="muted">/ WIN vs LOSS</span></h1>
+      <p>Analisis komparatif menyeluruh metrik manipulasi on-chain: <em>Rat Traders, Bot Degens, Fresh Wallets, Snipers, Bundlers, Insiders, & Top Holders</em>.</p>
+    </div>
+    <div class="actions">
+      <a href="/profit4" class="badge warn" style="padding: 8px 14px; text-decoration:none; font-size:12px;">📈 Live Dashboard Profit4 ↗</a>
+      <button class="primary" id="btn-refresh">↻ Refresh Data</button>
+    </div>
+  </header>
+
+  <!-- Aggregated Metric Cards -->
+  <div class="cards">
+    <div class="card">
+      <div class="label">Total Token Dianalisis</div>
+      <div class="value" id="c-total">0</div>
+      <small id="c-meta-count">0 dengan metadata GMGN</small>
+    </div>
+    <div class="card">
+      <div class="label">Pembeda: Rat Trader %</div>
+      <div class="value bad" id="c-rat-diff">0.0% vs 0.0%</div>
+      <small>🟢 WIN: <span id="c-win-rat" class="good">0%</span> | 🔴 LOSS: <span id="c-loss-rat" class="bad">0%</span></small>
+    </div>
+    <div class="card">
+      <div class="label">Pembeda: Bot Degens</div>
+      <div class="value warn" id="c-bot-diff">0 vs 0</div>
+      <small>🟢 WIN: <span id="c-win-bot" class="good">0</span> | 🔴 LOSS: <span id="c-loss-bot" class="bad">0</span></small>
+    </div>
+    <div class="card">
+      <div class="label">Pembeda: Fresh Wallets</div>
+      <div class="value good" id="c-fresh-diff">0 vs 0</div>
+      <small>🟢 WIN: <span id="c-win-fresh" class="good">0</span> | 🔴 LOSS: <span id="c-loss-fresh" class="bad">0</span></small>
+    </div>
+    <div class="card">
+      <div class="label">Rata-rata Net Win vs Loss</div>
+      <div class="value" id="c-net-diff">+0% / −0%</div>
+      <small>Pembalik arah performa bot</small>
+    </div>
+    <div class="card">
+      <div class="label">Snipers & Bundlers</div>
+      <div class="value muted" id="c-sniper-bundler">~11 / ~3</div>
+      <small>Sama di kedua kelompok (Standar pump.fun)</small>
+    </div>
+  </div>
+
+  <!-- Detailed Comparison Metric Boxes -->
+  <section class="panel">
+    <div class="row">
+      <h2>Ringkasan Metrik Komparasi (Rata-Rata WIN 🟢 vs LOSS 🔴)</h2>
+      <span class="badge purple">Dataset GMGN Vas v1 Verified</span>
+    </div>
+    <div class="compare-grid">
+      <div class="compare-card">
+        <div class="title" style="color:var(--yellow)">🐭 Rat Trader % (Tikus Curang / Orang Dalam)</div>
+        <div class="stat-row"><span>Token WIN (🟢):</span><strong class="good" id="box-win-rat">1.50%</strong></div>
+        <div class="stat-row"><span>Token LOSS (🔴):</span><strong class="bad" id="box-loss-rat">10.38%</strong></div>
+        <div class="stat-row"><span>Rasio Bahaya:</span><strong class="bad">6.9x Lipat di LOSS</strong></div>
+        <div class="stat-row"><span class="muted">Kasus Ekstrem SpaceX:</span><strong class="bad">52.42% Rat Trader</strong></div>
+      </div>
+      <div class="compare-card">
+        <div class="title" style="color:var(--red)">🤖 Bot Degens (Bot Spekulatif / Spam)</div>
+        <div class="stat-row"><span>Token WIN (🟢):</span><strong class="good" id="box-win-bot">45.6 bot</strong></div>
+        <div class="stat-row"><span>Token LOSS (🔴):</span><strong class="bad" id="box-loss-bot">272.6 bot</strong></div>
+        <div class="stat-row"><span>Rasio Bahaya:</span><strong class="bad">6.0x Lipat di LOSS</strong></div>
+        <div class="stat-row"><span class="muted">Kondisi Aman:</span><strong class="good">&lt; 100 bot degen</strong></div>
+      </div>
+      <div class="compare-card">
+        <div class="title" style="color:var(--green)">👛 Fresh Wallets (Pembeli Baru Riil / Organik)</div>
+        <div class="stat-row"><span>Token WIN (🟢):</span><strong class="good" id="box-win-fresh">29.0 wallet</strong></div>
+        <div class="stat-row"><span>Token LOSS (🔴):</span><strong class="bad" id="box-loss-fresh">16.4 wallet</strong></div>
+        <div class="stat-row"><span>Kekuatan Minat:</span><strong class="good">1.8x Lebih Ramai di WIN</strong></div>
+        <div class="stat-row"><span class="muted">Indikator Organik:</span><strong class="good">Fresh Wallets &gt; 20</strong></div>
+      </div>
+      <div class="compare-card">
+        <div class="title" style="color:var(--blue)">📦 Snipers, Bundlers, & Holders</div>
+        <div class="stat-row"><span>Snipers (WIN vs LOSS):</span><strong class="muted" id="box-snipers">11.5 vs 11.2</strong></div>
+        <div class="stat-row"><span>Bundlers (WIN vs LOSS):</span><strong class="muted" id="box-bundlers">2.8 vs 2.7</strong></div>
+        <div class="stat-row"><span>Bundler % (WIN vs LOSS):</span><strong class="warn" id="box-bundler-pct">0.02% vs 0.23%</strong></div>
+        <div class="stat-row"><span>Top 10 Holder %:</span><strong class="muted" id="box-top10">0.28% vs 0.92%</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Table Section -->
+  <section class="panel">
+    <div class="row">
+      <h2>Daftar Komparasi Semua Token (Seragam: Kolom WIN & LOSS Identik)</h2>
+      <span class="muted" id="table-count-label">Menampilkan 0 token</span>
+    </div>
+    <div class="filter-bar">
+      <input type="text" id="search-input" class="search-input" placeholder="🔍 Cari nama koin (symbol) atau mint address..." />
+      <button class="active" id="filter-all">Semua Token (<span id="btn-count-all">0</span>)</button>
+      <button id="filter-win">Hanya WIN 🟢 (<span id="btn-count-win">0</span>)</button>
+      <button id="filter-loss">Hanya LOSS 🔴 (<span id="btn-count-loss">0</span>)</button>
+      <button id="filter-meta">Hanya Data Lengkap GMGN (<span id="btn-count-meta">0</span>)</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="no"># ↕</th>
+            <th data-sort="symbol">Token ↕</th>
+            <th data-sort="mint">Mint Address ↕</th>
+            <th data-sort="outcome">Hasil ↕</th>
+            <th data-sort="netReturnPercent">Net % ↕</th>
+            <th data-sort="pnlUsd">PnL ($) ↕</th>
+            <th data-sort="reason">Alasan Exit ↕</th>
+            <th data-sort="holdDurationSec">Hold (dtk) ↕</th>
+            <th data-sort="ratTraderPct" title="Top Rat Trader Percentage (Sindikat Orang Dalam)">Rat Trader % ↕</th>
+            <th data-sort="botDegens" title="Bot Degen Count (Bot Spekulatif / Spam)">Bot Degens ↕</th>
+            <th data-sort="freshWallets" title="Fresh Wallet Count (Pembeli Organik Baru)">Fresh Wallets ↕</th>
+            <th data-sort="snipers" title="Sniper Count">Snipers ↕</th>
+            <th data-sort="sniperHoldPct" title="Top 70 Sniper Hold Rate">Sniper Hold % ↕</th>
+            <th data-sort="bundlers" title="Bundler Count">Bundlers ↕</th>
+            <th data-sort="bundlerPct" title="Top Bundler Trader Percentage">Bundler % ↕</th>
+            <th data-sort="insiders" title="Insider Count">Insiders ↕</th>
+            <th data-sort="dexBots" title="DEX Bots Count">DEX Bots ↕</th>
+            <th data-sort="top10Pct" title="Top 10 Holder Rate">Top 10 % ↕</th>
+            <th data-sort="creatorCoins" title="Creator Created Coins">Dev Coins ↕</th>
+            <th data-sort="holderCount" title="Total Holders">Holders ↕</th>
+          </tr>
+        </thead>
+        <tbody id="token-table-body">
+          <tr><td colspan="20" style="text-align:center; padding:30px; color:var(--muted);">Memuat dataset audit...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Technical Insights & Lane V3 Implementation Rule Box -->
+  <section class="panel">
+    <h2>Analisis Pola & Solusi di Lane V3 (Precision 20% & Anti-Trap)</h2>
+    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 10px;">
+      <div style="background:var(--panel-alt); padding:14px; border-radius:8px; border-left:3px solid var(--red);">
+        <strong style="color:var(--red)">🚨 1. Jebakan Rat Trader (Tikus Curang)</strong>
+        <p style="font-size:12px; margin-top:6px;">Pada token loss seperti <strong>SpaceX</strong>, tercatat <code>52.42% Rat Trader</code> dan <code>1,539 Bot Degen</code>. Orang dalam memompa harga sesaat lalu mengguyur seluruh suplai ke buyer retail.<br><br>
+        <strong>Pencegahan di Lane V3:</strong> Filter tolak token jika <code>ratTraderPct &gt; 2.0%</code> atau <code>botDegens &gt; 500</code>.</p>
+      </div>
+      <div style="background:var(--panel-alt); padding:14px; border-radius:8px; border-left:3px solid var(--yellow);">
+        <strong style="color:var(--yellow)">⚠️ 2. Beli di Pucuk Pantulan (Overextended)</strong>
+        <p style="font-size:12px; margin-top:6px;">Pada token <strong>BARRON</strong> (+28.7% bounce saat entry) dan <strong>GTA 6 Coin</strong> (+35.8% bounce), bot masuk terlambat saat pantulan sudah hampir habis sehingga terkena dump kedua.<br><br>
+        <strong>Pencegahan di Lane V3:</strong> Maksimal bounce entry dibatasi hanya <strong>4.0% s/d 15.0%</strong> (menolak bounce &gt; 15%).</p>
+      </div>
+      <div style="background:var(--panel-alt); padding:14px; border-radius:8px; border-left:3px solid var(--green);">
+        <strong style="color:var(--green)">✅ 3. Manipulasi Volume 3 Wallet (Wash Trade)</strong>
+        <p style="font-size:12px; margin-top:6px;">Pada token <strong>LEGO</strong> dan <strong>Muse AI</strong>, volume buy tampak besar namun hanya digerakkan oleh 3 wallet dev internal yang saling oper koin.<br><br>
+        <strong>Pencegahan di Lane V3:</strong> Wajib minimal <strong>&ge;8 pembeli bermakna riil</strong> dan <strong>Fresh Wallets &gt; 15</strong> sebelum entry diizinkan.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const num = (n, d = 2) => (n === null || n === undefined || !Number.isFinite(Number(n))) ? '—' : Number(n).toFixed(d);
+  const money = n => (n == null || !Number.isFinite(Number(n))) ? '—' : `${n > 0 ? '+' : ''}$${Number(n).toFixed(2)}`;
+
+  let rawData = [
+  {
+    "symbol": "SpaceXSI",
+    "mint": "ATTxVBCkt774zSBSzPJp9BwuXmx8qeRGtQB5zLNpump",
+    "shortMint": "ATTxVBCk",
+    "outcome": "WIN",
+    "netReturnPercent": 37.48,
+    "net": "+37.5%",
+    "pnlUsd": 1.87,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 9,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 566,
+    "botDegens": 10,
+    "freshWallets": 17,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 231,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Van Cleef",
+    "mint": "JaHWM3WWggYcW4PqoYSzwqKdBBtTyzArQpwdgbmpump",
+    "shortMint": "JaHWM3WW",
+    "outcome": "WIN",
+    "netReturnPercent": 35.42,
+    "net": "+35.4%",
+    "pnlUsd": 1.77,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 383,
+    "botDegens": 2,
+    "freshWallets": 20,
+    "creatorCoins": 1,
+    "top10Pct": 0,
+    "holderCount": 37,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "STARBUCKS",
+    "mint": "bpJWfwySU5dBin6456fbQkn7rPeET27UWLN53XGpump",
+    "shortMint": "bpJWfwyS",
+    "outcome": "WIN",
+    "netReturnPercent": 34.25,
+    "net": "+34.3%",
+    "pnlUsd": 1.71,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0.05,
+    "bundlers": 6,
+    "bundlerPct": 0.51,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 345,
+    "botDegens": 201,
+    "freshWallets": 36,
+    "creatorCoins": 1,
+    "top10Pct": 0.9,
+    "holderCount": 588,
+    "devTeamHoldPct": 0.05,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "OpenAI",
+    "mint": "W5dgZGAYdbAKVNdPnvR6iAUZEoaEPAiH7JLCgYxpump",
+    "shortMint": "W5dgZGAY",
+    "outcome": "WIN",
+    "netReturnPercent": 33.64,
+    "net": "+33.6%",
+    "pnlUsd": 1.68,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 335,
+    "botDegens": 1,
+    "freshWallets": 27,
+    "creatorCoins": 1,
+    "top10Pct": 1,
+    "holderCount": 28,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "FOMO",
+    "mint": "bZHykH79tvNZg9kwhbjGr7nGspd2zuHyo3ByXdxpump",
+    "shortMint": "bZHykH79",
+    "outcome": "WIN",
+    "netReturnPercent": 32.2,
+    "net": "+32.2%",
+    "pnlUsd": 1.61,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 16,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 329,
+    "botDegens": 0,
+    "freshWallets": 25,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 24,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Elonhotdog",
+    "mint": "J5taBeug2ZhXFvqzXxGyoeNajX1r4NXLGS7QUvopump",
+    "shortMint": "J5taBeug",
+    "outcome": "WIN",
+    "netReturnPercent": 31.98,
+    "net": "+32.0%",
+    "pnlUsd": 1.6,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 328,
+    "botDegens": 2,
+    "freshWallets": 17,
+    "creatorCoins": 4,
+    "top10Pct": 0.1,
+    "holderCount": 19,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "McDonald's",
+    "mint": "AXBxyNfd3q1fSLrHeH3U8BjoWzUSpxcdBMTn6wCpump",
+    "shortMint": "AXBxyNfd",
+    "outcome": "WIN",
+    "netReturnPercent": 31.83,
+    "net": "+31.8%",
+    "pnlUsd": 1.59,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 71,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 353,
+    "botDegens": 28,
+    "freshWallets": 138,
+    "creatorCoins": 1,
+    "top10Pct": 0.2,
+    "holderCount": 34,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Simpsons",
+    "mint": "BA3TzMFQtjH3EtfBiKcMYUo16TZXodfwNDK9Jwo87Fgz",
+    "shortMint": "BA3TzMFQ",
+    "outcome": "WIN",
+    "netReturnPercent": 31.62,
+    "net": "+31.6%",
+    "pnlUsd": 1.58,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 6,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 343,
+    "botDegens": 1,
+    "freshWallets": 21,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 39,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "FOMO",
+    "mint": "oniPsvQ9jZwVmPToqnNgirbLmHchjABjKAVcUH9pump",
+    "shortMint": "oniPsvQ9",
+    "outcome": "WIN",
+    "netReturnPercent": 31.24,
+    "net": "+31.2%",
+    "pnlUsd": 1.56,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 10,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 330,
+    "botDegens": 2,
+    "freshWallets": 14,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 27,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Rolex",
+    "mint": "cvq1R4UbmgKmiKCGYcNWy2k9Ph6rVJPL6k5QqjTpump",
+    "shortMint": "cvq1R4Ub",
+    "outcome": "WIN",
+    "netReturnPercent": 31.16,
+    "net": "+31.2%",
+    "pnlUsd": 1.56,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 20.91,
+    "insiders": 1000,
+    "dexBots": 350,
+    "botDegens": 484,
+    "freshWallets": 28,
+    "creatorCoins": 1,
+    "top10Pct": 0.4,
+    "holderCount": 951,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "GTA 6 Coin",
+    "mint": "DbrEnxQ9Xf3yDxbfWgqgtuXKFrxp3ga9Skaktnepump",
+    "shortMint": "DbrEnxQ9",
+    "outcome": "WIN",
+    "netReturnPercent": 30.87,
+    "net": "+30.9%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 198,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 335,
+    "botDegens": 28,
+    "freshWallets": 16,
+    "creatorCoins": 2,
+    "top10Pct": 0.7,
+    "holderCount": 36,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "ChatGPT",
+    "mint": "L9Sks8Y5m9gJDB5cmc61UazupYd1QEw3dmkaTnwpump",
+    "shortMint": "L9Sks8Y5",
+    "outcome": "WIN",
+    "netReturnPercent": 30.85,
+    "net": "+30.9%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 7,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 344,
+    "botDegens": 0,
+    "freshWallets": 21,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 26,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "cDdMCH997WkFdPeZY8DajacfTCxxtXAwPZccsQFpump",
+    "shortMint": "cDdMCH99",
+    "outcome": "WIN",
+    "netReturnPercent": 30.75,
+    "net": "+30.8%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 14,
+    "sniperHoldPct": 0,
+    "bundlers": 9,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 345,
+    "botDegens": 1,
+    "freshWallets": 27,
+    "creatorCoins": 1,
+    "top10Pct": 0.3,
+    "holderCount": 30,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Haaland",
+    "mint": "JBy2HcHLpwReDDUrVNU2XRBpw71iUZKRBC42GBCr45Lb",
+    "shortMint": "JBy2HcHL",
+    "outcome": "WIN",
+    "netReturnPercent": 30.56,
+    "net": "+30.6%",
+    "pnlUsd": 1.53,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 319,
+    "botDegens": 1,
+    "freshWallets": 12,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 14,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "hRxsE2EDH36mBRL7g9BTHYWQJkxBVG5R6PfgK4Zpump",
+    "shortMint": "hRxsE2ED",
+    "outcome": "WIN",
+    "netReturnPercent": 30.46,
+    "net": "+30.5%",
+    "pnlUsd": 1.52,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 331,
+    "botDegens": 2,
+    "freshWallets": 8,
+    "creatorCoins": 1,
+    "top10Pct": 0.2,
+    "holderCount": 26,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "TikTok",
+    "mint": "s2vPe7krwXtrtZTiDBx246mrtEwiByUWhbGSX3upump",
+    "shortMint": "s2vPe7kr",
+    "outcome": "WIN",
+    "netReturnPercent": 30.44,
+    "net": "+30.4%",
+    "pnlUsd": 1.52,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 151,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 340,
+    "botDegens": 2,
+    "freshWallets": 16,
+    "creatorCoins": 2,
+    "top10Pct": 0.2,
+    "holderCount": 27,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Claude AI",
+    "mint": "dSj6kUPicaAj7vLUk1GoGd5zoxEatPF1i8Y5dE8pump",
+    "shortMint": "dSj6kUPi",
+    "outcome": "WIN",
+    "netReturnPercent": 30.26,
+    "net": "+30.3%",
+    "pnlUsd": 1.51,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 10,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 327,
+    "botDegens": 3,
+    "freshWallets": 20,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 26,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Claude AI",
+    "mint": "neytECKQqzgGfEh78fRD6NRLJjZQEV8Kn8wbFkPpump",
+    "shortMint": "neytECKQ",
+    "outcome": "WIN",
+    "netReturnPercent": 30.04,
+    "net": "+30.0%",
+    "pnlUsd": 1.5,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 335,
+    "botDegens": 2,
+    "freshWallets": 21,
+    "creatorCoins": 1,
+    "top10Pct": 0.3,
+    "holderCount": 34,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Grok AI",
+    "mint": "exdoc1DiPtwggJkYDMsbYV5umY69fz7Rqj8JUAdpump",
+    "shortMint": "exdoc1Di",
+    "outcome": "WIN",
+    "netReturnPercent": 29.64,
+    "net": "+29.6%",
+    "pnlUsd": 1.48,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0.01,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 13.48,
+    "insiders": 1000,
+    "dexBots": 339,
+    "botDegens": 272,
+    "freshWallets": 15,
+    "creatorCoins": 2,
+    "top10Pct": 0.4,
+    "holderCount": 708,
+    "devTeamHoldPct": 0.01,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "POKEMON",
+    "mint": "3rP3HD1Z8eqNcVSXKkeQTbaMUq2M4e1ftM8HNXGzuSxm",
+    "shortMint": "3rP3HD1Z",
+    "outcome": "WIN",
+    "netReturnPercent": 29.6,
+    "net": "+29.6%",
+    "pnlUsd": 1.48,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 15,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 318,
+    "botDegens": 0,
+    "freshWallets": 15,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 13,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Simpsons",
+    "mint": "6CD85vG3zs5LjUqzDf5QPrc38z3nvmZv2eg6gukEUbyT",
+    "shortMint": "6CD85vG3",
+    "outcome": "WIN",
+    "netReturnPercent": 19.91,
+    "net": "+19.9%",
+    "pnlUsd": 1,
+    "reason": "TARGET_BOUNCE_20",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 10,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 332,
+    "botDegens": 5,
+    "freshWallets": 27,
+    "creatorCoins": 1,
+    "top10Pct": 0.7,
+    "holderCount": 31,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Elon",
+    "mint": "H9ho5vFyWmd6BHHt8mJxw6Tz36DBedME5gkJX3B5jp7X",
+    "shortMint": "H9ho5vFy",
+    "outcome": "WIN",
+    "netReturnPercent": 17.4,
+    "net": "+17.4%",
+    "pnlUsd": 0.87,
+    "reason": "TARGET_BOUNCE_20",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 315,
+    "botDegens": 2,
+    "freshWallets": 15,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 15,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "ChatGPT",
+    "mint": "ga7wFrfzb2vG3UozrFLs5fDfxCse3t4ZcZYQM8Fpump",
+    "shortMint": "ga7wFrfz",
+    "outcome": "WIN",
+    "netReturnPercent": 2.95,
+    "net": "+3.0%",
+    "pnlUsd": 0.15,
+    "reason": "STAGNANT_NO_MOVEMENT_AFTER_DUMP",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 12,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 311,
+    "botDegens": 0,
+    "freshWallets": 111,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 19,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Taylor",
+    "mint": "6qo5rBHczkj1JgGw3pWaaBztdr99s38ChzR1PbQ6BSaL",
+    "shortMint": "6qo5rBHc",
+    "outcome": "LOSS",
+    "netReturnPercent": -6.38,
+    "net": "-6.4%",
+    "pnlUsd": -0.32,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 9,
+    "sniperHoldPct": 0,
+    "bundlers": 8,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 311,
+    "botDegens": 1,
+    "freshWallets": 13,
+    "creatorCoins": 1,
+    "top10Pct": 0.6,
+    "holderCount": 12,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Meta",
+    "mint": "r5eSeFX4nm3FrM6hCbEqbfTeG5QigNZSWPJbsekpump",
+    "shortMint": "r5eSeFX4",
+    "outcome": "LOSS",
+    "netReturnPercent": -7.95,
+    "net": "-8.0%",
+    "pnlUsd": -0.4,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 10,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 21.09,
+    "insiders": 1000,
+    "dexBots": 334,
+    "botDegens": 512,
+    "freshWallets": 16,
+    "creatorCoins": 1,
+    "top10Pct": 2.6,
+    "holderCount": 968,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "OpenAI",
+    "mint": "Gwq9eD3CFgBgsRauaRcSkD3GkZd6q67Vw6t9VkNpump",
+    "shortMint": "Gwq9eD3C",
+    "outcome": "LOSS",
+    "netReturnPercent": -8.98,
+    "net": "-9.0%",
+    "pnlUsd": -0.45,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 25.27,
+    "insiders": 585,
+    "dexBots": 334,
+    "botDegens": 597,
+    "freshWallets": 20,
+    "creatorCoins": 1,
+    "top10Pct": 0.5,
+    "holderCount": 1090,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Claude AI",
+    "mint": "12Ky93ysSuk5p5kggqaH9ah2E3nWgLTjVuNUxvWpump",
+    "shortMint": "12Ky93ys",
+    "outcome": "LOSS",
+    "netReturnPercent": -10.78,
+    "net": "-10.8%",
+    "pnlUsd": -0.54,
+    "reason": "TRAILING_PROFIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 10,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 20.98,
+    "insiders": 1000,
+    "dexBots": 323,
+    "botDegens": 486,
+    "freshWallets": 17,
+    "creatorCoins": 1,
+    "top10Pct": 4.7,
+    "holderCount": 960,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "GTA 7 VII",
+    "mint": "jo1gN7RJKcj4vBB3w9hoGXYVLUqwhE4AorS3Zhopump",
+    "shortMint": "jo1gN7RJ",
+    "outcome": "LOSS",
+    "netReturnPercent": -11.78,
+    "net": "-11.8%",
+    "pnlUsd": -0.59,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0.01,
+    "bundlers": 7,
+    "bundlerPct": 4.33,
+    "ratTraderPct": 72.57,
+    "insiders": 1000,
+    "dexBots": 334,
+    "botDegens": 1896,
+    "freshWallets": 19,
+    "creatorCoins": 1,
+    "top10Pct": 6.8,
+    "holderCount": 2530,
+    "devTeamHoldPct": 0.01,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "LEGO",
+    "mint": "rLpnVoqdL8vM55Hivq2NFkzs9DYzZt3D4qnzaM9pump",
+    "shortMint": "rLpnVoqd",
+    "outcome": "LOSS",
+    "netReturnPercent": -31.26,
+    "net": "-31.3%",
+    "pnlUsd": -1.56,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 10,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 328,
+    "botDegens": 3,
+    "freshWallets": 22,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 27,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Muse AI",
+    "mint": "JToSrrjPckmWDEUzEqdW2AwTrXBx8jKvN3UZD5apump",
+    "shortMint": "JToSrrjP",
+    "outcome": "LOSS",
+    "netReturnPercent": -31.69,
+    "net": "-31.7%",
+    "pnlUsd": -1.58,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 313,
+    "botDegens": 1,
+    "freshWallets": 16,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 23,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Muse AI",
+    "mint": "uwLi8sHu3HpqjLhGM17xPAcm4tBepQxy8eGJoiLpump",
+    "shortMint": "uwLi8sHu",
+    "outcome": "LOSS",
+    "netReturnPercent": -33.34,
+    "net": "-33.3%",
+    "pnlUsd": -1.67,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0.03,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 4.96,
+    "insiders": 1000,
+    "dexBots": 314,
+    "botDegens": 134,
+    "freshWallets": 14,
+    "creatorCoins": 1,
+    "top10Pct": 0.5,
+    "holderCount": 466,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "SpaceX",
+    "mint": "PUoe51PFspKCJDVcB1gN9gq579Ht61PC5Ph4JdHpump",
+    "shortMint": "PUoe51PF",
+    "outcome": "LOSS",
+    "netReturnPercent": -35.17,
+    "net": "-35.2%",
+    "pnlUsd": -1.76,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0,
+    "bundlers": 3,
+    "bundlerPct": 0,
+    "ratTraderPct": 52.42,
+    "insiders": 1000,
+    "dexBots": 268,
+    "botDegens": 1539,
+    "freshWallets": 20,
+    "creatorCoins": 1,
+    "top10Pct": 0.5,
+    "holderCount": 1855,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "BARRON",
+    "mint": "AJq3WjovpzZo1ZtLxJwV98RtZnhpNBRzN5ctt6Mpump",
+    "shortMint": "AJq3Wjov",
+    "outcome": "LOSS",
+    "netReturnPercent": -38.23,
+    "net": "-38.2%",
+    "pnlUsd": -1.91,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 14,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 339,
+    "botDegens": 1,
+    "freshWallets": 34,
+    "creatorCoins": 1,
+    "top10Pct": 0.2,
+    "holderCount": 28,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "HLDM",
+    "mint": "pHmP7bx3KxteyEEoJxa2cH7FFspaegPUCHgrCCupump",
+    "shortMint": "pHmP7bx3",
+    "outcome": "LOSS",
+    "netReturnPercent": -41.69,
+    "net": "-41.7%",
+    "pnlUsd": -2.08,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 9,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 328,
+    "botDegens": 2,
+    "freshWallets": 13,
+    "creatorCoins": 1,
+    "top10Pct": 0,
+    "holderCount": 30,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Mr Beast",
+    "mint": "HUypfHBdSBPQEwozPEtVr3VxMu2UBmAETpBCkgs51MrA",
+    "shortMint": "HUypfHBd",
+    "outcome": "LOSS",
+    "netReturnPercent": -51.11,
+    "net": "-51.1%",
+    "pnlUsd": -2.56,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 15,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 334,
+    "botDegens": 1,
+    "freshWallets": 23,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 24,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "GTA 6 Coin",
+    "mint": "n4DVyYhqDJLhHL6D2wc1zB4Ni67ZJBcdVHSGi1Qpump",
+    "shortMint": "n4DVyYhq",
+    "outcome": "LOSS",
+    "netReturnPercent": -55.77,
+    "net": "-55.8%",
+    "pnlUsd": -2.79,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0,
+    "bundlers": 3,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 322,
+    "botDegens": 4,
+    "freshWallets": 20,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 22,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Mr Beast",
+    "mint": "4zSgG4DGwVrrDKVuJzUEDheKkTnTyKsciUjWk8Qpump",
+    "shortMint": "4zSgG4DG",
+    "outcome": "LOSS",
+    "netReturnPercent": -56.92,
+    "net": "-56.9%",
+    "pnlUsd": -2.85,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 7,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 325,
+    "botDegens": 0,
+    "freshWallets": 5,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 23,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Cap Coin",
+    "mint": "3x5qLD5HrpNXuqCDcqb6rR7pGRa12f6xCXzS49qfNpZF",
+    "shortMint": "3x5qLD5H",
+    "outcome": "LOSS",
+    "netReturnPercent": -57.58,
+    "net": "-57.6%",
+    "pnlUsd": -2.88,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 8,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 333,
+    "botDegens": 1,
+    "freshWallets": 14,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 23,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Amazon",
+    "mint": "Wfyf7rYaX9aYHKgKHsrLaKjMZ9mGcNZ89vmtuNEpump",
+    "shortMint": "Wfyf7rYa",
+    "outcome": "LOSS",
+    "netReturnPercent": -60.4,
+    "net": "-60.4%",
+    "pnlUsd": -3.02,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 8,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 337,
+    "botDegens": 2,
+    "freshWallets": 15,
+    "creatorCoins": 1,
+    "top10Pct": 0.2,
+    "holderCount": 31,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "TRUMPSI",
+    "mint": "wGoJNS9PPDhtgLrZ1vUNyDcLy2vCPow8z4aAyavpump",
+    "shortMint": "wGoJNS9P",
+    "outcome": "LOSS",
+    "netReturnPercent": -69.88,
+    "net": "-69.9%",
+    "pnlUsd": -3.49,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 11,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 328,
+    "botDegens": 0,
+    "freshWallets": 16,
+    "creatorCoins": 2,
+    "top10Pct": 0.1,
+    "holderCount": 24,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "X",
+    "mint": "FSVmrwnsmrYXZvGLAaXNhmptdk81WYGdcoJ91DAf2CdG",
+    "shortMint": "FSVmrwns",
+    "outcome": "LOSS",
+    "netReturnPercent": -78.35,
+    "net": "-78.3%",
+    "pnlUsd": -3.92,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 13,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 310,
+    "botDegens": 0,
+    "freshWallets": 9,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 13,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "FOMO",
+    "mint": "vUycvhJ7fbRJCg8UkMFSmys2b3XaunnF82s8PQepump",
+    "shortMint": "vUycvhJ7",
+    "outcome": "LOSS",
+    "netReturnPercent": -82.63,
+    "net": "-82.6%",
+    "pnlUsd": -4.13,
+    "reason": "LARGE_SELL_WHALE_DUMP_EXIT",
+    "holdDurationSec": 0,
+    "hasMeta": true,
+    "snipers": 14,
+    "sniperHoldPct": 0,
+    "bundlers": 2,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 1000,
+    "dexBots": 303,
+    "botDegens": 0,
+    "freshWallets": 5,
+    "creatorCoins": 1,
+    "top10Pct": 0.1,
+    "holderCount": 5,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "dMwRvK15YXtsVgkeAjxePEUKp51tLujqqByK1t3pump",
+    "shortMint": "dMwRvK15",
+    "outcome": "WIN",
+    "netReturnPercent": 36.15,
+    "net": "+36.1%",
+    "pnlUsd": 1.81,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 243,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Joker",
+    "mint": "FDa36mUFRWLXofQBewDWVs7vCKbhwJBEWAseEEPpump",
+    "shortMint": "FDa36mUF",
+    "outcome": "WIN",
+    "netReturnPercent": 34.26,
+    "net": "+34.3%",
+    "pnlUsd": 1.71,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 134,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Samsung",
+    "mint": "GWa3R7V2Lc2EQPcov8qh7QtdDStVUX3aTdiqtKtpump",
+    "shortMint": "GWa3R7V2",
+    "outcome": "WIN",
+    "netReturnPercent": 32.44,
+    "net": "+32.4%",
+    "pnlUsd": 1.62,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 57,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "GTA 6 Coin",
+    "mint": "12Sc6FSUbxF61x7DvVccWPbzzYh6diSsmG7hQeMmpump",
+    "shortMint": "12Sc6FSU",
+    "outcome": "WIN",
+    "netReturnPercent": 32.38,
+    "net": "+32.4%",
+    "pnlUsd": 1.62,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 54,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Gemini",
+    "mint": "vo6XLLqCJ6fyShVhZZDoaHFQ92kwGmUnFnG5Leppump",
+    "shortMint": "vo6XLLqC",
+    "outcome": "WIN",
+    "netReturnPercent": 32.28,
+    "net": "+32.3%",
+    "pnlUsd": 1.61,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 101,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Meta",
+    "mint": "M7vs3UUyjPK5SHmAu1cFBCQgDxBAS5pxydizps5pump",
+    "shortMint": "M7vs3UUy",
+    "outcome": "WIN",
+    "netReturnPercent": 32.12,
+    "net": "+32.1%",
+    "pnlUsd": 1.61,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 109,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Mr Beast",
+    "mint": "h8PXES6vaDrt8Bf9VXAFL7KrCVzePkQ5arRbFpppump",
+    "shortMint": "h8PXES6v",
+    "outcome": "WIN",
+    "netReturnPercent": 31.96,
+    "net": "+32.0%",
+    "pnlUsd": 1.6,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 91,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "ELON",
+    "mint": "rDWkEcbnRqn49115eK5RGgEg7cdPP54McmTXKPKpump",
+    "shortMint": "rDWkEcbn",
+    "outcome": "WIN",
+    "netReturnPercent": 31.71,
+    "net": "+31.7%",
+    "pnlUsd": 1.59,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 73,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Youtube",
+    "mint": "YuNn7DryzLmJfrYYt72RHHwJwShtW8VafMTQQMtpump",
+    "shortMint": "YuNn7Dry",
+    "outcome": "WIN",
+    "netReturnPercent": 31.7,
+    "net": "+31.7%",
+    "pnlUsd": 1.59,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 88,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Claude AI",
+    "mint": "SCJePbJETGqDx5FkmRpkdgymZjsqNLw2fHzpXTFpump",
+    "shortMint": "SCJePbJE",
+    "outcome": "WIN",
+    "netReturnPercent": 31.63,
+    "net": "+31.6%",
+    "pnlUsd": 1.58,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 248,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "CNN",
+    "mint": "3YhqmUd98eEzPC6iQCvCACPqmbCgxEtEJBkKoeypAmkz",
+    "shortMint": "3YhqmUd9",
+    "outcome": "WIN",
+    "netReturnPercent": 31.55,
+    "net": "+31.6%",
+    "pnlUsd": 1.58,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 86,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "POKEMON",
+    "mint": "8apTzDjr1PNVLf4p2ERua8JV1aTAfsqTfzNaB8H6Hiy4",
+    "shortMint": "8apTzDjr",
+    "outcome": "WIN",
+    "netReturnPercent": 31.36,
+    "net": "+31.4%",
+    "pnlUsd": 1.57,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 106,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Grok AI",
+    "mint": "MzeqeiCGnLbrhj4K2JqAw99MCpavV94aNEBB9ngpump",
+    "shortMint": "MzeqeiCG",
+    "outcome": "WIN",
+    "netReturnPercent": 31.3,
+    "net": "+31.3%",
+    "pnlUsd": 1.57,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 157,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "GTA 6 Coin",
+    "mint": "cs8ibBMGMwaj6r7MMdTEbVmAZRPsTVVuUechBVTpump",
+    "shortMint": "cs8ibBMG",
+    "outcome": "WIN",
+    "netReturnPercent": 31.29,
+    "net": "+31.3%",
+    "pnlUsd": 1.56,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 79,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Coinbase",
+    "mint": "BbbqXFPpACnpxcEvicyW1w1QzJShtRrEqf5Wp2wpump",
+    "shortMint": "BbbqXFPp",
+    "outcome": "WIN",
+    "netReturnPercent": 31.13,
+    "net": "+31.1%",
+    "pnlUsd": 1.56,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 67,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Grok AI",
+    "mint": "bM6S9updpEhHHSyYRoWz4EU1HQKVNLHdWBma9egpump",
+    "shortMint": "bM6S9upd",
+    "outcome": "WIN",
+    "netReturnPercent": 31.04,
+    "net": "+31.0%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 98,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Speed",
+    "mint": "FYimwHPuA9Nch5VZgb7wnj54ogNWYFtnbSigkbspump",
+    "shortMint": "FYimwHPu",
+    "outcome": "WIN",
+    "netReturnPercent": 31.03,
+    "net": "+31.0%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 193,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Mr Beast",
+    "mint": "G246zjdFxvtcqd3mWQ6N6eApLE8EejsCTY5NjDupump",
+    "shortMint": "G246zjdF",
+    "outcome": "WIN",
+    "netReturnPercent": 31.02,
+    "net": "+31.0%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 92,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Elonhotdog",
+    "mint": "FVyBsSmgGyqzjm76d5Ef2pNE2B6FbgNMrjzGt9yA1KzZ",
+    "shortMint": "FVyBsSmg",
+    "outcome": "WIN",
+    "netReturnPercent": 31,
+    "net": "+31.0%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 84,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "N7ej48813UyojLs518HABJGmtKXHeVxejcW3d6kpump",
+    "shortMint": "N7ej4881",
+    "outcome": "WIN",
+    "netReturnPercent": 30.99,
+    "net": "+31.0%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 88,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "T2K1haE86tEpdRvkETYBsh1wfMbF8xwoEacDK4Rpump",
+    "shortMint": "T2K1haE8",
+    "outcome": "WIN",
+    "netReturnPercent": 30.97,
+    "net": "+31.0%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 111,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Joker",
+    "mint": "VQCcr91kaPj4BXQD4XtNqNX6bVZC5S8Tkbw49Kcpump",
+    "shortMint": "VQCcr91k",
+    "outcome": "WIN",
+    "netReturnPercent": 30.9,
+    "net": "+30.9%",
+    "pnlUsd": 1.55,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 179,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "fmaV4CzaR3wHejif7iXnZX9jezJXDse7WF48W5Jpump",
+    "shortMint": "fmaV4Cza",
+    "outcome": "WIN",
+    "netReturnPercent": 30.87,
+    "net": "+30.9%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 95,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Haaland",
+    "mint": "FNVpZVEh9hMKgFtyyEw981riddrkg1NkKBmdjyoJ6SKQ",
+    "shortMint": "FNVpZVEh",
+    "outcome": "WIN",
+    "netReturnPercent": 30.86,
+    "net": "+30.9%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 93,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "DISNEY",
+    "mint": "6N4dHKFHG4ihR7Uew96QJ6kbrvZjftv77cMCdUQ9u4eP",
+    "shortMint": "6N4dHKFH",
+    "outcome": "WIN",
+    "netReturnPercent": 30.85,
+    "net": "+30.9%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 109,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "BARRON",
+    "mint": "VXuXTkU3nSawCEpKGEWxGgDigknnJBpgtkYW5Lupump",
+    "shortMint": "VXuXTkU3",
+    "outcome": "WIN",
+    "netReturnPercent": 30.81,
+    "net": "+30.8%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 52,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "GTA 7 VII",
+    "mint": "GECTqP6XJRiKAiaqhb4nQQU8479JVYxygLyzXe6pump",
+    "shortMint": "GECTqP6X",
+    "outcome": "WIN",
+    "netReturnPercent": 30.72,
+    "net": "+30.7%",
+    "pnlUsd": 1.54,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 78,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "MetaMask",
+    "mint": "HU2yCoDC1s9xpT5sbeGnvzidzYtef1AGhjLLAVeyHFYL",
+    "shortMint": "HU2yCoDC",
+    "outcome": "WIN",
+    "netReturnPercent": 30.63,
+    "net": "+30.6%",
+    "pnlUsd": 1.53,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 66,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Tesla",
+    "mint": "7rcxrME91bNEyD7EyodbF24prL882WsvxE5VJQ55pHad",
+    "shortMint": "7rcxrME9",
+    "outcome": "WIN",
+    "netReturnPercent": 30.61,
+    "net": "+30.6%",
+    "pnlUsd": 1.53,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 126,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Muse AI",
+    "mint": "b7GUmFJVdV5PVdt19JQhxk3edttcdNe7Z2qybHXpump",
+    "shortMint": "b7GUmFJV",
+    "outcome": "WIN",
+    "netReturnPercent": 30.51,
+    "net": "+30.5%",
+    "pnlUsd": 1.53,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 40,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Muse AI",
+    "mint": "oVMntKbfiSEemX1Wyoa37n7f4LxRBNuigKgr8qBpump",
+    "shortMint": "oVMntKbf",
+    "outcome": "WIN",
+    "netReturnPercent": 30.44,
+    "net": "+30.4%",
+    "pnlUsd": 1.52,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 135,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Nike",
+    "mint": "5dfPtKouE5xSJjtJoEVjTH1Smk8QcWCwupkuA55pump",
+    "shortMint": "5dfPtKou",
+    "outcome": "WIN",
+    "netReturnPercent": 30.38,
+    "net": "+30.4%",
+    "pnlUsd": 1.52,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 79,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Apple",
+    "mint": "MW3TbRqhtJi2g7gYs9s5KymEPb7W3HJLZoxKpVmpump",
+    "shortMint": "MW3TbRqh",
+    "outcome": "WIN",
+    "netReturnPercent": 30.29,
+    "net": "+30.3%",
+    "pnlUsd": 1.51,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 292,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Claude AI",
+    "mint": "Rc3kTPDHE17auVpH1Jm36wCNSrDLLMa8R11xHEvpump",
+    "shortMint": "Rc3kTPDH",
+    "outcome": "WIN",
+    "netReturnPercent": 30.29,
+    "net": "+30.3%",
+    "pnlUsd": 1.51,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 86,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "NFL",
+    "mint": "77kypLp47shPv1CuudeYS8mpVJrFLQ2axy198XcZ8KWn",
+    "shortMint": "77kypLp4",
+    "outcome": "WIN",
+    "netReturnPercent": 28.94,
+    "net": "+28.9%",
+    "pnlUsd": 1.45,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 177,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "PONS",
+    "mint": "amtwy4ttSyXSnMTU97amdpU3R1n5u2muNtMC4N9pump",
+    "shortMint": "amtwy4tt",
+    "outcome": "WIN",
+    "netReturnPercent": 28.6,
+    "net": "+28.6%",
+    "pnlUsd": 1.43,
+    "reason": "TARGET_BOUNCE_30_40",
+    "holdDurationSec": 104,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Coinbase",
+    "mint": "uS9zTjZgUDv4Wpmr94ThB1MV2KsXXHuHchuj7Vqpump",
+    "shortMint": "uS9zTjZg",
+    "outcome": "WIN",
+    "netReturnPercent": 27.01,
+    "net": "+27.0%",
+    "pnlUsd": 1.35,
+    "reason": "MAX_HOLD",
+    "holdDurationSec": 303,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Open AI",
+    "mint": "NJtTGxe6D5oaQxVu5eu3P3c4PXz2dqB3xXrTtWYpump",
+    "shortMint": "NJtTGxe6",
+    "outcome": "LOSS",
+    "netReturnPercent": -18.8,
+    "net": "-18.8%",
+    "pnlUsd": -0.94,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 27,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Claude AI",
+    "mint": "aBwjiaQyG7zvSV4tQsbJQfDgbKEyFBrAwshyphVpump",
+    "shortMint": "aBwjiaQy",
+    "outcome": "LOSS",
+    "netReturnPercent": -19.01,
+    "net": "-19.0%",
+    "pnlUsd": -0.95,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 19,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "TRALA",
+    "mint": "2RE2hDGyxtNVPcnqWPWUbE3az9ptZscgzkeJXrnwqqfv",
+    "shortMint": "2RE2hDGy",
+    "outcome": "LOSS",
+    "netReturnPercent": -25.75,
+    "net": "-25.8%",
+    "pnlUsd": -1.29,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 178,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "X",
+    "mint": "6GX4a4L5eJj2iviAEkn4eRFzhdg7JwFkHXD3xwSby3ve",
+    "shortMint": "6GX4a4L5",
+    "outcome": "LOSS",
+    "netReturnPercent": -30.07,
+    "net": "-30.1%",
+    "pnlUsd": -1.5,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 226,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "ChatGPT",
+    "mint": "sYnNx8LvJnm5acmEWQmTkRDf9AZTnwBiRwVUGsupump",
+    "shortMint": "sYnNx8Lv",
+    "outcome": "LOSS",
+    "netReturnPercent": -46.53,
+    "net": "-46.5%",
+    "pnlUsd": -2.33,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 32,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "ANSEM",
+    "mint": "ywuBYywqDYtsAZWuf1t8QwGa3eg3uWa82WUF832UwJz",
+    "shortMint": "ywuBYywq",
+    "outcome": "LOSS",
+    "netReturnPercent": -63.58,
+    "net": "-63.6%",
+    "pnlUsd": -3.18,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 59,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Rolex",
+    "mint": "BDoETbRbiopK8o9izWycLFtLMdZqKEdiwwnwT2kYcWUf",
+    "shortMint": "BDoETbRb",
+    "outcome": "LOSS",
+    "netReturnPercent": -65.16,
+    "net": "-65.2%",
+    "pnlUsd": -3.26,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 151,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "NYT Coin",
+    "mint": "b9aTwHuTKN3bFpHRtfGVnzmMj96v5sGYaoWfysnpump",
+    "shortMint": "b9aTwHuT",
+    "outcome": "LOSS",
+    "netReturnPercent": -66.51,
+    "net": "-66.5%",
+    "pnlUsd": -3.33,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 103,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Muse AI",
+    "mint": "QxspUNCycChdJthPzSUr32XPhXxjaZw2pqqCzuqpump",
+    "shortMint": "QxspUNCy",
+    "outcome": "LOSS",
+    "netReturnPercent": -67.64,
+    "net": "-67.6%",
+    "pnlUsd": -3.38,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 185,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "TikTok",
+    "mint": "9YwxcdBFPeQzYnsuoefZooAgu1zH9t7izQ4tSruf5TPH",
+    "shortMint": "9YwxcdBF",
+    "outcome": "LOSS",
+    "netReturnPercent": -71.12,
+    "net": "-71.1%",
+    "pnlUsd": -3.56,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 16,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "Anthropic",
+    "mint": "Pc58X9zdtkigyj2Z5rfccwCfSwZ3rWTe82pyh7Bpump",
+    "shortMint": "Pc58X9zd",
+    "outcome": "LOSS",
+    "netReturnPercent": -74.12,
+    "net": "-74.1%",
+    "pnlUsd": -3.71,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 42,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  },
+  {
+    "symbol": "67",
+    "mint": "FrJZSfAuLH7QfQkB5iZRL2DBM5p1iBFbREvQEtbomc3F",
+    "shortMint": "FrJZSfAu",
+    "outcome": "LOSS",
+    "netReturnPercent": -77.23,
+    "net": "-77.2%",
+    "pnlUsd": -3.86,
+    "reason": "STOP_LOSS",
+    "holdDurationSec": 52,
+    "hasMeta": false,
+    "snipers": 0,
+    "sniperHoldPct": 0,
+    "bundlers": 0,
+    "bundlerPct": 0,
+    "ratTraderPct": 0,
+    "insiders": 0,
+    "dexBots": 0,
+    "botDegens": 0,
+    "freshWallets": 0,
+    "creatorCoins": 0,
+    "top10Pct": 0,
+    "holderCount": 0,
+    "devTeamHoldPct": 0,
+    "creatorHoldPct": 0,
+    "renouncedMint": null,
+    "renouncedFreeze": null
+  }
+];
+  let currentFilter = 'all'; // all, win, loss, meta
+  let sortKey = 'no';
+  let sortDir = 1;
+
+  async function loadData() {
+    try {
+      const res = await fetch('/api/audit-data');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      rawData = await res.json();
+    } catch (e) {
+      console.warn('Fallback loading from cache:', e);
+      // Fallback if accessed as static file or different port
+      try {
+        const res2 = await fetch('audit-cache.json');
+        if (res2.ok) rawData = await res2.json();
+      } catch (err) {}
+    }
+    renderAll();
+  }
+
+  function renderAll() {
+    renderCards();
+    renderTable();
+  }
+
+  function renderCards() {
+    const metaTokens = rawData.filter(d => d.hasMeta);
+    const wins = metaTokens.filter(d => d.outcome === 'WIN');
+    const losses = metaTokens.filter(d => d.outcome === 'LOSS');
+
+    $('c-total').textContent = rawData.length;
+    $('c-meta-count').textContent = `${metaTokens.length} token dengan detail bot GMGN`;
+
+    const avg = (arr, k) => {
+      const vals = arr.map(r => Number(r[k]) || 0);
+      return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    };
+
+    const winRat = avg(wins, 'ratTraderPct');
+    const lossRat = avg(losses, 'ratTraderPct');
+    $('c-win-rat').textContent = `${num(winRat, 2)}%`;
+    $('c-loss-rat').textContent = `${num(lossRat, 2)}%`;
+    $('c-rat-diff').textContent = `${num(winRat, 1)}% vs ${num(lossRat, 1)}%`;
+    $('box-win-rat').textContent = `${num(winRat, 2)}%`;
+    $('box-loss-rat').textContent = `${num(lossRat, 2)}%`;
+
+    const winBot = avg(wins, 'botDegens');
+    const lossBot = avg(losses, 'botDegens');
+    $('c-win-bot').textContent = `${num(winBot, 1)}`;
+    $('c-loss-bot').textContent = `${num(lossBot, 1)}`;
+    $('c-bot-diff').textContent = `${num(winBot, 0)} vs ${num(lossBot, 0)}`;
+    $('box-win-bot').textContent = `${num(winBot, 1)} bot`;
+    $('box-loss-bot').textContent = `${num(lossBot, 1)} bot`;
+
+    const winFresh = avg(wins, 'freshWallets');
+    const lossFresh = avg(losses, 'freshWallets');
+    $('c-win-fresh').textContent = `${num(winFresh, 1)}`;
+    $('c-loss-fresh').textContent = `${num(lossFresh, 1)}`;
+    $('c-fresh-diff').textContent = `${num(winFresh, 0)} vs ${num(lossFresh, 0)}`;
+    $('box-win-fresh').textContent = `${num(winFresh, 1)} wallet`;
+    $('box-loss-fresh').textContent = `${num(lossFresh, 1)} wallet`;
+
+    const winNet = avg(wins, 'netReturnPercent');
+    const lossNet = avg(losses, 'netReturnPercent');
+    $('c-net-diff').textContent = `+${num(winNet, 1)}% / ${num(lossNet, 1)}%`;
+
+    const winSnipers = avg(wins, 'snipers');
+    const lossSnipers = avg(losses, 'snipers');
+    const winBundlers = avg(wins, 'bundlers');
+    const lossBundlers = avg(losses, 'bundlers');
+    $('box-snipers').textContent = `${num(winSnipers, 1)} vs ${num(lossSnipers, 1)}`;
+    $('box-bundlers').textContent = `${num(winBundlers, 1)} vs ${num(lossBundlers, 1)}`;
+    $('box-bundler-pct').textContent = `${num(avg(wins, 'bundlerPct'), 2)}% vs ${num(avg(losses, 'bundlerPct'), 2)}%`;
+    $('box-top10').textContent = `${num(avg(wins, 'top10Pct'), 2)}% vs ${num(avg(losses, 'top10Pct'), 2)}%`;
+
+    // Button counters
+    $('btn-count-all').textContent = rawData.length;
+    $('btn-count-win').textContent = rawData.filter(d => d.outcome === 'WIN').length;
+    $('btn-count-loss').textContent = rawData.filter(d => d.outcome === 'LOSS').length;
+    $('btn-count-meta').textContent = metaTokens.length;
+  }
+
+  function renderTable() {
+    const search = ($('search-input').value || '').trim().toLowerCase();
+    let filtered = rawData.filter(d => {
+      if (currentFilter === 'win' && d.outcome !== 'WIN') return false;
+      if (currentFilter === 'loss' && d.outcome !== 'LOSS') return false;
+      if (currentFilter === 'meta' && !d.hasMeta) return false;
+      if (search) {
+        const text = `${d.symbol} ${d.mint} ${d.reason}`.toLowerCase();
+        if (!text.includes(search)) return false;
+      }
+      return true;
+    });
+
+    $('table-count-label').textContent = `Menampilkan ${filtered.length} dari ${rawData.length} token`;
+
+    // Sorting
+    filtered.sort((a, b) => {
+      if (sortKey === 'no') return 0;
+      let va = a[sortKey];
+      let vb = b[sortKey];
+      if (va == null) return vb == null ? 0 : 1;
+      if (vb == null) return -1;
+      return (typeof va === 'number' ? (va - vb) : String(va).localeCompare(String(vb))) * sortDir;
+    });
+
+    if (!filtered.length) {
+      $('token-table-body').innerHTML = `<tr><td colspan="20" style="text-align:center; padding:30px; color:var(--muted);">Tidak ada token yang cocok dengan filter.</td></tr>`;
+      return;
+    }
+
+    $('token-table-body').innerHTML = filtered.map((d, idx) => {
+      const isWin = d.outcome === 'WIN';
+      const outcomeBadge = isWin ? `<span class="badge win">WIN 🟢</span>` : `<span class="badge loss">LOSS 🔴</span>`;
+      const netClass = d.netReturnPercent > 0 ? 'good' : (d.netReturnPercent < 0 ? 'bad' : 'muted');
+      const pnlClass = d.pnlUsd > 0 ? 'good' : (d.pnlUsd < 0 ? 'bad' : 'muted');
+
+      // Warning badges
+      const ratAlert = d.ratTraderPct > 2.0 ? `<span class="tag-flag danger">🚨 CURANG</span>` : '';
+      const botAlert = d.botDegens > 300 ? `<span class="tag-flag danger">SPAM</span>` : '';
+      const freshBadge = d.freshWallets >= 20 ? `<span class="tag-flag safe">RAMAI</span>` : '';
+
+      const ratDisplay = d.hasMeta ? `<strong class="${d.ratTraderPct > 2.0 ? 'bad' : ''}">${num(d.ratTraderPct, 2)}%</strong>${ratAlert}` : `<span class="muted">—</span>`;
+      const botDisplay = d.hasMeta ? `<span class="${d.botDegens > 300 ? 'bad' : ''}">${d.botDegens}</span>${botAlert}` : `<span class="muted">—</span>`;
+      const freshDisplay = d.hasMeta ? `<span class="${d.freshWallets >= 20 ? 'good' : ''}">${d.freshWallets}</span>${freshBadge}` : `<span class="muted">—</span>`;
+      const snipersDisplay = d.hasMeta ? d.snipers : `<span class="muted">—</span>`;
+      const sniperHoldDisplay = d.hasMeta ? `${num(d.sniperHoldPct, 2)}%` : `<span class="muted">—</span>`;
+      const bundlersDisplay = d.hasMeta ? d.bundlers : `<span class="muted">—</span>`;
+      const bundlerPctDisplay = d.hasMeta ? `${num(d.bundlerPct, 2)}%` : `<span class="muted">—</span>`;
+      const insidersDisplay = d.hasMeta ? d.insiders : `<span class="muted">—</span>`;
+      const dexBotsDisplay = d.hasMeta ? d.dexBots : `<span class="muted">—</span>`;
+      const top10Display = d.hasMeta ? `${num(d.top10Pct, 1)}%` : `<span class="muted">—</span>`;
+      const devCoinsDisplay = d.hasMeta ? d.creatorCoins : `<span class="muted">—</span>`;
+      const holderCountDisplay = d.hasMeta ? (d.holderCount || '—') : `<span class="muted">—</span>`;
+
+      return `<tr>
+        <td class="muted">${idx + 1}</td>
+        <td>
+          <a href="https://gmgn.ai/sol/token/${esc(d.mint)}" target="_blank" rel="noopener noreferrer">
+            <strong>${esc(d.symbol)}</strong> ↗
+          </a>
+        </td>
+        <td class="mono" style="font-size:11px;" title="${esc(d.mint)}">
+          <a href="https://solscan.io/token/${esc(d.mint)}" target="_blank" rel="noopener noreferrer" style="color:var(--muted)">
+            ${esc(d.shortMint || d.mint.slice(0, 8))}…
+          </a>
+        </td>
+        <td>${outcomeBadge}</td>
+        <td class="${netClass}"><strong>${d.netReturnPercent > 0 ? '+' : ''}${num(d.netReturnPercent, 2)}%</strong></td>
+        <td class="${pnlClass}">${money(d.pnlUsd)}</td>
+        <td class="muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis;">${esc(d.reason)}</td>
+        <td>${d.holdDurationSec ? `${d.holdDurationSec}s` : '—'}</td>
+        <td>${ratDisplay}</td>
+        <td>${botDisplay}</td>
+        <td>${freshDisplay}</td>
+        <td>${snipersDisplay}</td>
+        <td>${sniperHoldDisplay}</td>
+        <td>${bundlersDisplay}</td>
+        <td>${bundlerPctDisplay}</td>
+        <td>${insidersDisplay}</td>
+        <td>${dexBotsDisplay}</td>
+        <td>${top10Display}</td>
+        <td>${devCoinsDisplay}</td>
+        <td>${holderCountDisplay}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Setup event listeners
+  $('search-input').addEventListener('input', renderTable);
+  $('btn-refresh').addEventListener('click', loadData);
+
+  const filterButtons = [
+    { id: 'filter-all', key: 'all' },
+    { id: 'filter-win', key: 'win' },
+    { id: 'filter-loss', key: 'loss' },
+    { id: 'filter-meta', key: 'meta' },
+  ];
+
+  filterButtons.forEach(fb => {
+    $(fb.id).addEventListener('click', () => {
+      filterButtons.forEach(b => $(b.id).classList.remove('active'));
+      $(fb.id).classList.add('active');
+      currentFilter = fb.key;
+      renderTable();
+    });
+  });
+
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) {
+        sortDir = -sortDir;
+      } else {
+        sortKey = key;
+        sortDir = (key === 'netReturnPercent' || key === 'pnlUsd' || key === 'ratTraderPct' || key === 'botDegens' || key === 'freshWallets') ? -1 : 1;
+      }
+      renderTable();
+    });
+  });
+
+  loadData();
+</script>
+</body>
+</html>

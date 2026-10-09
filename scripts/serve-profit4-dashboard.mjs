@@ -145,7 +145,13 @@ export function createProfit4Dashboard({ root = defaultRoot } = {}) {
       const rawPath = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
       const path = rawPath.startsWith('/profit4') ? (rawPath.slice('/profit4'.length) || '/') : rawPath;
       if (req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) return json(res, 403, { error: 'Origin tidak diizinkan.' });
-      if (req.method === 'GET' && path === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/' || path === '/dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/audit' || rawPath === '/audit' || path === '/audit-dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-audit-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/audit-data' || path === '/audit-cache.json')) {
+        const cachePath = join(data, 'audit-cache.json');
+        if (existsSync(cachePath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(cachePath));
+        return json(res, 200, []);
+      }
       if (req.method === 'GET' && path === '/api/state') {
         const current = read(controlFile), worker = current ? { ...current, active: alive(current.pid) } : { active: false, status: 'stopped' };
         const history = profit4Snapshot(root, worker);
