@@ -133,8 +133,8 @@
 
   <div class="notice">
     💡 <strong>Penjelasan Utama Perbedaan Win V1 (68 Token) vs Win V4 (24 Token):</strong><br>
-    • <strong>40 Token Win di V1 berasal dari Sesi Lama 8 Oktober</strong> (era sebelum aturan Dump ≥ 60% diterapkan; saat itu token dibeli langsung saat naik stabil biasa).<br>
-    • Pada token era <strong>9–10 Oktober (Era Dump & Bounce Riil)</strong>, sebanyak <strong>22 Token Win Konsisten di V1 dan V4</strong> (+30% s/d +35%).<br>
+    • <strong>40 Token Win di V1 berasal dari Sesi Lama 8 Oktober (termasuk Coinbase & Muse AI):</strong> Token-token ini memang pernah dump parah di chart GMGN (>85%), namun pada sesi 8 Oktober bot <em>hanya menyimpan snapshot status akhir</em> dan <em>belum merekam streaming file trade per-detik (`token-trades.jsonl`)</em>. Karena log rekaman tick transaksi per-detiknya tidak ada di disk, algoritma simulasi Staircase V4 (yang membutuhkan observasi jeda 2–6 detik) tidak dapat merekonstruksi tangga kenaikannya.<br>
+    • Pada token era <strong>9–10 Oktober (Era Log Streaming Riil Lengkap)</strong>, sebanyak <strong>22 Token Win Konsisten Lolos di V1 dan V4</strong> (+30% s/d +35%).<br>
     • <strong>17 Token Loss Fatal di V1 Berhasil Diselamatkan di V4 ($0 Loss)</strong> karena filter <em>Progressive Staircase</em> berhasil memblokir order wash-trade & fake-spike 1-detik!
   </div>
 
