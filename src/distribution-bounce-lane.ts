@@ -383,3 +383,185 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
   }
 }
 
+export const BOUNCE_DUMP_LANE_V4 = 'distribution-bounce-dump-v4';
+export const BOUNCE_TARGET_PERCENT_V4 = 35; // Target keuntungan besar V1: 30% - 40% (default 35% net)
+export const BOUNCE_MIN_TARGET_PERCENT_V4 = 30;
+export const BOUNCE_MAX_TARGET_PERCENT_V4 = 40;
+
+export const BOUNCE_RULES_V4: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-bounce-dump-v4',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: BOUNCE_MAX_TARGET_PERCENT_V4,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 600,
+  confirmSeconds: 1,
+  minBuySharePercent: 50,
+  minMeaningfulBuyUsd: 2,
+  minMeaningfulBuyers: 1,
+  maxBuyerSharePercent: 100,
+  minMomentumPercent: 0,
+  maxMomentumPercent: 50,
+  maxEntryReturnPercent: 100,
+  maxDrawdownPercent: 99,
+  stopLossPercent: 12,
+  trailingStartPercent: 25,
+  trailingDrawdownPercent: 5,
+  maxHoldSeconds: 300,
+  executionDelayMs: 1000,
+  maxFillWaitMs: 5000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
+export class DistributionBounceLaneV4 extends DistributionTargetLane {
+  private dumpObserved = false;
+  private maxDrawdownSeen = 0;
+  private entryTime: number | null = null;
+  private entryBuyPrice: number | null = null;
+  private lastPriceMoveTime: number | null = null;
+  private lastPriceMove: number | null = null;
+
+  // Progressive Staircase Confirmation Tracking
+  private initialStep: { price: number; time: number; troughAtStep: number } | null = null;
+  private staircaseConfirmed = false;
+  private staircaseInvalidated = false;
+  private staircaseInvalidReason = '';
+
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, { ...BOUNCE_RULES_V4 }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT_V4, version: 'distribution-bounce-dump-v4' }), {
+      name: 'dump-bounce-v4',
+      paperLane: BOUNCE_DUMP_LANE_V4,
+      trailingEnabled: true,
+      flowExitEnabled: false,
+      overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
+        const reasons: string[] = [];
+        if (!r.enabled) reasons.push('LANE_DISABLED');
+        if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
+        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
+
+        // Syarat 1 Dasar V1: Token harus sudah pernah mengalami DUMP PARAH (>= 60%)
+        const dd = f.drawdownPercent ?? 0;
+        if (dd >= 60) {
+          this.dumpObserved = true;
+        }
+        if (dd > this.maxDrawdownSeen) {
+          this.maxDrawdownSeen = dd;
+        }
+
+        if (!this.dumpObserved && this.maxDrawdownSeen < 60) {
+          reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // Syarat 2 Dasar V1: Buy flow memadai
+        if ((f.buyShareUsdPercent ?? 0) < 50 || f.meaningfulBuyUsd < 2) {
+          reasons.push('BUY_FLOW_NOT_RECOVERED');
+        }
+
+        const bounce = f.bounceFromTroughPercent ?? 0;
+        const currentPrice = f.price ?? 0;
+        const currentTrough = f.troughPrice ?? currentPrice;
+
+        // Progressive Staircase Logic:
+        // Jika belum ada initial step, cari pantulan awal (3.5% s/d 15%)
+        if (!this.initialStep) {
+          if (bounce < 3.5) {
+            reasons.push('BOUNCE_FROM_TROUGH_TOO_SMALL');
+          } else if (bounce > 15.0) {
+            reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+          } else if (currentPrice > 0) {
+            // Catat Step 1
+            this.initialStep = {
+              price: currentPrice,
+              time: f.now,
+              troughAtStep: currentTrough,
+            };
+            reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+          }
+        } else if (!this.staircaseConfirmed) {
+          // Sedang dalam proses observasi staircase
+          const dtSeconds = (f.now - this.initialStep.time) / 1000;
+
+          if (currentPrice < this.initialStep.troughAtStep * 0.98) {
+            // Tembus trough baru -> breakdown
+            this.staircaseInvalidated = true;
+            this.staircaseInvalidReason = 'BREAKDOWN_BELOW_TROUGH';
+            // Reset step agar bisa deteksi trough baru di masa depan
+            this.initialStep = null;
+            reasons.push('STAIRCASE_BREAKDOWN_BELOW_TROUGH');
+          } else if (dtSeconds < 2.0) {
+            // Masih dalam jeda 2 detik pertama -> tunggu konfirmasi bertahap
+            reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+          } else if (dtSeconds >= 2.0 && dtSeconds <= 6.0) {
+            // Jendela konfirmasi tercapai:
+            if (currentPrice < this.initialStep.price * 0.90) {
+              // Spike ambruk >10%
+              this.initialStep = null;
+              reasons.push('STAIRCASE_SPIKE_COLLAPSED');
+            } else if (bounce > 18.0) {
+              // Overextended pucuk
+              this.initialStep = null;
+              reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+            } else if (currentPrice >= this.initialStep.price * 0.97) {
+              // Terkonfirmasi bertahap!
+              this.staircaseConfirmed = true;
+            } else {
+              reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+            }
+          } else {
+            // Kadaluarsa >6 detik tanpa konfirmasi bertahap
+            this.initialStep = null;
+            reasons.push('STAIRCASE_CONFIRMATION_TIMEOUT');
+          }
+        }
+
+        return reasons;
+      },
+      exitReason: (f: TargetFacts, net: number) => {
+        // Target Take Profit Lane V1: 30% - 40% (default min 30%)
+        if (net >= BOUNCE_MIN_TARGET_PERCENT_V4) {
+          return 'TARGET_BOUNCE_30_40';
+        }
+
+        // Exit jika Stagnan setelah dump
+        if (this.entryTime !== null && f.price !== null) {
+          const holdSeconds = (f.now - this.entryTime) / 1000;
+
+          if (this.lastPriceMove === null || Math.abs(f.price - this.lastPriceMove) / (this.lastPriceMove || 1) >= 0.01) {
+            this.lastPriceMove = f.price;
+            this.lastPriceMoveTime = f.now;
+          }
+
+          const stagnationTimeMs = this.lastPriceMoveTime ? f.now - this.lastPriceMoveTime : 0;
+          if (holdSeconds >= 90 && stagnationTimeMs >= 60_000 && net < 10) {
+            return 'STAGNANT_NO_MOVEMENT_AFTER_DUMP';
+          }
+        }
+
+        return null;
+      },
+    });
+  }
+
+  override step(f: TargetFacts) {
+    if (this.entryAt !== null && this.entryTime === null) {
+      this.entryTime = this.entryAt;
+      this.entryBuyPrice = this.entryPrice;
+      this.lastPriceMoveTime = this.entryAt;
+      this.lastPriceMove = this.entryPrice;
+    }
+    if (f.priceAt !== null && f.priceAt > f.now) {
+      f = { ...f, price: null, priceAt: null };
+    }
+    super.step(f);
+  }
+}
+
+
