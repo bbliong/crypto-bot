@@ -150,7 +150,13 @@ export function createProfit4Dashboard({ root = defaultRoot } = {}) {
       const path = rawPath.startsWith('/profit4') ? (rawPath.slice('/profit4'.length) || '/') : rawPath;
       if (req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) return json(res, 403, { error: 'Origin tidak diizinkan.' });
       if (['GET', 'HEAD'].includes(req.method) && (path === '/' || path === '/dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/comparison' || path === '/v1-vs-v4' || rawPath === '/comparison')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-v1-vs-v4.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/audit' || rawPath === '/audit' || path === '/audit-dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-audit-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/comparison-v1-v4' || path === '/comparison-v1-v4.json')) {
+        const compPath = join(data, 'comparison-v1-v4.json');
+        if (existsSync(compPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(compPath));
+        return json(res, 200, []);
+      }
       if (['GET', 'HEAD'].includes(req.method) && (path === '/api/audit-data' || path === '/audit-cache.json')) {
         const cachePath = join(data, 'audit-cache.json');
         if (existsSync(cachePath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(cachePath));

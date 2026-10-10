@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard Komparasi Token · Lane V1 vs Lane V4</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0c121a;
+      --panel: #141d29;
+      --panel-alt: #101824;
+      --edge: #273447;
+      --muted: #94a4ba;
+      --text: #e9eff8;
+      --green: #5bdeb1;
+      --red: #ff8090;
+      --blue: #8fb8ff;
+      --yellow: #f5c862;
+      --purple: #d884ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    main {
+      max-width: 1600px;
+      margin: auto;
+      padding: 24px;
+    }
+    h1 { font-size: 28px; letter-spacing: -0.5px; margin: 4px 0; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    p { color: var(--muted); line-height: 1.6; margin: 4px 0; }
+    header, .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .eyebrow {
+      color: var(--purple);
+      font-size: 11px;
+      letter-spacing: 2px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button, input, select {
+      font: inherit;
+      border: 1px solid var(--edge);
+      background: #1a2738;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+    button { cursor: pointer; transition: all 0.15s ease; }
+    button:hover { border-color: var(--blue); }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-win { background: rgba(91, 222, 177, 0.15); color: var(--green); border: 1px solid rgba(91, 222, 177, 0.3); }
+    .badge-loss { background: rgba(255, 128, 144, 0.15); color: var(--red); border: 1px solid rgba(255, 128, 144, 0.3); }
+    .badge-filter { background: rgba(245, 200, 98, 0.15); color: var(--yellow); border: 1px solid rgba(245, 200, 98, 0.3); }
+    .badge-saved { background: rgba(216, 132, 255, 0.15); color: var(--purple); border: 1px solid rgba(216, 132, 255, 0.3); }
+    .good { color: var(--green); font-weight: 600; }
+    .bad { color: var(--red); font-weight: 600; }
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card .label { font-size: 12px; color: var(--muted); }
+    .card .value { font-size: 26px; font-weight: 700; margin: 6px 0; }
+    .card small { color: var(--muted); font-size: 11px; }
+    .panel { margin-bottom: 16px; }
+    .table-wrap { overflow: auto; margin-top: 12px; border: 1px solid var(--edge); border-radius: 8px; }
+    table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--edge); font-size: 12px; }
+    th { background: #101824; color: var(--muted); font-weight: 600; position: sticky; top: 0; }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+    .filter-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .filter-bar input { flex: 1; min-width: 200px; }
+    .notice {
+      padding: 12px 16px;
+      border: 1px solid #4a3459;
+      background: #1f1424;
+      color: #e5b9f7;
+      border-radius: 9px;
+      margin: 16px 0;
+      line-height: 1.6;
+    }
+    @media(max-width:1100px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+    @media(max-width:700px) { .cards { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">ANALISIS KOMPARASI AUDIT TOKEN</div>
+      <h1>Perbandingan Hasil Token · Lane V1 vs Lane V4</h1>
+      <p>Mengapa token Win di V1 berbeda dengan Win di V4? Menampilkan detail eliminasi, pencegahan fake-spike, dan rekapitulasi data.</p>
+    </div>
+    <div class="actions">
+      <a href="/profit4" class="badge" style="background:#1a2738; color:var(--text); padding:8px 12px; text-decoration:none;">← Kembali ke Dashboard Realtime</a>
+    </div>
+  </header>
+
+  <div class="notice">
+    💡 <strong>Penjelasan Utama Perbedaan Win V1 (68 Token) vs Win V4 (24 Token):</strong><br>
+    • <strong>40 Token Win di V1 berasal dari Sesi Lama 8 Oktober</strong> (era sebelum aturan Dump ≥ 60% diterapkan; saat itu token dibeli langsung saat naik stabil biasa).<br>
+    • Pada token era <strong>9–10 Oktober (Era Dump & Bounce Riil)</strong>, sebanyak <strong>22 Token Win Konsisten di V1 dan V4</strong> (+30% s/d +35%).<br>
+    • <strong>17 Token Loss Fatal di V1 Berhasil Diselamatkan di V4 ($0 Loss)</strong> karena filter <em>Progressive Staircase</em> berhasil memblokir order wash-trade & fake-spike 1-detik!
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">Total Token Traded</div>
+      <div class="value" id="c-total">99</div>
+      <small>Seluruh riwayat posisi tertutup</small>
+    </div>
+    <div class="card">
+      <div class="label">Win di V1 & Win di V4 🟢</div>
+      <div class="value good" id="c-win-both">22</div>
+      <small>Konsisten TP besar +30%–35%</small>
+    </div>
+    <div class="card">
+      <div class="label">Win V1 tapi Skip di V4 ⚠️</div>
+      <div class="value" style="color:var(--yellow)" id="c-win-skip">45</div>
+      <small>40 token sesi 8 Okt + 5 no-staircase</small>
+    </div>
+    <div class="card">
+      <div class="label">Loss V1 Diselamatkan V4 🛡️</div>
+      <div class="value" style="color:var(--purple)" id="c-saved">17</div>
+      <small>Terhindar dari fake-spike ($0 Loss)</small>
+    </div>
+    <div class="card">
+      <div class="label">Loss di V1 & Loss di V4 🔴</div>
+      <div class="value bad" id="c-loss-both">14</div>
+      <small>Dump lanjutan setelah tangga naik</small>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="row">
+      <h2>Daftar Komparasi Token & Evaluasi Rules</h2>
+      <span class="muted" id="filter-count">Menampilkan 0 token</span>
+    </div>
+
+    <div class="filter-bar">
+      <input id="search" placeholder="Cari nama token atau mint..." aria-label="Cari token">
+      <select id="category-filter">
+        <option value="all">Semua Kategori (99 Token)</option>
+        <option value="WIN_IN_BOTH">Win di V1 & Win di V4 (22 Token)</option>
+        <option value="WIN_V1_FILTERED_V4">Win di V1 tapi Tidak Masuk V4 (45 Token)</option>
+        <option value="LOSS_V1_SAVED_V4">Loss di V1 tapi Diselamatkan di V4 (17 Token) 🛡️</option>
+        <option value="WIN_V1_LOSS_V4">Win di V1 tapi Loss di V4 (1 Token)</option>
+        <option value="LOSS_IN_BOTH">Loss di Kedua Lane (14 Token)</option>
+      </select>
+      <select id="date-filter">
+        <option value="all">Semua Tanggal</option>
+        <option value="2026-10-09_10">Era Dump-Bounce (9 & 10 Okt)</option>
+        <option value="2026-10-08">Era Sesi Lama (8 Okt)</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Token / Symbol</th>
+            <th>Tanggal Sesi</th>
+            <th>Hasil Lane V1</th>
+            <th>Net V1</th>
+            <th>Hasil Lane V4</th>
+            <th>Net V4</th>
+            <th>Status Evaluasi Staircase & Alasan</th>
+          </tr>
+        </thead>
+        <tbody id="comparison-rows">
+          <tr><td colspan="8" style="text-align:center; padding:32px;">Memuat data komparasi...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const num = (n, d = 1) => n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toFixed(d);
+  const short = s => s ? `${s.slice(0, 6)}…${s.slice(-4)}` : '—';
+
+  let rawData = [];
+
+  function getCategoryBadge(cat) {
+    switch (cat) {
+      case 'WIN_IN_BOTH': return '<span class="badge badge-win">Win di Kedua Lane</span>';
+      case 'WIN_V1_FILTERED_V4': return '<span class="badge badge-filter">Win V1 · Skip V4</span>';
+      case 'LOSS_V1_SAVED_V4': return '<span class="badge badge-saved">🛡️ Diselamatkan di V4</span>';
+      case 'WIN_V1_LOSS_V4': return '<span class="badge badge-loss">Win V1 · Loss V4</span>';
+      case 'LOSS_IN_BOTH': return '<span class="badge badge-loss">Loss di Kedua Lane</span>';
+      default: return `<span class="badge">${cat}</span>`;
+    }
+  }
+
+  function render() {
+    const search = ($('search').value || '').toLowerCase();
+    const cat = $('category-filter').value;
+    const dateF = $('date-filter').value;
+
+    const filtered = rawData.filter(d => {
+      const matchText = !search || d.symbol.toLowerCase().includes(search) || d.mint.toLowerCase().includes(search);
+      const matchCat = cat === 'all' || d.category === cat;
+      const matchDate = dateF === 'all' 
+        ? true 
+        : (dateF === '2026-10-08' ? d.date === '2026-10-08' : d.date !== '2026-10-08');
+      return matchText && matchCat && matchDate;
+    });
+
+    $('filter-count').textContent = `Menampilkan ${filtered.length} dari ${rawData.length} token`;
+
+    if (!filtered.length) {
+      $('comparison-rows').innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px;" class="muted">Tidak ada token yang sesuai filter pencarian.</td></tr>';
+      return;
+    }
+
+    $('comparison-rows').innerHTML = filtered.map((d, i) => {
+      const v1Cls = d.v1Status === 'WIN' ? 'good' : 'bad';
+      const v4Cls = d.v4Status === 'WIN' ? 'good' : (d.v4Status === 'LOSS' ? 'bad' : 'muted');
+      const v1NetStr = d.v1Net != null ? `${d.v1Net > 0 ? '+' : ''}${num(d.v1Net)}%` : '—';
+      const v4NetStr = d.v4Net != null ? `${d.v4Net > 0 ? '+' : ''}${num(d.v4Net)}%` : '—';
+
+      return `<tr>
+        <td class="muted">${i + 1}</td>
+        <td>
+          <a href="https://gmgn.ai/sol/token/${esc(d.mint)}" target="_blank" rel="noopener noreferrer"><strong>${esc(d.symbol)}</strong> ↗</a>
+          <div class="muted mono" style="font-size:10px;">${esc(short(d.mint))}</div>
+        </td>
+        <td><span class="mono">${esc(d.date)}</span></td>
+        <td><span class="${v1Cls}">${d.v1Status === 'WIN' ? '🟢 WIN' : '🔴 LOSS'}</span></td>
+        <td class="${v1Cls}">${v1NetStr}</td>
+        <td><span class="${v4Cls}">${d.v4Status === 'WIN' ? '🟢 WIN' : (d.v4Status === 'LOSS' ? '🔴 LOSS' : '⚪ TIDAK ENTRY')}</span></td>
+        <td class="${v4Cls}">${v4NetStr}</td>
+        <td>
+          ${getCategoryBadge(d.category)}
+          <div class="muted" style="font-size:11px; margin-top:3px;">${esc(d.v4Reason)}</div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function loadData() {
+    try {
+      const basePath = window.location.pathname.startsWith('/profit4') ? '/profit4' : '';
+      const res = await fetch(`${basePath}/api/comparison-v1-v4`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      rawData = await res.json();
+
+      // Hitung summary counts
+      const winBoth = rawData.filter(d => d.category === 'WIN_IN_BOTH').length;
+      const winSkip = rawData.filter(d => d.category === 'WIN_V1_FILTERED_V4').length;
+      const saved = rawData.filter(d => d.category === 'LOSS_V1_SAVED_V4').length;
+      const lossBoth = rawData.filter(d => d.category === 'LOSS_IN_BOTH').length;
+
+      $('c-total').textContent = rawData.length;
+      $('c-win-both').textContent = winBoth;
+      $('c-win-skip').textContent = winSkip;
+      $('c-saved').textContent = saved;
+      $('c-loss-both').textContent = lossBoth;
+
+      render();
+    } catch (e) {
+      $('comparison-rows').innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px;" class="bad">Gagal memuat data: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  $('search').oninput = render;
+  $('category-filter').onchange = render;
+  $('date-filter').onchange = render;
+
+  loadData();
+</script>
+</body>
+</html>
