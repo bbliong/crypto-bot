@@ -35,6 +35,7 @@ test('stop gaps are recorded honestly and missing delayed exits remain unknown',
 test('runtime accepts socket holder history, keeps quotes causal and persists one-round ledger across restart', () => {
   const data = mkdtempSync(join(tmpdir(), 'profit4-runtime-')), run = join(data, 'one'); mkdirSync(run);
   const events: any[] = [], a = new DistributionProfit4Runtime(run, (_n, e) => events.push(e), data);
+  const liveSignals: any[] = []; a.setLiveSignalHandler(signal => liveSignals.push(signal));
   a.register({ mint: 'mint', wallet: 'receiver', timestamp: 1 }, 1000);
   a.trade('mint', { at: 2000, timestamp: 2, price: 1, side: 'buy', wallet: 'buyer', usd: 5, signature: 'initial' });
   for (let at = 2000; at <= 34000; at += 1000) {
@@ -44,6 +45,7 @@ test('runtime accepts socket holder history, keeps quotes causal and persists on
     a.evaluate(at);
   }
   const first = JSON.parse(readFileSync(join(run, 'profit4-state.json'), 'utf8'));
+  const liveBuy = liveSignals.find(e => e.type === 'PAPER_BUY'); assert.ok(liveBuy.priceUsd > 0); assert.equal(liveBuy.laneLabel, 'P4'); assert.equal(liveBuy.rules.version, PROFIT4_RULES.version);
   assert.ok(first.positions[0].entryAt !== null); assert.equal(first.positions[0].targetPercent, 4);
   assert.equal(first.positions[0].facts.holderCount, 134);
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'bought-mints.json'), 'utf8')).mints, ['mint']);

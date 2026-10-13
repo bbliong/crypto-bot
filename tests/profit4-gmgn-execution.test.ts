@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+import {runInNewContext} from 'node:vm';
+import {GmgnLiveAdapter} from '../src/profit4-gmgn-execution.js';
+import {LIVE_DEFAULTS} from '../src/profit4-live-store.js';
+const wallet='F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6',mint='5bmpgSv6LHyfX6EQ9XnreapgW2VoaDJNAK8mRSNZGZoT';
+test('GMGN adapter quotes and submits configured wallet, amount, slippage and fees with no retry',async()=>{
+ const requests:any[]=[];let status=200;
+ const page:any=new EventEmitter();page.isClosed=()=>false;page.goto=async()=>{};
+ page.evaluate=async(fn:any,arg:any)=>runInNewContext('('+fn.toString()+')',{URLSearchParams,AbortSignal,fetch:async(url:string,options:any)=>{requests.push({url,options});return{ok:status===200,status,json:async()=>({code:0,data:url.includes('get_swap_route')?{quote:{inDecimals:9,outDecimals:6,outAmount:'1234',routePlan:[]}}:{order_id:'order-id'}})};}})(arg);
+ const context:any=new EventEmitter();context.newPage=async()=>page;
+ const adapter=new GmgnLiveAdapter(context,page);
+ context.emit('request',{url:()=>`https://gmgn.ai/defi/quotation/v1/smartmoney/sol/walletstat/${wallet}?token_address=${mint}`,headers:()=>({authorization:'Bearer test-session'}),method:()=> 'GET'});
+ await adapter.prepare('id',mint,wallet);const config={...LIVE_DEFAULTS,buySlippagePercent:7,sellSlippagePercent:12,tipFeeSol:.0003,priorityFeeSol:.0004,antiMev:true};
+ const quote=await adapter.quote('id','BUY','5000000',config);const query=new URL(requests[0].url,'https://gmgn.ai').searchParams;
+ assert.equal(query.get('from_address'),wallet);assert.equal(query.get('in_amount'),'5000000');assert.equal(query.get('slippage'),'7');assert.equal(query.get('is_anti_mev'),'true');
+ const result=await adapter.submit('id','BUY','5000000',quote,config,100,.001);assert.equal(result.ok,true);assert.equal(result.orderId,'order-id');
+ const payload=JSON.parse(requests[1].options.body);assert.equal(payload.from_address,wallet);assert.equal(payload.input_amount,'5000000');assert.equal(payload.slippage,7);assert.equal(payload.tip_fee,'0.0003');assert.equal(payload.priority_fee,'0.0004');assert.equal(payload.retry_on_submit_failed,0);assert.equal(payload.is_anti_mev,true);
+ const sell=await adapter.quote('id','SELL','1234',config);await adapter.submit('id','SELL','1234',sell,config,100,.001);const sellPayload=JSON.parse(requests[3].options.body);assert.equal(sellPayload.slippage,12);assert.equal(sellPayload.input_amount,'1234');assert.equal(sellPayload.token_in_address,mint);
+ status=503;await assert.rejects(adapter.submit('id','BUY','5000000',quote,config,100,.001),/belum diketahui/);
+});

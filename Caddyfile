@@ -9,3 +9,7 @@ cr.bbliong.io {
         reverse_proxy 127.0.0.1:4180
     }
 }
+
+router.bbliong.io {
+    reverse_proxy 127.0.0.1:20128
+}

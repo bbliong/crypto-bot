@@ -49,6 +49,10 @@ export type TargetFacts = {
   peakPrice?: number | null;
   troughPrice?: number | null;
   bounceFromTroughPercent?: number | null;
+  devWallet?: string | null;
+  devBalance?: number | null;
+  devHoldingSharePercent?: number | null;
+  holderDeclineEverSeen?: boolean;
 };
 const median = (rows: number[]) => {
   if (!rows.length) return null;
@@ -64,6 +68,7 @@ export class TargetObservation {
   private peak = 0;
   private trough = Infinity;
   private ids = new Map<string, number>();
+  private holderDeclineEverSeen = false;
   constructor(readonly transferAt: number) {}
   trade(t: TargetTrade) {
     const lag = t.at - t.timestamp * 1000;
@@ -91,7 +96,7 @@ export class TargetObservation {
     while (rows.length > 2 && rows[1]!.at < t.at - 60000) rows.shift();
     this.holders.set(wallet, rows);
   }
-  facts(now: number, risks: RiskSeller[]): TargetFacts {
+  facts(now: number, risks: RiskSeller[], devWallet?: string | null): TargetFacts {
     const rows = this.trades.filter(t => t.at <= now);
     const recent = rows.filter(t => t.at > now - 5000);
     const before = rows.filter(t => t.at > now - 10000 && t.at <= now - 5000);
@@ -109,6 +114,10 @@ export class TargetObservation {
     const a = median(recent.map(t => t.price)), b = median(before.map(t => t.price));
     const currentCount = this.counts.filter(t => t.at <= now && now - t.at <= 15000).at(-1);
     const priorCount = this.counts.filter(t => t.at <= now - 15000 && now - 15000 - t.at <= 15000).at(-1);
+    const holderGrowth15s = currentCount && priorCount ? currentCount.count - priorCount.count : null;
+    if (holderGrowth15s !== null && holderGrowth15s < -3) {
+      this.holderDeclineEverSeen = true;
+    }
     const buy = recent.filter(t => t.side === 'buy'), sell = recent.filter(t => t.side === 'sell');
     const sum = (xs: TargetTrade[]) => xs.reduce((n, t) => n + (t.usd ?? 0), 0);
     const buyUsd = sum(buy), sellUsd = sum(sell), meaningful = buy.filter(t => (t.usd ?? 0) >= 1);
@@ -122,19 +131,39 @@ export class TargetObservation {
     const bounceFromTroughPercent = (price !== null && Number.isFinite(this.trough) && this.trough > 0 && price >= this.trough)
       ? ((price - this.trough) / this.trough) * 100
       : null;
+
+    // Pelacakan dev wallet & dev balance
+    let devBalance: number | null = null;
+    let devHoldingSharePercent: number | null = null;
+    if (devWallet) {
+      const devHoldings = this.holders.get(devWallet);
+      if (devHoldings && devHoldings.length) {
+        const lastDev = devHoldings.filter(h => h.at <= now).at(-1);
+        if (lastDev && Number.isFinite(lastDev.amount)) {
+          devBalance = lastDev.amount;
+          // Supply standar token pumpfun adalah 1 Miliar (1,000,000,000)
+          devHoldingSharePercent = (lastDev.amount / 1_000_000_000) * 100;
+        }
+      }
+    }
+
     return { now, firstAt: this.firstAt !== null && this.firstAt <= now ? this.firstAt : null, transferAt: this.transferAt,
       price, priceAt: price !== null ? last?.at ?? null : null,
       momentumPercent: a !== null && b !== null && b > 0 ? (a / b - 1) * 100 : null,
       drawdownPercent: price !== null && this.peak > 0 ? (1 - price / this.peak) * 100 : null,
       entryReturnPercent: price !== null && this.firstPrice ? (price / this.firstPrice - 1) * 100 : null,
-      holderCount: currentCount?.count ?? null, holderGrowth15s: currentCount && priorCount ? currentCount.count - priorCount.count : null,
+      holderCount: currentCount?.count ?? null, holderGrowth15s,
       buyShareUsdPercent: buyUsd + sellUsd > 0 ? buyUsd / (buyUsd + sellUsd) * 100 : null,
       meaningfulBuyUsd: meaningfulUsd, meaningfulBuyers: buyers.size,
       topBuyerSharePercent: meaningfulUsd > 0 ? Math.max(0, ...buyers.values()) / meaningfulUsd * 100 : null,
       sellUsd, largestSellUsd: Math.max(0, ...sell.map(t => t.usd ?? 0)), riskWalletsPresent: [...new Set(present)],
       peakPrice: this.peak > 0 ? this.peak : null,
       troughPrice: Number.isFinite(this.trough) ? this.trough : null,
-      bounceFromTroughPercent };
+      bounceFromTroughPercent,
+      devWallet: devWallet ?? null,
+      devBalance,
+      devHoldingSharePercent,
+      holderDeclineEverSeen: this.holderDeclineEverSeen };
   }
 }
 export function assessTargetEntry(f: TargetFacts, r: TargetRules): string[] {
@@ -160,6 +189,7 @@ export type TargetPolicy = {
   name: string;
   paperLane?: string;
   exitMode?: 'default' | 'target-stop-time';
+  prioritizeCustomExit?: boolean;
   trailingEnabled?: boolean;
   flowExitEnabled?: boolean;
   entryReasons?: (facts: TargetFacts) => string[];
@@ -248,10 +278,13 @@ export class DistributionTargetLane {
     const net = this.net(f.price)!;
     this.peakNet = Math.max(this.peakNet, net);
     let reason = '';
-    if (net <= -r.stopLossPercent) reason = 'STOP_LOSS';
-    else if (net >= r.targetPercent) reason = 'TARGET_NET';
-    else if (this.policy.exitMode !== 'target-stop-time' && this.policy.trailingEnabled !== false && this.peakNet >= r.trailingStartPercent && this.peakNet - net >= r.trailingDrawdownPercent) reason = 'TRAILING_PROFIT';
-    else if (this.policy.exitMode !== 'target-stop-time' && this.policy.exitReason) reason = this.policy.exitReason(f, net) ?? '';
+    if (this.policy.prioritizeCustomExit && this.policy.exitMode !== 'target-stop-time' && this.policy.exitReason) {
+      reason = this.policy.exitReason(f, net) ?? '';
+    }
+    if (!reason && net <= -r.stopLossPercent) reason = 'STOP_LOSS';
+    else if (!reason && net >= r.targetPercent) reason = 'TARGET_NET';
+    else if (!reason && this.policy.exitMode !== 'target-stop-time' && this.policy.trailingEnabled !== false && this.peakNet >= r.trailingStartPercent && this.peakNet - net >= r.trailingDrawdownPercent) reason = 'TRAILING_PROFIT';
+    else if (!reason && this.policy.exitMode !== 'target-stop-time' && this.policy.exitReason) reason = this.policy.exitReason(f, net) ?? '';
     if (this.policy.exitMode !== 'target-stop-time' && this.policy.flowExitEnabled !== false && !reason && (f.largestSellUsd >= 250 || f.sellUsd >= 100 && (f.buyShareUsdPercent ?? 100) <= 15 && (f.momentumPercent ?? 0) < 0)) reason = 'FLOW_OR_LARGE_SELL';
     if (!reason && now - this.entryAt! >= r.maxHoldSeconds * 1000) reason = 'MAX_HOLD';
     if (!reason) return;

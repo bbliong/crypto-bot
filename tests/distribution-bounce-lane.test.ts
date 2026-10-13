@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
+import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, DistributionBounceLaneV5, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
 import type { TargetEvent, TargetFacts } from '../src/distribution-target-lane.js';
 
 const mockFacts = (now = 100000, price = 1, extra: Partial<TargetFacts> = {}): TargetFacts => ({
@@ -206,3 +206,231 @@ test('DistributionBounceLaneV3 takes quick profit at 18-20% gain', () => {
   assert.equal(lane.phase, 'CLOSED');
   assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_20');
 });
+
+test('DistributionBounceLaneV5 Solusi 2 Gate 1: blocks entry if dev still holds supply (Claude AI pattern)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-dev-trap', e => events.push(e));
+
+  // Severe dump observed (drawdown 80%)
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 80,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 70,
+    meaningfulBuyUsd: 20,
+    // Dev still holds 82% supply (Claude AI trap)
+    devHoldingSharePercent: 82.0,
+    devBalance: 820_000_000,
+  }));
+
+  assert.equal(lane.phase, 'WATCHING');
+  const lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK'));
+});
+
+test('DistributionBounceLaneV5 Solusi 2 Gate 2: blocks entry if rapid holder decline was seen (Taylor pattern)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-taylor-flight', e => events.push(e));
+
+  // Token dumped 78% and bounced, but holder decline ever seen (bundler wallet exodus)
+  lane.step(mockFacts(100000, 0.22, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 25,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+    holderDeclineEverSeen: true,
+  }));
+
+  assert.equal(lane.phase, 'WATCHING');
+  const lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('HOLDERS_DECLINING_FLIGHT_RISK'));
+});
+
+test('DistributionBounceLaneV5 Solusi 2 Gate 3: blocks entry if large whale sell active in window', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-whale-active', e => events.push(e));
+
+  // Token bounced, dev balance 0, but whale sell $200 active in window
+  lane.step(mockFacts(100000, 0.25, {
+    drawdownPercent: 76,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 65,
+    meaningfulBuyUsd: 15,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+    largestSellUsd: 200,
+  }));
+
+  assert.equal(lane.phase, 'WATCHING');
+  const lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('WHALE_SELL_ACTIVE_IN_WINDOW'));
+});
+
+test('DistributionBounceLaneV5 enters clean staircase bounce when dev balance 0 and steady flow (Mr Beast / Grok)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-clean-win', e => events.push(e));
+
+  // Step 1: Severe dump observed (drawdown 78%), trough established at 0.20, starts bounce to 0.21 (+5%)
+  lane.step(mockFacts(100000, 0.21, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 20,
+    topBuyerSharePercent: 40,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+    holderDeclineEverSeen: false,
+    holderGrowth15s: 2,
+    largestSellUsd: 10,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+
+  // Step 2: Dwell time 3.5 seconds later, price holds steady at 0.212 -> staircase confirmed
+  lane.step(mockFacts(103500, 0.212, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+    topBuyerSharePercent: 35,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+    holderDeclineEverSeen: false,
+    holderGrowth15s: 3,
+    largestSellUsd: 5,
+  }));
+
+  // Step 3: Confirm execution delay -> OPEN
+  lane.step(mockFacts(104600, 0.212, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Step 4: Price reaches target +35% gain -> TARGET_BOUNCE_30_40
+  lane.step(mockFacts(106000, 0.29)); // ~+36% gain
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(107100, 0.29));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_30_40');
+});
+
+test('DistributionBounceLaneV5 enforces hard-cap rugpull loss protection if flash dump occurs', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-hard-cap', e => events.push(e));
+
+  // Enter clean position
+  lane.step(mockFacts(100000, 0.21, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 20,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(103500, 0.212, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(104600, 0.212));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Sudden catastrophic dump to 0.10 (-52% net)
+  lane.step(mockFacts(106000, 0.10));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(107100, 0.10));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'HARD_CAP_RUGPULL_PROTECTION');
+});
+
+test('DistributionBounceLaneV5 blocks entry during 45s whale sell cooldown (FOMO pattern)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-whale-cooldown', e => events.push(e));
+
+  // T = 100s: Whale sell $180 occurs (largestSellUsd = 180)
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 70,
+    meaningfulBuyUsd: 15,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+    largestSellUsd: 180,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+  let lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('WHALE_SELL_ACTIVE_IN_WINDOW'));
+
+  // T = 120s (20s later): Price is trying to bounce, current largestSellUsd is small ($10), but 45s cooldown is still active
+  lane.step(mockFacts(120000, 0.21, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 20,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+    largestSellUsd: 10,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+  lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('WHALE_SELL_COOLDOWN_ACTIVE'));
+});
+
+test('DistributionBounceLaneV5 locks profit at +15% when pullback occurs from +19% peak (DeepSeek pattern)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV5('mint-v5-deepseek-lock', e => events.push(e));
+
+  // Enter clean position at 0.20
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 20,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(103500, 0.202, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(104600, 0.202));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Price surges to 0.245 (peak net ~ +18.4%)
+  lane.step(mockFacts(106000, 0.245));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Pullback drops to 0.235 (net ~ +13.5%, trailing drop is > 4% from peak)
+  lane.step(mockFacts(107000, 0.235));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(108100, 0.235));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'PROFIT_LOCK_15_EXIT');
+});
+
+

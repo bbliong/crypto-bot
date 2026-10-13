@@ -1,56 +1,2355 @@
 <!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Profit4 · Paper Lane</title>
-<style>
-:root{color-scheme:dark;--bg:#0c121a;--panel:#141d29;--edge:#273447;--muted:#94a4ba;--text:#e9eff8;--green:#5bdeb1;--red:#ff8090;--blue:#8fb8ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}main{max-width:1500px;margin:auto;padding:28px}h1{font-size:30px;letter-spacing:-1px;margin:5px 0}h2{font-size:17px;margin:0 0 14px}p{color:var(--muted);line-height:1.6;margin:6px 0}header,.row{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.eyebrow{color:var(--green);font-size:12px;letter-spacing:2px;font-weight:700}.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}button,input,select{font:inherit;border:1px solid var(--edge);background:#1a2738;color:var(--text);padding:10px 13px;border-radius:8px}button{cursor:pointer}button:hover{border-color:var(--blue)}button.primary{background:var(--green);color:#092219;font-weight:700}button.danger{color:var(--red)}button:disabled{opacity:.5;cursor:wait}input{min-width:180px}#wallet-input{flex:1}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}.badge{padding:6px 10px;border-radius:99px;background:#203047;color:var(--blue);font-size:12px}.good{color:var(--green)}.bad{color:var(--red)}.muted{color:var(--muted)}.notice{padding:12px 16px;border:1px solid #564b29;background:#251f15;color:#e9ce8f;border-radius:9px;margin:18px 0;line-height:1.6}.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:20px 0}.card,.panel{background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:18px}.card .label{font-size:12px;color:var(--muted)}.card .value{font-size:27px;font-weight:650;margin:8px 0}.card small{color:var(--muted);font-size:11px}.panel{margin-bottom:16px}.rule-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.rule{padding:12px;background:#101824;border-radius:8px;line-height:1.65}.rule strong{display:block;font-size:13px}.rule span{color:var(--muted);font-size:12px}.table-wrap{overflow:auto;margin-top:14px}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--edge);font-size:12px}th{color:var(--muted);font-weight:600;cursor:pointer}td.reason{white-space:normal;min-width:200px;max-width:280px;line-height:1.5}.empty{text-align:center;padding:32px;color:var(--muted)}.mono{font-family:ui-monospace,monospace}.small-btn{padding:5px 9px;font-size:12px}.status-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:16px}.status-grid small{display:block;color:var(--muted);margin-bottom:5px}.log{max-height:220px;overflow:auto;font:12px ui-monospace,monospace;line-height:1.8;color:var(--muted)}#error{color:var(--red);line-height:1.6;display:none;padding:12px;background:#361d26;border-radius:8px;margin:12px 0}footer{font-size:12px;color:var(--muted);padding:8px 0 25px}#wallet-message{font-size:12px;margin-top:10px}.filter{display:flex;gap:8px;flex-wrap:wrap}#wallet-table td{font-size:13px}@media(max-width:950px){.cards{grid-template-columns:repeat(3,1fr)}.rule-grid,.status-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:600px){main{padding:16px}.cards{grid-template-columns:repeat(2,1fr)}.rule-grid,.status-grid{grid-template-columns:1fr}h1{font-size:26px}}
-</style></head><body><main>
-<header><div><div class="eyebrow">RESEARCH · PAPER TRADING</div><h1>Profit4 <span class="muted">/ Satu putaran</span></h1><p>Transfer masuk → observasi → buy → sell. Satu entry per token, tanpa buy ulang.</p></div><div class="actions"><a href="/profit4/comparison" class="badge" style="background:#361f42; color:#d884ff; text-decoration:none; padding:8px 12px; font-weight:700;">📊 Komparasi Win V1 vs V4 ↗</a><a href="/profit4/audit" class="badge warn" style="text-decoration:none; padding:8px 12px; font-weight:700;">🛡️ Audit Bot &amp; Keamanan Token ↗</a><span id="worker-badge" class="badge">Memuat…</span><button class="primary" id="start">Start / Restart</button><button class="danger" id="stop">Stop worker</button></div></header>
-<div class="notice">Target <strong>+4% bersih</strong>, stop <strong>−5%</strong>, modal <strong>$5</strong>. Ini simulasi harga realtime; dump cepat dapat melewati stop. Data exit yang terputus ditandai belum diketahui.</div><div id="error" role="alert"></div>
-<div class="cards"><div class="card"><div class="label">Token diamati</div><div class="value" id="tokens">0</div><small id="capture-count">0 detail aktif</small></div><div class="card"><div class="label">Entry paper</div><div class="value" id="entries">0</div><small id="closed-count">0 sudah selesai</small></div><div class="card"><div class="label">Posisi terbuka</div><div class="value" id="open">0</div><small>Belum ada harga exit</small></div><div class="card"><div class="label">Untung / rugi</div><div class="value" id="win-loss">0 / 0</div><small id="win-rate">Win rate —</small></div><div class="card"><div class="label">PnL bersih selesai</div><div class="value" id="pnl">$0.00</div><small id="mean">Rata-rata —</small></div><div class="card"><div class="label">Exit kurang data</div><div class="value" id="missing">0</div><small>Tidak dihitung untung/rugi</small></div></div>
-<section class="panel"><div class="row"><h2>Worker & koneksi</h2><span class="muted" id="refresh-time">—</span></div><div class="status-grid"><div><small>Proses</small><span id="process">—</span></div><div><small>Poll wallet terakhir · WIB</small><span id="poll">—</span></div><div><small>Socket terakhir · WIB</small><span id="socket">—</span></div><div><small>Respons aktivitas</small><span id="api-health">Belum ada polling</span></div></div><p id="worker-error"></p><p id="path" class="mono" style="font-size:11px;overflow-wrap:anywhere"></p></section>
-<section class="panel"><div class="row"><h2>Rules aktif</h2><span class="badge" id="version">distribution-profit4-v1</span></div><div class="rule-grid"><div class="rule"><strong>Entry & observasi</strong><span>Minimal 30 detik; monitor mulai ≤15 detik setelah transfer. Entry maksimal 180 detik sejak harga pertama.</span></div><div class="rule"><strong>Flow & holder</strong><span>Buy-share 5s ≥50%; buy bermakna ≥$5; ≥1 buyer. Holder count dan pertumbuhan harus tersedia, tidak menurun.</span></div><div class="rule"><strong>Momentum & harga</strong><span>Momentum 0,3–5%; drawdown ≤5%; kenaikan dari harga pertama ≤15%. Sell ≥$250 memblokir entry.</span></div><div class="rule"><strong>Exit & biaya model</strong><span>Target +4% net; stop −5% net; hold ≤300s. Fee 1% + slippage 0,5% + $0,005 per sisi. Fill menunggu quote baru ≥1s.</span></div></div></section>
-<section class="panel"><h2>Wallet yang dipantau</h2><div class="row"><input id="wallet-input" placeholder="Address wallet atau URL GMGN address" aria-label="Address wallet"><button id="add">Tambah ke daftar</button><button class="primary" id="save">Simpan & restart</button></div><p id="wallet-message">Menyimpan daftar akan restart worker. Posisi terbuka saat restart ditandai exit kurang data. Jumlah detail mengikuti jumlah wallet.</p><div class="table-wrap"><table id="wallet-table"><thead><tr><th>#</th><th>Wallet</th><th>Profil</th><th>Aksi</th></tr></thead><tbody id="wallets"></tbody></table></div></section>
-<section class="panel"><div class="row"><h2>Komparasi Keuntungan · Lane V1 vs Lane V2 vs Lane V3 vs Lane V4</h2><span class="badge good">Quad-Lane Active</span></div><p>Perbandingan real-time antara <strong>Lane V1 (Original Bounce 35%)</strong> vs <strong>Lane V2 (Anti-Whale + Lock +20%)</strong> vs <strong>Lane V3 (Precision 20% & Safe Entry)</strong> vs <strong>Lane V4 (Original TP + Staircase Confirmation)</strong>.</p><div class="table-wrap"><table id="comparison-table"><thead><tr><th>Strategi Lane</th><th>Total Entry</th><th>Selesai Exit</th><th>Win / Loss</th><th>Win Rate</th><th>Total PnL Bersih</th><th>Rata-rata Net %</th><th>Keterangan Rules</th></tr></thead><tbody><tr><td><strong style="color:var(--blue)">Lane V1 (Original)</strong></td><td id="v1-entries">0</td><td id="v1-closed">0</td><td id="v1-win-loss">0 / 0</td><td id="v1-win-rate">—</td><td><strong id="v1-pnl">$0.00</strong></td><td id="v1-mean">—</td><td><small class="muted">Bounce 30-40% standar, tanpa filter whale dump</small></td></tr><tr><td><strong style="color:var(--green)">Lane V2 (Anti-Whale)</strong></td><td id="v2-entries">0</td><td id="v2-closed">0</td><td id="v2-win-loss">0 / 0</td><td id="v2-win-rate">—</td><td><strong id="v2-pnl">$0.00</strong></td><td id="v2-mean">—</td><td><small class="muted">Filter anti-whale sell ≥$300, Lock Profit di +20%, Exit darurat sell ≥$250</small></td></tr><tr><td><strong style="color:#e9ce8f">Lane V3 (Precision 20%)</strong></td><td id="v3-entries">0</td><td id="v3-closed">0</td><td id="v3-win-loss">0 / 0</td><td id="v3-win-rate">—</td><td><strong id="v3-pnl">$0.00</strong></td><td id="v3-mean">—</td><td><small class="muted">Early Bounce (4–15%), Buyers ≥8, TP +20%, Lock +14%, Stop −10%</small></td></tr><tr><td><strong style="color:#d884ff">Lane V4 (Staircase TP35%)</strong></td><td id="v4-entries">0</td><td id="v4-closed">0</td><td id="v4-win-loss">0 / 0</td><td id="v4-win-rate">—</td><td><strong id="v4-pnl">$0.00</strong></td><td id="v4-mean">—</td><td><small class="muted">V1 Target Besar (TP 30-40%) + Konfirmasi Staircase 2-6s (Anti Fake-Spike)</small></td></tr></tbody></table></div></section>
-<section class="panel"><div class="row"><h2>Breakdown Performa Per 1 Jam · Lane V1 vs V2 vs V3 vs V4</h2><span class="badge">Hourly Comparison</span></div><p>Rincian performa per rentang waktu 1 jam (WIB) untuk membandingkan akumulasi keuntungan dan win rate antara <strong>Lane V1</strong>, <strong>Lane V2</strong>, <strong>Lane V3</strong>, dan <strong>Lane V4</strong>.</p><div class="table-wrap"><table id="hourly-table"><thead><tr><th>Jam / Waktu (WIB)</th><th>V1 (W/L)</th><th>V1 PnL</th><th>V2 (W/L)</th><th>V2 PnL</th><th>V3 (W/L)</th><th>V3 PnL</th><th>V4 (W/L)</th><th>V4 PnL</th><th>Total PnL Jam Ini</th></tr></thead><tbody id="hourly-rows"></tbody></table></div></section>
-<section class="panel"><div class="row"><h2>Token & hasil paper</h2><div class="filter"><input id="search" placeholder="Cari token / mint"><select id="lane"><option value="all">Semua Lane (V1, V2, V3, V4)</option><option value="V1">Hanya Lane V1</option><option value="V2">Hanya Lane V2</option><option value="V3">Hanya Lane V3</option><option value="V4">Hanya Lane V4</option></select><select id="hour"><option value="all">Semua Jam</option></select><select id="phase"><option value="all">Semua status</option><option value="live">Sedang diamati</option><option value="entry">Pernah buy</option><option value="closed">Trade selesai</option><option value="missing">Exit kurang data</option><option value="rejected">Belum entry</option></select><select id="run"><option value="all">Semua sesi</option></select></div></div><p>Harga buy/sell adalah quote simulasi. Waktu menggunakan WIB. Klik judul kolom untuk sorting.</p><div class="table-wrap"><table><thead><tr><th data-sort="symbol">Token ↕</th><th data-sort="phase">Status ↕</th><th data-sort="entryAt">Buy WIB ↕</th><th data-sort="entryPrice">Socket Buy ↕</th><th data-sort="swapBuyPrice">Swap Buy ↕</th><th data-sort="exitAt">Sell WIB ↕</th><th data-sort="exitPrice">Socket Sell ↕</th><th data-sort="swapSellPrice2">Swap Sell (2x, jeda 1s) ↕</th><th data-sort="netReturnPercent">Net ↕</th><th data-sort="pnlUsd">PnL ↕</th><th>Holder / Δ15s</th><th>Buy-share 5s</th><th>Alasan terbaru</th></tr></thead><tbody id="positions"></tbody></table></div></section>
-<section class="panel"><h2>Event terbaru</h2><div id="events" class="log">Belum ada event.</div></section><footer id="historical">Riwayat simulasi lama ditampilkan terpisah dari hasil worker realtime.</footer>
-</main><script>
-const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const time=n=>n?new Date(n).toLocaleString('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'—';
-const num=(n,d=2)=>n===null||n===undefined||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d),money=n=>n==null?'—':`${n>0?'+':''}$${num(n)}`,short=s=>s?`${s.slice(0,7)}…${s.slice(-5)}`:'—';
-const reasons={OBSERVATION_NOT_COMPLETE:'Menunggu observasi 20-30 detik',MONITOR_STARTED_TOO_LATE:'Monitor mulai terlambat (>15s)',ENTRY_WINDOW_EXPIRED:'Jendela entry berakhir',PRICE_MISSING_OR_STALE:'Harga belum tersedia / kedaluwarsa',HOLDER_HISTORY_MISSING_OR_STALE:'Riwayat holder belum lengkap / kedaluwarsa',HOLDERS_DECLINING:'Holder menurun',HOLDERS_DECLINING_RAPIDLY:'Holder menurun cepat',MEANINGFUL_BUY_FLOW_WEAK:'Flow buy belum cukup',BUYER_CONCENTRATION_HIGH:'Konsentrasi buyer tinggi',MOMENTUM_OUTSIDE_RANGE:'Momentum di luar range',PRICE_UNSTABLE_OR_ENTRY_LATE:'Drawdown / kenaikan harga melewati batas',LARGE_SELL_ALREADY_PRESENT:'Ada sell ≥$250',DUMP_ALREADY_OBSERVED:'Dump parah sudah teramati',NOT_YET_DUMPED_SEVERELY:'Belum dump parah (drawdown < 60%)',BOUNCE_FROM_TROUGH_TOO_SMALL:'Pantulan dari trough masih < 4,0%',BOUNCE_OVEREXTENDED_LATE_ENTRY:'Filter: Pantulan sudah terlalu tinggi (>15-18%; risiko pucuk)',INSUFFICIENT_BUYERS:'V3 Filter: Pembeli terlalu sedikit (<8 buyers; risiko wash trade)',SELL_PRESSURE_OVERWHELMING:'V3 Filter: Tekanan sell mendominasi flow',BUY_FLOW_NOT_RECOVERED:'Flow buy belum dominan (buy-share < 50%)',TARGET_BOUNCE_30_40:'Target bounce net 30%–40%',TARGET_BOUNCE_20:'V3 Target Take Profit: +18% s/d +20%',PROFIT_LOCK_14_EXIT:'V3 Profit Lock: Mengamankan gain saat peak ≥+14%',EMERGENCY_WHALE_SELL_EXIT:'V3 Emergency Exit: Order sell whale ≥$200 terdeteksi',STAGNANT_NO_MOVEMENT_AFTER_DUMP:'Stagnan: tidak ada pergerakan setelah dump (cut)',ONE_ROUND_ALREADY_ENTERED:'Token sudah pernah dibeli; tidak buy ulang',TARGET_NET_4:'Target net +4%',TARGET_NET:'Target profit tercapai',STOP_LOSS:'Stop loss terpicu',TRAILING_PROFIT:'Trailing profit lock terpicu',MAX_HOLD:'Batas pegang 300 detik',WORKER_STOPPED:'Worker berhenti; exit belum diketahui',WORKER_ENDED_WITHOUT_EXIT:'Worker terputus; exit belum diketahui',TRACKED_WALLET_SOLD_AND_DETAIL_CLOSED:'Wallet dipantau sell; detail ditutup',DETAIL_REPLACED:'Detail diganti token baru',DETAIL_CLOSED:'Detail Chrome ditutup',TRANSFER_TIME_MISSING_OR_FUTURE:'Waktu transfer tidak valid',EXIT_QUOTE_UNAVAILABLE_AFTER_DELAY:'Quote exit tidak tersedia setelah jeda',WHALE_SELL_PRESENT_BEFORE_ENTRY:'Filter V2: Terdeteksi whale sell ≥$300 (skip dump)',SELL_VOLUME_OVERWHELMING:'Filter V2: Tekanan sell volume terlalu masif (skip)',PROFIT_LOCK_20_EXIT:'V2 Lock Profit: Mengamankan gain +20% (trailing lock)',LARGE_SELL_WHALE_DUMP_EXIT:'V2 Emergency Exit: Order sell whale ≥$250 terdeteksi',STAIRCASE_WAITING_CONFIRMATION:'V4 Staircase: Menunggu konfirmasi kenaikan bertahap (2-6s)',STAIRCASE_BREAKDOWN_BELOW_TROUGH:'V4 Staircase: Harga breakdown di bawah trough (fake spike terhindar)',STAIRCASE_SPIKE_COLLAPSED:'V4 Staircase: Spike ambruk >10% dalam jendela konfirmasi',STAIRCASE_CONFIRMATION_TIMEOUT:'V4 Staircase: Waktu konfirmasi habis tanpa kelanjutan'};
-const explain=p=>{const e=p.lastEvent??{};if(e.reason)return reasons[e.reason]??e.reason;if(e.type==='PAPER_ENTRY_CANCELLED'&&e.reasons?.length)return e.reasons.map(r=>reasons[r]??r).join('; ');if(['OPEN','EXIT_PENDING'].includes(p.phase))return e.type==='PAPER_BUY'?'Paper buy terisi':(e.type==='PAPER_EXIT_SIGNAL'?'Menunggu quote exit':'Posisi terbuka');const d=p.lastDecision;return d?.reasons?.length?d.reasons.map(r=>reasons[r]??r).join('; '):d?.allowed?'Syarat entry terpenuhi':'Menunggu data realtime';};
-let state=null,wallets=[],dirty=false,editing=-1,sortKey='entryAt',sortDir=-1,busy=false;
-function renderWallets(){$('wallets').innerHTML=wallets.map((a,i)=>`<tr><td>${i+1}</td><td class="mono">${esc(a)}</td><td><a href="https://gmgn.ai/sol/address/${esc(a)}" target="_blank" rel="noopener noreferrer">Buka GMGN ↗</a></td><td><button class="small-btn" data-edit="${i}">Edit</button> <button class="small-btn danger" data-delete="${i}">Hapus</button></td></tr>`).join('');}
-function renderPositions(){if(!state)return;const laneFilter=$('lane').value,hourFilter=$('hour').value;let ps=state.positions.filter(p=>{const text=($('search').value||'').toLowerCase(),phase=$('phase').value;const pLane=p.laneLabel||(p.version?.includes('v4')?'V4':(p.version?.includes('v3')?'V3':(p.version?.includes('v2')?'V2':'V1')));const pTime=p.entryAt??p.lastEvent?.observedAt??(p.timestamp?p.timestamp*1000:null);const pHour=pTime?String(Math.floor(pTime/3600000)*3600000):null;const matchHour=hourFilter==='all'||pHour===hourFilter;return(!text||`${p.symbol} ${p.mint}`.toLowerCase().includes(text))&&(laneFilter==='all'||pLane===laneFilter)&&matchHour&&($('run').value==='all'||p.run===$('run').value)&&(phase==='all'||phase==='live'&&p.live&&p.captureActive||phase==='entry'&&p.entryAt!==null||phase==='closed'&&p.netReturnPercent!==null||phase==='missing'&&p.phase==='CENSORED'||phase==='rejected'&&p.entryAt===null)});
-ps.sort((a,b)=>{const x=a[sortKey],y=b[sortKey];if(x==null)return y==null?0:1;if(y==null)return-1;return(typeof x==='number'?x-y:String(x).localeCompare(String(y)))*sortDir});
-$('positions').innerHTML=ps.length?ps.map(p=>{const n=p.netReturnPercent??p.estimatedOpenNetPercent,open=p.netReturnPercent===null&&p.estimatedOpenNetPercent!==null;const laneBadge=p.laneLabel||(p.version?.includes('v4')?'V4':(p.version?.includes('v3')?'V3':(p.version?.includes('v2')?'V2':'V1')));const badgeStyle=laneBadge==='V4'?'background:#361f42;color:#d884ff;':(laneBadge==='V3'?'background:#3d2f14;color:#e9ce8f;':(laneBadge==='V2'?'background:#163529;color:var(--green);':''));const swapBuyHtml=p.swapBuyPrice?`<div class="mono" style="font-weight:600">${num(p.swapBuyPrice,10)}</div>${p.swapBuySpreadPct!=null?`<div class="${p.swapBuySpreadPct<=0?'good':'bad'}" style="font-size:11px">${p.swapBuySpreadPct>0?'+':''}${num(p.swapBuySpreadPct,1)}% vs sck</div>`:''}${p.swapBuyLatencyMs?`<small class="muted">${p.swapBuyLatencyMs}ms</small>`:''}`:(p.swapBuyError?`<span class="bad" style="font-size:11px">${esc(p.swapBuyError)}</span>`:'<span class="muted">—</span>');const swapSellHtml=(p.swapSellPrice1||p.swapSellPrice2)?`<div class="mono" style="font-size:11px"><span class="muted">1:</span> ${num(p.swapSellPrice1,10)}</div><div class="mono" style="font-size:11px"><span class="muted">2:</span> ${num(p.swapSellPrice2,10)}</div>${p.swapSellDeltaPct!=null?`<div class="${p.swapSellDeltaPct>=0?'good':'bad'}" style="font-size:11px">Δ1s: ${p.swapSellDeltaPct>0?'+':''}${num(p.swapSellDeltaPct,2)}%</div>`:''}${p.swapSellSpreadPct!=null?`<small class="muted">${p.swapSellSpreadPct>0?'+':''}${num(p.swapSellSpreadPct,1)}% vs sck</small>`:''}`:'<span class="muted">—</span>';return`<tr><td><a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener noreferrer">${esc(p.symbol||short(p.mint))} ↗</a> <span class="badge" style="font-size:10px;padding:2px 6px;${badgeStyle}">${laneBadge}</span><div class="muted mono" title="${esc(p.mint)}">${esc(short(p.mint))}</div></td><td>${esc(p.phase)}${p.live&&p.captureActive?'<div class="good">socket dipantau</div>':''}</td><td>${time(p.entryAt)}</td><td class="mono">${num(p.entryPrice,12)}</td><td>${swapBuyHtml}</td><td>${time(p.exitAt)}</td><td class="mono">${num(p.exitPrice,12)}</td><td>${swapSellHtml}</td><td class="${n>0?'good':n<0?'bad':''}">${num(n)}${n==null?'':'%'}${open?'<div class="muted">estimasi terbuka</div>':''}</td><td class="${p.pnlUsd>0?'good':p.pnlUsd<0?'bad':''}">${money(p.pnlUsd)}</td><td>${num(p.facts?.holderCount,0)} / ${num(p.facts?.holderGrowth15s,0)}</td><td>${num(p.facts?.buyShareUsdPercent)}${p.facts?.buyShareUsdPercent==null?'':'%'}</td><td class="reason">${esc(explain(p))}</td></tr>`}).join(''):'<tr><td class="empty" colspan="13">Belum ada token pada filter ini. Entry hanya dipertimbangkan setelah transfer baru dan data memenuhi rules.</td></tr>';}
-function render(){const s=state.summary,w=state.worker;const s1=state.summaryV1||s,s2=state.summaryV2||{entries:0,closed:0,profit:0,loss:0,realizedPnlUsd:0,meanNetPercent:null,winRatePercent:null},s3=state.summaryV3||{entries:0,closed:0,profit:0,loss:0,realizedPnlUsd:0,meanNetPercent:null,winRatePercent:null},s4=state.summaryV4||{entries:0,closed:0,profit:0,loss:0,realizedPnlUsd:0,meanNetPercent:null,winRatePercent:null};$('tokens').textContent=s.tokensObserved;$('entries').textContent=s.entries;$('closed-count').textContent=`${s.closed} sudah selesai`;$('open').textContent=s.open;$('win-loss').textContent=`${s.profit} / ${s.loss}`;$('win-rate').textContent=`Win rate ${num(s.winRatePercent)}${s.winRatePercent==null?'':'%'}`;$('pnl').textContent=money(s.realizedPnlUsd);$('pnl').className='value '+(s.realizedPnlUsd>0?'good':s.realizedPnlUsd<0?'bad':'');$('mean').textContent=`Rata-rata ${num(s.meanNetPercent)}${s.meanNetPercent==null?'':'%'}`;$('missing').textContent=s.missing;$('capture-count').textContent=`${state.positions.filter(p=>p.live&&p.captureActive).length} detail aktif`;
-$('v1-entries').textContent=s1.entries;$('v1-closed').textContent=s1.closed;$('v1-win-loss').textContent=`${s1.profit} / ${s1.loss}`;$('v1-win-rate').textContent=s1.winRatePercent!=null?`${num(s1.winRatePercent,1)}%`:'—';$('v1-pnl').textContent=money(s1.realizedPnlUsd);$('v1-pnl').className=s1.realizedPnlUsd>0?'good':s1.realizedPnlUsd<0?'bad':'';$('v1-mean').textContent=s1.meanNetPercent!=null?`${num(s1.meanNetPercent,1)}%`:'—';
-$('v2-entries').textContent=s2.entries;$('v2-closed').textContent=s2.closed;$('v2-win-loss').textContent=`${s2.profit} / ${s2.loss}`;$('v2-win-rate').textContent=s2.winRatePercent!=null?`${num(s2.winRatePercent,1)}%`:'—';$('v2-pnl').textContent=money(s2.realizedPnlUsd);$('v2-pnl').className=s2.realizedPnlUsd>0?'good':s2.realizedPnlUsd<0?'bad':'';$('v2-mean').textContent=s2.meanNetPercent!=null?`${num(s2.meanNetPercent,1)}%`:'—';
-$('v3-entries').textContent=s3.entries;$('v3-closed').textContent=s3.closed;$('v3-win-loss').textContent=`${s3.profit} / ${s3.loss}`;$('v3-win-rate').textContent=s3.winRatePercent!=null?`${num(s3.winRatePercent,1)}%`:'—';$('v3-pnl').textContent=money(s3.realizedPnlUsd);$('v3-pnl').className=s3.realizedPnlUsd>0?'good':s3.realizedPnlUsd<0?'bad':'';$('v3-mean').textContent=s3.meanNetPercent!=null?`${num(s3.meanNetPercent,1)}%`:'—';
-$('v4-entries').textContent=s4.entries;$('v4-closed').textContent=s4.closed;$('v4-win-loss').textContent=`${s4.profit} / ${s4.loss}`;$('v4-win-rate').textContent=s4.winRatePercent!=null?`${num(s4.winRatePercent,1)}%`:'—';$('v4-pnl').textContent=money(s4.realizedPnlUsd);$('v4-pnl').className=s4.realizedPnlUsd>0?'good':s4.realizedPnlUsd<0?'bad':'';$('v4-mean').textContent=s4.meanNetPercent!=null?`${num(s4.meanNetPercent,1)}%`:'—';
-const hourly=state.hourlyComparison||[];
-$('hourly-rows').innerHTML=hourly.length?hourly.map(h=>{
-  const v1Wl=`${h.v1?.profit||0}/${h.v1?.loss||0}`, v1Pnl=money(h.v1?.realizedPnlUsd||0), v1Cls=(h.v1?.realizedPnlUsd||0)>0?'good':(h.v1?.realizedPnlUsd||0)<0?'bad':'';
-  const v2Wl=`${h.v2?.profit||0}/${h.v2?.loss||0}`, v2Pnl=money(h.v2?.realizedPnlUsd||0), v2Cls=(h.v2?.realizedPnlUsd||0)>0?'good':(h.v2?.realizedPnlUsd||0)<0?'bad':'';
-  const v3Wl=`${h.v3?.profit||0}/${h.v3?.loss||0}`, v3Pnl=money(h.v3?.realizedPnlUsd||0), v3Cls=(h.v3?.realizedPnlUsd||0)>0?'good':(h.v3?.realizedPnlUsd||0)<0?'bad':'';
-  const v4Wl=`${h.v4?.profit||0}/${h.v4?.loss||0}`, v4Pnl=money(h.v4?.realizedPnlUsd||0), v4Cls=(h.v4?.realizedPnlUsd||0)>0?'good':(h.v4?.realizedPnlUsd||0)<0?'bad':'';
-  const totPnl=money(h.total.realizedPnlUsd), totCls=h.total.realizedPnlUsd>0?'good':h.total.realizedPnlUsd<0?'bad':'';
-  return `<tr><td><strong>${esc(h.label)}</strong></td><td>${v1Wl}</td><td class="${v1Cls}"><strong>${v1Pnl}</strong></td><td>${v2Wl}</td><td class="${v2Cls}"><strong>${v2Pnl}</strong></td><td>${v3Wl}</td><td class="${v3Cls}"><strong>${v3Pnl}</strong></td><td>${v4Wl}</td><td class="${v4Cls}"><strong>${v4Pnl}</strong></td><td class="${totCls}"><strong>${totPnl}</strong></td></tr>`;
-}).join(''):'<tr><td class="empty" colspan="10">Belum ada data per jam.</td></tr>';
-const selectedHour=$('hour').value;
-$('hour').innerHTML='<option value="all">Semua Jam</option>'+hourly.map(h=>`<option value="${h.hourTimestamp}">${esc(h.label)}</option>`).join('');
-$('hour').value=[...$('hour').options].some(o=>o.value===selectedHour)?selectedHour:'all';
-$('worker-badge').textContent=w.active?(w.status==='starting'?'STARTING':'RUNNING · PAPER'):(w.status==='failed'?'FAILED':'STOPPED');$('process').textContent=w.pid?`PID ${w.pid} · ${w.status??'running'}`:'Belum dimulai';$('poll').textContent=time(w.lastPollAt);$('socket').textContent=time(w.lastSocketAt);$('api-health').textContent=w.lastPollAt?(w.lastPollComplete?`JSON valid · HTTP ${w.lastPollStatus}`:`Polling terganggu · HTTP ${w.lastPollStatus}`):'Belum ada polling';$('api-health').className=w.lastPollAt?(w.lastPollComplete?'good':'bad'):'muted';$('worker-error').textContent=w.lastError??'';$('worker-error').className='bad';$('path').textContent=`Data: ${state.paths.data}${w.run?' · Sesi: '+w.run:''}`;$('version').textContent=state.rules.version;$('refresh-time').textContent=`Diperbarui ${time(Date.now())}`;
-const selected=$('run').value;$('run').innerHTML='<option value="all">Semua sesi</option>'+state.runs.slice().reverse().map(r=>`<option value="${esc(r.id)}">${esc(r.id)}${r.current?' · terbaru':''}</option>`).join('');$('run').value=[...$('run').options].some(o=>o.value===selected)?selected:'all';
-$('events').innerHTML=state.recentEvents.length?state.recentEvents.map(e=>{if(e.type==='SWAP_BUY_QUOTE')return`<div>${time(e.observedAt)} · <span style="color:var(--blue)">SWAP BUY QUOTE</span> · ${esc(e.transfer?.symbol||short(e.mint))} · $${num(e.impliedPriceUsd,10)}${e.latencyMs?' ('+e.latencyMs+'ms)':''}</div>`;if(e.type==='SWAP_SELL_QUOTES')return`<div>${time(e.observedAt)} · <span style="color:var(--green)">SWAP SELL QUOTES (2x jeda 1s)</span> · ${esc(e.transfer?.symbol||short(e.mint))} · Q1 $${num(e.impliedPriceUsd1,10)} → Q2 $${num(e.impliedPriceUsd2,10)}${e.priceDeltaPct!=null?' (Δ1s '+num(e.priceDeltaPct,2)+'%)':''}</div>`;return`<div>${time(e.observedAt)} · ${esc(e.type)} · ${esc(e.transfer?.symbol||short(e.mint))}${e.reason?' · '+esc(reasons[e.reason]??e.reason):''}</div>`;}).join(''):'Belum ada event.';const h=state.historical;$('historical').textContent=h?`Pembanding historis (bukan hasil worker ini): ${h.closed} trade selesai, ${h.profit} profit / ${h.loss} rugi, total ${money(h.totalPnlUsd)}. Rules masih eksperimental.`:'Rules masih eksperimental. Data socket dan API disimpan per 30 menit.';renderPositions();}
-function error(s){$('error').textContent=s;$('error').style.display=s?'block':'none'}
-const basePath = window.location.pathname.startsWith('/profit4') ? '/profit4' : '';
-async function refresh(){try{const r=await fetch(`${basePath}/api/state`);if(!r.ok)throw Error(`Server HTTP ${r.status}`);state=await r.json();if(!dirty){wallets=[...state.config.addresses];renderWallets()}render()}catch(e){error(e.message)}}
-async function action(path,value={}){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);error('');try{const r=await fetch(`${basePath}${path}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(value)}),v=await r.json();if(!r.ok)throw Error(v.error||`HTTP ${r.status}`);return v}catch(e){error(e.message);throw e}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);await refresh()}}
-$('start').onclick=()=>action('/api/worker/start').catch(()=>{});$('stop').onclick=()=>action('/api/worker/stop').catch(()=>{});
-$('add').onclick=()=>{let a=$('wallet-input').value.trim();const match=a.match(/^https:\/\/gmgn\.ai\/sol\/address\/([1-9A-HJ-NP-Za-km-z]+)(?:[/?#].*)?$/);if(match)a=match[1];if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a))return error('Masukkan address atau URL profil wallet Solana.');if(wallets.includes(a)&&wallets.indexOf(a)!==editing)return error('Wallet sudah ada.');if(editing>=0)wallets[editing]=a;else wallets.push(a);editing=-1;dirty=true;$('wallet-input').value='';$('add').textContent='Tambah ke daftar';$('wallet-message').textContent='Ada perubahan belum disimpan. Simpan & restart akan menerapkan daftar baru.';error('');renderWallets()};
-$('wallets').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.edit!==undefined){editing=Number(b.dataset.edit);$('wallet-input').value=wallets[editing];$('add').textContent='Terapkan edit';$('wallet-input').focus()}else if(b.dataset.delete!==undefined){wallets.splice(Number(b.dataset.delete),1);dirty=true;editing=-1;renderWallets();$('wallet-message').textContent='Ada perubahan belum disimpan. Simpan & restart akan menerapkan daftar baru.'}};
-$('save').onclick=async()=>{try{const v=await action('/api/wallets',{addresses:wallets});if(v){dirty=false;$('wallet-message').textContent='Daftar disimpan. Worker direstart dengan wallet terbaru.';await refresh()}}catch{}};
-['search','lane','hour','phase','run'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',renderPositions));document.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{sortDir=sortKey===th.dataset.sort?-sortDir:-1;sortKey=th.dataset.sort;renderPositions()});refresh();setInterval(refresh,2000);
-</script></body></html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#090d16" />
+    <title>Profit4 · Research Dashboard</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090d16;
+        --panel: rgba(17, 24, 39, 0.8);
+        --edge: rgba(255, 255, 255, 0.09);
+        --muted: #9ca3af;
+        --text: #f3f4f6;
+        --green: #34d399;
+        --red: #f87171;
+        --blue: #60a5fa;
+        --accent: #f59e0b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        background-image:
+          radial-gradient(at 0% 0%, rgba(245, 158, 11, 0.06), transparent 50%),
+          radial-gradient(
+            at 100% 100%,
+            rgba(59, 130, 246, 0.06),
+            transparent 50%
+          );
+        color: var(--text);
+        font:
+          14px/1.5 Inter,
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1400px;
+        margin: auto;
+        padding: 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      h1 {
+        font-size: 23px;
+        letter-spacing: -0.6px;
+        margin: 0;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0;
+      }
+      p {
+        color: var(--muted);
+        margin: 6px 0;
+      }
+      header,
+      .row,
+      .session-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      header {
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--edge);
+      }
+      .eyebrow {
+        font-size: 10px;
+        letter-spacing: 2px;
+        color: var(--accent);
+        font-weight: 800;
+      }
+      .actions,
+      .filter {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+        padding: 9px 12px;
+        background: #172032;
+        color: var(--text);
+        max-width: 100%;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:hover,
+      a:hover {
+        filter: brightness(1.2);
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 3px;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      button.primary {
+        background: #059669;
+        color: #fff;
+        font-weight: 700;
+      }
+      button.danger {
+        color: var(--red);
+      }
+      a {
+        color: var(--blue);
+        text-decoration: none;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: rgba(59, 130, 246, 0.14);
+        color: var(--blue);
+        border: 1px solid rgba(59, 130, 246, 0.22);
+        border-radius: 6px;
+        padding: 5px 9px;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .badge.paper {
+        background: rgba(245, 158, 11, 0.12);
+        color: #fbbf24;
+        border-color: rgba(245, 158, 11, 0.25);
+      }
+      .badge.live {
+        color: var(--green);
+        background: rgba(16, 185, 129, 0.12);
+        border-color: rgba(16, 185, 129, 0.25);
+      }
+      .pulse {
+        width: 6px;
+        height: 6px;
+        background: var(--green);
+        border-radius: 50%;
+        box-shadow: 0 0 8px var(--green);
+      }
+      .session-bar {
+        padding: 14px 16px;
+        background: linear-gradient(
+          120deg,
+          rgba(59, 130, 246, 0.12),
+          var(--panel)
+        );
+        border: 1px solid var(--edge);
+        border-radius: 12px;
+      }
+      .session-bar label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #run {
+        min-width: 200px;
+      }
+      .desktop-tabs {
+        display: flex;
+        gap: 6px;
+        border-bottom: 1px solid var(--edge);
+        padding-bottom: 10px;
+      }
+      .tab-button {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-weight: 650;
+      }
+      .tab-button.active {
+        color: #fbbf24;
+        background: rgba(245, 158, 11, 0.12);
+        border-color: rgba(245, 158, 11, 0.25);
+      }
+      .count {
+        font:
+          11px ui-monospace,
+          monospace;
+        padding: 1px 5px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 4px;
+      }
+      .tab-pane {
+        display: none;
+      }
+      .tab-pane.active {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 12px;
+      }
+      .card,
+      .panel {
+        border: 1px solid var(--edge);
+        border-radius: 12px;
+        background: var(--panel);
+        padding: 18px;
+      }
+      .card .label {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .card .value {
+        font:
+          700 25px ui-monospace,
+          monospace;
+        margin: 10px 0;
+      }
+      .card small {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .card.highlight {
+        border-color: rgba(16, 185, 129, 0.3);
+      }
+      .good {
+        color: var(--green);
+      }
+      .bad {
+        color: var(--red);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .mono {
+        font-family: ui-monospace, monospace;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        margin-top: 14px;
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        white-space: nowrap;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--edge);
+        font-size: 12px;
+      }
+      thead {
+        background: #162031;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 650;
+      }
+      tbody tr:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+      td:first-child,
+      th:first-child {
+        position: sticky;
+        left: 0;
+        background: #111827;
+        z-index: 1;
+      }
+      th[data-sort] {
+        cursor: pointer;
+      }
+      td.reason {
+        white-space: normal;
+        min-width: 210px;
+        max-width: 320px;
+      }
+      td.empty {
+        position: static;
+        text-align: center;
+        color: var(--muted);
+        padding: 28px;
+        white-space: normal;
+      }
+      .status-grid,
+      .rule-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .status-grid small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .rule {
+        padding: 12px;
+        background: rgba(59, 130, 246, 0.06);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+        overflow-wrap: anywhere;
+      }
+      .rule strong {
+        display: block;
+        font-size: 12px;
+        color: var(--blue);
+      }
+      .rule span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .rule-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .log {
+        max-height: 230px;
+        overflow: auto;
+        font:
+          12px/1.9 ui-monospace,
+          monospace;
+        margin-top: 12px;
+        color: var(--muted);
+      }
+      .small-btn {
+        padding: 4px 8px;
+        font-size: 11px;
+      }
+      .hint {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+      .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+        font-size: 12px;
+      }
+      .notice {
+        padding: 12px 14px;
+        border-radius: 8px;
+        border: 1px solid rgba(245, 158, 11, 0.25);
+        background: rgba(245, 158, 11, 0.07);
+        color: #fcd34d;
+        font-size: 12px;
+      }
+      .control-panel {
+        border-color: rgba(59, 130, 246, 0.25);
+        background: linear-gradient(120deg, rgba(8, 47, 73, 0.3), var(--panel));
+      }
+      .worker-action-status {
+        margin: 12px 0 0;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .worker-action-status.success {
+        color: #a7f3d0;
+        background: rgba(16, 185, 129, 0.12);
+      }
+      .worker-action-status.failure {
+        color: #fecaca;
+        background: rgba(239, 68, 68, 0.12);
+      }
+      .disabled-panel {
+        border-color: rgba(245, 158, 11, 0.25);
+      }
+      #wallet-input {
+        flex: 1;
+        min-width: 200px;
+      }
+      .wallet-message {
+        font-size: 12px;
+      }
+      #error {
+        display: none;
+        color: var(--red);
+        padding: 12px;
+        background: #361d26;
+        border-radius: 8px;
+      }
+      footer {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .bottom-nav {
+        display: none;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      fieldset {
+        border: 0;
+        padding: 0;
+        margin: 0;
+        min-width: 0;
+      }
+      .autobuy-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .autobuy-card {
+        min-width: 0;
+        padding: 14px;
+        background: rgba(59, 130, 246, 0.06);
+        border: 1px solid var(--edge);
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .config-label {
+        color: var(--blue);
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .ab-input-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .ab-input-grid label {
+        color: var(--muted);
+        font-size: 11px;
+        display: grid;
+        gap: 5px;
+      }
+      .wallet-balance {
+        color: #34d399;
+        font-size: 18px;
+        font-weight: 800;
+      }
+      @media (max-width: 1100px) {
+        .autobuy-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 640px) {
+        .autobuy-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      #autobuy-form .rule {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 12px;
+      }
+      #autobuy-form input,
+      #autobuy-form select {
+        width: 100%;
+      }
+      #autobuy-form input[type="checkbox"] {
+        width: auto;
+      }
+      #real-audit-dialog,
+      #success-modal {
+        color: var(--text);
+        background: #111827;
+        border: 1px solid var(--edge);
+        border-radius: 12px;
+        padding: 22px;
+        width: min(900px, calc(100vw - 24px));
+        max-height: 85vh;
+        overflow: auto;
+      }
+      #success-modal {
+        width: min(440px, calc(100vw - 32px));
+        text-align: center;
+        border: 1px solid #10b981;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 20px rgba(16, 185, 129, 0.2);
+      }
+      #real-audit-dialog::backdrop,
+      #success-modal::backdrop {
+        background: rgba(0, 0, 0, 0.75);
+      }
+      .modal-icon {
+        font-size: 40px;
+        line-height: 1;
+        margin-bottom: 12px;
+      }
+      .modal-title {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        color: #10b981;
+      }
+      .modal-body {
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.5;
+        margin-bottom: 20px;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+      }
+      .wrap {
+        overflow-wrap: anywhere;
+      }
+      pre.wrap {
+        white-space: pre-wrap;
+      }
+      .scope-note {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      @media (max-width: 1100px) {
+        .cards {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        .desktop-tabs {
+          flex-wrap: wrap;
+        }
+        .status-grid,
+        .rule-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 640px) {
+        main {
+          padding: 14px 12px 100px;
+          gap: 14px;
+        }
+        h1 {
+          font-size: 21px;
+        }
+        header .actions {
+          gap: 6px;
+        }
+        .cards {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+        }
+        .card,
+        .panel {
+          padding: 14px;
+        }
+        .card .value {
+          font-size: 23px;
+        }
+        .desktop-tabs {
+          display: none;
+        }
+        .status-grid,
+        .rule-grid {
+          grid-template-columns: 1fr;
+        }
+        .bottom-nav {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          padding: 8px 5px calc(8px + env(safe-area-inset-bottom));
+          background: rgba(9, 13, 22, 0.97);
+          border-top: 1px solid var(--edge);
+          z-index: 10;
+          backdrop-filter: blur(12px);
+        }
+        .bottom-nav .tab-button {
+          flex-direction: column;
+          gap: 3px;
+          font-size: 10px;
+          padding: 7px 2px;
+        }
+        .bottom-nav .icon {
+          font-size: 19px;
+        }
+        .session-bar {
+          padding: 12px;
+        }
+        .session-bar .actions {
+          width: 100%;
+        }
+        #run {
+          width: 100%;
+          min-width: 0;
+        }
+        .session-bar label {
+          width: 100%;
+        }
+        .filter input,
+        .filter select {
+          flex: 1;
+          min-width: 125px;
+        }
+        .filter {
+          margin-top: 10px;
+        }
+        .pagination .actions {
+          gap: 5px;
+        }
+        .scope-note {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">RESEARCH · PAPER TRADING</div>
+          <h1>📊 Profit4 Dashboard</h1>
+          <p>Transfer masuk → observasi → simulasi BUY / SELL · Satu putaran</p>
+        </div>
+        <div class="actions">
+          <span class="badge paper">PAPER</span
+          ><span id="worker-badge" class="badge">Memuat…</span
+          ><a data-link="comparison" class="badge">📊 Komparasi ↗</a
+          ><a data-link="audit" class="badge">🛡️ Audit ↗</a>
+        </div>
+      </header>
+      <div class="session-bar">
+        <label for="run"
+          >Sesi riset<select id="run">
+            <option value="all">Memuat sesi…</option>
+          </select></label
+        >
+        <div class="actions">
+          <span id="session-badge" class="badge">—</span
+          ><span id="session-start" class="badge">Mulai: —</span
+          ><span id="session-trades" class="badge">0 trade selesai</span
+          ><span id="refresh-time" class="scope-note" role="status"
+            >Menunggu data…</span
+          >
+        </div>
+      </div>
+      <div id="error" role="alert"></div>
+      <nav class="desktop-tabs" aria-label="Bagian dashboard">
+        <button class="tab-button active" data-tab="overview">
+          📊 Ringkasan</button
+        ><button class="tab-button" data-tab="positions">
+          🎯 Posisi Aktif <span class="count" data-count="open">0</span></button
+        ><button class="tab-button" data-tab="history">
+          📜 Riwayat Transaksi
+          <span class="count" data-count="history">0</span></button
+        ><button class="tab-button" data-tab="onchain">
+          💳 On-Chain &amp; Auto-Buy
+        </button>
+      </nav>
+      <section
+        id="pane-overview"
+        class="tab-pane active"
+        aria-label="Ringkasan"
+      >
+        <div class="cards">
+          <div class="card">
+            <div class="label">Token diamati</div>
+            <div class="value" id="tokens">0</div>
+            <small id="capture-count">0 detail aktif</small>
+          </div>
+          <div class="card">
+            <div class="label">Entry paper</div>
+            <div class="value" id="entries">0</div>
+            <small id="closed-count">0 sudah selesai</small>
+          </div>
+          <div class="card">
+            <div class="label">Posisi terbuka</div>
+            <div class="value" id="open">0</div>
+            <small>Estimasi belum direalisasi</small>
+          </div>
+          <div class="card">
+            <div class="label">Untung / rugi</div>
+            <div class="value" id="win-loss">0 / 0</div>
+            <small id="win-rate">Win rate —</small>
+          </div>
+          <div class="card highlight">
+            <div class="label">PnL bersih selesai</div>
+            <div class="value" id="pnl">$0.00</div>
+            <small id="mean">Rata-rata —</small>
+          </div>
+          <div class="card">
+            <div class="label">Exit kurang data</div>
+            <div class="value" id="missing">0</div>
+            <small>Hasil belum diketahui</small>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>📊 Perbandingan lane</h2>
+            <span id="lane-count" class="badge">—</span>
+          </div>
+          <p>
+            Hasil paper berdasarkan sesi terpilih. Quote swap ditampilkan
+            terpisah dari PnL simulasi.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Lane</th>
+                  <th>Entry</th>
+                  <th>Selesai</th>
+                  <th>Win / Loss</th>
+                  <th>Win rate</th>
+                  <th>PnL bersih</th>
+                  <th>Rata-rata net</th>
+                  <th>Kurang data</th>
+                </tr>
+              </thead>
+              <tbody id="lane-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>📈 Breakdown per jam · WIB</h2>
+          <p>
+            Dikelompokkan menurut jam entry; token tanpa entry memakai waktu
+            event atau transfer.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead id="hourly-head"></thead>
+              <tbody id="hourly-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>📋 Rules sesi</h2>
+            <span class="badge paper">Rules tersimpan</span>
+          </div>
+          <div id="rules" class="rule-list"></div>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>🛰️ Worker &amp; koneksi</h2>
+            <span class="badge">Worker saat ini</span>
+          </div>
+          <div class="status-grid">
+            <div><small>Proses</small><span id="process">—</span></div>
+            <div>
+              <small>Poll wallet terakhir · WIB</small><span id="poll">—</span>
+            </div>
+            <div>
+              <small>Socket terakhir · WIB</small><span id="socket">—</span>
+            </div>
+            <div>
+              <small>Respons aktivitas</small><span id="api-health">—</span>
+            </div>
+          </div>
+          <p id="worker-error" class="bad"></p>
+          <p id="path" class="mono hint wrap"></p>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>🔎 Observasi &amp; token belum entry</h2>
+            <span id="observation-count" class="badge">0 token</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Waktu</th>
+                  <th>Lane</th>
+                  <th>Wallet asal</th>
+                  <th>Status</th>
+                  <th>Holder / Δ15s</th>
+                  <th>Buy-share 5s</th>
+                  <th>Alasan</th>
+                </tr>
+              </thead>
+              <tbody id="observations"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>⚡ Event terbaru</h2>
+          <div id="events" class="log">Belum ada event.</div>
+        </div>
+      </section>
+      <section id="pane-positions" class="tab-pane" aria-label="Posisi Aktif">
+        <div class="panel">
+          <div class="row">
+            <h2>
+              🎯 Posisi Aktif <span class="count" data-count="open">0</span>
+            </h2>
+            <span class="badge live">Estimasi paper</span>
+          </div>
+          <p>
+            Posisi yang sudah entry pada worker aktif. Waktu ditampilkan dalam
+            WIB.
+          </p>
+          <div class="hint">Geser tabel untuk melihat seluruh kolom →</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Lane</th>
+                  <th>Wallet asal</th>
+                  <th>Entry WIB</th>
+                  <th>Harga entry</th>
+                  <th>Socket terbaru</th>
+                  <th>Floating net %</th>
+                  <th>Hold</th>
+                  <th>Holder / Δ15s</th>
+                  <th>Buy-share 5s</th>
+                  <th>Status / alasan</th>
+                </tr>
+              </thead>
+              <tbody id="positions"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <section
+        id="pane-history"
+        class="tab-pane"
+        aria-label="Riwayat Transaksi"
+      >
+        <div class="panel">
+          <h2>
+            📜 Riwayat Transaksi
+            <span class="count" data-count="history">0</span>
+          </h2>
+          <div class="filter">
+            <input
+              id="search"
+              placeholder="Cari token / mint"
+              aria-label="Cari token"
+            /><select id="lane" aria-label="Filter lane">
+              <option value="all">Semua lane</option></select
+            ><select id="hour" aria-label="Filter jam">
+              <option value="all">Semua jam</option></select
+            ><select id="phase" aria-label="Filter status">
+              <option value="all">Semua status</option>
+              <option value="closed">Trade selesai</option>
+              <option value="missing">Exit kurang data</option>
+            </select>
+          </div>
+          <p>
+            PnL berasal dari model paper. Quote swap merupakan pembanding harga.
+            Klik judul kolom untuk sorting.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-sort="symbol">Token ↕</th>
+                  <th>Lane</th>
+                  <th data-sort="phase">Status ↕</th>
+                  <th data-sort="entryAt">BUY WIB ↕</th>
+                  <th data-sort="exitAt">SELL WIB ↕</th>
+                  <th>Harga socket entry → exit</th>
+                  <th>Quote BUY</th>
+                  <th>Quote SELL 1 → 2</th>
+                  <th data-sort="netReturnPercent">Net % ↕</th>
+                  <th data-sort="pnlUsd">PnL bersih ↕</th>
+                  <th>Alasan exit</th>
+                </tr>
+              </thead>
+              <tbody id="history"></tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <div class="actions">
+              <label for="page-size">Tampilkan</label
+              ><select id="page-size">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option></select
+              ><span id="page-info">0 transaksi</span>
+            </div>
+            <div class="actions">
+              <button id="prev">‹ Prev</button><span id="page-label">1 / 1</span
+              ><button id="next">Next ›</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section
+        id="pane-onchain"
+        class="tab-pane"
+        aria-label="On-Chain & Auto-Buy"
+      >
+        <div class="panel control-panel" id="real-control-panel">
+          <div class="row">
+            <h2>⚡ Real Auto-Buy</h2>
+            <span id="real-enabled-badge" class="badge paper">OFF</span>
+          </div>
+          <p>
+            Eksekusi asli melalui wallet GMGN yang aktif. Posisi paper tetap
+            menjadi pembanding.
+          </p>
+          <div class="notice">
+            Kontrol Auto-Buy dan audit dapat digunakan tanpa password.
+          </div>
+          <div id="admin-session" class="row">
+            <span class="badge live">Kontrol terbuka</span>
+          </div>
+          <form id="autobuy-form">
+            <fieldset id="autobuy-fields" disabled>
+              <div class="autobuy-grid">
+                <div class="autobuy-card">
+                  <label class="config-label" for="real-lane"
+                    >🎯 Lane pemicu Real Buy</label
+                  >
+                  <select id="real-lane" class="config-select">
+                    <option>V1</option>
+                    <option>V2</option>
+                    <option>V3</option>
+                    <option>V4</option>
+                    <option>V5</option>
+                    <option>P4</option>
+                  </select>
+                  <p class="hint">
+                    Hanya sinyal dari lane Profit4 yang dipilih akan memicu
+                    order nyata.
+                  </p>
+                </div>
+                <div class="autobuy-card">
+                  <label class="config-label" for="real-stake-mode"
+                    >💵 Modal per BUY</label
+                  >
+                  <select id="real-stake-mode" class="config-select">
+                    <option value="usd">USD ($)</option>
+                    <option value="sol">SOL (◎)</option>
+                  </select>
+                  <label class="config-label" for="real-stake-usd"
+                    >Modal USD</label
+                  ><input
+                    id="real-stake-usd"
+                    type="number"
+                    min="0.01"
+                    max="10000"
+                    step="0.01"
+                    value="0.5"
+                  />
+                  <label class="config-label" for="real-stake-sol"
+                    >Modal SOL</label
+                  ><input
+                    id="real-stake-sol"
+                    type="number"
+                    min="0.00001"
+                    max="100"
+                    step="0.00001"
+                    value="0.003"
+                  />
+                </div>
+                <div class="autobuy-card">
+                  <label class="config-label"
+                    >🛑 Kuota & manajemen risiko</label
+                  >
+                  <div class="ab-input-grid">
+                    <label
+                      >Max BUY<input
+                        id="real-max-buys"
+                        type="number"
+                        min="0"
+                        max="100000"
+                        step="1"
+                        value="3" /></label
+                    ><label
+                      >Posisi aktif max<input
+                        id="real-max-positions"
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value="1"
+                    /></label>
+                  </div>
+                  <div class="actions">
+                    <button type="button" id="real-unlimited" class="small-btn">
+                      ♾️ Unlimited</button
+                    ><button type="button" id="real-reset" class="small-btn">
+                      ⟳ Reset kuota
+                    </button>
+                  </div>
+                  <div class="ab-input-grid">
+                    <label
+                      >Buy slip %<input
+                        id="real-buy-slip"
+                        type="number"
+                        min="0.1"
+                        max="50"
+                        step="0.1"
+                        value="9" /></label
+                    ><label
+                      >Sell slip %<input
+                        id="real-sell-slip"
+                        type="number"
+                        min="0.1"
+                        max="50"
+                        step="0.1"
+                        value="14"
+                    /></label>
+                  </div>
+                  <label class="config-label" for="real-priority"
+                    >Priority SOL</label
+                  ><input
+                    id="real-priority"
+                    type="number"
+                    min="0"
+                    max="0.1"
+                    step="0.00001"
+                    value="0.0001"
+                  />
+                  <div class="config-hint" id="real-quota-status"></div>
+                </div>
+                <div class="autobuy-card autobuy-wallet">
+                  <div class="config-label">💼 Wallet GMGN riil</div>
+                  <div id="real-wallet" class="mono wrap">Belum terdeteksi</div>
+                  <div id="real-balance" class="wallet-balance">—</div>
+                  <div>
+                    BUY terkonfirmasi / kuota: <b id="real-quota">0 / 3</b>
+                  </div>
+                  <div>
+                    Posisi riil aktif: <b id="real-active-count">0 / 1</b>
+                  </div>
+                  <p id="real-ready" role="status">Menunggu worker Profit4…</p>
+                </div>
+              </div>
+              <div class="actions" style="margin-top: 14px">
+                <button type="submit" class="primary" id="real-save">
+                  Simpan pengaturan</button
+                ><button type="button" id="real-toggle">
+                  Nyalakan Real Auto-Buy
+                </button>
+              </div>
+            </fieldset>
+          </form>
+          <p class="hint">
+            OFF menghentikan BUY baru. Auto-Sell posisi yang sudah dibeli tetap
+            mengikuti pengaturan.
+          </p>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>🎯 Posisi asli yang masih aktif</h2>
+            <span class="badge">Wallet saat ini</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Lane</th>
+                  <th>Status</th>
+                  <th>Token tersisa</th>
+                  <th>Alasan / error</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="real-positions"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>💳 Audit transaksi asli</h2>
+            <span id="real-pnl" class="badge">PnL terkonfirmasi —</span>
+          </div>
+          <div class="filter">
+            <select id="real-scope" aria-label="Cakupan audit">
+              <option value="all">Semua sesi</option>
+              <option value="session">Sesi terpilih</option></select
+            ><input
+              id="real-search"
+              placeholder="Cari token / mint"
+              aria-label="Cari transaksi asli"
+            /><select id="real-filter-lane" aria-label="Lane audit">
+              <option value="">Semua lane</option>
+              <option>V1</option>
+              <option>V2</option>
+              <option>V3</option>
+              <option>V4</option>
+              <option>V5</option>
+              <option>P4</option></select
+            ><select id="real-filter-status" aria-label="Status audit">
+              <option value="">Semua status</option>
+              <option>BUY_PENDING</option>
+              <option>HOLDING</option>
+              <option>SELL_PENDING</option>
+              <option>CLOSED</option>
+              <option>FAILED</option>
+              <option>UNKNOWN</option>
+            </select>
+          </div>
+          <p>
+            Order terkirim masih menunggu konfirmasi. PnL berasal dari perubahan
+            saldo transaksi terkonfirmasi, termasuk fee dan rent/refund;
+            konversi USD memakai harga SOL saat setiap order.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Lane</th>
+                  <th>BUY WIB / order</th>
+                  <th>SELL WIB / order</th>
+                  <th>Status</th>
+                  <th>Modal aktual SOL</th>
+                  <th>Proceeds SOL</th>
+                  <th>Network fee SOL</th>
+                  <th>Net cashflow SOL / USD</th>
+                  <th>Audit</th>
+                </tr>
+              </thead>
+              <tbody id="real-trades"></tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <span id="real-page-info"
+              >Login untuk membuka audit transaksi.</span
+            >
+            <div class="actions">
+              <button id="real-prev">‹ Prev</button
+              ><span id="real-page-label">1 / 1</span
+              ><button id="real-next">Next ›</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel control-panel">
+          <div class="row">
+            <div>
+              <h2>🛰️ Kontrol worker paper</h2>
+              <p>
+                Kontrol ini berlaku untuk worker saat ini pada semua pilihan
+                sesi.
+              </p>
+            </div>
+            <div class="actions">
+              <button class="primary" id="start">Start / Restart</button
+              ><button class="danger" id="stop">Stop worker</button>
+            </div>
+          </div>
+          <p id="worker-action-status" class="worker-action-status" role="status" hidden></p>
+        </div>
+        <div class="panel control-panel">
+          <h2>👛 Wallet yang dipantau</h2>
+          <p>Alamat sumber transfer untuk observasi token.</p>
+          <div class="row">
+            <input
+              id="wallet-input"
+              placeholder="Address wallet atau URL GMGN address"
+              aria-label="Address wallet"
+            /><button id="add">Tambah ke daftar</button
+            ><button class="primary" id="save">Simpan &amp; restart</button>
+          </div>
+          <p id="wallet-message" class="wallet-message">
+            Menyimpan daftar akan restart worker. Posisi terbuka saat restart
+            ditandai exit kurang data.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Wallet</th>
+                  <th>Profil</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="wallets"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>🔄 Quote swap BUY / SELL</h2>
+            <span id="quote-count" class="badge">0 posisi</span>
+          </div>
+          <p>
+            Quote harga AMM sebagai pembanding simulasi, termasuk dua quote SELL
+            dengan jeda sekitar 1 detik.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Lane</th>
+                  <th>BUY WIB</th>
+                  <th>Quote BUY</th>
+                  <th>Deviasi BUY</th>
+                  <th>Latency BUY</th>
+                  <th>SELL WIB</th>
+                  <th>Quote SELL 1</th>
+                  <th>Quote SELL 2</th>
+                  <th>Δ SELL 1s</th>
+                  <th>Deviasi SELL</th>
+                  <th>Latency SELL</th>
+                  <th>Status quote</th>
+                </tr>
+              </thead>
+              <tbody id="quotes"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <footer id="historical"></footer>
+    </main>
+    <dialog id="real-audit-dialog">
+      <div class="row">
+        <h2>Audit transaksi asli</h2>
+        <button id="real-audit-close">Tutup</button>
+      </div>
+      <div id="real-audit-content"></div>
+    </dialog>
+    <dialog id="success-modal">
+      <div class="modal-icon" id="success-modal-icon">✅</div>
+      <div class="modal-title" id="success-modal-title">Berhasil Disimpan</div>
+      <div class="modal-body" id="success-modal-body">Pengaturan berhasil diperbarui.</div>
+      <div class="modal-actions">
+        <button type="button" class="primary" id="success-modal-ok">OK, Mengerti</button>
+      </div>
+    </dialog>
+    <nav class="bottom-nav" aria-label="Navigasi mobile">
+      <button class="tab-button active" data-tab="overview">
+        <span class="icon">📊</span>Ringkasan</button
+      ><button class="tab-button" data-tab="positions">
+        <span class="icon"
+          >🎯 <span class="count" data-count="open">0</span></span
+        >Posisi Aktif</button
+      ><button class="tab-button" data-tab="history">
+        <span class="icon"
+          >📜 <span class="count" data-count="history">0</span></span
+        >Riwayat</button
+      ><button class="tab-button" data-tab="onchain">
+        <span class="icon">💳</span>On-Chain
+      </button>
+    </nav>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id),
+        esc = (s) =>
+          String(s ?? "").replace(
+            /[&<>"']/g,
+            (c) =>
+              ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+              })[c],
+          );
+      const time = (n) =>
+        n != null && Number.isFinite(new Date(n).getTime())
+          ? new Date(n).toLocaleString("id-ID", {
+              timeZone: "Asia/Jakarta",
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hour12: false,
+            })
+          : "—";
+      const num = (n, d = 2) =>
+          n == null || !Number.isFinite(Number(n)) ? "—" : Number(n).toFixed(d),
+        money = (n) => (n == null ? "—" : `${n > 0 ? "+" : ""}$${num(n)}`),
+        pct = (n) => (n == null ? "—" : `${num(n)}%`),
+        short = (s) => (s ? `${s.slice(0, 7)}…${s.slice(-5)}` : "—"),
+        tone = (n) => (n > 0 ? "good" : n < 0 ? "bad" : "");
+      const reasons = {
+        OBSERVATION_NOT_COMPLETE: "Menunggu observasi 20-30 detik",
+        MONITOR_STARTED_TOO_LATE: "Monitor mulai terlambat (>15s)",
+        ENTRY_WINDOW_EXPIRED: "Jendela entry berakhir",
+        PRICE_MISSING_OR_STALE: "Harga belum tersedia / kedaluwarsa",
+        HOLDER_HISTORY_MISSING_OR_STALE:
+          "Riwayat holder belum lengkap / kedaluwarsa",
+        HOLDERS_DECLINING: "Holder menurun",
+        HOLDERS_DECLINING_RAPIDLY: "Holder menurun cepat",
+        MEANINGFUL_BUY_FLOW_WEAK: "Flow buy belum cukup",
+        BUYER_CONCENTRATION_HIGH: "Konsentrasi buyer tinggi",
+        MOMENTUM_OUTSIDE_RANGE: "Momentum di luar range",
+        PRICE_UNSTABLE_OR_ENTRY_LATE:
+          "Drawdown / kenaikan harga melewati batas",
+        LARGE_SELL_ALREADY_PRESENT: "Ada sell ≥$250",
+        DUMP_ALREADY_OBSERVED: "Dump parah sudah teramati",
+        NOT_YET_DUMPED_SEVERELY: "Belum dump parah (drawdown < 60%)",
+        BOUNCE_FROM_TROUGH_TOO_SMALL: "Pantulan dari trough masih < 4,0%",
+        BOUNCE_OVEREXTENDED_LATE_ENTRY:
+          "Filter: Pantulan sudah terlalu tinggi (>15-18%; risiko pucuk)",
+        INSUFFICIENT_BUYERS:
+          "V3 Filter: Pembeli terlalu sedikit (<8 buyers; risiko wash trade)",
+        SELL_PRESSURE_OVERWHELMING: "V3 Filter: Tekanan sell mendominasi flow",
+        BUY_FLOW_NOT_RECOVERED: "Flow buy belum dominan (buy-share < 50%)",
+        TARGET_BOUNCE_30_40: "Target bounce net 30%–40%",
+        TARGET_BOUNCE_20: "V3 Target Take Profit: +18% s/d +20%",
+        PROFIT_LOCK_14_EXIT: "V3 Profit Lock: Mengamankan gain saat peak ≥+14%",
+        EMERGENCY_WHALE_SELL_EXIT:
+          "V3 Emergency Exit: Order sell whale ≥$200 terdeteksi",
+        STAGNANT_NO_MOVEMENT_AFTER_DUMP:
+          "Stagnan: tidak ada pergerakan setelah dump (cut)",
+        ONE_ROUND_ALREADY_ENTERED: "Token sudah pernah dibeli; tidak buy ulang",
+        TARGET_NET_4: "Target net +4%",
+        TARGET_NET: "Target profit tercapai",
+        STOP_LOSS: "Stop loss terpicu",
+        TRAILING_PROFIT: "Trailing profit lock terpicu",
+        MAX_HOLD: "Batas pegang 300 detik",
+        WORKER_STOPPED: "Worker berhenti; exit belum diketahui",
+        WORKER_ENDED_WITHOUT_EXIT: "Worker terputus; exit belum diketahui",
+        TRACKED_WALLET_SOLD_AND_DETAIL_CLOSED:
+          "Wallet dipantau sell; detail ditutup",
+        DETAIL_REPLACED: "Detail diganti token baru",
+        DETAIL_CLOSED: "Detail Chrome ditutup",
+        TRANSFER_TIME_MISSING_OR_FUTURE: "Waktu transfer tidak valid",
+        EXIT_QUOTE_UNAVAILABLE_AFTER_DELAY:
+          "Quote exit tidak tersedia setelah jeda",
+        WHALE_SELL_PRESENT_BEFORE_ENTRY:
+          "Filter V2: Terdeteksi whale sell ≥$300 (skip dump)",
+        SELL_VOLUME_OVERWHELMING:
+          "Filter V2: Tekanan sell volume terlalu masif (skip)",
+        PROFIT_LOCK_20_EXIT:
+          "V2 Lock Profit: Mengamankan gain +20% (trailing lock)",
+        LARGE_SELL_WHALE_DUMP_EXIT:
+          "V2 Emergency Exit: Order sell whale ≥$250 terdeteksi",
+        STAIRCASE_WAITING_CONFIRMATION:
+          "V4 Staircase: Menunggu konfirmasi kenaikan bertahap (2-6s)",
+        STAIRCASE_BREAKDOWN_BELOW_TROUGH:
+          "V4 Staircase: Harga breakdown di bawah trough (fake spike terhindar)",
+        STAIRCASE_SPIKE_COLLAPSED:
+          "V4 Staircase: Spike ambruk >10% dalam jendela konfirmasi",
+        STAIRCASE_CONFIRMATION_TIMEOUT:
+          "V4 Staircase: Waktu konfirmasi habis tanpa kelanjutan",
+      };
+      const explain = (p) => {
+        const e = p.lastEvent ?? {};
+        if (e.reason) return reasons[e.reason] ?? e.reason;
+        if (e.type === "PAPER_ENTRY_CANCELLED" && e.reasons?.length)
+          return e.reasons.map((r) => reasons[r] ?? r).join("; ");
+        if (["OPEN", "EXIT_PENDING"].includes(p.phase))
+          return e.type === "PAPER_BUY"
+            ? "Paper buy terisi"
+            : e.type === "PAPER_EXIT_SIGNAL"
+              ? "Menunggu quote exit"
+              : "Posisi terbuka";
+        const d = p.lastDecision;
+        return d?.reasons?.length
+          ? d.reasons.map((r) => reasons[r] ?? r).join("; ")
+          : d?.allowed
+            ? "Syarat entry terpenuhi"
+            : "Menunggu data realtime";
+      };
+      let state = null,
+        wallets = [],
+        dirty = false,
+        editing = -1,
+        busy = false,
+        session = null,
+        page = 1,
+        sortKey = "entryAt",
+        sortDir = -1,
+        refreshPromise = null,
+        lastUpdated = null;
+      const basePath = location.pathname.startsWith("/profit4")
+        ? "/profit4"
+        : "";
+      document
+        .querySelectorAll("[data-link]")
+        .forEach((a) => (a.href = `${basePath}/${a.dataset.link}`));
+      const laneOf = (p) =>
+        p.laneLabel ||
+        (/profit4/.test(p.version || "")
+          ? "P4"
+          : /v5/.test(p.version || "")
+            ? "V5"
+            : /v4/.test(p.version || "")
+              ? "V4"
+              : /v3/.test(p.version || "")
+                ? "V3"
+                : /v2/.test(p.version || "")
+                  ? "V2"
+                  : /v1/.test(p.version || "")
+                    ? "V1"
+                    : "Tidak diketahui");
+      const entered = (p) => p.entryAt != null,
+        closed = (p) =>
+          entered(p) &&
+          p.phase === "CLOSED" &&
+          Number.isFinite(p.netReturnPercent),
+        missing = (p) => entered(p) && p.phase === "CENSORED",
+        open = (p) =>
+          entered(p) && p.live && ["OPEN", "EXIT_PENDING"].includes(p.phase);
+      const stamp = (p) =>
+          p.entryAt ??
+          p.lastEvent?.observedAt ??
+          (p.timestamp != null ? p.timestamp * 1000 : null),
+        hourOf = (p) =>
+          stamp(p) == null ? null : Math.floor(stamp(p) / 3600000) * 3600000;
+      const runHourOf = (r) => {
+        let ms = r.startedAt ? new Date(r.startedAt).getTime() : NaN;
+        if (!Number.isFinite(ms)) {
+          const m = r.id.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+          if (m) ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+        }
+        return Number.isFinite(ms) ? Math.floor(ms / 3600000) * 3600000 : null;
+      };
+      const scoped = (rows) => {
+        if (session === "all") return rows;
+        if (session === "live")
+          return rows.filter((p) =>
+            state.runs.some((r) => r.live && r.id === p.run),
+          );
+        if (typeof session === "string" && session.startsWith("hour:")) {
+          const h = Number(session.slice(5));
+          const matchRunIds = new Set(
+            state.runs.filter((r) => runHourOf(r) === h).map((r) => r.id),
+          );
+          return rows.filter(
+            (p) => matchRunIds.has(p.run) || hourOf(p) === h,
+          );
+        }
+        return rows.filter((p) => p.run === session);
+      };
+      function summary(rows) {
+        const ent = rows.filter(entered),
+          cls = rows.filter(closed);
+        return {
+          tokensObserved: new Set(rows.map((p) => p.mint)).size,
+          entries: ent.length,
+          closed: cls.length,
+          profit: cls.filter((p) => p.netReturnPercent > 0).length,
+          loss: cls.filter((p) => p.netReturnPercent < 0).length,
+          open: rows.filter(open).length,
+          missing: rows.filter(missing).length,
+          pnl: cls.reduce(
+            (s, p) => s + (Number.isFinite(p.pnlUsd) ? p.pnlUsd : 0),
+            0,
+          ),
+          mean: cls.length
+            ? cls.reduce((s, p) => s + p.netReturnPercent, 0) / cls.length
+            : null,
+          winRate: cls.length
+            ? (cls.filter((p) => p.netReturnPercent > 0).length / cls.length) *
+              100
+            : null,
+        };
+      }
+      const empty = (count, message) =>
+        `<tr><td class="empty" colspan="${count}">${message}</td></tr>`;
+      const token = (p) =>
+        `<a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener noreferrer">${esc(p.symbol || short(p.mint))} ↗</a><div class="muted mono" title="${esc(p.mint)}">${esc(short(p.mint))}</div>`;
+      const laneBadge = (p) => `<span class="badge">${esc(laneOf(p))}</span>`;
+      const wallet = (p) =>
+        `<span class="mono" title="${esc(p.wallet)}">${esc(short(p.wallet))}</span>`;
+      const facts = (p) =>
+        `<td>${num(p.facts?.holderCount, 0)} / ${num(p.facts?.holderGrowth15s, 0)}</td><td>${pct(p.facts?.buyShareUsdPercent)}</td>`;
+      function options(id, rows, label) {
+        const value = $(id).value;
+        $(id).innerHTML =
+          `<option value="all">${label}</option>` +
+          rows
+            .map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`)
+            .join("");
+        $(id).value = Array.from($(id).options).some((o) => o.value === value)
+          ? value
+          : "all";
+      }
+      function renderSessions() {
+        const hourMap = new Map();
+        for (const r of state.runs) {
+          const h = runHourOf(r);
+          if (h != null) {
+            if (!hourMap.has(h)) hourMap.set(h, []);
+            hourMap.get(h).push(r);
+          }
+        }
+        for (const p of state.positions) {
+          const h = hourOf(p);
+          if (h != null && !hourMap.has(h)) hourMap.set(h, []);
+        }
+        const sortedHours = Array.from(hourMap.keys()).sort((a, b) => b - a);
+        const hourChoices = sortedHours.map((h) => {
+          const list = hourMap.get(h) || [];
+          const d = new Date(h),
+            endD = new Date(h + 3600000);
+          const dayStr = d.toLocaleDateString("id-ID", {
+            timeZone: "Asia/Jakarta",
+            day: "2-digit",
+            month: "2-digit",
+          });
+          const startH = d.toLocaleTimeString("id-ID", {
+            timeZone: "Asia/Jakarta",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+          const endH = endD.toLocaleTimeString("id-ID", {
+            timeZone: "Asia/Jakarta",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+          return [
+            `hour:${h}`,
+            `⏰ ${dayStr} ${startH} - ${endH} WIB`,
+          ];
+        });
+        const runChoices = state.runs.map((r) => [
+          r.live ? "live" : r.id,
+          r.live ? "🟢 Sesi Live" : `📁 Arsip ${r.id}`,
+        ]);
+        const choices = [
+          ["all", "Semua sesi"],
+          ...runChoices,
+          ...hourChoices,
+        ];
+        if (session === null) {
+          const hasLive = state.runs.some((r) => r.live);
+          session = hasLive ? "live" : "all";
+        }
+        if (!choices.some(([v]) => v === session)) {
+          const hasLive = state.runs.some((r) => r.live);
+          session = hasLive ? "live" : "all";
+        }
+        const newHtml = choices
+          .map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`)
+          .join("");
+        if ($("run").innerHTML !== newHtml) {
+          $("run").innerHTML = newHtml;
+        }
+        if ($("run").value !== session) {
+          $("run").value = session;
+        }
+        const isHour =
+          typeof session === "string" && session.startsWith("hour:");
+        const selectedHour = isHour ? Number(session.slice(5)) : null;
+        $("session-badge").textContent =
+          session === "all"
+            ? "SEMUA SESI"
+            : session === "live"
+              ? "LIVE"
+              : isHour
+                ? `JAM ${new Date(selectedHour).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false })} WIB`
+                : "📁 ARSIP";
+        $("session-badge").className =
+          "badge " + (session === "live" ? "good" : "");
+        $("session-start").textContent =
+          session === "all"
+            ? "Mulai: Semua Sesi"
+            : session === "live"
+              ? "Sesi realtime aktif"
+              : isHour
+                ? `Rentang: 1 Jam WIB`
+                : `Sesi: ${session}`;
+      }
+      function renderRules() {
+        const isHour =
+          typeof session === "string" && session.startsWith("hour:");
+        const selectedHour = isHour ? Number(session.slice(5)) : null;
+        const runs =
+          session === "all"
+            ? state.runs
+            : isHour
+              ? state.runs.filter((r) => runHourOf(r) === selectedHour)
+              : state.runs.filter((r) =>
+                  session === "live" ? r.live : r.id === session,
+                );
+        const groups = new Map();
+        for (const r of runs) {
+          const key = JSON.stringify([r.rules, r.targetPercent, r.execution]);
+          if (!groups.has(key)) groups.set(key, { run: r, count: 0 });
+          groups.get(key).count++;
+        }
+        $("rules").innerHTML = groups.size
+          ? Array.from(groups.values())
+              .map(({ run: r, count }) => {
+                const rules = r.rules;
+                if (!rules)
+                  return `<div class="rule"><strong>${esc(r.id)}${count > 1 ? ` · ${count} sesi` : ""}</strong><span>Rules arsip tidak tersedia.</span></div>`;
+                return `<div><div class="row"><span class="badge">${esc(rules.version || r.paperLane || "Rules tersimpan")}</span><span class="muted hint">${count} sesi · ${esc(r.execution || "Mode tidak tersedia")}</span></div><div class="rule-grid"><div class="rule"><strong>Entry & observasi</strong><span>Observasi ${num(rules.observationSeconds, 0)}s · batas entry ${num(rules.maxEntryWaitSeconds, 0)}s · delay fill ${num(rules.executionDelayMs, 0)}ms</span></div><div class="rule"><strong>Flow & momentum</strong><span>Buy-share ≥${pct(rules.minBuySharePercent)} · buyer ≥${num(rules.minMeaningfulBuyers, 0)} · momentum ${num(rules.minMomentumPercent)}–${num(rules.maxMomentumPercent)}%</span></div><div class="rule"><strong>Target & risiko</strong><span>Target sesi ${pct(r.targetPercent)} · stop ${pct(rules.stopLossPercent)} · hold ≤${num(rules.maxHoldSeconds, 0)}s</span></div><div class="rule"><strong>Modal & biaya per sisi</strong><span>Modal ${money(rules.stakeUsd)} · fee ${pct(rules.feePercentPerSide)} · slippage ${pct(rules.slippagePercentPerSide)} · tetap ${money(rules.fixedFeeUsdPerSide)}</span></div></div><details class="hint"><summary>Semua rules tersimpan</summary><pre class="wrap">${esc(JSON.stringify(rules, null, 2))}</pre></details></div>`;
+              })
+              .join("")
+          : "<p>Rules sesi belum tersedia.</p>";
+      }
+      function renderOverview(rows) {
+        const s = summary(rows);
+        $("tokens").textContent = s.tokensObserved;
+        $("entries").textContent = s.entries;
+        $("closed-count").textContent = `${s.closed} sudah selesai`;
+        $("open").textContent = s.open;
+        $("win-loss").textContent = `${s.profit} / ${s.loss}`;
+        $("win-rate").textContent = `Win rate ${pct(s.winRate)}`;
+        $("pnl").textContent = money(s.pnl);
+        $("pnl").className = "value " + tone(s.pnl);
+        $("mean").textContent = `Rata-rata ${pct(s.mean)}`;
+        $("missing").textContent = s.missing;
+        $("capture-count").textContent =
+          `${new Set(rows.filter((p) => p.live && p.captureActive).map((p) => p.mint)).size} detail aktif`;
+        $("session-trades").textContent = `${s.closed} trade selesai`;
+        const lanes = [...new Set(rows.map(laneOf))].sort();
+        $("lane-count").textContent = `${lanes.length} lane`;
+        $("lane-rows").innerHTML =
+          lanes
+            .map((l) => {
+              const x = summary(rows.filter((p) => laneOf(p) === l));
+              return `<tr><td><span class="badge">${esc(l)}</span></td><td>${x.entries}</td><td>${x.closed}</td><td>${x.profit} / ${x.loss}</td><td>${pct(x.winRate)}</td><td class="${tone(x.pnl)}">${money(x.pnl)}</td><td>${pct(x.mean)}</td><td>${x.missing}</td></tr>`;
+            })
+            .join("") || empty(8, "Belum ada lane pada sesi ini.");
+        const hours = [
+          ...new Set(rows.map(hourOf).filter((h) => h != null)),
+        ].sort((a, b) => b - a);
+        $("hourly-head").innerHTML =
+          `<tr><th>Jam WIB</th>${lanes.map((l) => `<th>${esc(l)} W/L</th><th>${esc(l)} PnL</th>`).join("")}<th>Total PnL</th></tr>`;
+        $("hourly-rows").innerHTML =
+          hours
+            .map((h) => {
+              const items = rows.filter((p) => hourOf(p) === h),
+                x = summary(items);
+              return `<tr><td>${time(h)}–${time(h + 3600000)
+                .split(" ")
+                .pop()}</td>${lanes
+                .map((l) => {
+                  const t = summary(items.filter((p) => laneOf(p) === l));
+                  return `<td>${t.profit}/${t.loss}</td><td class="${tone(t.pnl)}">${money(t.pnl)}</td>`;
+                })
+                .join("")}<td class="${tone(x.pnl)}">${money(x.pnl)}</td></tr>`;
+            })
+            .join("") || empty(2 + lanes.length * 2, "Belum ada data per jam.");
+        options(
+          "lane",
+          lanes.map((l) => [l, l]),
+          "Semua lane",
+        );
+        options(
+          "hour",
+          hours.map((h) => [String(h), time(h)]),
+          "Semua jam",
+        );
+        const obs = rows.filter((p) => !entered(p));
+        $("observation-count").textContent = `${obs.length} observasi`;
+        $("observations").innerHTML =
+          obs
+            .map(
+              (p) =>
+                `<tr><td>${token(p)}</td><td>${time(stamp(p))}</td><td>${laneBadge(p)}</td><td>${wallet(p)}</td><td>${esc(p.phase)}</td>${facts(p)}<td class="reason">${esc(explain(p))}</td></tr>`,
+            )
+            .join("") || empty(8, "Belum ada token tanpa entry pada sesi ini.");
+        const events = scoped(
+          state.recentEventsByRun
+            ? Object.values(state.recentEventsByRun).flat()
+            : state.recentEvents || [],
+        )
+          .sort((a, b) => b.observedAt - a.observedAt)
+          .slice(0, 60);
+        $("events").innerHTML =
+          events
+            .map(
+              (e) =>
+                `<div>${time(e.observedAt)} · ${esc(e.type)} · ${esc(e.transfer?.symbol || short(e.mint))}${e.reason ? " · " + esc(reasons[e.reason] ?? e.reason) : ""}</div>`,
+            )
+            .join("") || "Belum ada event pada sesi ini.";
+        renderRules();
+      }
+      function renderPositions(rows) {
+        const positions = rows.filter(open);
+        document
+          .querySelectorAll('[data-count="open"]')
+          .forEach((e) => (e.textContent = positions.length));
+        $("positions").innerHTML =
+          positions
+            .map(
+              (p) =>
+                `<tr><td>${token(p)}</td><td>${laneBadge(p)}</td><td>${wallet(p)}</td><td>${time(p.entryAt)}</td><td class="mono">${num(p.entryPrice, 10)}</td><td class="mono">${num(p.facts?.price, 10)}</td><td class="${tone(p.estimatedOpenNetPercent)}">${pct(p.estimatedOpenNetPercent)}</td><td>${Math.max(0, Math.floor(((p.facts?.now ?? lastUpdated) - p.entryAt) / 1000))}s</td>${facts(p)}<td class="reason">${esc(p.phase)} · ${esc(explain(p))}</td></tr>`,
+            )
+            .join("") ||
+          empty(11, "Tidak ada posisi paper terbuka pada sesi ini.");
+      }
+      function renderHistory() {
+        if (!state) return;
+        const rows = scoped(state.positions),
+          history = rows.filter((p) => closed(p) || missing(p));
+        document
+          .querySelectorAll('[data-count="history"]')
+          .forEach((e) => (e.textContent = history.length));
+        const query = $("search").value.trim().toLowerCase();
+        let items = history.filter(
+          (p) =>
+            (!query ||
+              `${p.symbol || ""} ${p.mint}`.toLowerCase().includes(query)) &&
+            ($("lane").value === "all" || laneOf(p) === $("lane").value) &&
+            ($("hour").value === "all" ||
+              String(hourOf(p)) === $("hour").value) &&
+            ($("phase").value === "all" ||
+              ($("phase").value === "closed" ? closed(p) : missing(p))),
+        );
+        items.sort((a, b) => {
+          const x = a[sortKey],
+            y = b[sortKey];
+          if (x == null) return y == null ? 0 : 1;
+          if (y == null) return -1;
+          return (
+            (typeof x === "number"
+              ? x - y
+              : String(x).localeCompare(String(y))) * sortDir
+          );
+        });
+        const size = Number($("page-size").value),
+          pages = Math.max(1, Math.ceil(items.length / size));
+        page = Math.min(page, pages);
+        $("history").innerHTML =
+          items
+            .slice((page - 1) * size, page * size)
+            .map(
+              (p) =>
+                `<tr><td>${token(p)}</td><td>${laneBadge(p)}</td><td>${missing(p) ? '<span class="badge paper">Exit kurang data</span>' : "Selesai"}</td><td>${time(p.entryAt)}</td><td>${time(p.exitAt)}</td><td class="mono">${num(p.entryPrice, 10)} → ${num(p.exitPrice, 10)}</td><td>${num(p.swapBuyPrice, 10)}</td><td>${num(p.swapSellPrice1, 10)} → ${num(p.swapSellPrice2, 10)}</td><td class="${closed(p) ? tone(p.netReturnPercent) : ""}">${closed(p) ? pct(p.netReturnPercent) : "—"}</td><td class="${closed(p) ? tone(p.pnlUsd) : ""}">${closed(p) ? money(p.pnlUsd) : "—"}</td><td class="reason">${esc(explain(p))}</td></tr>`,
+            )
+            .join("") || empty(11, "Belum ada transaksi pada filter ini.");
+        $("page-info").textContent =
+          `${items.length ? (page - 1) * size + 1 : 0}–${Math.min(page * size, items.length)} dari ${items.length} transaksi`;
+        $("page-label").textContent = `${page} / ${pages}`;
+        $("prev").disabled = page === 1;
+        $("next").disabled = page === pages;
+      }
+      function renderQuotes(rows) {
+        const quotes = rows.filter((p) =>
+          [
+            p.swapBuyPrice,
+            p.swapBuyOk,
+            p.swapBuyError,
+            p.swapSellPrice1,
+            p.swapSellPrice2,
+            p.swapSellOk1,
+            p.swapSellOk2,
+          ].some((v) => v != null),
+        );
+        $("quote-count").textContent = `${quotes.length} posisi`;
+        $("quotes").innerHTML =
+          quotes
+            .map(
+              (p) =>
+                `<tr><td>${token(p)}</td><td>${laneBadge(p)}</td><td>${time(p.entryAt)}</td><td>${num(p.swapBuyPrice, 10)}</td><td>${pct(p.swapBuySpreadPct)}</td><td>${p.swapBuyLatencyMs == null ? "—" : num(p.swapBuyLatencyMs, 0) + "ms"}</td><td>${time(p.exitAt)}</td><td>${num(p.swapSellPrice1, 10)}</td><td>${num(p.swapSellPrice2, 10)}</td><td>${pct(p.swapSellDeltaPct)}</td><td>${pct(p.swapSellSpreadPct)}</td><td>${p.swapSellLatencyMs == null ? "—" : num(p.swapSellLatencyMs, 0) + "ms"}</td><td class="reason">${esc(p.swapBuyError || `BUY: ${p.swapBuyOk == null ? "—" : p.swapBuyOk ? "OK" : "Gagal"} · SELL 1: ${p.swapSellOk1 == null ? "—" : p.swapSellOk1 ? "OK" : "Gagal"} · SELL 2: ${p.swapSellOk2 == null ? "—" : p.swapSellOk2 ? "OK" : "Gagal"}`)}</td></tr>`,
+            )
+            .join("") || empty(13, "Quote swap belum tersedia pada sesi ini.");
+      }
+      function renderWorker() {
+        const w = state.worker;
+        $("worker-badge").textContent = w.active
+          ? w.status === "starting"
+            ? "STARTING"
+            : "● RUNNING · PAPER"
+          : w.status === "failed"
+            ? "FAILED"
+            : "STOPPED";
+        $("worker-badge").className = "badge " + (w.active ? "live" : "");
+        $("process").textContent = w.pid
+          ? `PID ${w.pid} · ${w.status || "running"}`
+          : "Belum dimulai";
+        $("poll").textContent = time(w.lastPollAt);
+        $("socket").textContent = time(w.lastSocketAt);
+        $("api-health").textContent = w.lastPollAt
+          ? w.lastPollComplete
+            ? `JSON valid · HTTP ${w.lastPollStatus}`
+            : `Polling terganggu · HTTP ${w.lastPollStatus}`
+          : "Belum ada polling";
+        $("api-health").className = w.lastPollAt
+          ? w.lastPollComplete
+            ? "good"
+            : "bad"
+          : "muted";
+        $("worker-error").textContent = w.lastError || "";
+        $("path").textContent =
+          `Data: ${state.paths?.data || "—"}${w.run ? " · Sesi worker: " + w.run : ""}`;
+        const h = state.historical;
+        $("historical").textContent = h
+          ? `Pembanding historis terpisah: ${h.closed} trade, ${h.profit} profit / ${h.loss} rugi, PnL ${money(h.totalPnlUsd)}.`
+          : "Profit4 · Paper research · Waktu Asia/Jakarta (WIB)";
+      }
+      function render() {
+        renderSessions();
+        const rows = scoped(state.positions);
+        renderOverview(rows);
+        renderPositions(rows);
+        renderHistory();
+        renderQuotes(rows);
+        renderWorker();
+        renderLivePanel();
+        void fetchRealTrades();
+      }
+      function renderWallets() {
+        $("wallets").innerHTML =
+          wallets
+            .map(
+              (a, i) =>
+                `<tr><td>${i + 1}</td><td class="mono">${esc(a)}</td><td><a href="https://gmgn.ai/sol/address/${esc(a)}" target="_blank" rel="noopener noreferrer">Buka GMGN ↗</a></td><td><button class="small-btn" data-edit="${i}">Edit</button> <button class="small-btn danger" data-delete="${i}">Hapus</button></td></tr>`,
+            )
+            .join("") ||
+          empty(4, "Daftar wallet kosong. Tambahkan wallet sebelum menyimpan.");
+      }
+      function error(message) {
+        $("error").textContent = message;
+        $("error").style.display = message ? "block" : "none";
+      }
+      function refresh() {
+        if (refreshPromise) return refreshPromise;
+        refreshPromise = (async () => {
+          try {
+            const r = await fetch(`${basePath}/api/state`, {
+              signal: AbortSignal.timeout(10000),
+            });
+            if (!r.ok) throw Error(`Server HTTP ${r.status}`);
+            const next = await r.json();
+            if (
+              !Array.isArray(next.positions) ||
+              !Array.isArray(next.runs) ||
+              !Array.isArray(next.config?.addresses) ||
+              !next.worker
+            )
+              throw Error("Data dashboard tidak valid");
+            state = next;
+            lastUpdated = Date.now();
+            if (!dirty && editing < 0) {
+              wallets = [...state.config.addresses];
+              renderWallets();
+            }
+            render();
+            $("refresh-time").textContent = `Diperbarui ${time(lastUpdated)}`;
+            error("");
+          } catch (e) {
+            $("refresh-time").textContent =
+              `Pembaruan gagal${lastUpdated ? " · data terakhir " + time(lastUpdated) : ""}`;
+            error(e.message);
+          } finally {
+            refreshPromise = null;
+          }
+        })();
+        return refreshPromise;
+      }
+      async function loop() {
+        await refresh();
+        setTimeout(loop, 2000);
+      }
+      async function action(path, value = {}) {
+        if (busy) return;
+        busy = true;
+        const buttons = Array.from(
+            document.querySelectorAll(
+              "#start,#stop,#save,#add,#wallets button,#autobuy-fields button",
+            ),
+          ),
+          disabled = buttons.map((b) => b.disabled);
+        buttons.forEach((b) => (b.disabled = true));
+        error("");
+        try {
+          const r = await fetch(`${basePath}${path}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(value),
+            }),
+            v = await r.json();
+          if (!r.ok) throw Error(v.error || `HTTP ${r.status}`);
+          return v;
+        } catch (e) {
+          error(e.message);
+          throw e;
+        } finally {
+          busy = false;
+          buttons.forEach((b, i) => (b.disabled = disabled[i]));
+        }
+      }
+      function workerActionStatus(message, kind) {
+        const el = $("worker-action-status");
+        el.textContent = message;
+        el.className = `worker-action-status ${kind}`;
+        el.hidden = false;
+      }
+      function switchTab(tab, persist = true) {
+        if (!["overview", "positions", "history", "onchain"].includes(tab))
+          tab = "overview";
+        document
+          .querySelectorAll(".tab-pane")
+          .forEach((p) => p.classList.toggle("active", p.id === `pane-${tab}`));
+        document.querySelectorAll("[data-tab]").forEach((b) => {
+          const active = b.dataset.tab === tab;
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-pressed", String(active));
+        });
+        if (persist) {
+          try {
+            localStorage.setItem("profit4_active_tab", tab);
+          } catch {}
+          history.replaceState(null, "", `#${tab}`);
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      document
+        .querySelectorAll("[data-tab]")
+        .forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
+      window.addEventListener("hashchange", () =>
+        switchTab(location.hash.slice(1)),
+      );
+      let initialTab = location.hash.slice(1);
+      if (!initialTab) {
+        try {
+          initialTab = localStorage.getItem("profit4_active_tab");
+        } catch {}
+      }
+      switchTab(initialTab || "overview");
+      $("run").onchange = () => {
+        session = $("run").value;
+        page = 1;
+        realPage = 1;
+        if (state) render();
+      };
+      ["search", "lane", "hour", "phase", "page-size"].forEach((id) =>
+        $(id).addEventListener(id === "search" ? "input" : "change", () => {
+          page = 1;
+          renderHistory();
+        }),
+      );
+      document.querySelectorAll("[data-sort]").forEach(
+        (th) =>
+          (th.onclick = () => {
+            sortDir = sortKey === th.dataset.sort ? -sortDir : -1;
+            sortKey = th.dataset.sort;
+            page = 1;
+            renderHistory();
+          }),
+      );
+      $("prev").onclick = () => {
+        page = Math.max(1, page - 1);
+        renderHistory();
+      };
+      $("next").onclick = () => {
+        page++;
+        renderHistory();
+      };
+      $("start").onclick = async () => {
+        try {
+          await action("/api/worker/start");
+          await refresh();
+          const w = state.worker;
+          workerActionStatus(
+            w.active
+              ? `Worker berjalan · PID ${w.pid || "—"}. Auto-Buy real tetap ${state.autoBuy?.config?.enabled ? "aktif" : "OFF"}.`
+              : "Perintah Start diterima. Worker sedang memulai; status akan diperbarui otomatis.",
+            "success",
+          );
+        } catch (e) {
+          workerActionStatus(`Start gagal: ${e.message}`, "failure");
+        }
+      };
+      $("stop").onclick = async () => {
+        if (!window.confirm("Hentikan worker Profit4 sekarang?")) return;
+        try {
+          await action("/api/worker/stop");
+          window.alert("Perintah Stop diterima. Worker Profit4 sedang dihentikan.");
+          await refresh();
+          workerActionStatus("Perintah Stop diterima.", "success");
+        } catch (e) {
+          window.alert(`Stop gagal: ${e.message}`);
+          workerActionStatus(`Stop gagal: ${e.message}`, "failure");
+        }
+      };
+      $("wallet-input").addEventListener("input", () => {
+        dirty = true;
+      });
+      $("add").onclick = () => {
+        if (busy) return;
+        let a = $("wallet-input").value.trim();
+        const match = a.match(
+          /^https:\/\/gmgn\.ai\/sol\/address\/([1-9A-HJ-NP-Za-km-z]+)(?:[/?#].*)?$/,
+        );
+        if (match) a = match[1];
+        if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a))
+          return error("Masukkan address atau URL profil wallet Solana.");
+        if (wallets.includes(a) && wallets.indexOf(a) !== editing)
+          return error("Wallet sudah ada.");
+        if (editing >= 0) wallets[editing] = a;
+        else wallets.push(a);
+        editing = -1;
+        dirty = true;
+        $("wallet-input").value = "";
+        $("add").textContent = "Tambah ke daftar";
+        $("wallet-message").textContent =
+          "Ada perubahan belum disimpan. Simpan & restart akan menerapkan daftar baru.";
+        error("");
+        renderWallets();
+      };
+      $("wallets").onclick = (e) => {
+        if (busy) return;
+        const b = e.target.closest("button");
+        if (!b) return;
+        if (b.dataset.edit !== undefined) {
+          editing = Number(b.dataset.edit);
+          $("wallet-input").value = wallets[editing];
+          $("add").textContent = "Terapkan edit";
+          $("wallet-input").focus();
+        } else if (b.dataset.delete !== undefined) {
+          wallets.splice(Number(b.dataset.delete), 1);
+          dirty = true;
+          editing = -1;
+          $("wallet-input").value = "";
+          $("add").textContent = "Tambah ke daftar";
+          renderWallets();
+          $("wallet-message").textContent =
+            "Ada perubahan belum disimpan. Simpan & restart akan menerapkan daftar baru.";
+        }
+      };
+      $("save").onclick = async () => {
+        if (editing >= 0 || $("wallet-input").value.trim())
+          return error("Terapkan edit atau tambah wallet sebelum menyimpan.");
+        try {
+          const v = await action("/api/wallets", { addresses: wallets });
+          if (v) {
+            dirty = false;
+            $("wallet-message").textContent =
+              "Daftar disimpan. Worker direstart dengan wallet terbaru.";
+            await refresh();
+          }
+        } catch {}
+      };
+      let realDirty = false,
+        realPage = 1,
+        realPages = 1,
+        realFetch = null,
+        realData = null,
+        loginBusy = false;
+      const realFields = {
+        activeLane: "real-lane",
+        stakeMode: "real-stake-mode",
+        stakeUsd: "real-stake-usd",
+        stakeSol: "real-stake-sol",
+        maxBuys: "real-max-buys",
+        maxActiveRealPositions: "real-max-positions",
+        buySlippagePercent: "real-buy-slip",
+        sellSlippagePercent: "real-sell-slip",
+        priorityFeeSol: "real-priority",
+      };
+      function realSettings() {
+        return Object.fromEntries(
+          Object.entries(realFields).map(([key, id]) => [
+            key,
+            ["activeLane", "stakeMode"].includes(key)
+              ? $(id).value
+              : Number($(id).value),
+          ]),
+        );
+      }
+      function renderLivePanel() {
+        const live = state.autoBuy,
+          authenticated = Boolean(state.admin?.authenticated);
+        $("admin-session").hidden = false;
+        $("autobuy-fields").disabled = !authenticated;
+        ["start", "stop", "save"].forEach(
+          (id) => ($(id).disabled = !authenticated),
+        );
+        if (!live) return;
+        const c = live.config,
+          r = live.readiness;
+        if (!realDirty)
+          for (const [key, id] of Object.entries(realFields)) {
+            $(id).value = c[key];
+          }
+        const lanes = r.activeLanes || [];
+        Array.from($("real-lane").options).forEach((o) => {
+          o.disabled = !lanes.includes(o.value);
+          o.textContent = o.value + (o.disabled ? " · tidak berjalan" : "");
+        });
+        $("real-enabled-badge").textContent = c.enabled ? "● ON · REAL" : "OFF";
+        $("real-enabled-badge").className =
+          "badge " + (c.enabled ? "live" : "paper");
+        $("real-toggle").textContent = c.enabled
+          ? "Matikan BUY baru"
+          : "Nyalakan Real Auto-Buy";
+        $("real-wallet").innerHTML = r.wallet
+          ? `<a href="https://solscan.io/account/${esc(r.wallet)}" target="_blank" rel="noopener noreferrer">${esc(r.wallet)} ↗</a>`
+          : "Belum terdeteksi";
+        $("real-balance").textContent =
+          r.balanceSol == null
+            ? r.balanceError || "Menunggu pembacaan saldo SOL…"
+            : `${num(r.balanceSol, 6)} SOL${r.solUsd == null ? "" : " · ≈ $" + num(r.balanceSol * r.solUsd)}${r.priceError ? " · " + r.priceError : ""}`;
+        $("real-quota").textContent =
+          `${live.buysCompleted} / ${c.maxBuys === 0 ? "Unlimited" : c.maxBuys}`;
+        $("real-quota-status").textContent =
+          c.maxBuys === 0
+            ? `${live.buysCompleted} BUY terkonfirmasi · Unlimited`
+            : `${live.buysCompleted} / ${c.maxBuys} BUY terpakai`;
+        $("real-active-count").textContent =
+          `${live.activePositions} / ${c.maxActiveRealPositions}`;
+        $("real-ready").textContent = r.sessionReady
+          ? "Sesi GMGN siap · " + time(r.observedAt)
+          : r.error || "Sesi GMGN belum siap.";
+        $("real-ready").className = r.sessionReady ? "good" : "muted";
+        if (!authenticated) {
+          $("real-trades").innerHTML = empty(10, "Audit transaksi asli.");
+          $("real-positions").innerHTML = empty(
+            6,
+            "Tidak ada posisi real aktif.",
+          );
+          $("real-pnl").textContent = "PnL terkonfirmasi —";
+        }
+      }
+      function realQuery() {
+        const q = new URLSearchParams({ page: String(realPage), limit: "25" });
+        if ($("real-scope").value === "session" && session !== "all") {
+          if (typeof session === "string" && !session.startsWith("hour:")) {
+            const run =
+              session === "live" ? state.runs.find((r) => r.live)?.id : session;
+            q.set("run", run || "__no_live_run__");
+          }
+        }
+        if ($("real-filter-lane").value)
+          q.set("lane", $("real-filter-lane").value);
+        if ($("real-filter-status").value)
+          q.set("status", $("real-filter-status").value);
+        if ($("real-search").value.trim())
+          q.set("search", $("real-search").value.trim());
+        return q.toString();
+      }
+      const orderLink = (o) =>
+        !o
+          ? "—"
+          : `${time(o.submittedAt)}<div class="mono hint">${esc(o.orderId || "Belum ada order ID")}</div>${o.hash ? `<a href="https://solscan.io/tx/${esc(o.hash)}" target="_blank" rel="noopener noreferrer">${esc(short(o.hash))} ↗</a>` : ""}`;
+      async function fetchRealTrades() {
+        if (!state?.admin?.authenticated) return;
+        if (realFetch) return realFetch;
+        const query = realQuery();
+        realFetch = (async () => {
+          try {
+            const r = await fetch(`${basePath}/api/real-trades?${query}`);
+            if (r.status === 401) {
+              state.admin.authenticated = false;
+              renderLivePanel();
+              return;
+            }
+            if (!r.ok) throw Error("Audit gagal dimuat.");
+            const d = await r.json();
+            if (query !== realQuery()) return;
+            realData = d;
+            realPage = d.page;
+            realPages = d.pages;
+            $("real-trades").innerHTML =
+              d.trades
+                .map((p) => {
+                  const orders = [...p.buys, ...p.sells],
+                    cost = p.buys
+                      .filter((o) => o.status === "CONFIRMED")
+                      .reduce((n, o) => n - (o.cashflowSol || 0), 0),
+                    proceeds = p.sells
+                      .filter((o) => o.status === "CONFIRMED")
+                      .reduce((n, o) => n + (o.cashflowSol || 0), 0),
+                    fees = orders
+                      .filter((o) => o.status === "CONFIRMED")
+                      .reduce((n, o) => n + (o.networkFeeSol || 0), 0);
+                  return `<tr><td>${token(p)}</td><td><span class="badge">${esc(p.lane)}</span></td><td>${orderLink(p.buys.at(-1))}</td><td>${orderLink(p.sells.at(-1))}</td><td>${esc(p.status)}${p.lastError ? `<div class="hint bad">${esc(p.lastError)}</div>` : ""}</td><td>${p.buyConfirmedAt ? num(cost, 6) : "—"}</td><td>${p.sells.some((o) => o.status === "CONFIRMED") ? num(proceeds, 6) : "—"}</td><td>${orders.some((o) => o.status === "CONFIRMED") ? num(fees, 6) : "—"}</td><td class="${tone(p.pnlSol)}">${num(p.pnlSol, 6)} / ${money(p.pnlUsd)}</td><td><button class="small-btn" data-audit="${esc(p.id)}">Detail</button></td></tr>`;
+                })
+                .join("") ||
+              empty(10, "Belum ada transaksi asli pada filter ini.");
+            $("real-positions").innerHTML =
+              (d.activePositions || [])
+                .map(
+                  (p) =>
+                    `<tr><td>${token(p)}</td><td>${esc(p.lane)}</td><td>${esc(p.status)}</td><td class="mono">${esc(p.remainingAmount)} base units</td><td class="reason">${esc(p.lastError || p.exitWanted || "Dipantau")}</td><td><button class="danger small-btn" data-real-sell="${esc(p.id)}" ${p.status === "SELL_PENDING" ? "disabled" : ""}>SELL posisi bot</button></td></tr>`,
+                )
+                .join("") ||
+              empty(6, "Tidak ada posisi/order asli yang aktif.");
+            $("real-page-info").textContent =
+              `${d.total} transaksi · 25 per halaman`;
+            $("real-page-label").textContent = `${d.page} / ${d.pages}`;
+            $("real-prev").disabled = d.page <= 1;
+            $("real-next").disabled = d.page >= d.pages;
+            $("real-pnl").textContent =
+              `PnL terkonfirmasi ${money(d.summary?.pnlUsd)} · ${d.summary?.knownClosed || 0} posisi`;
+          } catch (e) {
+            $("real-page-info").textContent = e.message;
+          } finally {
+            realFetch = null;
+          }
+        })();
+        return realFetch;
+      }
+      $("autobuy-form").addEventListener("input", () => {
+        realDirty = true;
+      });
+      function showSuccessModal(title, message, icon = "✅") {
+        $("success-modal-icon").textContent = icon;
+        $("success-modal-title").textContent = title;
+        $("success-modal-body").textContent = message;
+        $("success-modal").showModal();
+      }
+      $("success-modal-ok").onclick = () => {
+        $("success-modal").close();
+      };
+      $("autobuy-form").onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await action("/api/autobuy", realSettings());
+          realDirty = false;
+          await refresh();
+          showSuccessModal(
+            "Pengaturan Berhasil Disimpan",
+            "Parameter Real Auto-Buy (Lane, Modal, Kuota, Slippage, dan Priority Fee) telah berhasil diperbarui.",
+          );
+        } catch (e) {
+          error(`Gagal menyimpan pengaturan: ${e.message}`);
+        }
+      };
+      $("real-toggle").onclick = async () => {
+        const enable = !state.autoBuy.config.enabled;
+        if (
+          enable &&
+          !confirm(
+            `Nyalakan Real Auto-Buy?\nWallet: ${state.autoBuy.readiness.wallet || "Belum tersedia"}\nLane: ${$("real-lane").value}\nModal: ${$("real-stake-mode").value === "usd" ? "$" + $("real-stake-usd").value : $("real-stake-sol").value + " SOL"}\nOrder asli akan dikirim otomatis.`,
+          )
+        )
+          return;
+        try {
+          await action(
+            "/api/autobuy",
+            enable ? { ...realSettings(), enabled: true } : { enabled: false },
+          );
+          realDirty = false;
+          await refresh();
+          if (enable) {
+            showSuccessModal(
+              "Real Auto-Buy AKTIF! 🚀",
+              `Auto-Buy telah dinyalakan untuk Lane ${$("real-lane").value}. Order on-chain asli akan dikirim otomatis saat sinyal masuk dan syarat terpenuhi.`,
+              "⚡",
+            );
+          } else {
+            showSuccessModal(
+              "Real Auto-Buy DIMATIKAN",
+              "Status Auto-Buy sekarang OFF. Bot tidak akan mengeksekusi order BUY baru.",
+              "⏸️",
+            );
+          }
+        } catch (e) {
+          error(`Gagal mengubah status Auto-Buy: ${e.message}`);
+        }
+      };
+      $("real-unlimited").onclick = () => {
+        $("real-max-buys").value = "0";
+        realDirty = true;
+      };
+      $("real-reset").onclick = async () => {
+        if (
+          !confirm(
+            "Reset penghitung kuota BUY? Riwayat transaksi dan larangan buy ulang tetap disimpan.",
+          )
+        )
+          return;
+        try {
+          await action("/api/autobuy", { resetQuota: true });
+          await refresh();
+          showSuccessModal(
+            "Kuota Berhasil Direset",
+            "Penghitung kuota BUY telah di-reset ke 0. Batas eksekusi baru siap digunakan.",
+            "🔄",
+          );
+        } catch (e) {
+          error(`Gagal mereset kuota: ${e.message}`);
+        }
+      };
+      [
+        "real-scope",
+        "real-filter-lane",
+        "real-filter-status",
+        "real-search",
+      ].forEach((id) =>
+        $(id).addEventListener(
+          id === "real-search" ? "input" : "change",
+          () => {
+            realPage = 1;
+            void fetchRealTrades();
+          },
+        ),
+      );
+      $("real-prev").onclick = () => {
+        realPage = Math.max(1, realPage - 1);
+        void fetchRealTrades();
+      };
+      $("real-next").onclick = () => {
+        realPage = Math.min(realPages, realPage + 1);
+        void fetchRealTrades();
+      };
+      $("real-trades").onclick = async (e) => {
+        const b = e.target.closest("[data-audit]");
+        if (!b) return;
+        try {
+          const r = await fetch(
+            `${basePath}/api/real-trades/${b.dataset.audit}`,
+          );
+          if (!r.ok)
+            throw Error("Audit tidak tersedia. Login ulang jika sesi habis.");
+          const p = await r.json();
+          $("real-audit-content").innerHTML =
+            `<p>${esc(p.symbol)} · ${esc(p.lane)} · ${esc(p.status)}</p><p class="mono wrap">${esc(p.id)}</p><div class="log">${p.audit.map((a) => `<div><strong>${time(a.at)} · ${esc(a.type)}</strong><pre class="wrap">${esc(JSON.stringify(a.details, null, 2))}</pre></div>`).join("")}</div>`;
+          if (p.status === "UNKNOWN")
+            $("real-audit-content").innerHTML +=
+              `<form id="real-reconcile-form" data-position="${esc(p.id)}"><p>Konfirmasi order yang belum pasti melalui signature Solana. Transaksi diperiksa on-chain tanpa mengirim ulang order.</p><input name="signature" required pattern="[1-9A-HJ-NP-Za-km-z]{64,90}" placeholder="Signature transaksi"><button>Periksa on-chain</button></form>`;
+          $("real-audit-dialog").showModal();
+        } catch (e) {
+          error(e.message);
+        }
+      };
+      $("real-audit-content").onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        if (form.id !== "real-reconcile-form") return;
+        try {
+          await action(
+            `/api/real-positions/${form.dataset.position}/reconcile`,
+            { signature: new FormData(form).get("signature") },
+          );
+          $("real-audit-dialog").close();
+          await fetchRealTrades();
+        } catch {}
+      };
+      $("real-audit-close").onclick = () => $("real-audit-dialog").close();
+      $("real-positions").onclick = async (e) => {
+        const b = e.target.closest("[data-real-sell]");
+        if (!b) return;
+        if (!confirm("Jual 100% sisa token milik posisi bot ini melalui GMGN?"))
+          return;
+        try {
+          await action(`/api/real-positions/${b.dataset.realSell}/sell`, {
+            idempotencyKey: crypto.randomUUID(),
+          });
+          await fetchRealTrades();
+        } catch {}
+      };
+      loop();
+    </script>
+  </body>
+</html>
