@@ -292,29 +292,11 @@ export class GmgnLiveAdapter implements LiveAdapter {
   async prepare(id: string, mint: string, wallet: string) {
     const existing = this.pages.get(id);
     if (existing && !existing.page.isClosed()) return;
-    const page = await this.context.newPage();
-    this.pages.set(id, { page, mint, wallet });
-    page.on("websocket", (socket) =>
-      socket.on("framereceived", ({ payload }) => {
-        try {
-          const body = decodeFrame(payload);
-          this.monitorHook?.(mint, body, Date.now());
-        } catch {}
-      }),
-    );
-    try {
-      await page.goto(`https://gmgn.ai/sol/token/${mint}`, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-    } catch (e) {
-      this.pages.delete(id);
-      await page.close().catch(() => {});
-      throw e;
-    }
+    // Single-tab execution mode: reuse controller page directly without opening extra tabs
+    this.pages.set(id, { page: this.controller, mint, wallet });
   }
   async restoreMonitor(id: string, mint: string, wallet: string) {
-    await this.prepare(id, mint, wallet);
+    this.pages.set(id, { page: this.controller, mint, wallet });
   }
   private item(id: string) {
     const item = this.pages.get(id);
@@ -536,8 +518,6 @@ export class GmgnLiveAdapter implements LiveAdapter {
     return parseExecutionFill(tx, wallet, mint, hash);
   }
   async release(id: string) {
-    const item = this.pages.get(id);
     this.pages.delete(id);
-    await item?.page.close().catch(() => {});
   }
 }

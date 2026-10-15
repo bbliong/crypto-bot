@@ -25,6 +25,7 @@ import {
   getBrowserDualSellSwapRoute,
   DEFAULT_SWAP_WALLET,
 } from "./browser-swap-route.js";
+import { HeadlessTradeStream } from "./headless-trade-stream.js";
 
 type Transfer = {
   wallet: string;
@@ -51,7 +52,8 @@ const { values } = parseArgs({
     profileName: { type: "string", default: "Default" },
     paperLane: { type: "string", default: "target" },
     dataDir: { type: "string", default: "data/distribution-watch" },
-    maxDetails: { type: "string", default: "3" },
+    maxDetails: { type: "string", default: "0" },
+    headlessStream: { type: "string", default: "true" },
   },
 });
 if (!["target", "profit4", "bounce"].includes(values.paperLane!))
@@ -59,6 +61,7 @@ if (!["target", "profit4", "bounce"].includes(values.paperLane!))
 const isPaperRunner =
   values.paperLane === "profit4" || values.paperLane === "bounce";
 const profit4 = isPaperRunner;
+const useHeadlessStream = values.headlessStream !== "false";
 const savedAddresses = readJson<{ addresses?: string[] }>(
   join(values.dataDir!, "dashboard-config.json"),
   {},
@@ -90,9 +93,10 @@ if (!Number.isFinite(walletPollMilliseconds) || walletPollMilliseconds < 250)
   throw new Error("--walletPollMilliseconds minimal 250.");
 if (!existsSync(values.profileDir!))
   throw new Error("Profile Chrome research tidak ditemukan.");
-const parsedMax = Number(values.maxDetails ?? 3);
-const maxDetails =
-  Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 3) : 3;
+const parsedMax = Number(values.maxDetails ?? (useHeadlessStream ? 0 : 3));
+const maxDetails = useHeadlessStream
+  ? 0
+  : (Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 3) : 0);
 
 const dataDirectory = values.dataDir!;
 const output = join(
@@ -208,6 +212,20 @@ const details = new Map<
   { page: Page; watch: Watch; openedAt: number }
 >();
 const seen = new Set<string>();
+let tradeStream: HeadlessTradeStream | null = null;
+if (useHeadlessStream) {
+  tradeStream = new HeadlessTradeStream();
+  tradeStream.on("trade", (mint, trade) => {
+    write("token-trades.jsonl", {
+      observedAt: trade.at,
+      ...trade,
+    });
+    targetLane.trade(mint, trade);
+  });
+  tradeStream.start();
+  process.once("exit", () => tradeStream?.stop());
+}
+
 let liveEngine: Profit4LiveEngine | null = null;
 if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
   const adapter = new GmgnLiveAdapter(context, controller);
@@ -246,6 +264,7 @@ if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
           break;
         }
       }
+      if (!page && !controller.isClosed()) page = controller;
       if (!page) return null;
       try {
         return await getBrowserBuySwapRoute(
@@ -273,6 +292,7 @@ if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
           break;
         }
       }
+      if (!page && !controller.isClosed()) page = controller;
       if (!page) return null;
       try {
         return await getBrowserDualSellSwapRoute(
@@ -501,6 +521,23 @@ async function openOrReplaceDetail(next: Transfer) {
   if (seen.has(key)) return;
   seen.add(key);
   write("transfers.jsonl", { observedAt: Date.now(), ...next });
+
+  if (useHeadlessStream && tradeStream) {
+    targetLane.register(next, Date.now());
+    tradeStream.registerMint(next.mint, {
+      symbol: next.symbol,
+      priceUsd: next.priceUsd,
+    });
+    write("watch-events.jsonl", {
+      type: "TOKEN_MONITOR_HEADLESS_ATTACHED",
+      observedAt: Date.now(),
+      trackedWallet: next.wallet,
+      transfer: next,
+      mode: "headless-websocket",
+    });
+    return;
+  }
+
   const existing = details.get(next.wallet);
   if (existing?.watch.transfer.mint === next.mint) return;
   if (!existing && details.size >= maxDetails) {
@@ -627,6 +664,20 @@ const targetTimer = setInterval(() => {
       });
       details.delete(wallet);
       void item.page.close().catch(() => {});
+    }
+  }
+
+  if (tradeStream) {
+    for (const mint of tradeStream.getTrackedMints()) {
+      const isRealActive = liveEngine?.hasActiveMint(mint);
+      if (isRealActive) continue;
+      const isPaperLive =
+        typeof (targetLane as any).isMintActive === "function"
+          ? (targetLane as any).isMintActive(mint)
+          : false;
+      if (!isPaperLive) {
+        tradeStream.unregisterMint(mint);
+      }
     }
   }
 
