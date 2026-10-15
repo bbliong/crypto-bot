@@ -10,10 +10,10 @@ export const STAIRCASE_RULES_S1: Readonly<TargetRules> = Object.freeze(validateT
   paperOnly: true,
   enabled: true,
   targetPercent: STAIRCASE_TARGET_PERCENT_S1,
-  observationSeconds: 30, // Dioptimasi dari 120s ke 30s agar token pump.fun tidak kadaluarsa
-  minTransferAgeSeconds: 15,
+  observationSeconds: 120, // Baseline S1 tetap 120s
+  minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 90,
+  maxEntryWaitSeconds: 180,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -22,10 +22,10 @@ export const STAIRCASE_RULES_S1: Readonly<TargetRules> = Object.freeze(validateT
   minMomentumPercent: 0,
   maxMomentumPercent: 100,
   maxEntryReturnPercent: 100,
-  maxDrawdownPercent: 5.0, // Diperlebar dari 2.5% ke 5.0% untuk toleransi wick mikro
+  maxDrawdownPercent: 2.5,
   stopLossPercent: STAIRCASE_STOP_LOSS_PERCENT_S1,
-  trailingStartPercent: 15, // Trail aktif lebih cepat di +15%
-  trailingDrawdownPercent: 4,
+  trailingStartPercent: 20,
+  trailingDrawdownPercent: 5,
   maxHoldSeconds: 300, // 5 menit
   executionDelayMs: 1000,
   maxFillWaitMs: 5000,
@@ -50,10 +50,10 @@ export const STAIRCASE_RULES_S2: Readonly<TargetRules> = Object.freeze(validateT
   paperOnly: true,
   enabled: true,
   targetPercent: STAIRCASE_TARGET_PERCENT_S2,
-  observationSeconds: 45, // Dioptimasi dari 120s ke 45s
-  minTransferAgeSeconds: 20,
+  observationSeconds: 120, // Baseline S2 tetap 120s
+  minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 120,
+  maxEntryWaitSeconds: 180,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -62,10 +62,10 @@ export const STAIRCASE_RULES_S2: Readonly<TargetRules> = Object.freeze(validateT
   minMomentumPercent: 0,
   maxMomentumPercent: 100,
   maxEntryReturnPercent: 100,
-  maxDrawdownPercent: 6.0, // Diperlebar dari 2.5% ke 6.0%
+  maxDrawdownPercent: 2.5,
   stopLossPercent: STAIRCASE_STOP_LOSS_PERCENT_S2,
-  trailingStartPercent: 30,
-  trailingDrawdownPercent: 5,
+  trailingStartPercent: 40,
+  trailingDrawdownPercent: 6,
   maxHoldSeconds: 900, // 15 menit runway
   executionDelayMs: 1000,
   maxFillWaitMs: 5000,
@@ -564,6 +564,72 @@ export class DistributionStaircaseLaneS4 extends BaseDistributionStaircaseLane {
           reasons.push('DEV_HOLDING_TOO_HIGH');
         }
 
+        return reasons;
+      },
+    });
+  }
+}
+
+// --- Implementation S1.2: Fast Strike Staircase (TP +25%, Observation 30s) ---
+export const STAIRCASE_LANE_S1_V2 = 'distribution-staircase-s1-v2';
+export const STAIRCASE_RULES_S1_V2: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-staircase-s1-v2',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: 25,
+  observationSeconds: 30, // 30s observasi cepat
+  minTransferAgeSeconds: 15,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 90,
+  confirmSeconds: 1,
+  minBuySharePercent: 60,
+  minMeaningfulBuyUsd: 1,
+  minMeaningfulBuyers: 1,
+  maxBuyerSharePercent: 100,
+  minMomentumPercent: 0,
+  maxMomentumPercent: 100,
+  maxEntryReturnPercent: 100,
+  maxDrawdownPercent: 5.0, // Toleransi 5% drawdown
+  stopLossPercent: 8,
+  trailingStartPercent: 15,
+  trailingDrawdownPercent: 4,
+  maxHoldSeconds: 300,
+  executionDelayMs: 1000,
+  maxFillWaitMs: 5000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
+export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLane {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, { ...STAIRCASE_RULES_S1_V2 }, e => emit({ ...e, laneLabel: 'S1.2' as any, targetPercent: 25 }), {
+      name: 'staircase-fast-s1-2',
+      paperLane: STAIRCASE_LANE_S1_V2,
+      trailingEnabled: true,
+      flowExitEnabled: false,
+      overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
+        const reasons: string[] = [];
+        if (!r.enabled) reasons.push('LANE_DISABLED');
+
+        const t0 = this.firstTradeAt ?? f.firstAt;
+        if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
+
+        const elapsedMs = f.now - t0;
+        if (elapsedMs < 30_000) {
+          reasons.push(`STAIRCASE_OBSERVING_30S_${Math.floor(elapsedMs / 1000)}S`);
+          return reasons;
+        }
+        if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) {
+          reasons.push('PRICE_MISSING_OR_STALE');
+          return reasons;
+        }
+
+        // Higher Low check
+        if (this.trades.length < 3) reasons.push('INSUFFICIENT_TRADES');
         return reasons;
       },
     });
