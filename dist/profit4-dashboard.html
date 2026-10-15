@@ -812,6 +812,114 @@
           width: 100%;
         }
       }
+    
+      /* Model A Segmented Control & Clean Layout */
+      .segmented-control {
+        display: flex;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--edge);
+        border-radius: 10px;
+        padding: 3px;
+        gap: 4px;
+        margin-bottom: 12px;
+      }
+      .seg-btn {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+        padding: 9px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      .seg-btn.active {
+        background: var(--blue);
+        color: #fff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+      }
+      .accordion-panel {
+        background: rgba(17, 24, 39, 0.55);
+        border: 1px solid var(--edge);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 10px;
+      }
+      .accordion-panel summary {
+        font-weight: 700;
+        font-size: 13.5px;
+        cursor: pointer;
+        color: var(--text);
+        outline: none;
+        user-select: none;
+        list-style: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .accordion-panel summary::-webkit-details-marker {
+        display: none;
+      }
+      .accordion-panel summary::after {
+        content: '▼';
+        font-size: 10px;
+        color: var(--muted);
+        transition: transform 0.2s ease;
+      }
+      .accordion-panel[open] summary::after {
+        transform: rotate(180deg);
+      }
+      .accordion-content {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--edge);
+      }
+      .socket-mini-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 10px 0 14px;
+      }
+      .socket-mini-chips .badge {
+        font-size: 11px;
+        padding: 4px 8px;
+      }
+      @media (max-width: 640px) {
+        .bottom-nav {
+          display: grid !important;
+          grid-template-columns: repeat(3, 1fr) !important;
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          padding: 8px 6px calc(8px + env(safe-area-inset-bottom)) !important;
+          background: rgba(9, 13, 22, 0.98) !important;
+          border-top: 1px solid var(--edge);
+          z-index: 100;
+          backdrop-filter: blur(16px);
+          gap: 6px;
+        }
+        .bottom-nav .tab-button {
+          flex-direction: column !important;
+          gap: 3px !important;
+          font-size: 11px !important;
+          padding: 8px 2px !important;
+          border-radius: 8px !important;
+          text-align: center !important;
+          line-height: 1.1 !important;
+        }
+        .bottom-nav .icon {
+          font-size: 18px !important;
+          line-height: 1 !important;
+        }
+      }
+
     </style>
   </head>
   <body>
@@ -848,27 +956,232 @@
       </div>
       <div id="error" role="alert"></div>
       <nav class="desktop-tabs" aria-label="Bagian dashboard">
-        <button class="tab-button active" data-tab="overview">
-          📊 Ringkasan</button
-        ><button class="tab-button" data-tab="positions">
-          🎯 Posisi Aktif <span class="count" data-count="open">0</span></button
-        ><button class="tab-button" data-tab="history">
-          📜 Riwayat Transaksi
-          <span class="count" data-count="history">0</span></button
-        ><button class="tab-button" data-tab="onchain">
-          💳 On-Chain &amp; Auto-Buy</button
-        ><button class="tab-button" data-tab="clusters">
-          🌐 Cluster Sindikat <span class="count" id="cluster-count">0</span>
-        </button
-        ><button class="tab-button" data-tab="genesis">
-          🚀 Lane G1 Genesis <span class="count" id="genesis-count">0</span>
-        </button>
+        <button class="tab-button active" data-tab="radar">
+          ⚡ Radar Live (Tersaring) <span class="count" id="radar-badge-count">0</span></button
+        ><button class="tab-button" data-tab="trading">
+          💼 Trading (Dibeli &amp; Dijual) <span class="count" id="trading-badge-count">0</span></button
+        ><button class="tab-button" data-tab="rekap">
+          📊 Rekap &amp; 20 Lane Matrix</button>
       </nav>
-      <section
-        id="pane-overview"
-        class="tab-pane active"
-        aria-label="Ringkasan"
-      >
+      <section id="pane-radar" class="tab-pane active" aria-label="Radar Live">
+        <div class="panel">
+          <div class="row">
+            <h2>⚡ Detail &amp; Token Masuk Real-Time (Tersaring)</h2>
+            <div class="actions">
+              <div class="view-toggle" id="active-toggle">
+                <button type="button" class="view-btn" data-target="active" data-view="card">📱 Kartu</button>
+                <button type="button" class="view-btn active" data-target="active" data-view="table">📊 Tabel</button>
+              </div>
+              <span id="active-details-count" class="badge">0 Token</span>
+            </div>
+          </div>
+          <p>
+            Daftar token yang tertangkap masuk radar detail secara real-time via Solana RPC WebSocket (inflow sindikat 149/235 wallet), GMGN Browser WS, dan PumpPortal WebSocket (koin baru 0s). Evaluasi 20 lane berjalan paralel.
+          </p>
+          <div id="active-details-cards" class="mobile-card-list" style="display:none;"></div>
+          <div id="active-details-table-wrap" class="table-wrap table-scroll-bounded">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Sumber</th>
+                  <th>Waktu Masuk · WIB</th>
+                  <th>Wallet Pemicu</th>
+                  <th>Harga Masuk</th>
+                  <th>Status Evaluasi</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="active-details-rows">
+                <tr><td colspan="7" class="empty">Belum ada token baru dalam antrean radar live.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>⚡ Event terbaru</h2>
+          <div id="events" class="log">Belum ada event.</div>
+        </div>
+        <details class="accordion-panel">
+          <summary>🔎 Observasi &amp; Token Belum Entry (Evaluasi Gate)</summary>
+          <div class="accordion-content">
+            <div class="panel">
+          <div class="row">
+            <h2>🔎 Observasi &amp; token belum entry</h2>
+            <span id="observation-count" class="badge">0 token</span>
+          </div>
+          <div class="table-wrap table-scroll-bounded">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Waktu</th>
+                  <th>Lane</th>
+                  <th>Wallet asal</th>
+                  <th>Status</th>
+                  <th>Holder / Δ15s</th>
+                  <th>Buy-share 5s</th>
+                  <th>Alasan</th>
+                </tr>
+              </thead>
+              <tbody id="observations"></tbody>
+            </table>
+          </div>
+          <div id="observation-note" class="hint" style="margin-top:8px;"></div>
+        </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="pane-trading" class="tab-pane" aria-label="Trading">
+        <!-- Segmented Control for Subtabs -->
+        <div class="segmented-control" id="trading-subnav">
+          <button type="button" class="seg-btn active" data-subtab="open">
+            🟢 Dibeli / Posisi Aktif <span class="count" data-count="open">0</span>
+          </button>
+          <button type="button" class="seg-btn" data-subtab="closed">
+            🔴 Dijual / Selesai <span class="count" data-count="history">0</span>
+          </button>
+        </div>
+
+        <!-- Shared Filter Bar -->
+        <div class="panel" style="padding: 12px 14px; margin-bottom: 12px;">
+          <div class="row" style="flex-wrap: wrap; gap: 8px;">
+            <div style="flex: 1; min-width: 200px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <input id="search" placeholder="Cari token / mint" aria-label="Cari token" style="flex: 1; min-width: 140px;" />
+              <select id="lane" aria-label="Filter lane" style="min-width: 130px;">
+                <option value="all">Semua lane (20 Lane)</option>
+              </select>
+              <select id="hour" aria-label="Filter jam" style="display:none; min-width: 120px;">
+                <option value="all">Semua jam</option>
+              </select>
+              <select id="phase" aria-label="Filter status" style="display:none; min-width: 130px;">
+                <option value="all">Semua status</option>
+                <option value="closed">Trade selesai</option>
+                <option value="missing">Exit kurang data</option>
+              </select>
+            </div>
+            <div class="view-toggle" id="trading-view-toggle">
+              <button type="button" class="view-btn" data-target="trading" data-view="card">📱 Kartu</button>
+              <button type="button" class="view-btn active" data-target="trading" data-view="table">📊 Tabel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subpane OPEN: Dibeli / Posisi Aktif -->
+        <div id="trading-open-container">
+          <div class="panel">
+            <div class="row">
+              <h2>🎯 Posisi Aktif (Dibeli) <span class="count" data-count="open">0</span></h2>
+              <span class="badge live">Estimasi paper</span>
+            </div>
+            <p>Posisi yang sudah dibeli (entry) pada worker aktif. Waktu ditampilkan dalam WIB.</p>
+            <div id="positions-cards" class="mobile-card-list" style="display:none;"></div>
+            <div id="positions-table-wrap" class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Lane</th>
+                    <th>Wallet asal</th>
+                    <th>Entry WIB</th>
+                    <th>Harga entry</th>
+                    <th>Socket terbaru</th>
+                    <th>Floating net %</th>
+                    <th>Hold</th>
+                    <th>Holder / Δ15s</th>
+                    <th>Buy-share 5s</th>
+                    <th>Status / alasan</th>
+                  </tr>
+                </thead>
+                <tbody id="positions"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subpane CLOSED: Dijual / Riwayat Selesai -->
+        <div id="trading-closed-container" style="display:none;">
+          <div class="panel">
+            <div class="row">
+              <h2>📜 Riwayat Transaksi (Dijual) <span class="count" data-count="history">0</span></h2>
+              <span class="badge paper">Trade Selesai</span>
+            </div>
+            <p>PnL berasal dari model paper. Quote swap merupakan perbandingan harga pasar vs Jupiter/Raydium.</p>
+            <div id="history-cards" class="mobile-card-list" style="display:none;"></div>
+            <div id="history-table-wrap" class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th data-sort="symbol">Token ↕</th>
+                    <th>Lane</th>
+                    <th data-sort="phase">Status ↕</th>
+                    <th data-sort="entryAt">BUY WIB ↕</th>
+                    <th data-sort="exitAt">SELL WIB ↕</th>
+                    <th>Harga socket entry → exit</th>
+                    <th>Hasil Swap BUY</th>
+                    <th>Hasil Swap SELL 1 → 2</th>
+                    <th data-sort="netReturnPercent">Net % ↕</th>
+                    <th data-sort="pnlUsd">PnL bersih ↕</th>
+                    <th>Alasan exit</th>
+                  </tr>
+                </thead>
+                <tbody id="history"></tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <div class="actions">
+                <label for="page-size">Tampilkan</label>
+                <select id="page-size">
+                  <option value="15">15 per halaman</option>
+                  <option value="30">30 per halaman</option>
+                  <option value="50">50 per halaman</option>
+                  <option value="100">100 per halaman</option>
+                </select>
+              </div>
+              <div class="actions">
+                <span id="page-info" class="scope-note">0–0 dari 0 transaksi</span>
+                <button id="prev" type="button" class="mini">←</button>
+                <span id="page-label" class="badge">1 / 1</span>
+                <button id="next" type="button" class="mini">→</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Swap Quotes Audit Panel -->
+          <div class="panel" style="margin-top: 12px;">
+            <div class="row">
+              <h2>💳 Audit Quote Swap Raydium/Jupiter</h2>
+              <span id="quote-count" class="badge">0 posisi</span>
+            </div>
+            <p>Perbandingan harga beli &amp; jual quote on-chain vs harga live WebSocket.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Lane</th>
+                    <th>Entry WIB</th>
+                    <th>Quote BUY</th>
+                    <th>Spread BUY</th>
+                    <th>Latensi BUY</th>
+                    <th>Exit WIB</th>
+                    <th>Quote SELL 1</th>
+                    <th>Quote SELL 2</th>
+                    <th>Slippage SELL</th>
+                    <th>Spread SELL</th>
+                    <th>Latensi SELL</th>
+                    <th>Hasil Audit</th>
+                  </tr>
+                </thead>
+                <tbody id="quotes"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="pane-rekap" class="tab-pane" aria-label="Rekap &amp; 20 Lane Matrix">
         <div class="cards">
           <div class="card">
             <div class="label">Token diamati</div>
@@ -930,40 +1243,6 @@
         </div>
         <div class="panel">
           <div class="row">
-            <h2>⚡ Detail &amp; Token Masuk Real-Time (Tersaring)</h2>
-            <div class="actions">
-              <div class="view-toggle" id="active-toggle">
-                <button type="button" class="view-btn" data-target="active" data-view="card">📱 Kartu</button>
-                <button type="button" class="view-btn active" data-target="active" data-view="table">📊 Tabel</button>
-              </div>
-              <span id="active-details-count" class="badge">0 Token</span>
-            </div>
-          </div>
-          <p>
-            Daftar token yang tertangkap masuk radar detail secara real-time via Solana RPC WebSocket (inflow sindikat 149/235 wallet), GMGN Browser WS, dan PumpPortal WebSocket (koin baru 0s). Evaluasi 20 lane berjalan paralel.
-          </p>
-          <div id="active-details-cards" class="mobile-card-list" style="display:none;"></div>
-          <div id="active-details-table-wrap" class="table-wrap table-scroll-bounded">
-            <table>
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Sumber</th>
-                  <th>Waktu Masuk · WIB</th>
-                  <th>Wallet Pemicu</th>
-                  <th>Harga Masuk</th>
-                  <th>Status Evaluasi</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="active-details-rows">
-                <tr><td colspan="7" class="empty">Belum ada token baru dalam antrean radar live.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="row">
             <h2>🩺 Kesehatan Socket Per 1 Jam</h2>
             <span id="socket-health-badge" class="badge live">100% HEALTHY</span>
           </div>
@@ -989,7 +1268,11 @@
             </table>
           </div>
         </div>
-        <div class="panel">
+
+        <details class="accordion-panel">
+          <summary>📈 Breakdown Per Jam (WIB)</summary>
+          <div class="accordion-content">
+            <div class="panel">
           <h2>📈 Breakdown per jam · WIB</h2>
           <p>
             Dikelompokkan menurut jam entry; token tanpa entry memakai waktu
@@ -1003,7 +1286,13 @@
           </div>
         </div>
         <div class="grid-2col">
-          <div class="panel">
+          </div>
+        </details>
+
+        <details class="accordion-panel">
+          <summary>🛰️ Worker &amp; Koneksi Headless Paralel</summary>
+          <div class="accordion-content">
+            <div class="panel">
             <div class="row">
               <h2>🛰️ Worker &amp; Koneksi Headless Paralel</h2>
               <span id="worker-badge" class="badge">Worker saat ini</span>
@@ -1030,7 +1319,13 @@
             <p id="worker-error" class="bad"></p>
             <p id="path" class="mono hint wrap"></p>
           </div>
-          <div class="panel">
+          </div>
+        </details>
+
+        <details class="accordion-panel">
+          <summary>📋 Rules Sesi</summary>
+          <div class="accordion-content">
+            <div class="panel">
             <div class="row">
               <h2>📋 Rules sesi</h2>
               <span class="badge paper">Rules tersimpan</span>
@@ -1038,152 +1333,152 @@
             <div id="rules" class="rule-list"></div>
           </div>
         </div>
-        <div class="panel">
-          <div class="row">
-            <h2>🔎 Observasi &amp; token belum entry</h2>
-            <span id="observation-count" class="badge">0 token</span>
           </div>
+        </details>
+
+        <details class="accordion-panel">
+          <summary>🌐 Cluster Sindikat (<span id="cluster-count">0</span> Cluster)</summary>
+          <div class="accordion-content">
+            
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h2 style="margin:0 0 4px 0;font-size:20px;">🌐 Cluster Sindikat Airdrop (Pola 360.500 Token)</h2>
+            <div class="muted" style="font-size:13px;">Pemetaan otomatis dev pump.fun yang mendistribusikan 360.500 token ke grup 8 wallet penerima dalam satu bundle transaksi on-chain.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="secondary" id="btn-scan-clusters" style="font-size:13px;padding:7px 14px;cursor:pointer;">🔄 Scan Ulang On-Chain</button>
+            <button type="button" class="primary" id="btn-sync-clusters" style="font-size:13px;padding:7px 14px;cursor:pointer;">⚡ Auto-Sync ke Profit4</button>
+          </div>
+        </div>
+
+        <div class="cards" style="margin-bottom:20px;">
+          <div class="card">
+            <div class="label">Cluster Terdeteksi</div>
+            <div class="value" id="cluster-stat-total">0</div>
+            <small id="cluster-stat-desc">Kelompok bundle unik</small>
+          </div>
+          <div class="card">
+            <div class="label">Total Wallet Dipetakan</div>
+            <div class="value" id="cluster-stat-wallets">0</div>
+            <small id="cluster-stat-tracked">0 sedang dipantau worker</small>
+          </div>
+          <div class="card">
+            <div class="label">Total Token Masuk</div>
+            <div class="value" id="cluster-stat-tokens">0</div>
+            <small>Tersebar di seluruh cluster</small>
+          </div>
+          <div class="card">
+            <div class="label">Auto-Sync Harvester</div>
+            <div class="value" id="cluster-stat-sync-status" style="color:#10b981;">AKTIF</div>
+            <small id="cluster-stat-sync-desc">Sinkronisasi otomatis ke Profit4</small>
+          </div>
+        </div>
+
+        <div id="clusters-container">
+          <div class="empty">Memuat data cluster sindikat…</div>
+        </div>
+      
+          </div>
+        </details>
+
+        <details class="accordion-panel">
+          <summary>🚀 Lane G1 Genesis Surge Status (<span id="genesis-count">0</span> Token)</summary>
+          <div class="accordion-content">
+            
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h2 style="margin:0 0 4px 0;font-size:20px;">🚀 Lane G1 · Genesis Surge (+50% TP / -6% SL)</h2>
+            <div class="muted" style="font-size:13px;">Strategi sweet-spot entry (MC $7k–$35k), sniper volume flow, dev holding &lt;2%, proteksi emergency dump 1.237 wallet klaster sindikat, dan simulasi dual swap probe GMGN.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="secondary" id="btn-refresh-genesis" style="font-size:13px;padding:7px 14px;cursor:pointer;">🔄 Refresh Data</button>
+          </div>
+        </div>
+
+        <div class="cards" style="margin-bottom:20px;">
+          <div class="card">
+            <div class="label">Status Worker G1</div>
+            <div class="value" id="g1-worker-status" style="color:#10b981;">AKTIF</div>
+            <small id="g1-worker-pid">PID —</small>
+          </div>
+          <div class="card">
+            <div class="label">Target Rules</div>
+            <div class="value" style="color:#38bdf8;">TP +50%</div>
+            <small>SL -6% · Trailing +35%/8%</small>
+          </div>
+          <div class="card">
+            <div class="label">Token Genesis Dipantau</div>
+            <div class="value" id="g1-token-count">0</div>
+            <small id="g1-token-watching">0 sedang evaluasi gate</small>
+          </div>
+          <div class="card">
+            <div class="label">Klaster Sindikat Terkoneksi</div>
+            <div class="value" id="g1-cluster-wallets">1.237</div>
+            <small style="color:#f59e0b;">Anti-Dump Watchdog On</small>
+          </div>
+          <div class="card highlight">
+            <div class="label">Win Rate Historis Sindikat</div>
+            <div class="value" style="color:#10b981;">72.7%</div>
+            <small>8 dari 11 token pump &gt;50%</small>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-bottom:20px;">
+          <div class="row">
+            <h2>🎯 Token Genesis Sedang Dipantau (Live Watching)</h2>
+            <span id="g1-watching-badge" class="badge">0 token</span>
+          </div>
+          <p>Daftar token airdrop sindikat 360.500 yang sedang dianalisis secara real-time untuk kondisi sweet-spot sniper flow.</p>
           <div class="table-wrap table-scroll-bounded">
             <table>
               <thead>
                 <tr>
                   <th>Token</th>
-                  <th>Waktu</th>
-                  <th>Lane</th>
-                  <th>Wallet asal</th>
-                  <th>Status</th>
-                  <th>Holder / Δ15s</th>
-                  <th>Buy-share 5s</th>
-                  <th>Alasan</th>
+                  <th>Symbol</th>
+                  <th>Fase</th>
+                  <th>Waktu Deteksi WIB</th>
+                  <th>Harga Entry / Live</th>
+                  <th>Aksi</th>
                 </tr>
               </thead>
-              <tbody id="observations"></tbody>
+              <tbody id="g1-watching-rows">
+                <tr><td colspan="6" class="muted">Memuat token yang sedang dipantau…</td></tr>
+              </tbody>
             </table>
           </div>
-          <div id="observation-note" class="hint" style="margin-top:8px;"></div>
         </div>
-        <div class="panel">
-          <h2>⚡ Event terbaru</h2>
-          <div id="events" class="log">Belum ada event.</div>
-        </div>
-      </section>
-      <section id="pane-positions" class="tab-pane" aria-label="Posisi Aktif">
+
         <div class="panel">
           <div class="row">
-            <h2>
-              🎯 Posisi Aktif (Dibeli) <span class="count" data-count="open">0</span>
-            </h2>
-            <div class="actions">
-              <div class="view-toggle" id="pos-toggle">
-                <button type="button" class="view-btn" data-target="pos" data-view="card">📱 Kartu</button>
-                <button type="button" class="view-btn active" data-target="pos" data-view="table">📊 Tabel</button>
-              </div>
-              <span class="badge live">Estimasi paper</span>
-            </div>
+            <h2>📋 Log Keputusan Evaluasi Gate G1 Real-Time</h2>
+            <span class="badge paper">Stream Event</span>
           </div>
-          <p>
-            Posisi yang sudah dibeli (entry) pada worker aktif. Waktu ditampilkan dalam WIB.
-          </p>
-          <div id="positions-cards" class="mobile-card-list" style="display:none;"></div>
-          <div id="positions-table-wrap" class="table-wrap">
+          <p>Keputusan Gate 1 (Dev &lt;2%), Gate 2 (Anti-Dump Sindikat), Gate 3 (MC $7k–$35k), dan Gate 4 (Sniper Flow).</p>
+          <div class="table-wrap table-scroll-bounded">
             <table>
               <thead>
                 <tr>
+                  <th>Waktu WIB</th>
                   <th>Token</th>
-                  <th>Lane</th>
-                  <th>Wallet asal</th>
-                  <th>Entry WIB</th>
-                  <th>Harga entry</th>
-                  <th>Socket terbaru</th>
-                  <th>Floating net %</th>
-                  <th>Hold</th>
-                  <th>Holder / Δ15s</th>
-                  <th>Buy-share 5s</th>
-                  <th>Status / alasan</th>
+                  <th>Keputusan / Event</th>
+                  <th>Reasons / Catatan</th>
+                  <th>Harga Saat Cek</th>
                 </tr>
               </thead>
-              <tbody id="positions"></tbody>
+              <tbody id="g1-decision-rows">
+                <tr><td colspan="5" class="muted">Memuat log keputusan evaluasi…</td></tr>
+              </tbody>
             </table>
           </div>
         </div>
-      </section>
-      <section
-        id="pane-history"
-        class="tab-pane"
-        aria-label="Riwayat Transaksi"
-      >
-        <div class="panel">
-          <div class="row">
-            <h2>
-              📜 Riwayat Transaksi (Dijual)
-              <span class="count" data-count="history">0</span>
-            </h2>
-            <div class="view-toggle" id="hist-toggle">
-              <button type="button" class="view-btn" data-target="hist" data-view="card">📱 Kartu</button>
-              <button type="button" class="view-btn active" data-target="hist" data-view="table">📊 Tabel</button>
-            </div>
+      
           </div>
-          <div class="filter">
-            <input
-              id="search"
-              placeholder="Cari token / mint"
-              aria-label="Cari token"
-            /><select id="lane" aria-label="Filter lane">
-              <option value="all">Semua lane</option></select
-            ><select id="hour" aria-label="Filter jam">
-              <option value="all">Semua jam</option></select
-            ><select id="phase" aria-label="Filter status">
-              <option value="all">Semua status</option>
-              <option value="closed">Trade selesai</option>
-              <option value="missing">Exit kurang data</option>
-            </select>
-          </div>
-          <p>
-            PnL berasal dari model paper. Quote swap merupakan perbandingan harga pasar vs Jupiter/Raydium.
-            Klik judul kolom untuk sorting.
-          </p>
-          <div id="history-cards" class="mobile-card-list" style="display:none;"></div>
-          <div id="history-table-wrap" class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th data-sort="symbol">Token ↕</th>
-                  <th>Lane</th>
-                  <th data-sort="phase">Status ↕</th>
-                  <th data-sort="entryAt">BUY WIB ↕</th>
-                  <th data-sort="exitAt">SELL WIB ↕</th>
-                  <th>Harga socket entry → exit</th>
-                  <th>Hasil Swap BUY</th>
-                  <th>Hasil Swap SELL 1 → 2</th>
-                  <th data-sort="netReturnPercent">Net % ↕</th>
-                  <th data-sort="pnlUsd">PnL bersih ↕</th>
-                  <th>Alasan exit</th>
-                </tr>
-              </thead>
-              <tbody id="history"></tbody>
-            </table>
-          </div>
-          <div class="pagination">
-            <div class="actions">
-              <label for="page-size">Tampilkan</label
-              ><select id="page-size">
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option></select
-              ><span id="page-info">0 transaksi</span>
-            </div>
-            <div class="actions">
-              <button id="prev">‹ Prev</button><span id="page-label">1 / 1</span
-              ><button id="next">Next ›</button>
-            </div>
-          </div>
-        </div>
-      </section>
-      <section
-        id="pane-onchain"
-        class="tab-pane"
-        aria-label="On-Chain & Auto-Buy"
-      >
+        </details>
+
+        <details class="accordion-panel">
+          <summary>💳 Kontrol On-Chain &amp; Auto-Buy</summary>
+          <div class="accordion-content">
+            
         <div class="panel control-panel" id="real-control-panel">
           <div class="row">
             <h2>⚡ Real Auto-Buy</h2>
@@ -1519,178 +1814,17 @@
             </table>
           </div>
         </div>
+      
+          </div>
+        </details>
       </section>
-      <section
-        id="pane-clusters"
-        class="tab-pane"
-        aria-label="Cluster Sindikat"
-      >
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-          <div>
-            <h2 style="margin:0 0 4px 0;font-size:20px;">🌐 Cluster Sindikat Airdrop (Pola 360.500 Token)</h2>
-            <div class="muted" style="font-size:13px;">Pemetaan otomatis dev pump.fun yang mendistribusikan 360.500 token ke grup 8 wallet penerima dalam satu bundle transaksi on-chain.</div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button type="button" class="secondary" id="btn-scan-clusters" style="font-size:13px;padding:7px 14px;cursor:pointer;">🔄 Scan Ulang On-Chain</button>
-            <button type="button" class="primary" id="btn-sync-clusters" style="font-size:13px;padding:7px 14px;cursor:pointer;">⚡ Auto-Sync ke Profit4</button>
-          </div>
-        </div>
-
-        <div class="cards" style="margin-bottom:20px;">
-          <div class="card">
-            <div class="label">Cluster Terdeteksi</div>
-            <div class="value" id="cluster-stat-total">0</div>
-            <small id="cluster-stat-desc">Kelompok bundle unik</small>
-          </div>
-          <div class="card">
-            <div class="label">Total Wallet Dipetakan</div>
-            <div class="value" id="cluster-stat-wallets">0</div>
-            <small id="cluster-stat-tracked">0 sedang dipantau worker</small>
-          </div>
-          <div class="card">
-            <div class="label">Total Token Masuk</div>
-            <div class="value" id="cluster-stat-tokens">0</div>
-            <small>Tersebar di seluruh cluster</small>
-          </div>
-          <div class="card">
-            <div class="label">Auto-Sync Harvester</div>
-            <div class="value" id="cluster-stat-sync-status" style="color:#10b981;">AKTIF</div>
-            <small id="cluster-stat-sync-desc">Sinkronisasi otomatis ke Profit4</small>
-          </div>
-        </div>
-
-        <div id="clusters-container">
-          <div class="empty">Memuat data cluster sindikat…</div>
-        </div>
-      </section>
-      <section
-        id="pane-genesis"
-        class="tab-pane"
-        aria-label="Lane G1 Genesis Surge"
-      >
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-          <div>
-            <h2 style="margin:0 0 4px 0;font-size:20px;">🚀 Lane G1 · Genesis Surge (+50% TP / -6% SL)</h2>
-            <div class="muted" style="font-size:13px;">Strategi sweet-spot entry (MC $7k–$35k), sniper volume flow, dev holding &lt;2%, proteksi emergency dump 1.237 wallet klaster sindikat, dan simulasi dual swap probe GMGN.</div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button type="button" class="secondary" id="btn-refresh-genesis" style="font-size:13px;padding:7px 14px;cursor:pointer;">🔄 Refresh Data</button>
-          </div>
-        </div>
-
-        <div class="cards" style="margin-bottom:20px;">
-          <div class="card">
-            <div class="label">Status Worker G1</div>
-            <div class="value" id="g1-worker-status" style="color:#10b981;">AKTIF</div>
-            <small id="g1-worker-pid">PID —</small>
-          </div>
-          <div class="card">
-            <div class="label">Target Rules</div>
-            <div class="value" style="color:#38bdf8;">TP +50%</div>
-            <small>SL -6% · Trailing +35%/8%</small>
-          </div>
-          <div class="card">
-            <div class="label">Token Genesis Dipantau</div>
-            <div class="value" id="g1-token-count">0</div>
-            <small id="g1-token-watching">0 sedang evaluasi gate</small>
-          </div>
-          <div class="card">
-            <div class="label">Klaster Sindikat Terkoneksi</div>
-            <div class="value" id="g1-cluster-wallets">1.237</div>
-            <small style="color:#f59e0b;">Anti-Dump Watchdog On</small>
-          </div>
-          <div class="card highlight">
-            <div class="label">Win Rate Historis Sindikat</div>
-            <div class="value" style="color:#10b981;">72.7%</div>
-            <small>8 dari 11 token pump &gt;50%</small>
-          </div>
-        </div>
-
-        <div class="panel" style="margin-bottom:20px;">
-          <div class="row">
-            <h2>🎯 Token Genesis Sedang Dipantau (Live Watching)</h2>
-            <span id="g1-watching-badge" class="badge">0 token</span>
-          </div>
-          <p>Daftar token airdrop sindikat 360.500 yang sedang dianalisis secara real-time untuk kondisi sweet-spot sniper flow.</p>
-          <div class="table-wrap table-scroll-bounded">
-            <table>
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Symbol</th>
-                  <th>Fase</th>
-                  <th>Waktu Deteksi WIB</th>
-                  <th>Harga Entry / Live</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="g1-watching-rows">
-                <tr><td colspan="6" class="muted">Memuat token yang sedang dipantau…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="row">
-            <h2>📋 Log Keputusan Evaluasi Gate G1 Real-Time</h2>
-            <span class="badge paper">Stream Event</span>
-          </div>
-          <p>Keputusan Gate 1 (Dev &lt;2%), Gate 2 (Anti-Dump Sindikat), Gate 3 (MC $7k–$35k), dan Gate 4 (Sniper Flow).</p>
-          <div class="table-wrap table-scroll-bounded">
-            <table>
-              <thead>
-                <tr>
-                  <th>Waktu WIB</th>
-                  <th>Token</th>
-                  <th>Keputusan / Event</th>
-                  <th>Reasons / Catatan</th>
-                  <th>Harga Saat Cek</th>
-                </tr>
-              </thead>
-              <tbody id="g1-decision-rows">
-                <tr><td colspan="5" class="muted">Memuat log keputusan evaluasi…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-      <footer id="historical"></footer>
-    </main>
-    <dialog id="real-audit-dialog">
-      <div class="row">
-        <h2>Audit transaksi asli</h2>
-        <button id="real-audit-close">Tutup</button>
-      </div>
-      <div id="real-audit-content"></div>
-    </dialog>
-    <dialog id="success-modal">
-      <div class="modal-icon" id="success-modal-icon">✅</div>
-      <div class="modal-title" id="success-modal-title">Berhasil Disimpan</div>
-      <div class="modal-body" id="success-modal-body">Pengaturan berhasil diperbarui.</div>
-      <div class="modal-actions">
-        <button type="button" class="primary" id="success-modal-ok">OK, Mengerti</button>
-      </div>
-    </dialog>
-    <nav class="bottom-nav" aria-label="Navigasi mobile">
-      <button class="tab-button active" data-tab="overview">
-        <span class="icon">📊</span>Ringkasan</button
-      ><button class="tab-button" data-tab="positions">
-        <span class="icon"
-          >🎯 <span class="count" data-count="open">0</span></span
-        >Posisi Aktif</button
-      ><button class="tab-button" data-tab="history">
-        <span class="icon"
-          >📜 <span class="count" data-count="history">0</span></span
-        >Riwayat</button
-      ><button class="tab-button" data-tab="onchain">
-        <span class="icon">💳</span>On-Chain</button
-      ><button class="tab-button" data-tab="clusters">
-        <span class="icon">🌐</span>Cluster
-      </button
-      ><button class="tab-button" data-tab="genesis">
-        <span class="icon">🚀</span>Lane G1
-      </button>
+<nav class="bottom-nav" aria-label="Navigasi mobile">
+      <button class="tab-button active" data-tab="radar">
+        <span class="icon">⚡</span>Radar Live</button
+      ><button class="tab-button" data-tab="trading">
+        <span class="icon">💼 <span class="count" id="trading-total-count">0</span></span>Trading</button
+      ><button class="tab-button" data-tab="rekap">
+        <span class="icon">📊</span>Rekap &amp; Lane</button>
     </nav>
     <script>
       "use strict";
@@ -2093,6 +2227,9 @@
         $("capture-count").textContent =
           `${new Set(rows.filter((p) => p.live && p.captureActive).map((p) => p.mint)).size} detail aktif`;
         $("session-trades").textContent = `${s.closed} trade selesai`;
+        document.querySelectorAll("#trading-total-count, #trading-badge-count").forEach(e => e.textContent = s.entries);
+        const actCount = $("active-details-count") ? $("active-details-count").textContent.replace(/[^0-9]/g, "") : "0";
+        document.querySelectorAll("#radar-badge-count").forEach(e => e.textContent = actCount || "0");
         const lanes = [...new Set(rows.map(laneOf))].sort();
         $("lane-count").textContent = `${lanes.length} lane`;
         const byLane = new Map();
@@ -2292,7 +2429,15 @@
       }
 
       function renderPositions(rows) {
-        const positions = rows.filter(open);
+        const query = $("search") ? $("search").value.trim().toLowerCase() : "";
+        const laneVal = $("lane") ? $("lane").value : "all";
+        let positions = rows.filter(open);
+        if (query) {
+          positions = positions.filter((p) => `${p.symbol || ""} ${p.mint}`.toLowerCase().includes(query));
+        }
+        if (laneVal !== "all") {
+          positions = positions.filter((p) => laneOf(p) === laneVal);
+        }
         document
           .querySelectorAll('[data-count="open"]')
           .forEach((e) => (e.textContent = positions.length));
@@ -2861,77 +3006,90 @@
         el.className = `worker-action-status ${kind}`;
         el.hidden = false;
       }
+      let currentTradingSubtab = "open";
+      function switchTradingSubtab(subtab) {
+        currentTradingSubtab = subtab;
+        document.querySelectorAll("[data-subtab]").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.subtab === subtab);
+        });
+        const isOpen = subtab === "open";
+        if ($("trading-open-container")) $("trading-open-container").style.display = isOpen ? "block" : "none";
+        if ($("trading-closed-container")) $("trading-closed-container").style.display = isOpen ? "none" : "block";
+        if ($("phase")) $("phase").style.display = isOpen ? "none" : "inline-block";
+        if ($("hour")) $("hour").style.display = isOpen ? "none" : "inline-block";
+      }
+
       function initViewToggles() {
         const isMobile = window.innerWidth <= 768;
-        ["pos", "hist", "active"].forEach((target) => {
-          const wrap = $(
-            target === "pos"
-              ? "positions-table-wrap"
-              : target === "hist"
-                ? "history-table-wrap"
-                : "active-details-table-wrap",
-          );
-          const cards = $(
-            target === "pos"
-              ? "positions-cards"
-              : target === "hist"
-                ? "history-cards"
-                : "active-details-cards",
-          );
-          const toggle = $(
-            target === "pos"
-              ? "pos-toggle"
-              : target === "hist"
-                ? "hist-toggle"
-                : "active-toggle",
-          );
-          if (!wrap || !cards || !toggle) return;
-
-          let savedMode = null;
-          try {
-            savedMode = localStorage.getItem(`profit4_view_${target}`);
-          } catch {}
-          const defaultMode = savedMode || (isMobile ? "card" : "table");
-
-          const applyMode = (mode) => {
-            if (mode === "card") {
-              cards.style.display = "flex";
-              wrap.style.display = "none";
-            } else {
-              cards.style.display = "none";
-              wrap.style.display = "block";
-            }
-            toggle.querySelectorAll("button").forEach((btn) => {
-              btn.classList.toggle("active", btn.dataset.view === mode);
-            });
-            try {
-              localStorage.setItem(`profit4_view_${target}`, mode);
-            } catch {}
+        
+        // 1. Radar toggle
+        const radarWrap = $("active-details-table-wrap"), radarCards = $("active-details-cards"), radarToggle = $("active-toggle") || $("radar-view-toggle");
+        if (radarWrap && radarCards && radarToggle) {
+          let savedRadar = null;
+          try { savedRadar = localStorage.getItem("profit4_view_radar"); } catch {}
+          const modeRadar = savedRadar || (isMobile ? "card" : "table");
+          const applyRadar = (mode) => {
+            radarCards.style.display = mode === "card" ? "flex" : "none";
+            radarWrap.style.display = mode === "card" ? "none" : "block";
+            radarToggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.view === mode));
+            try { localStorage.setItem("profit4_view_radar", mode); } catch {}
           };
+          applyRadar(modeRadar);
+          radarToggle.querySelectorAll("button").forEach(b => b.onclick = () => applyRadar(b.dataset.view));
+        }
 
-          applyMode(defaultMode);
+        // 2. Trading unified toggle (controls both Open and Closed)
+        const posWrap = $("positions-table-wrap"), posCards = $("positions-cards");
+        const histWrap = $("history-table-wrap"), histCards = $("history-cards");
+        const tradeToggle = $("trading-view-toggle");
+        if (tradeToggle) {
+          let savedTrade = null;
+          try { savedTrade = localStorage.getItem("profit4_view_trading"); } catch {}
+          const modeTrade = savedTrade || (isMobile ? "card" : "table");
+          const applyTrade = (mode) => {
+            if (posCards) posCards.style.display = mode === "card" ? "flex" : "none";
+            if (posWrap) posWrap.style.display = mode === "card" ? "none" : "block";
+            if (histCards) histCards.style.display = mode === "card" ? "flex" : "none";
+            if (histWrap) histWrap.style.display = mode === "card" ? "none" : "block";
+            tradeToggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.view === mode));
+            try { localStorage.setItem("profit4_view_trading", mode); } catch {}
+          };
+          applyTrade(modeTrade);
+          tradeToggle.querySelectorAll("button").forEach(b => b.onclick = () => applyTrade(b.dataset.view));
+        }
 
-          toggle.querySelectorAll("button").forEach((btn) => {
-            btn.onclick = () => applyMode(btn.dataset.view);
-          });
+        // Subtab click handlers
+        document.querySelectorAll("[data-subtab]").forEach((btn) => {
+          btn.onclick = () => switchTradingSubtab(btn.dataset.subtab);
         });
       }
+
       function switchTab(tab, persist = true) {
-        if (!["overview", "positions", "history", "onchain", "clusters", "genesis"].includes(tab))
-          tab = "overview";
+        const legacyMap = {
+          overview: "rekap",
+          positions: "trading",
+          history: "trading",
+          onchain: "rekap",
+          clusters: "rekap",
+          genesis: "rekap",
+        };
+        const targetTab = legacyMap[tab] || (["radar", "trading", "rekap"].includes(tab) ? tab : "radar");
+        if (tab === "positions") switchTradingSubtab("open");
+        else if (tab === "history") switchTradingSubtab("closed");
+
         document
           .querySelectorAll(".tab-pane")
-          .forEach((p) => p.classList.toggle("active", p.id === `pane-${tab}`));
+          .forEach((p) => p.classList.toggle("active", p.id === `pane-${targetTab}`));
         document.querySelectorAll("[data-tab]").forEach((b) => {
-          const active = b.dataset.tab === tab;
+          const active = b.dataset.tab === targetTab;
           b.classList.toggle("active", active);
           b.setAttribute("aria-pressed", String(active));
         });
         if (persist) {
           try {
-            localStorage.setItem("profit4_active_tab", tab);
+            localStorage.setItem("profit4_active_tab", targetTab);
           } catch {}
-          history.replaceState(null, "", `#${tab}`);
+          history.replaceState(null, "", `#${targetTab}`);
         }
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
@@ -2947,7 +3105,7 @@
           initialTab = localStorage.getItem("profit4_active_tab");
         } catch {}
       }
-      switchTab(initialTab || "overview");
+      switchTab(initialTab || "radar");
       initViewToggles();
       $("run").onchange = () => {
         session = $("run").value;
@@ -2956,9 +3114,12 @@
         if (state) render();
       };
       ["search", "lane", "hour", "phase", "page-size"].forEach((id) =>
-        $(id).addEventListener(id === "search" ? "input" : "change", () => {
+        $(id)?.addEventListener(id === "search" ? "input" : "change", () => {
           page = 1;
           renderHistory();
+          if (state && (id === "search" || id === "lane")) {
+            renderPositions(scoped(state.positions));
+          }
         }),
       );
       document.querySelectorAll("[data-sort]").forEach(

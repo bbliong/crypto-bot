@@ -47,16 +47,14 @@ export function profit4Snapshot(root, worker) {
     const live = Boolean(current && worker.active);
     let state, manifest;
     const cached = runCache.get(dir.name);
-    if (!live && cached && cached.mtimeMs === stat.mtimeMs) {
+    if (cached && (Date.now() - (cached.readAt || 0) < 2000 || (!live && cached.mtimeMs === stat.mtimeMs))) {
       state = cached.state;
       manifest = cached.manifest;
     } else {
       state = read(stateFile);
       if (!state?.positions) continue;
       manifest = read(join(runPath, 'manifest.json'), {});
-      if (!live) {
-        runCache.set(dir.name, { mtimeMs: stat.mtimeMs, state, manifest });
-      }
+      runCache.set(dir.name, { mtimeMs: stat.mtimeMs, readAt: Date.now(), state, manifest });
     }
     runs.push({ id: dir.name, observedAt: state.observedAt, current: Boolean(current), live: Boolean(live),
       startedAt: manifest.startedAt ?? null, execution: state.execution ?? null,
@@ -212,7 +210,10 @@ export function profit4Snapshot(root, worker) {
         total: summarize(items),
       };
     });
-  return { positions, runs, recentEventsByRun, recentEvents: recentEvents.sort((a, b) => b.observedAt - a.observedAt).slice(0, 60),
+  const enteredTrades = positions.filter(p => p.entryAt != null || p.phase === 'OPEN');
+  const watchingSample = positions.filter(p => p.entryAt == null && p.phase !== 'OPEN' && (p.phase === 'WATCHING' || p.captureActive)).slice(-50);
+  const clientPositions = [...enteredTrades, ...watchingSample];
+  return { positions: clientPositions, runs, recentEventsByRun, recentEvents: recentEvents.sort((a, b) => b.observedAt - a.observedAt).slice(0, 60),
     summary: summarize(positions),
     summaryV1: summarize(v1Positions),
     summaryV2: summarize(v2Positions),
@@ -442,7 +443,13 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
         const history = profit4Snapshot(root, worker);
         const historical = read(join(root, 'reports', 'distribution-profit-search', 'analysis.json'))?.bestKnownPnlDescriptive?.all ?? null;
         const live = liveStatus();
-        if (live.readiness.wallet) Object.assign(live.readiness, await readProfit4WalletBalance(live.readiness.wallet));
+        if (live.readiness.wallet) {
+          const cachedBal = await Promise.race([
+            readProfit4WalletBalance(live.readiness.wallet),
+            new Promise(res => setTimeout(() => res(null), 250))
+          ]);
+          if (cachedBal) Object.assign(live.readiness, cachedBal);
+        }
         const airdropClusters = read(join(data, 'airdrop-clusters.json'), null);
         return json(res, 200, { mode: 'PROFIT4_PAPER', admin: { authenticated: admin.authenticated(req) }, autoBuy: { ...live, positions: undefined }, config: config(), worker, rules: { ...PROFIT4_RULES, targetPercent: PROFIT4_TARGET_PERCENT, trailingEnabled: false, flowExitEnabled: false, rounds: 1 },
           historical, ...history, airdropClusters, logs, paths: { data, workerLog: join(data, 'worker.log') } }, req);
