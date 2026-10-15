@@ -212,6 +212,7 @@ export class DistributionTargetLane {
   private lastReasons = '';
   private exitReason = '';
   private lastStepAt = -Infinity;
+  private lastKnownPrice: number | null = null;
   constructor(readonly mint: string, rules: TargetRules, private readonly emit: (event: TargetEvent) => void = () => {}, policy: TargetPolicy = { name: 'base' }) {
     this.rules = Object.freeze(validateTargetRules(rules));
     this.policy = Object.freeze({ ...policy });
@@ -234,18 +235,73 @@ export class DistributionTargetLane {
   }
   end(now: number, reason: string) {
     if (this.phase === 'CLOSED' || this.phase === 'CENSORED') return;
-    if (this.entryAt !== null) { this.phase = 'CENSORED'; this.event('PAPER_EXIT_DATA_MISSING', now, { reason, entryAt: this.entryAt, entryPrice: this.entryPrice }); }
-    else { this.phase = 'CLOSED'; this.event('PAPER_NO_ENTRY', now, { reason }); }
+    if (this.entryAt !== null) {
+      const exitPrice = this.lastKnownPrice ?? this.entryPrice;
+      if (exitPrice !== null) {
+        this.exitAt = now;
+        this.exitPrice = exitPrice;
+        this.netReturnPercent = this.net(exitPrice);
+        this.phase = 'CLOSED';
+        this.event('PAPER_SELL', now, {
+          reason,
+          entryAt: this.entryAt,
+          entryPriceUsd: this.entryPrice,
+          priceUsd: exitPrice,
+          netReturnPercent: this.netReturnPercent,
+          pnlUsd: (this.netReturnPercent! / 100) * this.rules.stakeUsd,
+          targetPercent: this.rules.targetPercent,
+          holdSeconds: (now - this.entryAt!) / 1000,
+          rules: this.rules,
+          priceSource: 'end_finalize_last_known_price',
+        });
+        return;
+      }
+      this.phase = 'CENSORED';
+      this.event('PAPER_EXIT_DATA_MISSING', now, { reason, entryAt: this.entryAt, entryPrice: this.entryPrice });
+    } else {
+      this.phase = 'CLOSED';
+      this.event('PAPER_NO_ENTRY', now, { reason });
+    }
   }
   step(f: TargetFacts) {
     if (f.now <= this.lastStepAt || this.phase === 'CLOSED' || this.phase === 'CENSORED') return;
     this.lastStepAt = f.now;
     const r = this.rules, now = f.now;
+    if (f.price !== null) {
+      this.lastKnownPrice = f.price;
+    }
     if (this.phase === 'ENTRY_PENDING' || this.phase === 'EXIT_PENDING') {
       const deadline = this.pendingAt! + r.executionDelayMs;
       if (now > this.pendingAt! + r.maxFillWaitMs) {
-        if (this.phase === 'EXIT_PENDING') this.end(now, 'EXIT_QUOTE_UNAVAILABLE_AFTER_DELAY');
-        else { this.phase = 'WATCHING'; this.confirmedAt = null; this.event('PAPER_ENTRY_CANCELLED', now, { reason: 'ENTRY_QUOTE_UNAVAILABLE_AFTER_DELAY' }); }
+        if (this.phase === 'EXIT_PENDING') {
+          const fallbackPrice = (f.price !== null && f.priceAt !== null && now - f.priceAt <= 5000)
+            ? f.price
+            : (this.lastKnownPrice ?? f.price ?? this.entryPrice);
+          if (fallbackPrice !== null && this.entryPrice !== null) {
+            this.exitAt = now;
+            this.exitPrice = fallbackPrice;
+            this.netReturnPercent = this.net(fallbackPrice);
+            this.phase = 'CLOSED';
+            this.event('PAPER_SELL', now, {
+              reason: this.exitReason || 'OBSERVATION_END',
+              entryAt: this.entryAt,
+              entryPriceUsd: this.entryPrice,
+              priceUsd: fallbackPrice,
+              netReturnPercent: this.netReturnPercent,
+              pnlUsd: (this.netReturnPercent! / 100) * r.stakeUsd,
+              targetPercent: r.targetPercent,
+              holdSeconds: (now - this.entryAt!) / 1000,
+              rules: r,
+              priceSource: 'last_known_socket_price',
+            });
+            return;
+          }
+          this.end(now, 'EXIT_QUOTE_UNAVAILABLE_AFTER_DELAY');
+        } else {
+          this.phase = 'WATCHING';
+          this.confirmedAt = null;
+          this.event('PAPER_ENTRY_CANCELLED', now, { reason: 'ENTRY_QUOTE_UNAVAILABLE_AFTER_DELAY' });
+        }
         return;
       }
       if (now < deadline || f.price === null || f.priceAt === null || f.priceAt < deadline || now - f.priceAt > 2000) return;
@@ -274,6 +330,21 @@ export class DistributionTargetLane {
       this.event('PAPER_ENTRY_SIGNAL', now, { priceUsd: f.price, fillNotBefore: now + r.executionDelayMs });
       return;
     }
+
+    // 1. Timeout exit check: jika hold telah melebihi maxHoldSeconds, tutup posisi (mengikuti pola OBSERVATION_END)
+    if (this.phase === 'OPEN' && this.entryAt !== null && now - this.entryAt >= r.maxHoldSeconds * 1000) {
+      const isPriceFresh = f.price !== null && f.priceAt !== null && now - f.priceAt <= 2000;
+      const exitPrice = isPriceFresh ? f.price! : (this.lastKnownPrice ?? f.price ?? this.entryPrice!);
+      const reason = isPriceFresh ? 'MAX_HOLD' : 'OBSERVATION_END';
+      const net = this.net(exitPrice)!;
+      this.phase = 'EXIT_PENDING';
+      this.pendingAt = now;
+      this.exitReason = reason;
+      this.event('PAPER_EXIT_SIGNAL', now, { reason, netReturnPercent: net, priceUsd: exitPrice, fillNotBefore: now + r.executionDelayMs });
+      return;
+    }
+
+    // 2. Evaluasi kondisi pasar live (Stop-loss, target, trailing, flow exit) memerlukan harga fresh (< 2000ms)
     if (f.price === null || f.priceAt === null || now - f.priceAt > 2000) return;
     const net = this.net(f.price)!;
     this.peakNet = Math.max(this.peakNet, net);
