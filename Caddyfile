@@ -22,8 +22,9 @@ cr.bbliong.io {
     handle /api/comparison-v6-v7* {
         reverse_proxy 127.0.0.1:4178
     }
+    # Centralized Profit4 Dashboard as default root handler
     handle {
-        reverse_proxy 127.0.0.1:4180
+        reverse_proxy 127.0.0.1:4178
     }
 }
 

@@ -587,6 +587,128 @@
         font-size: 11px;
         color: var(--muted);
       }
+      /* Mobile Friendly Card & Toggle Styles */
+      .view-toggle {
+        display: inline-flex;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+        padding: 2px;
+        gap: 2px;
+      }
+      .view-toggle button {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .view-toggle button.active {
+        background: var(--blue);
+        color: #fff;
+        font-weight: 700;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+      .mobile-card-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .mobile-trade-card {
+        background: rgba(17, 24, 39, 0.75);
+        border: 1px solid var(--edge);
+        border-radius: 12px;
+        padding: 13px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+        backdrop-filter: blur(8px);
+      }
+      .mobile-trade-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .mobile-token-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .mobile-token-title .symbol {
+        font-weight: 800;
+        font-size: 15px;
+        color: #fff;
+        letter-spacing: -0.2px;
+      }
+      .mobile-pnl-pill {
+        font-weight: 800;
+        font-size: 12.5px;
+        padding: 4px 9px;
+        border-radius: 6px;
+        text-align: right;
+        white-space: nowrap;
+      }
+      .mobile-pnl-pill.good {
+        background: rgba(52, 211, 153, 0.15);
+        color: #34d399;
+        border: 1px solid rgba(52, 211, 153, 0.35);
+      }
+      .mobile-pnl-pill.bad {
+        background: rgba(248, 113, 113, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(248, 113, 113, 0.35);
+      }
+      .mobile-trade-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 12px;
+        font-size: 12px;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.025);
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
+      .mobile-trade-grid .lbl {
+        color: var(--muted);
+        font-size: 10.5px;
+        display: block;
+        margin-bottom: 1px;
+      }
+      .mobile-trade-reason {
+        font-size: 11.5px;
+        color: #d1d5db;
+        background: rgba(0, 0, 0, 0.25);
+        padding: 6px 10px;
+        border-radius: 6px;
+        border-left: 3px solid var(--blue);
+      }
+      .mobile-swap-info {
+        font-size: 11.5px;
+        background: rgba(96, 165, 250, 0.09);
+        border: 1px solid rgba(96, 165, 250, 0.25);
+        padding: 7px 10px;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        color: var(--text);
+      }
+      .mobile-trade-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 6px;
+        border-top: 1px solid var(--edge);
+        gap: 8px;
+      }
       @media (max-width: 1100px) {
         .cards {
           grid-template-columns: repeat(3, 1fr);
@@ -601,25 +723,25 @@
       }
       @media (max-width: 640px) {
         main {
-          padding: 14px 12px 100px;
-          gap: 14px;
+          padding: 12px 10px 96px;
+          gap: 12px;
         }
         h1 {
-          font-size: 21px;
+          font-size: 20px;
         }
         header .actions {
           gap: 6px;
         }
         .cards {
           grid-template-columns: repeat(2, 1fr);
-          gap: 8px;
+          gap: 7px;
         }
         .card,
         .panel {
-          padding: 14px;
+          padding: 12px;
         }
         .card .value {
-          font-size: 23px;
+          font-size: 20px;
         }
         .desktop-tabs {
           display: none;
@@ -629,26 +751,38 @@
           grid-template-columns: 1fr;
         }
         .bottom-nav {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          display: flex;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
           position: fixed;
           bottom: 0;
           left: 0;
           right: 0;
-          padding: 8px 5px calc(8px + env(safe-area-inset-bottom));
-          background: rgba(9, 13, 22, 0.97);
+          padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+          background: rgba(9, 13, 22, 0.98);
           border-top: 1px solid var(--edge);
-          z-index: 10;
-          backdrop-filter: blur(12px);
+          z-index: 100;
+          backdrop-filter: blur(16px);
+          gap: 2px;
+        }
+        .bottom-nav::-webkit-scrollbar {
+          display: none;
         }
         .bottom-nav .tab-button {
+          flex: 1 1 0;
+          min-width: 48px;
+          max-width: 72px;
           flex-direction: column;
-          gap: 3px;
-          font-size: 10px;
-          padding: 7px 2px;
+          gap: 2px;
+          font-size: 9.5px;
+          padding: 6px 1px;
+          border-radius: 8px;
+          text-align: center;
+          line-height: 1.1;
         }
         .bottom-nav .icon {
-          font-size: 19px;
+          font-size: 17px;
+          line-height: 1;
         }
         .session-bar {
           padding: 12px;
@@ -796,13 +930,20 @@
         </div>
         <div class="panel">
           <div class="row">
-            <h2>⚡ Detail &amp; Token Masuk Real-Time</h2>
-            <span id="active-details-count" class="badge">0 Token</span>
+            <h2>⚡ Detail &amp; Token Masuk Real-Time (Tersaring)</h2>
+            <div class="actions">
+              <div class="view-toggle" id="active-toggle">
+                <button type="button" class="view-btn" data-target="active" data-view="card">📱 Kartu</button>
+                <button type="button" class="view-btn active" data-target="active" data-view="table">📊 Tabel</button>
+              </div>
+              <span id="active-details-count" class="badge">0 Token</span>
+            </div>
           </div>
           <p>
-            Daftar token yang tertangkap masuk radar detail secara real-time via Solana RPC WebSocket (inflow sindikat 149/235 wallet) dan PumpPortal WebSocket (riset koin baru usia 0s). Evaluasi berjalan paralel tanpa membuka tab Chrome detail.
+            Daftar token yang tertangkap masuk radar detail secara real-time via Solana RPC WebSocket (inflow sindikat 149/235 wallet), GMGN Browser WS, dan PumpPortal WebSocket (koin baru 0s). Evaluasi 20 lane berjalan paralel.
           </p>
-          <div class="table-wrap table-scroll-bounded">
+          <div id="active-details-cards" class="mobile-card-list" style="display:none;"></div>
+          <div id="active-details-table-wrap" class="table-wrap table-scroll-bounded">
             <table>
               <thead>
                 <tr>
@@ -930,16 +1071,21 @@
         <div class="panel">
           <div class="row">
             <h2>
-              🎯 Posisi Aktif <span class="count" data-count="open">0</span>
+              🎯 Posisi Aktif (Dibeli) <span class="count" data-count="open">0</span>
             </h2>
-            <span class="badge live">Estimasi paper</span>
+            <div class="actions">
+              <div class="view-toggle" id="pos-toggle">
+                <button type="button" class="view-btn" data-target="pos" data-view="card">📱 Kartu</button>
+                <button type="button" class="view-btn active" data-target="pos" data-view="table">📊 Tabel</button>
+              </div>
+              <span class="badge live">Estimasi paper</span>
+            </div>
           </div>
           <p>
-            Posisi yang sudah entry pada worker aktif. Waktu ditampilkan dalam
-            WIB.
+            Posisi yang sudah dibeli (entry) pada worker aktif. Waktu ditampilkan dalam WIB.
           </p>
-          <div class="hint">Geser tabel untuk melihat seluruh kolom →</div>
-          <div class="table-wrap">
+          <div id="positions-cards" class="mobile-card-list" style="display:none;"></div>
+          <div id="positions-table-wrap" class="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -967,10 +1113,16 @@
         aria-label="Riwayat Transaksi"
       >
         <div class="panel">
-          <h2>
-            📜 Riwayat Transaksi
-            <span class="count" data-count="history">0</span>
-          </h2>
+          <div class="row">
+            <h2>
+              📜 Riwayat Transaksi (Dijual)
+              <span class="count" data-count="history">0</span>
+            </h2>
+            <div class="view-toggle" id="hist-toggle">
+              <button type="button" class="view-btn" data-target="hist" data-view="card">📱 Kartu</button>
+              <button type="button" class="view-btn active" data-target="hist" data-view="table">📊 Tabel</button>
+            </div>
+          </div>
           <div class="filter">
             <input
               id="search"
@@ -987,10 +1139,11 @@
             </select>
           </div>
           <p>
-            PnL berasal dari model paper. Quote swap merupakan pembanding harga.
+            PnL berasal dari model paper. Quote swap merupakan perbandingan harga pasar vs Jupiter/Raydium.
             Klik judul kolom untuk sorting.
           </p>
-          <div class="table-wrap">
+          <div id="history-cards" class="mobile-card-list" style="display:none;"></div>
+          <div id="history-table-wrap" class="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -1000,8 +1153,8 @@
                   <th data-sort="entryAt">BUY WIB ↕</th>
                   <th data-sort="exitAt">SELL WIB ↕</th>
                   <th>Harga socket entry → exit</th>
-                  <th>Quote BUY</th>
-                  <th>Quote SELL 1 → 2</th>
+                  <th>Hasil Swap BUY</th>
+                  <th>Hasil Swap SELL 1 → 2</th>
                   <th data-sort="netReturnPercent">Net % ↕</th>
                   <th data-sort="pnlUsd">PnL bersih ↕</th>
                   <th>Alasan exit</th>
@@ -1766,7 +1919,14 @@
         `<tr><td class="empty" colspan="${count}">${message}</td></tr>`;
       const token = (p) =>
         `<a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener noreferrer">${esc(p.symbol || short(p.mint))} ↗</a><div class="muted mono" title="${esc(p.mint)}">${esc(short(p.mint))}</div>`;
-      const laneBadge = (p) => `<span class="badge">${esc(laneOf(p))}</span>`;
+      const laneColor = (p) => {
+        const l = laneOf(p);
+        if (l === "G1") return "good";
+        if (l.startsWith("S")) return "live";
+        if (l.startsWith("V")) return "paper";
+        return "highlight";
+      };
+      const laneBadge = (p) => `<span class="badge ${laneColor(p)}">${esc(laneOf(p))}</span>`;
       const wallet = (p) =>
         `<span class="mono" title="${esc(p.wallet)}">${esc(short(p.wallet))}</span>`;
       const facts = (p) =>
@@ -2024,6 +2184,113 @@
         );
         renderRules();
       }
+      function renderPositionCards(positions) {
+        if (!$("positions-cards")) return;
+        if (!positions.length) {
+          $("positions-cards").innerHTML =
+            '<div class="card empty" style="text-align:center; padding:20px;">Tidak ada posisi paper terbuka pada sesi ini.</div>';
+          return;
+        }
+        $("positions-cards").innerHTML = positions
+          .map((p) => {
+            const holdSec = Math.max(
+              0,
+              Math.floor(((p.facts?.now ?? lastUpdated) - p.entryAt) / 1000),
+            );
+            return `
+            <div class="mobile-trade-card">
+              <div class="mobile-trade-header">
+                <div class="mobile-token-title">
+                  <span class="symbol">${esc(p.symbol || short(p.mint))}</span>
+                  ${laneBadge(p)}
+                  <span class="badge live" style="font-size:10px;">${esc(p.phase)}</span>
+                </div>
+                <div class="mobile-pnl-pill ${tone(p.estimatedOpenNetPercent)}">
+                  ${pct(p.estimatedOpenNetPercent)}
+                </div>
+              </div>
+              <div class="mobile-trade-grid">
+                <div><span class="lbl">Entry WIB:</span> ${time(p.entryAt)}</div>
+                <div><span class="lbl">Hold:</span> ${holdSec}s</div>
+                <div><span class="lbl">Harga Entry:</span> <span class="mono">$${num(p.entryPrice, 6)}</span></div>
+                <div><span class="lbl">Socket Now:</span> <span class="mono">$${num(p.facts?.price, 6)}</span></div>
+                <div><span class="lbl">Holder / Growth:</span> ${num(p.facts?.holderCount, 0)} / ${num(p.facts?.holderGrowth15s, 0)}</div>
+                <div><span class="lbl">Buy Share:</span> ${pct(p.facts?.buyShareUsdPercent)}</div>
+              </div>
+              ${
+                p.swapBuyPrice
+                  ? `
+              <div class="mobile-swap-info">
+                <div><strong>Hasil Swap BUY:</strong> <span class="mono">$${num(p.swapBuyPrice, 6)}</span> (${p.swapBuySpreadPct != null ? (p.swapBuySpreadPct > 0 ? "+" : "") + p.swapBuySpreadPct.toFixed(1) + "%" : "0%"} spd, ${p.swapBuyLatencyMs || 0}ms) · ${p.swapBuyOk ? '<span style="color:#10b981;">OK</span>' : '<span style="color:#f87171;">Gagal</span>'}</div>
+              </div>`
+                  : ""
+              }
+              <div class="mobile-trade-reason">
+                <strong>Status / Sinyal:</strong> ${esc(explain(p))}
+              </div>
+              <div class="mobile-trade-footer">
+                <div style="display:flex; gap:6px;">
+                  <a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">GMGN ↗</a>
+                  <a href="https://dexscreener.com/solana/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">DexScreener ↗</a>
+                </div>
+                <span class="mono hint" style="font-size:10px;">${esc(short(p.mint))}</span>
+              </div>
+            </div>`;
+          })
+          .join("");
+      }
+
+      function renderHistoryCards(items) {
+        if (!$("history-cards")) return;
+        if (!items.length) {
+          $("history-cards").innerHTML =
+            '<div class="card empty" style="text-align:center; padding:20px;">Belum ada transaksi pada filter ini.</div>';
+          return;
+        }
+        $("history-cards").innerHTML = items
+          .map((p) => {
+            return `
+            <div class="mobile-trade-card">
+              <div class="mobile-trade-header">
+                <div class="mobile-token-title">
+                  <span class="symbol">${esc(p.symbol || short(p.mint))}</span>
+                  ${laneBadge(p)}
+                  <span class="badge ${missing(p) ? "paper" : "good"}" style="font-size:10px;">${missing(p) ? "Kurang Data" : "Selesai"}</span>
+                </div>
+                <div class="mobile-pnl-pill ${closed(p) ? tone(p.netReturnPercent) : ""}">
+                  ${closed(p) ? `${pct(p.netReturnPercent)} (${money(p.pnlUsd)})` : "—"}
+                </div>
+              </div>
+              <div class="mobile-trade-grid">
+                <div><span class="lbl">Waktu BUY:</span> ${time(p.entryAt)}</div>
+                <div><span class="lbl">Waktu SELL:</span> ${time(p.exitAt)}</div>
+                <div><span class="lbl">Harga Entry:</span> <span class="mono">$${num(p.entryPrice, 6)}</span></div>
+                <div><span class="lbl">Harga Exit:</span> <span class="mono">$${num(p.exitPrice, 6)}</span></div>
+              </div>
+              ${
+                p.swapBuyPrice || p.swapSellPrice1
+                  ? `
+              <div class="mobile-swap-info">
+                <div><strong>Hasil Swap BUY:</strong> ${p.swapBuyPrice ? `$${num(p.swapBuyPrice, 6)}` : "—"} ${p.swapBuySpreadPct != null ? `<span class="hint mono">(${p.swapBuySpreadPct > 0 ? "+" : ""}${p.swapBuySpreadPct.toFixed(1)}% spd, ${p.swapBuyLatencyMs || 0}ms)</span>` : ""}</div>
+                <div><strong>Hasil Swap SELL:</strong> ${p.swapSellPrice1 ? `$${num(p.swapSellPrice1, 6)}` : "—"} ${p.swapSellPrice2 ? `→ $${num(p.swapSellPrice2, 6)}` : ""}</div>
+              </div>`
+                  : ""
+              }
+              <div class="mobile-trade-reason">
+                <strong>Alasan Exit:</strong> ${esc(explain(p))}
+              </div>
+              <div class="mobile-trade-footer">
+                <div style="display:flex; gap:6px;">
+                  <a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">GMGN ↗</a>
+                  <a href="https://dexscreener.com/solana/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">DexScreener ↗</a>
+                </div>
+                <span class="mono hint" style="font-size:10px;">${esc(short(p.mint))}</span>
+              </div>
+            </div>`;
+          })
+          .join("");
+      }
+
       function renderPositions(rows) {
         const positions = rows.filter(open);
         document
@@ -2037,6 +2304,7 @@
             )
             .join("") ||
           empty(11, "Tidak ada posisi paper terbuka pada sesi ini.");
+        renderPositionCards(positions);
       }
       function renderHistory() {
         if (!state) return;
@@ -2070,12 +2338,12 @@
         const size = Number($("page-size").value),
           pages = Math.max(1, Math.ceil(items.length / size));
         page = Math.min(page, pages);
+        const paged = items.slice((page - 1) * size, page * size);
         $("history").innerHTML =
-          items
-            .slice((page - 1) * size, page * size)
+          paged
             .map(
               (p) =>
-                `<tr><td>${token(p)}</td><td>${laneBadge(p)}</td><td>${missing(p) ? '<span class="badge paper">Exit kurang data</span>' : "Selesai"}</td><td>${time(p.entryAt)}</td><td>${time(p.exitAt)}</td><td class="mono">${num(p.entryPrice, 10)} → ${num(p.exitPrice, 10)}</td><td>${num(p.swapBuyPrice, 10)}</td><td>${num(p.swapSellPrice1, 10)} → ${num(p.swapSellPrice2, 10)}</td><td class="${closed(p) ? tone(p.netReturnPercent) : ""}">${closed(p) ? pct(p.netReturnPercent) : "—"}</td><td class="${closed(p) ? tone(p.pnlUsd) : ""}">${closed(p) ? money(p.pnlUsd) : "—"}</td><td class="reason">${esc(explain(p))}</td></tr>`,
+                `<tr><td>${token(p)}</td><td>${laneBadge(p)}</td><td>${missing(p) ? '<span class="badge paper">Exit kurang data</span>' : "Selesai"}</td><td>${time(p.entryAt)}</td><td>${time(p.exitAt)}</td><td class="mono">${num(p.entryPrice, 8)} → ${num(p.exitPrice, 8)}</td><td>${p.swapBuyPrice ? '$' + num(p.swapBuyPrice, 6) : '—'}${p.swapBuySpreadPct != null ? `<br><span class="hint mono" style="font-size:10px;">(${p.swapBuySpreadPct > 0 ? '+' : ''}${p.swapBuySpreadPct.toFixed(1)}% spd, ${p.swapBuyLatencyMs || 0}ms)</span>` : ''}</td><td>${p.swapSellPrice1 ? '$' + num(p.swapSellPrice1, 6) : '—'}${p.swapSellPrice2 ? ` → $${num(p.swapSellPrice2, 6)}` : ''}</td><td class="${closed(p) ? tone(p.netReturnPercent) : ""}">${closed(p) ? pct(p.netReturnPercent) : "—"}</td><td class="${closed(p) ? tone(p.pnlUsd) : ""}">${closed(p) ? money(p.pnlUsd) : "—"}</td><td class="reason">${esc(explain(p))}</td></tr>`,
             )
             .join("") || empty(11, "Belum ada transaksi pada filter ini.");
         $("page-info").textContent =
@@ -2083,6 +2351,7 @@
         $("page-label").textContent = `${page} / ${pages}`;
         $("prev").disabled = page === 1;
         $("next").disabled = page === pages;
+        renderHistoryCards(paged);
       }
       function renderQuotes(rows) {
         const quotes = rows.filter((p) =>
@@ -2168,9 +2437,35 @@
                 </tr>
               `).join('');
               if ($("active-details-count")) $("active-details-count").textContent = `${activePositions.length} Token Aktif`;
+              if ($("active-details-cards")) {
+                $("active-details-cards").innerHTML = activePositions.map(p => `
+                  <div class="mobile-trade-card" style="border-left: 3px solid var(--blue);">
+                    <div class="mobile-trade-header">
+                      <div class="mobile-token-title">
+                        <span class="symbol">${esc(p.symbol || short(p.mint))}</span>
+                        <span class="badge" style="background:rgba(59,130,246,0.15); color:var(--blue);">Sindikat Inflow</span>
+                      </div>
+                      <span class="badge ${p.phase === 'OPEN' ? 'good' : 'paper'}">${esc(p.phase || 'EVALUATING')}</span>
+                    </div>
+                    <div class="mobile-trade-grid">
+                      <div><span class="lbl">Waktu:</span> ${time(p.entryAt || Date.now())}</div>
+                      <div><span class="lbl">Harga:</span> ${p.entryPrice ? '$' + Number(p.entryPrice).toFixed(6) : '—'}</div>
+                      <div style="grid-column: span 2;"><span class="lbl">Wallet:</span> <span class="mono hint">${p.wallet ? esc(p.wallet) : '—'}</span></div>
+                    </div>
+                    <div class="mobile-trade-footer">
+                      <div style="display:flex; gap:6px;">
+                        <a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">GMGN ↗</a>
+                        <a href="https://dexscreener.com/solana/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">DexScreener ↗</a>
+                      </div>
+                      <span class="mono hint" style="font-size:10px;">${esc(short(p.mint))}</span>
+                    </div>
+                  </div>
+                `).join('');
+              }
             } else {
               $("active-details-rows").innerHTML = '<tr><td colspan="7" class="empty">Belum ada token baru dalam antrean radar live.</td></tr>';
               if ($("active-details-count")) $("active-details-count").textContent = '0 Token';
+              if ($("active-details-cards")) $("active-details-cards").innerHTML = '<div class="card empty" style="text-align:center; padding:15px;">Belum ada token baru dalam antrean radar live.</div>';
             }
           } else {
             $("active-details-rows").innerHTML = list.map(item => `
@@ -2180,11 +2475,38 @@
                 <td>${time(item.openedAt)}</td>
                 <td><span class="mono hint" style="font-size:10px;">${item.wallet ? esc(item.wallet.slice(0, 6) + '...' + item.wallet.slice(-4)) : '—'}</span></td>
                 <td>${item.priceUsd ? '$' + Number(item.priceUsd).toFixed(6) : '—'}</td>
-                <td><span class="badge ${item.status === 'BOUGHT' ? 'good' : 'paper'}">${esc(item.status || 'EVALUATING 12 LANES')}</span></td>
+                <td><span class="badge ${item.status === 'BOUGHT' ? 'good' : 'paper'}">${esc(item.status || 'EVALUATING 20 LANES')}</span></td>
                 <td><a href="https://gmgn.ai/sol/token/${esc(item.mint)}" target="_blank" rel="noopener" class="button mini">Buka GMGN</a></td>
               </tr>
             `).join('');
             if ($("active-details-count")) $("active-details-count").textContent = `${list.length} Token`;
+            if ($("active-details-cards")) {
+              $("active-details-cards").innerHTML = list.map(item => `
+                <div class="mobile-trade-card" style="border-left: 3px solid ${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? '#10b981' : 'var(--blue)'};">
+                  <div class="mobile-trade-header">
+                    <div class="mobile-token-title">
+                      <span class="symbol">${esc(item.symbol || 'Unknown')}</span>
+                      <span class="badge" style="background:${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? 'rgba(16,185,129,0.15)' : 'rgba(59,130,246,0.15)'}; color:${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? '#10b981' : 'var(--blue)'};">
+                        ${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? 'Koin Baru (0s)' : 'Sindikat Inflow'}
+                      </span>
+                    </div>
+                    <span class="badge ${item.status === 'BOUGHT' ? 'good' : 'paper'}">${esc(item.status || 'EVALUATING 20 LANES')}</span>
+                  </div>
+                  <div class="mobile-trade-grid">
+                    <div><span class="lbl">Waktu:</span> ${time(item.openedAt)}</div>
+                    <div><span class="lbl">Harga:</span> ${item.priceUsd ? '$' + Number(item.priceUsd).toFixed(6) : '—'}</div>
+                    <div style="grid-column: span 2;"><span class="lbl">Wallet:</span> <span class="mono hint">${item.wallet ? esc(item.wallet) : '—'}</span></div>
+                  </div>
+                  <div class="mobile-trade-footer">
+                    <div style="display:flex; gap:6px;">
+                      <a href="https://gmgn.ai/sol/token/${esc(item.mint)}" target="_blank" rel="noopener" class="button mini">GMGN ↗</a>
+                      <a href="https://dexscreener.com/solana/${esc(item.mint)}" target="_blank" rel="noopener" class="button mini">DexScreener ↗</a>
+                    </div>
+                    <span class="mono hint" style="font-size:10px;">${esc(short(item.mint))}</span>
+                  </div>
+                </div>
+              `).join('');
+            }
           }
         }
 
@@ -2539,6 +2861,61 @@
         el.className = `worker-action-status ${kind}`;
         el.hidden = false;
       }
+      function initViewToggles() {
+        const isMobile = window.innerWidth <= 768;
+        ["pos", "hist", "active"].forEach((target) => {
+          const wrap = $(
+            target === "pos"
+              ? "positions-table-wrap"
+              : target === "hist"
+                ? "history-table-wrap"
+                : "active-details-table-wrap",
+          );
+          const cards = $(
+            target === "pos"
+              ? "positions-cards"
+              : target === "hist"
+                ? "history-cards"
+                : "active-details-cards",
+          );
+          const toggle = $(
+            target === "pos"
+              ? "pos-toggle"
+              : target === "hist"
+                ? "hist-toggle"
+                : "active-toggle",
+          );
+          if (!wrap || !cards || !toggle) return;
+
+          let savedMode = null;
+          try {
+            savedMode = localStorage.getItem(`profit4_view_${target}`);
+          } catch {}
+          const defaultMode = savedMode || (isMobile ? "card" : "table");
+
+          const applyMode = (mode) => {
+            if (mode === "card") {
+              cards.style.display = "flex";
+              wrap.style.display = "none";
+            } else {
+              cards.style.display = "none";
+              wrap.style.display = "block";
+            }
+            toggle.querySelectorAll("button").forEach((btn) => {
+              btn.classList.toggle("active", btn.dataset.view === mode);
+            });
+            try {
+              localStorage.setItem(`profit4_view_${target}`, mode);
+            } catch {}
+          };
+
+          applyMode(defaultMode);
+
+          toggle.querySelectorAll("button").forEach((btn) => {
+            btn.onclick = () => applyMode(btn.dataset.view);
+          });
+        });
+      }
       function switchTab(tab, persist = true) {
         if (!["overview", "positions", "history", "onchain", "clusters", "genesis"].includes(tab))
           tab = "overview";
@@ -2571,6 +2948,7 @@
         } catch {}
       }
       switchTab(initialTab || "overview");
+      initViewToggles();
       $("run").onchange = () => {
         session = $("run").value;
         page = 1;
