@@ -268,6 +268,19 @@ export class SolanaWalletStream extends EventEmitter {
   }
 }
 
+  public isConnected(): boolean {
+    return this.running && this.sockets.some((ws) => ws && ws.readyState === WebSocket.OPEN);
+  }
+
+  public getStatus() {
+    return {
+      running: this.running,
+      totalSockets: this.sockets.length,
+      activeSockets: this.sockets.filter((ws) => ws && ws.readyState === WebSocket.OPEN).length,
+      subscriptions: this.subToWallet.size,
+    };
+  }
+
   public stopSockets() {
     for (const timer of this.reconnectTimers) clearTimeout(timer);
     this.reconnectTimers = [];

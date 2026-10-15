@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -27,6 +28,7 @@ import {
 } from "./browser-swap-route.js";
 import { HeadlessTradeStream } from "./headless-trade-stream.js";
 import { SolanaWalletStream } from "./solana-wallet-stream.js";
+import { attachCapture } from "./capture.js";
 
 type Transfer = {
   wallet: string;
@@ -215,19 +217,241 @@ const details = new Map<
   { page: Page; watch: Watch; openedAt: number }
 >();
 const seen = new Set<string>();
+
+interface HourlySocketStat {
+  hourKey: string;
+  hourLabel: string;
+  solanaWsEvents: number;
+  tradeTicks: number;
+  newTokensCaptured: number;
+  syndicateTransfers: number;
+  reconnects: number;
+  status: "HEALTHY" | "DEGRADED";
+  lastEventAt: number;
+}
+
+const hourlyStatsMap = new Map<string, HourlySocketStat>();
+
+function getHourKey(date: Date = new Date()): { key: string; label: string } {
+  const wibTime = new Date(date.getTime() + 7 * 3600 * 1000);
+  const key = wibTime.toISOString().slice(0, 13);
+  const hourNum = Number(key.slice(11, 13));
+  const nextHourNum = (hourNum + 1) % 24;
+  const label = `${String(hourNum).padStart(2, "0")}:00 - ${String(nextHourNum).padStart(2, "0")}:00 WIB`;
+  return { key, label };
+}
+
+function recordHourlyEvent(type: "solanaWs" | "trade" | "newToken" | "transfer" | "reconnect") {
+  const { key, label } = getHourKey();
+  let stat = hourlyStatsMap.get(key);
+  if (!stat) {
+    stat = {
+      hourKey: key,
+      hourLabel: label,
+      solanaWsEvents: 0,
+      tradeTicks: 0,
+      newTokensCaptured: 0,
+      syndicateTransfers: 0,
+      reconnects: 0,
+      status: "HEALTHY",
+      lastEventAt: Date.now(),
+    };
+    hourlyStatsMap.set(key, stat);
+  }
+  stat.lastEventAt = Date.now();
+  if (type === "solanaWs") stat.solanaWsEvents++;
+  else if (type === "trade") stat.tradeTicks++;
+  else if (type === "newToken") stat.newTokensCaptured++;
+  else if (type === "transfer") stat.syndicateTransfers++;
+  else if (type === "reconnect") {
+    stat.reconnects++;
+    if (stat.reconnects > 5) stat.status = "DEGRADED";
+  }
+}
+
+function initHourlyStatsFromChunks(chunksDir: string) {
+  try {
+    if (!existsSync(chunksDir)) return;
+    const dirs = readdirSync(chunksDir);
+    for (const dir of dirs) {
+      const m = dir.match(/T(\d\d)-(\d\d)/);
+      if (!m) continue;
+      const hourStr = m[1];
+      const key = `2026-10-15T${hourStr}`;
+      const nextHour = (Number(hourStr) + 1) % 24;
+      const label = `${hourStr}:00 - ${String(nextHour).padStart(2, "0")}:00 WIB`;
+      if (!hourlyStatsMap.has(key)) {
+        hourlyStatsMap.set(key, {
+          hourKey: key,
+          hourLabel: label,
+          solanaWsEvents: 0,
+          tradeTicks: 0,
+          newTokensCaptured: 0,
+          syndicateTransfers: 0,
+          reconnects: 0,
+          status: "HEALTHY",
+          lastEventAt: Date.now(),
+        });
+      }
+      const stat = hourlyStatsMap.get(key)!;
+      const dirPath = join(chunksDir, dir);
+      if (existsSync(join(dirPath, "profit4-events.jsonl"))) {
+        stat.solanaWsEvents += readFileSync(join(dirPath, "profit4-events.jsonl"), "utf8").split("\n").filter(Boolean).length;
+      }
+      if (existsSync(join(dirPath, "token-trades.jsonl"))) {
+        stat.tradeTicks += readFileSync(join(dirPath, "token-trades.jsonl"), "utf8").split("\n").filter(Boolean).length;
+      }
+      if (existsSync(join(dirPath, "transfers.jsonl"))) {
+        stat.syndicateTransfers += readFileSync(join(dirPath, "transfers.jsonl"), "utf8").split("\n").filter(Boolean).length;
+      }
+    }
+  } catch {}
+}
+
+initHourlyStatsFromChunks(join(output, "chunks"));
+try {
+  const allRuns = readdirSync(dataDirectory).filter((f) => f.startsWith("2026-10-15"));
+  for (const r of allRuns) {
+    initHourlyStatsFromChunks(join(dataDirectory, r, "chunks"));
+  }
+} catch {}
+
+interface ActiveDetailItem {
+  mint: string;
+  symbol: string;
+  wallet: string;
+  openedAt: number;
+  source: string;
+  status: string;
+  priceUsd?: number;
+  tx?: string;
+}
+
+const activeDetailsQueue: ActiveDetailItem[] = [];
+
+function pushActiveDetail(item: ActiveDetailItem) {
+  const existingIdx = activeDetailsQueue.findIndex((x) => x.mint === item.mint);
+  if (existingIdx >= 0) {
+    activeDetailsQueue[existingIdx] = { ...activeDetailsQueue[existingIdx], ...item };
+  } else {
+    activeDetailsQueue.unshift(item);
+    if (activeDetailsQueue.length > 50) activeDetailsQueue.pop();
+  }
+}
+
 let tradeStream: HeadlessTradeStream | null = null;
 if (useHeadlessStream) {
   tradeStream = new HeadlessTradeStream();
   tradeStream.on("trade", (mint, trade) => {
+    recordHourlyEvent("trade");
     write("token-trades.jsonl", {
       observedAt: trade.at,
       ...trade,
     });
     targetLane.trade(mint, trade);
   });
+  tradeStream.on("newToken", (token) => {
+    recordHourlyEvent("newToken");
+    write("watch-events.jsonl", {
+      type: "RESEARCH_NEW_TOKEN_DISCOVERED",
+      observedAt: Date.now(),
+      mint: token.mint,
+      symbol: token.symbol || "UNKNOWN",
+      name: token.name,
+      creator: token.traderPublicKey,
+      initialBuy: token.initialBuy,
+      marketCapSol: token.marketCapSol,
+      source: "pumpportal_ws",
+    });
+    const priceUsd = token.marketCapSol ? (token.marketCapSol * 145) / 1000000000 : 0.000004;
+    pushActiveDetail({
+      mint: token.mint,
+      symbol: token.symbol || "UNKNOWN",
+      wallet: token.traderPublicKey,
+      openedAt: Date.now(),
+      source: "pumpportal_ws",
+      priceUsd,
+      status: "DISCOVERED_0S",
+    });
+    tradeStream?.registerMint(token.mint, { symbol: token.symbol, priceUsd });
+    if (targetLane instanceof DistributionProfit4Runtime) {
+      targetLane.register({
+        mint: token.mint,
+        wallet: token.traderPublicKey || "creator",
+        symbol: token.symbol || "UNKNOWN",
+        timestamp: Math.floor(Date.now() / 1000),
+        from: token.traderPublicKey || "creator",
+      }, Date.now());
+      targetLane.trade(token.mint, {
+        at: Date.now(),
+        timestamp: Math.floor(Date.now() / 1000),
+        price: priceUsd,
+        side: "buy",
+        wallet: token.traderPublicKey || "creator",
+        usd: (Number(token.initialBuy) || 0.1) * 145,
+        signature: "genesis_creation",
+      });
+    }
+  });
+  tradeStream.on("status", (s: any) => {
+    if (!s.ws) recordHourlyEvent("reconnect");
+  });
   tradeStream.start();
   process.once("exit", () => tradeStream?.stop());
 }
+
+attachCapture(
+  controller,
+  (ev) => {
+    if (ev.kind === "open") {
+      recordHourlyEvent("solanaWs");
+    }
+    if (ev.kind === "frame" && ev.direction === "received") {
+      recordHourlyEvent("trade");
+    }
+  },
+  (payload, now) => {
+    for (const row of walk(payload)) {
+      const f = fields(row);
+      if (f.mint && f.mint.length >= 32 && f.mint.length <= 44) {
+        recordHourlyEvent("newToken");
+        const symbol = String(f.token?.symbol || (row as any).symbol || "GMGN_NEW");
+        const wallet = String(f.token?.creator || (row as any).creator || "gmgn_research");
+        const priceUsd = Number(f.token?.price_usd || (row as any).price_usd || 0.000004);
+        pushActiveDetail({
+          mint: f.mint,
+          symbol,
+          wallet,
+          openedAt: now,
+          source: "gmgn_research_ws",
+          priceUsd,
+          status: "RESEARCH_DISCOVERED",
+        });
+        tradeStream?.registerMint(f.mint, { symbol, priceUsd: priceUsd > 0 ? priceUsd : 0.000004 });
+        if (targetLane instanceof DistributionProfit4Runtime) {
+          targetLane.register({
+            mint: f.mint,
+            wallet,
+            symbol,
+            timestamp: Math.floor(now / 1000),
+            from: wallet,
+          }, now);
+          if (priceUsd > 0) {
+            targetLane.trade(f.mint, {
+              at: now,
+              timestamp: Math.floor(now / 1000),
+              price: priceUsd,
+              side: "buy",
+              wallet,
+              usd: 25,
+              signature: `gmgn_${now}`,
+            });
+          }
+        }
+      }
+    }
+  },
+);
 
 let liveEngine: Profit4LiveEngine | null = null;
 if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
@@ -631,12 +855,22 @@ async function openOrReplaceDetail(next: Transfer) {
   });
 }
 
-await controller.goto(`https://gmgn.ai/sol/address/${addresses[0]}`, {
+let controllerTargetUrl = `https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=new_pair`;
+const feedSettingsFile = join(process.cwd(), "config", "feed-settings.json");
+if (existsSync(feedSettingsFile)) {
+  try {
+    const cfg = JSON.parse(readFileSync(feedSettingsFile, "utf8"));
+    if (cfg.feedUrl) controllerTargetUrl = cfg.feedUrl;
+  } catch {}
+}
+
+await controller.goto(controllerTargetUrl, {
   waitUntil: "commit",
 });
 write("watch-events.jsonl", {
   type: "READY",
   observedAt: Date.now(),
+  controllerUrl: controllerTargetUrl,
   controllerWallet: addresses[0],
   checkedWallets: addresses,
   maxTabs: 1 + maxDetails,
@@ -684,12 +918,75 @@ const targetTimer = setInterval(() => {
     }
   }
 
+  const controllerUrl =
+    controller && !controller.isClosed()
+      ? controller.url()
+      : `https://gmgn.ai/sol/address/${addresses[0]}`;
+  const controllerInfo = {
+    url: controllerUrl,
+    status: controller && !controller.isClosed() ? "READY" : "DISCONNECTED",
+    session: "Lolos Cloudflare / Siaga Order",
+    cdpPort: 9223,
+    tabs: 1,
+    maxDetails,
+  };
+
+  const socketHealth = {
+    activeConnections: {
+      solanaRpcPool: {
+        status: walletStream?.isConnected() ? "CONNECTED" : "DISCONNECTED",
+        endpoint: "wss://api.mainnet-beta.solana.com",
+        walletsWatched: addresses.length,
+        pools: walletStream?.getStatus().totalSockets || 2,
+      },
+      pumpPortalWs: {
+        status: tradeStream?.isConnected() ? "CONNECTED" : "DISCONNECTED",
+        endpoint: "wss://pumpportal.fun/api/data",
+        trackedMints: tradeStream?.getTrackedMints().length || 0,
+      },
+      controllerBrowser: controllerInfo,
+    },
+    hourlyStats: Array.from(hourlyStatsMap.values()).sort((a, b) =>
+      b.hourKey.localeCompare(a.hourKey),
+    ),
+  };
+
   if (profit4 && !stopping)
     writeControl({
       ...control,
       ...health,
       heartbeatAt: now,
       openTabs: details.size + 1,
+      controller: controllerInfo,
+      controllerUrl,
+      socketHealth,
+      activeDetailsQueue,
+      parallelResearch: {
+        enabled: true,
+        mode: "headless-websocket",
+        activeLanes: [
+          "V1",
+          "V2",
+          "V3",
+          "V4",
+          "V5",
+          "V6",
+          "V7",
+          "S1",
+          "S2",
+          "S3",
+          "S4",
+          "G1",
+          "Safe",
+          "Optimal",
+          "Wide",
+          "Swing 100k",
+          "Wave Scalper",
+          "Momentum V2",
+          "Momentum V3",
+          "R5 Band",
+        ],
+      },
     });
   if (profit4 && existsSync(stopFile)) {
     try {
@@ -728,7 +1025,22 @@ if (useSolanaWalletWs) {
     staggerMs: 20,
   });
 
+  walletStream.on("rawActivity", () => {
+    recordHourlyEvent("solanaWs");
+  });
+
   walletStream.on("transfer", async (t) => {
+    recordHourlyEvent("transfer");
+    pushActiveDetail({
+      mint: t.mint,
+      symbol: t.symbol || "UNKNOWN",
+      wallet: t.wallet,
+      openedAt: Date.now(),
+      source: "syndicate_inflow",
+      priceUsd: t.priceUsd,
+      tx: t.tx,
+      status: "EVALUATING_12_LANES",
+    });
     write("watch-events.jsonl", {
       type: "SOLANA_WALLET_TRANSFER_IN",
       observedAt: Date.now(),

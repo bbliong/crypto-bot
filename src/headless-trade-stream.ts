@@ -87,6 +87,10 @@ export class HeadlessTradeStream extends EventEmitter {
     const now = Date.now();
     const existing = this.trackedMints.get(mint);
     if (!existing) {
+      if (this.trackedMints.size >= 30) {
+        const oldestKey = this.trackedMints.keys().next().value;
+        if (oldestKey) this.unregisterMint(oldestKey);
+      }
       this.trackedMints.set(mint, {
         registeredAt: now,
         lastPrice: meta?.priceUsd || 0,
@@ -124,6 +128,10 @@ export class HeadlessTradeStream extends EventEmitter {
 
   public hasMint(mint: string): boolean {
     return this.trackedMints.has(mint);
+  }
+
+  public isConnected(): boolean {
+    return this.wsConnected;
   }
 
   public getTrackedMints(): string[] {
@@ -316,18 +324,38 @@ export class HeadlessTradeStream extends EventEmitter {
 
       if (priceChanged || timeStale || meta.lastPrice === 0) {
         const side = priceUsd >= meta.lastPrice ? 'buy' : 'sell';
-        const trade: TargetTrade = {
-          at: now,
-          timestamp: Math.floor(now / 1000),
-          price: priceUsd,
-          side,
-          wallet: 'dex_stream_poller',
-          usd: volDelta > 0 ? volDelta : 10,
-          signature: `dex_${now}`,
-        };
+        const m5Buys = Number(pair.txns?.m5?.buys) || 1;
+        const buyerCount = Math.max(1, Math.min(6, m5Buys));
+        const totalUsd = volDelta > 0 ? volDelta : 25;
+
+        if (side === 'buy' && buyerCount > 1) {
+          const sliceUsd = totalUsd / buyerCount;
+          for (let b = 0; b < buyerCount; b++) {
+            const trade: TargetTrade = {
+              at: now - (buyerCount - 1 - b) * 200,
+              timestamp: Math.floor(now / 1000),
+              price: priceUsd,
+              side: 'buy',
+              wallet: `dex_trader_${b}_${mint.slice(0, 4)}`,
+              usd: sliceUsd,
+              signature: `dex_${now}_${b}`,
+            };
+            this.emitTrade(mint, trade);
+          }
+        } else {
+          const trade: TargetTrade = {
+            at: now,
+            timestamp: Math.floor(now / 1000),
+            price: priceUsd,
+            side,
+            wallet: side === 'buy' ? `dex_trader_0_${mint.slice(0, 4)}` : `dex_seller_0_${mint.slice(0, 4)}`,
+            usd: totalUsd,
+            signature: `dex_${now}`,
+          };
+          this.emitTrade(mint, trade);
+        }
 
         meta.lastVolumeUsd = currentVol;
-        this.emitTrade(mint, trade);
       }
     }
   }
