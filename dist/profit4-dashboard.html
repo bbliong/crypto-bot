@@ -1818,6 +1818,23 @@
           </div>
         </details>
       </section>
+      <footer id="historical"></footer>
+    </main>
+    <dialog id="real-audit-dialog">
+      <div class="row">
+        <h2>Audit transaksi asli</h2>
+        <button id="real-audit-close">Tutup</button>
+      </div>
+      <div id="real-audit-content"></div>
+    </dialog>
+    <dialog id="success-modal">
+      <div class="modal-icon" id="success-modal-icon">✅</div>
+      <div class="modal-title" id="success-modal-title">Berhasil Disimpan</div>
+      <div class="modal-body" id="success-modal-body">Pengaturan berhasil diperbarui.</div>
+      <div class="modal-actions">
+        <button type="button" class="primary" id="success-modal-ok">OK, Mengerti</button>
+      </div>
+    </dialog>
 <nav class="bottom-nav" aria-label="Navigasi mobile">
       <button class="tab-button active" data-tab="radar">
         <span class="icon">⚡</span>Radar Live</button
@@ -2537,10 +2554,12 @@
         $("worker-error").textContent = w.lastError || "";
         $("path").textContent =
           `Data: ${state.paths?.data || "—"}${w.run ? " · Sesi worker: " + w.run : ""}`;
-        const h = state.historical;
-        $("historical").textContent = h
-          ? `Pembanding historis terpisah: ${h.closed} trade, ${h.profit} profit / ${h.loss} rugi, PnL ${money(h.totalPnlUsd)}.`
-          : "Profit4 · Paper research · Waktu Asia/Jakarta (WIB)";
+        if ($("historical")) {
+          const h = state.historical;
+          $("historical").textContent = h
+            ? `Pembanding historis terpisah: ${h.closed} trade, ${h.profit} profit / ${h.loss} rugi, PnL ${money(h.totalPnlUsd)}.`
+            : "Profit4 · Paper research · Waktu Asia/Jakarta (WIB)";
+        }
 
         if ($("controller-url")) {
           const cUrl = w.controller?.url || w.controllerUrl || "https://gmgn.ai/?chain=sol";

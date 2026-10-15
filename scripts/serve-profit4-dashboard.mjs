@@ -60,8 +60,18 @@ export function profit4Snapshot(root, worker) {
       startedAt: manifest.startedAt ?? null, execution: state.execution ?? null,
       rules: state.rules ?? null, targetPercent: state.targetPercent ?? null, paperLane: state.paperLane ?? null });
     for (const p of state.positions) {
+      if (p.entryAt === null && !p.captureActive && p.phase !== 'OPEN' && p.phase !== 'ENTRY_PENDING') {
+        continue;
+      }
       const interrupted = !live && ['OPEN', 'EXIT_PENDING'].includes(p.phase);
-      positions.push({ ...p, run: dir.name, live: Boolean(live),
+      const cleanFacts = p.facts ? {
+        price: p.facts.price ?? null,
+        now: p.facts.now ?? null,
+        holderCount: p.facts.holderCount ?? null,
+        holderGrowth15s: p.facts.holderGrowth15s ?? null,
+        buyShareUsdPercent: p.facts.buyShareUsdPercent ?? null
+      } : null;
+      positions.push({ ...p, facts: cleanFacts, run: dir.name, live: Boolean(live),
         phase: interrupted ? 'CENSORED' : p.phase, estimatedOpenNetPercent: live ? p.estimatedOpenNetPercent : null,
         netReturnPercent: interrupted || p.phase === 'CENSORED' ? null : p.netReturnPercent,
         pnlUsd: interrupted || p.phase === 'CENSORED' ? null : p.pnlUsd,
@@ -450,7 +460,18 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
           ]);
           if (cachedBal) Object.assign(live.readiness, cachedBal);
         }
-        const airdropClusters = read(join(data, 'airdrop-clusters.json'), null);
+        let airdropClusters = null;
+        try {
+          const rawC = read(join(data, 'airdrop-clusters.json'), null);
+          if (rawC) {
+            airdropClusters = {
+              totalClusters: rawC.totalClusters || (rawC.clusters || []).length,
+              totalWallets: rawC.totalWallets || 0,
+              totalTokens: rawC.totalTokens || 0,
+              clusters: (rawC.clusters || []).slice(0, 10)
+            };
+          }
+        } catch {}
         return json(res, 200, { mode: 'PROFIT4_PAPER', admin: { authenticated: admin.authenticated(req) }, autoBuy: { ...live, positions: undefined }, config: config(), worker, rules: { ...PROFIT4_RULES, targetPercent: PROFIT4_TARGET_PERCENT, trailingEnabled: false, flowExitEnabled: false, rounds: 1 },
           historical, ...history, airdropClusters, logs, paths: { data, workerLog: join(data, 'worker.log') } }, req);
       }

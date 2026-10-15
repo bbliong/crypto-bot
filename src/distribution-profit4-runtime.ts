@@ -399,10 +399,14 @@ export class DistributionProfit4Runtime {
       if (state.lane.entryAt === null && facts.firstAt !== null && now - facts.firstAt > state.lane.rules.maxEntryWaitSeconds * 1000) {
         state.lane.end(now, 'ENTRY_WINDOW_EXPIRED');
         state.active = false;
+        this.states.delete(state.key);
       } else {
         state.lane.step(facts);
         if (state.lane.phase === 'CLOSED' || state.lane.phase === 'CENSORED') {
           state.active = false;
+          if (state.lane.entryAt === null) {
+            this.states.delete(state.key);
+          }
         } else if (state.lane.phase === 'ENTRY_PENDING') {
           this.triggerSwapBuy(state.transfer.mint);
         } else if (state.lane.phase === 'EXIT_PENDING') {
@@ -448,10 +452,11 @@ export class DistributionProfit4Runtime {
   }
 
   private persist(now: number) {
+    const relevantStates = [...this.states.values()].filter(s => s.lane.entryAt !== null || s.active);
     atomicProfit4Json(join(this.run, 'profit4-state.json'), { observedAt: now, paperLane: this.laneName, rounds: 1,
       execution: 'PAPER_QUOTE', status: 'EXPERIMENTAL', targetPercent: this.targetPercent, rules: this.laneRules,
       recentEvents: this.recentEvents,
-      positions: [...this.states.values()].map(s => ({ ...s.transfer, captureActive: s.active,
+      positions: relevantStates.map(s => ({ ...s.transfer, captureActive: s.active,
         laneLabel: s.laneLabel, phase: s.lane.phase, version: s.lane.rules.version, targetPercent: this.targetPercent,
         entryAt: s.lane.entryAt, entryPrice: s.lane.entryPrice, exitAt: s.lane.exitAt, exitPrice: s.lane.exitPrice,
         netReturnPercent: s.lane.netReturnPercent, pnlUsd: s.lane.netReturnPercent === null ? null : s.lane.netReturnPercent / 100 * s.lane.rules.stakeUsd,
