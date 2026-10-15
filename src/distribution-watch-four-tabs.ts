@@ -26,6 +26,7 @@ import {
   DEFAULT_SWAP_WALLET,
 } from "./browser-swap-route.js";
 import { HeadlessTradeStream } from "./headless-trade-stream.js";
+import { SolanaWalletStream } from "./solana-wallet-stream.js";
 
 type Transfer = {
   wallet: string;
@@ -54,6 +55,7 @@ const { values } = parseArgs({
     dataDir: { type: "string", default: "data/distribution-watch" },
     maxDetails: { type: "string", default: "0" },
     headlessStream: { type: "string", default: "true" },
+    solanaWalletWs: { type: "string", default: "true" },
   },
 });
 if (!["target", "profit4", "bounce"].includes(values.paperLane!))
@@ -62,6 +64,7 @@ const isPaperRunner =
   values.paperLane === "profit4" || values.paperLane === "bounce";
 const profit4 = isPaperRunner;
 const useHeadlessStream = values.headlessStream !== "false";
+const useSolanaWalletWs = values.solanaWalletWs !== "false";
 const savedAddresses = readJson<{ addresses?: string[] }>(
   join(values.dataDir!, "dashboard-config.json"),
   {},
@@ -709,13 +712,64 @@ const targetTimer = setInterval(() => {
 }, 1000);
 targetTimer.unref();
 process.once("SIGINT", () => {
+  walletStream?.stop();
   clearInterval(targetTimer);
   targetLane.shutdown(Date.now());
 });
 process.once("SIGTERM", () => {
+  walletStream?.stop();
   clearInterval(targetTimer);
   targetLane.shutdown(Date.now());
 });
+let walletStream: SolanaWalletStream | null = null;
+if (useSolanaWalletWs) {
+  walletStream = new SolanaWalletStream({
+    maxWalletsPerSocket: 75,
+    staggerMs: 20,
+  });
+
+  walletStream.on("transfer", async (t) => {
+    write("watch-events.jsonl", {
+      type: "SOLANA_WALLET_TRANSFER_IN",
+      observedAt: Date.now(),
+      wallet: t.wallet,
+      mint: t.mint,
+      amount: t.amount,
+      tx: t.tx,
+    });
+    const candidate: Transfer = {
+      wallet: t.wallet,
+      mint: t.mint,
+      symbol: t.symbol,
+      timestamp: t.timestamp,
+      priceUsd: t.priceUsd,
+      amount: t.amount,
+      from: t.from,
+      tx: t.tx,
+    };
+    await openOrReplaceDetail(candidate);
+  });
+
+  walletStream.on("sell", (s) => {
+    write("watch-events.jsonl", {
+      type: "TRACKED_WALLET_SOLD",
+      observedAt: Date.now(),
+      trackedWallet: s.wallet,
+      mint: s.mint,
+      tx: s.tx,
+      source: "solana_rpc_ws",
+    });
+    if (values.paperLane !== "bounce") {
+      details.delete(s.wallet);
+      if (![...details.values()].some((d) => d.watch.transfer.mint === s.mint)) {
+        targetLane.end(s.mint, Date.now(), "TRACKED_WALLET_SOLD_SOLANA_WS");
+      }
+    }
+  });
+
+  void walletStream.start(addresses);
+  process.once("exit", () => walletStream?.stop());
+}
 let nextWallet = 0;
 let lastConfigReloadAt = Date.now();
 while (!controller.isClosed() && !stopping) {
@@ -738,6 +792,9 @@ while (!controller.isClosed() && !stopping) {
         ) {
           addresses = freshAddresses;
           if (nextWallet >= addresses.length) nextWallet = 0;
+          if (walletStream) {
+            void walletStream.start(addresses);
+          }
           write("watch-events.jsonl", {
             type: "WALLET_LIST_RELOADED_DYNAMICALLY",
             observedAt: pollStartedAt,
@@ -875,6 +932,7 @@ while (!controller.isClosed() && !stopping) {
 }
 clearInterval(targetTimer);
 clearInterval(liveTimer);
+walletStream?.stop();
 targetLane.shutdown(Date.now());
 if (profit4) {
   await context.close();

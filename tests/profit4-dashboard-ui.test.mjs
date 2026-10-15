@@ -469,6 +469,9 @@ test(
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(f.url + "/profit4#onchain");
       await page.waitForSelector("#pane-onchain.active");
+      await page.waitForFunction(
+        () => !document.querySelector("#autobuy-fields")?.disabled,
+      );
       assert.equal(
         await page.locator("#autobuy-fields").evaluate((e) => e.disabled),
         false,
@@ -493,8 +496,10 @@ test(
       assert.equal(saved.config.enabled, false);
       if (await page.locator("#success-modal-ok").isVisible()) {
         await page.locator("#success-modal-ok").click();
+        await page.locator("#success-modal").waitFor({ state: "hidden" }).catch(() => {});
       }
       await page.locator("[data-audit]").click();
+      await page.locator("#real-audit-dialog").waitFor({ state: "visible" });
       assert.equal(await page.locator("#real-audit-dialog").isVisible(), true);
       assert.match(
         await page.locator("#real-audit-content").innerText(),
