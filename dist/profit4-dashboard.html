@@ -874,6 +874,7 @@
               <div><small>Socket terakhir · WIB</small><span id="socket">—</span></div>
               <div><small>Solana RPC WS</small><span id="solana-ws-status" style="color:#10b981;">2 Pool · Connected</span></div>
               <div><small>PumpPortal WS</small><span id="pumpportal-ws-status" style="color:#10b981;">Connected (0s Discovery)</span></div>
+              <div><small>GMGN Browser WS (Max 20)</small><span id="gmgn-ws-status" style="color:#10b981;">Active (0/20 Token)</span></div>
               <div><small>Web Controller (GMGN)</small><span id="controller-url" class="mono" style="font-size:12px;">—</span></div>
               <div><small>Status Controller</small><span id="controller-session" style="color:#10b981;">Lolos Cloudflare / Siaga Order</span></div>
               <div><small>Chrome Detail Tabs</small><span id="detail-tabs-count" style="color:#10b981; font-weight:600;">0 Tab (Headless Mode)</span></div>
@@ -2144,6 +2145,10 @@
         if ($("pumpportal-ws-status")) {
           const p = w.socketHealth?.activeConnections?.pumpPortalWs;
           $("pumpportal-ws-status").textContent = p ? `${p.status || 'Connected'} (${p.trackedMints || 0} Token Stream)` : "Connected (0s Discovery)";
+        }
+        if ($("gmgn-ws-status")) {
+          const g = w.socketHealth?.activeConnections?.gmgnBrowserWs;
+          $("gmgn-ws-status").textContent = g ? `${g.status || 'Active'} (${g.subscribedCount || 0}/${g.maxTokens || 20} Token)` : "Active (0/20 Token)";
         }
 
         if ($("active-details-rows")) {

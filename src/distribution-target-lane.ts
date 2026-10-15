@@ -29,10 +29,10 @@ export function validateTargetRules(value: unknown): TargetRules {
     if (typeof DEFAULT_TARGET_RULES[k] === 'number' && (!Number.isFinite(r[k]) || Number(r[k]) < 0)) throw new Error(`Rule invalid: ${k}`);
   }
   if (typeof r.version !== 'string' || !r.version || typeof r.enabled !== 'boolean' || typeof r.blockKnownDumpSellers !== 'boolean'
-    || r.stakeUsd <= 0 || r.executionDelayMs < 1000 || r.maxFillWaitMs < r.executionDelayMs
+    || r.stakeUsd <= 0 || r.executionDelayMs < 100 || r.maxFillWaitMs < r.executionDelayMs
     || r.feePercentPerSide >= 100 || r.slippagePercentPerSide >= 100 || r.fixedFeeUsdPerSide * 2 >= r.stakeUsd
     || r.confirmSeconds < 1 || r.minBuySharePercent > 100 || r.maxBuyerSharePercent > 100
-    || r.observationSeconds < 15 || r.minTransferAgeSeconds < 30) throw new Error('Rule risk/latency invalid.');
+    || r.observationSeconds < 3 || r.minTransferAgeSeconds < 10) throw new Error('Rule risk/latency invalid.');
   return structuredClone(r);
 }
 export type TargetTrade = { at: number; timestamp: number; price: number; side: string; wallet: string; usd: number | null; signature?: string };

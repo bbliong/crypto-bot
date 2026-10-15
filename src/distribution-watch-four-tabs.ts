@@ -29,6 +29,7 @@ import {
 import { HeadlessTradeStream } from "./headless-trade-stream.js";
 import { SolanaWalletStream } from "./solana-wallet-stream.js";
 import { attachCapture } from "./capture.js";
+import { GmgnTokenWebSocketManager } from "./gmgn-token-websocket.js";
 
 type Transfer = {
   wallet: string;
@@ -212,6 +213,7 @@ const context = await chromium.launchPersistentContext(values.profileDir!, {
   ],
 });
 const controller = context.pages()[0] ?? (await context.newPage());
+const gmgnWsManager = new GmgnTokenWebSocketManager(controller, 20);
 const details = new Map<
   string,
   { page: Page; watch: Watch; openedAt: number }
@@ -392,6 +394,7 @@ if (useHeadlessStream) {
         signature: "genesis_creation",
       });
     }
+    gmgnWsManager.subscribeToken(token.mint).catch(() => {});
   });
   tradeStream.on("status", (s: any) => {
     if (!s.ws) recordHourlyEvent("reconnect");
@@ -399,6 +402,37 @@ if (useHeadlessStream) {
   tradeStream.start();
   process.once("exit", () => tradeStream?.stop());
 }
+
+gmgnWsManager.on("trade", (trade) => {
+  recordHourlyEvent("trade");
+  write("token-trades.jsonl", {
+    observedAt: trade.at,
+    ...trade,
+    source: "gmgn_browser_ws",
+  });
+  targetLane.trade(trade.mint, {
+    at: trade.at,
+    timestamp: trade.timestamp,
+    price: trade.price,
+    usd: trade.usd,
+    side: trade.side,
+    wallet: trade.wallet,
+    signature: trade.signature,
+  });
+});
+
+gmgnWsManager.on("stat", (stat) => {
+  recordHourlyEvent("trade");
+  targetLane.trade(stat.mint, {
+    at: stat.at,
+    timestamp: Math.floor(stat.at / 1000),
+    price: stat.price,
+    usd: 0,
+    side: "buy",
+    wallet: "gmgn_stat_feeder",
+    signature: "stat_update",
+  });
+});
 
 attachCapture(
   controller,
@@ -413,7 +447,7 @@ attachCapture(
   (payload, now) => {
     for (const row of walk(payload)) {
       const f = fields(row);
-      if (f.mint && f.mint.length >= 32 && f.mint.length <= 44) {
+      if (f.mint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(f.mint)) {
         recordHourlyEvent("newToken");
         const symbol = String(f.token?.symbol || (row as any).symbol || "GMGN_NEW");
         const wallet = String(f.token?.creator || (row as any).creator || "gmgn_research");
@@ -428,6 +462,7 @@ attachCapture(
           status: "RESEARCH_DISCOVERED",
         });
         tradeStream?.registerMint(f.mint, { symbol, priceUsd: priceUsd > 0 ? priceUsd : 0.000004 });
+        gmgnWsManager.subscribeToken(f.mint).catch(() => {});
         if (targetLane instanceof DistributionProfit4Runtime) {
           targetLane.register({
             mint: f.mint,
@@ -864,6 +899,8 @@ if (existsSync(feedSettingsFile)) {
   } catch {}
 }
 
+await gmgnWsManager.init();
+
 await controller.goto(controllerTargetUrl, {
   waitUntil: "commit",
 });
@@ -945,6 +982,12 @@ const targetTimer = setInterval(() => {
         trackedMints: tradeStream?.getTrackedMints().length || 0,
       },
       controllerBrowser: controllerInfo,
+      gmgnBrowserWs: {
+        status: "ACTIVE",
+        maxTokens: 20,
+        subscribedCount: gmgnWsManager.getSubscribedCount(),
+        subscribedMints: gmgnWsManager.getSubscribedMints(),
+      },
     },
     hourlyStats: Array.from(hourlyStatsMap.values()).sort((a, b) =>
       b.hourKey.localeCompare(a.hourKey),
@@ -961,6 +1004,7 @@ const targetTimer = setInterval(() => {
       controllerUrl,
       socketHealth,
       activeDetailsQueue,
+      gmgnSubscribedTokens: gmgnWsManager.getSubscribedMints(),
       parallelResearch: {
         enabled: true,
         mode: "headless-websocket",

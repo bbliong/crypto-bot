@@ -16,24 +16,24 @@ export const GENESIS_SURGE_RULES: Readonly<TargetRules> = Object.freeze(validate
   paperOnly: true,
   enabled: true,
   targetPercent: GENESIS_SURGE_TARGET_PERCENT,
-  observationSeconds: 20, // Konfirmasi awal cepat (20 detik) untuk tangkap momentum surge
+  observationSeconds: 5, // Konfirmasi awal super cepat (5 detik) untuk tangkap momen awal
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 90, // Maksimal 90s setelah rilis
-  confirmSeconds: 2,
-  minBuySharePercent: 65, // Min 65% volume buy dari sniper luar
-  minMeaningfulBuyUsd: 15,
-  minMeaningfulBuyers: 5, // Minimal 5 buyer independen
-  maxBuyerSharePercent: 50, // Tidak boleh dimonopoli 1 buyer saja
-  minMomentumPercent: 5,
-  maxMomentumPercent: 200,
+  maxEntryWaitSeconds: 60, // Maksimal 60s setelah rilis
+  confirmSeconds: 1,
+  minBuySharePercent: 60, // Min 60% volume buy dari sniper luar
+  minMeaningfulBuyUsd: 10,
+  minMeaningfulBuyers: 2, // Minimal 2 buyer independen
+  maxBuyerSharePercent: 65, // Toleransi buyer awal
+  minMomentumPercent: 3,
+  maxMomentumPercent: 250,
   maxEntryReturnPercent: 80, // Jangan kejar jika sudah pump >80%
-  maxDrawdownPercent: 3.5,
+  maxDrawdownPercent: 5.0,
   stopLossPercent: GENESIS_SURGE_STOP_LOSS_PERCENT,
-  trailingStartPercent: 35, // Trailing stop mulai aktif saat +35%
+  trailingStartPercent: 30, // Trailing stop mulai aktif saat +30%
   trailingDrawdownPercent: 8, // Toleransi pullback 8% dari ATH
   maxHoldSeconds: 600, // Maksimal 10 menit hold
-  executionDelayMs: 1000,
+  executionDelayMs: 500,
   maxFillWaitMs: 3000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
@@ -105,16 +105,16 @@ export class DistributionGenesisSurgeLaneG1 extends DistributionTargetLane {
       reasons.push('HOLDERS_DECLINING');
     }
 
-    // Gate 3: Sweet-spot Market Cap ($5k - $35k)
+    // Gate 3: Sweet-spot Market Cap ($3k - $35k) - baseline pump.fun adalah ~$3k
     const mc = (f as any).marketCapUsd ?? (f.price !== null ? f.price * 1_000_000_000 : null);
     if (mc !== null && mc !== undefined) {
-      if (mc < 5000) reasons.push('MARKET_CAP_BELOW_GENESIS_FLOOR');
+      if (mc < 3000) reasons.push('MARKET_CAP_BELOW_GENESIS_FLOOR');
       if (mc > 35000) reasons.push('MARKET_CAP_TOO_HIGH_FOR_EARLY_SURGE');
     }
 
-    // Gate 4: Volume Buy Flow Minimal $500 USD
+    // Gate 4: Volume Buy Flow Minimal $50 USD di awal
     const totalBuy = (f as any).totalBuyUsd ?? (this.cumulativeBuyVolumeUsd > 0 ? this.cumulativeBuyVolumeUsd : f.meaningfulBuyUsd);
-    if (totalBuy !== null && totalBuy < 500) {
+    if (totalBuy !== null && totalBuy < 50) {
       reasons.push('INSUFFICIENT_SNIPER_BUY_VOLUME');
     }
 
