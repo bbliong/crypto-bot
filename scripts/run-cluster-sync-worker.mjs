@@ -1,0 +1,169 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expandDeployerClusters } from './expand-deployer-clusters.mjs';
+
+const defaultRoot = fileURLToPath(new URL('../', import.meta.url));
+
+function logEvent(dataDir, event) {
+  try {
+    const file = join(dataDir, 'cluster-sync-events.jsonl');
+    appendFileSync(file, JSON.stringify({ observedAt: Date.now(), ...event }) + '\n', 'utf8');
+  } catch {}
+}
+
+export async function runClusterSyncIteration({
+  root = defaultRoot,
+  rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+  maxWalletsToSync = 64
+} = {}) {
+  const dataDir = join(root, 'data', 'profit4-watch');
+  mkdirSync(dataDir, { recursive: true });
+  const configFile = join(dataDir, 'dashboard-config.json');
+  const statusFile = join(dataDir, 'cluster-sync-status.json');
+
+  const startMs = Date.now();
+  console.log(`[SYNC] Memulai pemindaian cluster sindikat... (${new Date().toLocaleTimeString('id-ID')})`);
+
+  let prevTotalClusters = 0;
+  try {
+    const prevData = JSON.parse(readFileSync(join(dataDir, 'airdrop-clusters.json'), 'utf8'));
+    prevTotalClusters = prevData.totalClusters || 0;
+  } catch {}
+
+  // 1. Jalankan ekspansi cluster scanner
+  const clusterResult = await expandDeployerClusters({ root, rpcUrl, limitPerDeployer: 15 });
+  const durationMs = Date.now() - startMs;
+
+  const newClustersFound = Math.max(0, (clusterResult.totalClusters || 0) - prevTotalClusters);
+  console.log(`[SYNC] Selesai dalam ${(durationMs / 1000).toFixed(1)}s. Total Cluster: ${clusterResult.totalClusters} (+${newClustersFound} baru).`);
+
+  // 2. Kumpulkan wallet representatif untuk disinkronkan ke dashboard-config.json
+  // Ambil primaryTracked dari setiap cluster agar mencakup semua grup sindikat
+  const representativeWallets = [];
+  const clusters = clusterResult.clusters || [];
+
+  for (const cl of clusters) {
+    if (cl.primaryTracked && !representativeWallets.includes(cl.primaryTracked)) {
+      representativeWallets.push(cl.primaryTracked);
+    }
+  }
+
+  // Batasi agar tidak overload loop polling (prioritaskan cluster yang paling aktif / banyak token)
+  const walletsToSync = representativeWallets.slice(0, maxWalletsToSync);
+
+  // 3. Baca konfigurasi saat ini dan gabungkan
+  let currentAddresses = [];
+  try {
+    const cfg = JSON.parse(readFileSync(configFile, 'utf8'));
+    if (Array.isArray(cfg.addresses)) currentAddresses = cfg.addresses;
+  } catch {}
+
+  const mergedAddresses = [...new Set([...currentAddresses, ...walletsToSync])];
+  const newlyAdded = mergedAddresses.filter(a => !currentAddresses.includes(a));
+
+  if (newlyAdded.length > 0) {
+    console.log(`[SYNC] Menyuntikkan ${newlyAdded.length} wallet cluster baru ke dashboard-config.json...`);
+    writeFileSync(configFile, JSON.stringify({
+      addresses: mergedAddresses,
+      updatedAt: Date.now(),
+      autoSyncedBy: 'cluster-sync-worker',
+      lastSyncedAt: new Date().toISOString()
+    }, null, 2), 'utf8');
+
+    logEvent(dataDir, {
+      type: 'AUTO_SYNCED_NEW_WALLETS',
+      newlyAddedCount: newlyAdded.length,
+      totalAddresses: mergedAddresses.length,
+      sampleAdded: newlyAdded.slice(0, 3)
+    });
+  } else {
+    console.log(`[SYNC] Konfigurasi dashboard sudah up-to-date (${mergedAddresses.length} wallet).`);
+  }
+
+  // 4. Update status file
+  const status = {
+    status: 'active',
+    lastScanAt: new Date().toISOString(),
+    lastScanDurationMs: durationMs,
+    totalClusters: clusterResult.totalClusters || 0,
+    totalWallets: clusterResult.totalWallets || 0,
+    totalTokens: clusterResult.totalTokens || 0,
+    newClustersFound,
+    syncedWalletsCount: mergedAddresses.length,
+    newlyAddedToWatch: newlyAdded.length
+  };
+  writeFileSync(statusFile, JSON.stringify(status, null, 2), 'utf8');
+
+  return status;
+}
+
+export async function startClusterSyncWorker({
+  root = defaultRoot,
+  intervalMs = 180000, // 3 menit
+  once = false
+} = {}) {
+  const dataDir = join(root, 'data', 'profit4-watch');
+  const controlFile = join(dataDir, 'cluster-sync-control.json');
+  const statusFile = join(dataDir, 'cluster-sync-status.json');
+
+  writeFileSync(controlFile, JSON.stringify({
+    pid: process.pid,
+    mode: 'cluster-sync-worker',
+    startedAt: new Date().toISOString(),
+    status: 'running'
+  }, null, 2), 'utf8');
+
+  let running = true;
+  const cleanup = () => {
+    running = false;
+    try {
+      if (existsSync(controlFile)) {
+        writeFileSync(controlFile, JSON.stringify({
+          pid: process.pid,
+          mode: 'cluster-sync-worker',
+          stoppedAt: new Date().toISOString(),
+          status: 'stopped'
+        }, null, 2), 'utf8');
+      }
+      if (existsSync(statusFile)) {
+        const cur = JSON.parse(readFileSync(statusFile, 'utf8'));
+        cur.status = 'stopped';
+        writeFileSync(statusFile, JSON.stringify(cur, null, 2), 'utf8');
+      }
+    } catch {}
+    console.log('[SYNC] Worker dihentikan.');
+  };
+
+  process.once('SIGINT', cleanup);
+  process.once('SIGTERM', cleanup);
+
+  console.log(`[SYNC WORKER] Aktif (PID ${process.pid}). Interval scan: ${intervalMs / 1000}s`);
+
+  while (running) {
+    try {
+      await runClusterSyncIteration({ root });
+    } catch (err) {
+      console.error('[SYNC ERROR]', err.message);
+      logEvent(dataDir, { type: 'SYNC_ERROR', message: err.message });
+    }
+
+    if (once || !running) break;
+
+    console.log(`[SYNC] Menunggu ${intervalMs / 1000}s sampai siklus berikutnya...`);
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+
+  cleanup();
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const once = process.argv.includes('--once');
+  const intervalArg = process.argv.find(a => a.startsWith('--interval='));
+  const intervalMs = intervalArg ? Number(intervalArg.split('=')[1]) : 180000;
+
+  startClusterSyncWorker({ once, intervalMs }).catch(err => {
+    console.error('Fatal cluster-sync error:', err);
+    process.exit(1);
+  });
+}

@@ -8,7 +8,15 @@ import {
   DistributionBounceLaneV3,
   DistributionBounceLaneV4,
   DistributionBounceLaneV5,
+  DistributionBounceLaneV6,
+  DistributionBounceLaneV7,
 } from "./distribution-bounce-lane.js";
+import {
+  DistributionStaircaseLaneS1,
+  DistributionStaircaseLaneS2,
+  DistributionStaircaseLaneS3,
+  DistributionStaircaseLaneS4,
+} from "./distribution-staircase-lane.js";
 import {
   TargetObservation,
   type DistributionTargetLane,
@@ -114,9 +122,15 @@ export class Profit4LiveEngine {
     if (signal.type !== "PAPER_BUY") return;
     const c = readLiveConfig(this.dir),
       r = this.state.readiness;
+    const laneAllowed =
+      c.activeLane === signal.laneLabel ||
+      (c.activeLane === "V7+S1" && (signal.laneLabel === "V7" || signal.laneLabel === "S1")) ||
+      (c.activeLane === "V7+S2" && (signal.laneLabel === "V7" || signal.laneLabel === "S2")) ||
+      (c.activeLane === "V7+S3" && (signal.laneLabel === "V7" || signal.laneLabel === "S3")) ||
+      (c.activeLane === "V7+S4" && (signal.laneLabel === "V7" || signal.laneLabel === "S4"));
     if (
       !c.enabled ||
-      c.activeLane !== signal.laneLabel ||
+      !laneAllowed ||
       !this.lanes.includes(signal.laneLabel)
     )
       return;
@@ -180,9 +194,15 @@ export class Profit4LiveEngine {
     auditLive(this.dir, this.state, p, "BUY_INTENT", { signal, settings: c });
   }
   private configAllows(p: LivePosition, c: LiveConfig) {
+    const laneAllowed =
+      c.activeLane === p.lane ||
+      (c.activeLane === "V7+S1" && (p.lane === "V7" || p.lane === "S1")) ||
+      (c.activeLane === "V7+S2" && (p.lane === "V7" || p.lane === "S2")) ||
+      (c.activeLane === "V7+S3" && (p.lane === "V7" || p.lane === "S3")) ||
+      (c.activeLane === "V7+S4" && (p.lane === "V7" || p.lane === "S4"));
     return (
       c.enabled &&
-      c.activeLane === p.lane &&
+      laneAllowed &&
       this.lanes.includes(p.lane) &&
       this.state.readiness.sessionReady &&
       this.state.readiness.wallet === p.wallet &&
@@ -314,7 +334,13 @@ export class Profit4LiveEngine {
       V3: DistributionBounceLaneV3,
       V4: DistributionBounceLaneV4,
       V5: DistributionBounceLaneV5,
-    }[p.lane];
+      V6: DistributionBounceLaneV6,
+      V7: DistributionBounceLaneV7,
+      S1: DistributionStaircaseLaneS1,
+      S2: DistributionStaircaseLaneS2,
+      S3: DistributionStaircaseLaneS3,
+      S4: DistributionStaircaseLaneS4,
+    }[p.lane as "P4" | "V1" | "V2" | "V3" | "V4" | "V5" | "V6" | "V7" | "S1" | "S2" | "S3" | "S4"];
     if (!factory) throw new Error(`Unknown lane: ${p.lane}`);
     const lane = new factory(p.mint, emit);
     lane.phase = "OPEN";
@@ -664,5 +690,10 @@ export class Profit4LiveEngine {
   }
   hasActive() {
     return this.state.positions.some((p) => LIVE_ACTIVE.has(p.status));
+  }
+  hasActiveMint(mint: string) {
+    return this.state.positions.some(
+      (p) => p.mint === mint && LIVE_ACTIVE.has(p.status),
+    );
   }
 }

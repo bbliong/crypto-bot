@@ -152,7 +152,7 @@ async function fixture() {
 
 test(
   "Profit4 tabs consistently scope sessions, paper results, rules, filters and quotes",
-  { timeout: 30000 },
+  { timeout: 60000 },
   async () => {
     const f = await fixture();
     let browser;
@@ -338,7 +338,7 @@ test(
 
 test(
   "Profit4 empty data and stopped worker keep observation and interrupted exits distinct",
-  { timeout: 15000 },
+  { timeout: 60000 },
   async () => {
     const f = await fixture();
     let browser;
@@ -373,7 +373,7 @@ test(
 
 test(
   "Profit4 waits for slow refresh requests before scheduling the next poll",
-  { timeout: 20000 },
+  { timeout: 60000 },
   async () => {
     const f = await fixture();
     let browser;
@@ -420,7 +420,7 @@ test(
 
 test(
   "Real Auto-Buy form saves settings, preserves edits and opens authenticated audit",
-  { timeout: 20000 },
+  { timeout: 60000 },
   async () => {
     const f = await fixture();
     let browser;

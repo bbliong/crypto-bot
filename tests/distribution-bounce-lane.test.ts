@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, DistributionBounceLaneV5, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
+import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, DistributionBounceLaneV5, DistributionBounceLaneV6, DistributionBounceLaneV7, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_RULES_V5, BOUNCE_RULES_V6, BOUNCE_RULES_V7, BOUNCE_TARGET_PERCENT } from '../src/distribution-bounce-lane.js';
 import type { TargetEvent, TargetFacts } from '../src/distribution-target-lane.js';
 
 const mockFacts = (now = 100000, price = 1, extra: Partial<TargetFacts> = {}): TargetFacts => ({
@@ -315,13 +315,13 @@ test('DistributionBounceLaneV5 enters clean staircase bounce when dev balance 0 
   }));
   assert.equal(lane.phase, 'OPEN');
 
-  // Step 4: Price reaches target +35% gain -> TARGET_BOUNCE_30_40
-  lane.step(mockFacts(106000, 0.29)); // ~+36% gain
+  // Step 4: Price reaches target +20-22% gain -> TARGET_BOUNCE_20_22
+  lane.step(mockFacts(106000, 0.27)); // clean target gain
   assert.equal(lane.phase, 'EXIT_PENDING');
 
-  lane.step(mockFacts(107100, 0.29));
+  lane.step(mockFacts(107100, 0.27));
   assert.equal(lane.phase, 'CLOSED');
-  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_30_40');
+  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_20_22');
 });
 
 test('DistributionBounceLaneV5 enforces hard-cap rugpull loss protection if flash dump occurs', () => {
@@ -431,6 +431,204 @@ test('DistributionBounceLaneV5 locks profit at +15% when pullback occurs from +1
   lane.step(mockFacts(108100, 0.235));
   assert.equal(lane.phase, 'CLOSED');
   assert.equal(events.at(-1)?.reason, 'PROFIT_LOCK_15_EXIT');
+});
+
+test('DistributionBounceLaneV6 blocks entry when recovery volume < $18 or buyers < 3 (thin pool protection)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV6('mint-v6-thin-pool', e => events.push(e));
+
+  // T = 100s: Severe dump occurred (78%), but meaningful buyers only 2 and volume only $10 -> rejected
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 2, // V6 requires 3+
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 10, // V6 requires $18+
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+  let lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('BUY_FLOW_NOT_RECOVERED'));
+  assert.ok((lastDecision?.reasons as string[]).includes('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET'));
+});
+
+test('DistributionBounceLaneV6 enters when recovery volume >= $18 with 3+ buyers and takes profit at +20-22%', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV6('mint-v6-clean-flow', e => events.push(e));
+
+  // T = 100s: Initial step with solid volume ($25) and 4 buyers
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 25,
+    topBuyerSharePercent: 35,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(103500, 0.202, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+    topBuyerSharePercent: 35,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(104600, 0.202, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Price surges to 0.27 (net gain >= +20%) -> triggers TARGET_BOUNCE_20_22
+  lane.step(mockFacts(106000, 0.27));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(107100, 0.27));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_20_22');
+});
+
+test('DistributionBounceLaneV7 Gate 3: blocks entry on staggered multi-wave whale dumps (TRALA pattern)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV7('mint-v7-staggered-whale', e => events.push(e));
+
+  // Whale Sell Wave 1 at T = 100s ($500)
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    largestSellUsd: 500,
+    meaningfulBuyers: 4,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+
+  // Whale Sell Wave 2 at T = 120s ($400)
+  lane.step(mockFacts(120000, 0.18, {
+    drawdownPercent: 80,
+    bounceFromTroughPercent: 4.0,
+    largestSellUsd: 400,
+    meaningfulBuyers: 4,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+
+  // T = 180s (60s after 2nd sell): Price attempts to bounce, but staggered dump pattern is flagged
+  lane.step(mockFacts(180000, 0.19, {
+    drawdownPercent: 79,
+    bounceFromTroughPercent: 5.5,
+    largestSellUsd: 10,
+    meaningfulBuyers: 4,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+  const lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('STAGGERED_WHALE_DUMP_ACTIVE'));
+});
+
+test('DistributionBounceLaneV7 Gate 3: enforces 60s cooldown for large dump >= $2,000 (MarsX pattern)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV7('mint-v7-cooldown-60s', e => events.push(e));
+
+  // Massive Dump $2,500 occurs at T = 100s
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    largestSellUsd: 2500,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+
+  // At T = 150s (50s later): in V6 (45s) this would be allowed, but V7 enforces 60s cooldown for >= $2k
+  lane.step(mockFacts(150000, 0.21, {
+    drawdownPercent: 77,
+    bounceFromTroughPercent: 5.0,
+    largestSellUsd: 10,
+    meaningfulBuyers: 4,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+  let lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('WHALE_SELL_COOLDOWN_ACTIVE'));
+
+  // At T = 165s (65s later): Cooldown elapsed -> allowed to initiate staircase
+  lane.step(mockFacts(165000, 0.21, {
+    drawdownPercent: 77,
+    bounceFromTroughPercent: 5.0,
+    largestSellUsd: 10,
+    meaningfulBuyers: 4,
+    meaningfulBuyUsd: 30,
+    topBuyerSharePercent: 35,
+  }));
+  lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('STAIRCASE_WAITING_CONFIRMATION'));
+});
+
+test('DistributionBounceLaneV7 Gate 5: blocks entry when meaningful buy volume < $22 (Anti-Wash filter)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV7('mint-v7-anti-wash', e => events.push(e));
+
+  // Token bounced, but meaningful buy volume is only $19 (< $22 required)
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 3,
+    buyShareUsdPercent: 75,
+    meaningfulBuyUsd: 19, // Under $22
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  assert.equal(lane.phase, 'WATCHING');
+  const lastDecision = events.findLast(e => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok((lastDecision?.reasons as string[]).includes('BUY_FLOW_NOT_RECOVERED'));
+});
+
+test('DistributionBounceLaneV7 enters clean staircase bounce and takes profit at +20-22%', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionBounceLaneV7('mint-v7-win', e => events.push(e));
+
+  // Step 1: Initial step with solid volume ($28) and 4 buyers
+  lane.step(mockFacts(100000, 0.20, {
+    drawdownPercent: 78,
+    bounceFromTroughPercent: 5.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 28,
+    topBuyerSharePercent: 35,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(103500, 0.202, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+    topBuyerSharePercent: 35,
+    devHoldingSharePercent: 0,
+    devBalance: 0,
+  }));
+  lane.step(mockFacts(104600, 0.202, {
+    drawdownPercent: 77.8,
+    bounceFromTroughPercent: 6.0,
+    meaningfulBuyers: 4,
+    buyShareUsdPercent: 80,
+    meaningfulBuyUsd: 30,
+  }));
+  assert.equal(lane.phase, 'OPEN');
+
+  // Step 2: Price surges to 0.27 (net gain >= +20%) -> triggers TARGET_BOUNCE_20_22
+  lane.step(mockFacts(106000, 0.27));
+  assert.equal(lane.phase, 'EXIT_PENDING');
+
+  lane.step(mockFacts(107100, 0.27));
+  assert.equal(lane.phase, 'CLOSED');
+  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_20_22');
 });
 
 

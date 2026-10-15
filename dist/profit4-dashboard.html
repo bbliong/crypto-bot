@@ -212,8 +212,26 @@
       }
       .cards {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 12px;
+      }
+      .grid-2col {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+        gap: 16px;
+      }
+      .table-scroll-bounded {
+        max-height: 420px;
+        overflow-y: auto;
+      }
+      .table-scroll-bounded thead th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #162031;
+      }
+      .table-scroll-bounded thead th:first-child {
+        z-index: 4;
       }
       .card,
       .panel {
@@ -397,6 +415,41 @@
       }
       .wallet-message {
         font-size: 12px;
+      }
+      .cluster-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+        margin-bottom: 20px;
+      }
+      .cluster-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 14px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .token-badge-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .token-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: #1e293b;
+        color: #93c5fd;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 600;
       }
       #error {
         display: none;
@@ -638,6 +691,8 @@
         <div class="actions">
           <span class="badge paper">PAPER</span
           ><span id="worker-badge" class="badge">Memuat…</span
+          ><a data-link="v6-vs-v7" class="badge" style="background:#1e2d42; border-color:#60a5fa; color:#93c5fd; font-weight:700;">🚀 V6 vs V7 ↗</a
+          ><a data-link="staircase" class="badge" style="background:#2e1065; border-color:#a855f7; color:#d8b4fe; font-weight:700;">🪜 Staircase (85% WR) ↗</a
           ><a data-link="comparison" class="badge">📊 Komparasi ↗</a
           ><a data-link="audit" class="badge">🛡️ Audit ↗</a>
         </div>
@@ -667,7 +722,12 @@
           📜 Riwayat Transaksi
           <span class="count" data-count="history">0</span></button
         ><button class="tab-button" data-tab="onchain">
-          💳 On-Chain &amp; Auto-Buy
+          💳 On-Chain &amp; Auto-Buy</button
+        ><button class="tab-button" data-tab="clusters">
+          🌐 Cluster Sindikat <span class="count" id="cluster-count">0</span>
+        </button
+        ><button class="tab-button" data-tab="genesis">
+          🚀 Lane G1 Genesis <span class="count" id="genesis-count">0</span>
         </button>
       </nav>
       <section
@@ -740,46 +800,48 @@
             Dikelompokkan menurut jam entry; token tanpa entry memakai waktu
             event atau transfer.
           </p>
-          <div class="table-wrap">
+          <div class="table-wrap table-scroll-bounded">
             <table>
               <thead id="hourly-head"></thead>
               <tbody id="hourly-rows"></tbody>
             </table>
           </div>
         </div>
-        <div class="panel">
-          <div class="row">
-            <h2>📋 Rules sesi</h2>
-            <span class="badge paper">Rules tersimpan</span>
-          </div>
-          <div id="rules" class="rule-list"></div>
-        </div>
-        <div class="panel">
-          <div class="row">
-            <h2>🛰️ Worker &amp; koneksi</h2>
-            <span class="badge">Worker saat ini</span>
-          </div>
-          <div class="status-grid">
-            <div><small>Proses</small><span id="process">—</span></div>
-            <div>
-              <small>Poll wallet terakhir · WIB</small><span id="poll">—</span>
+        <div class="grid-2col">
+          <div class="panel">
+            <div class="row">
+              <h2>🛰️ Worker &amp; koneksi</h2>
+              <span class="badge">Worker saat ini</span>
             </div>
-            <div>
-              <small>Socket terakhir · WIB</small><span id="socket">—</span>
+            <div class="status-grid">
+              <div><small>Proses</small><span id="process">—</span></div>
+              <div>
+                <small>Poll wallet terakhir · WIB</small><span id="poll">—</span>
+              </div>
+              <div>
+                <small>Socket terakhir · WIB</small><span id="socket">—</span>
+              </div>
+              <div>
+                <small>Respons aktivitas</small><span id="api-health">—</span>
+              </div>
             </div>
-            <div>
-              <small>Respons aktivitas</small><span id="api-health">—</span>
-            </div>
+            <p id="worker-error" class="bad"></p>
+            <p id="path" class="mono hint wrap"></p>
           </div>
-          <p id="worker-error" class="bad"></p>
-          <p id="path" class="mono hint wrap"></p>
+          <div class="panel">
+            <div class="row">
+              <h2>📋 Rules sesi</h2>
+              <span class="badge paper">Rules tersimpan</span>
+            </div>
+            <div id="rules" class="rule-list"></div>
+          </div>
         </div>
         <div class="panel">
           <div class="row">
             <h2>🔎 Observasi &amp; token belum entry</h2>
             <span id="observation-count" class="badge">0 token</span>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap table-scroll-bounded">
             <table>
               <thead>
                 <tr>
@@ -796,6 +858,7 @@
               <tbody id="observations"></tbody>
             </table>
           </div>
+          <div id="observation-note" class="hint" style="margin-top:8px;"></div>
         </div>
         <div class="panel">
           <h2>⚡ Event terbaru</h2>
@@ -930,12 +993,24 @@
                     >🎯 Lane pemicu Real Buy</label
                   >
                   <select id="real-lane" class="config-select">
-                    <option>V1</option>
-                    <option>V2</option>
-                    <option>V3</option>
-                    <option>V4</option>
-                    <option>V5</option>
-                    <option>P4</option>
+                    <option value="V7">V7 (Bounce Spesialis)</option>
+                    <option value="G1">G1 (Genesis Surge +50% TP)</option>
+                    <option value="S1">S1 (Staircase Conservative +25%)</option>
+                    <option value="S2">S2 (Staircase Max Profit +50%)</option>
+                    <option value="S3">S3 (Staircase Trailing +35%)</option>
+                    <option value="S4">S4 (Staircase Runner &gt;50% Hunter)</option>
+                    <option value="V7+G1">⚡ V7 + G1 (Bounce &amp; Genesis Surge)</option>
+                    <option value="V7+S1">⚡ V7 + S1 (Bounce &amp; Conservative)</option>
+                    <option value="V7+S2">⚡ V7 + S2 (Bounce &amp; Max Profit)</option>
+                    <option value="V7+S3">⚡ V7 + S3 (Bounce &amp; Trailing)</option>
+                    <option value="V7+S4">⚡ V7 + S4 (Bounce &amp; Runner Hunter)</option>
+                    <option value="V6">V6</option>
+                    <option value="V5">V5</option>
+                    <option value="V4">V4</option>
+                    <option value="V3">V3</option>
+                    <option value="V2">V2</option>
+                    <option value="V1">V1</option>
+                    <option value="P4">P4</option>
                   </select>
                   <p class="hint">
                     Hanya sinyal dari lane Profit4 yang dipilih akan memicu
@@ -1093,14 +1168,21 @@
               id="real-search"
               placeholder="Cari token / mint"
               aria-label="Cari transaksi asli"
-            /><select id="real-filter-lane" aria-label="Lane audit">
+            ><select id="real-filter-lane" aria-label="Lane audit">
               <option value="">Semua lane</option>
-              <option>V1</option>
-              <option>V2</option>
-              <option>V3</option>
-              <option>V4</option>
-              <option>V5</option>
-              <option>P4</option></select
+              <option value="V7">V7</option>
+              <option value="G1">G1</option>
+              <option value="S1">S1</option>
+              <option value="S2">S2</option>
+              <option value="S3">S3</option>
+              <option value="S4">S4</option>
+              <option value="V6">V6</option>
+              <option value="V5">V5</option>
+              <option value="V4">V4</option>
+              <option value="V3">V3</option>
+              <option value="V2">V2</option>
+              <option value="V1">V1</option>
+              <option value="P4">P4</option></select
             ><select id="real-filter-status" aria-label="Status audit">
               <option value="">Semua status</option>
               <option>BUY_PENDING</option>
@@ -1224,6 +1306,141 @@
           </div>
         </div>
       </section>
+      <section
+        id="pane-clusters"
+        class="tab-pane"
+        aria-label="Cluster Sindikat"
+      >
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h2 style="margin:0 0 4px 0;font-size:20px;">🌐 Cluster Sindikat Airdrop (Pola 360.500 Token)</h2>
+            <div class="muted" style="font-size:13px;">Pemetaan otomatis dev pump.fun yang mendistribusikan 360.500 token ke grup 8 wallet penerima dalam satu bundle transaksi on-chain.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="secondary" id="btn-scan-clusters" style="font-size:13px;padding:7px 14px;cursor:pointer;">🔄 Scan Ulang On-Chain</button>
+            <button type="button" class="primary" id="btn-sync-clusters" style="font-size:13px;padding:7px 14px;cursor:pointer;">⚡ Auto-Sync ke Profit4</button>
+          </div>
+        </div>
+
+        <div class="cards" style="margin-bottom:20px;">
+          <div class="card">
+            <div class="label">Cluster Terdeteksi</div>
+            <div class="value" id="cluster-stat-total">0</div>
+            <small id="cluster-stat-desc">Kelompok bundle unik</small>
+          </div>
+          <div class="card">
+            <div class="label">Total Wallet Dipetakan</div>
+            <div class="value" id="cluster-stat-wallets">0</div>
+            <small id="cluster-stat-tracked">0 sedang dipantau worker</small>
+          </div>
+          <div class="card">
+            <div class="label">Total Token Masuk</div>
+            <div class="value" id="cluster-stat-tokens">0</div>
+            <small>Tersebar di seluruh cluster</small>
+          </div>
+          <div class="card">
+            <div class="label">Auto-Sync Harvester</div>
+            <div class="value" id="cluster-stat-sync-status" style="color:#10b981;">AKTIF</div>
+            <small id="cluster-stat-sync-desc">Sinkronisasi otomatis ke Profit4</small>
+          </div>
+        </div>
+
+        <div id="clusters-container">
+          <div class="empty">Memuat data cluster sindikat…</div>
+        </div>
+      </section>
+      <section
+        id="pane-genesis"
+        class="tab-pane"
+        aria-label="Lane G1 Genesis Surge"
+      >
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h2 style="margin:0 0 4px 0;font-size:20px;">🚀 Lane G1 · Genesis Surge (+50% TP / -6% SL)</h2>
+            <div class="muted" style="font-size:13px;">Strategi sweet-spot entry (MC $7k–$35k), sniper volume flow, dev holding &lt;2%, proteksi emergency dump 1.237 wallet klaster sindikat, dan simulasi dual swap probe GMGN.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="secondary" id="btn-refresh-genesis" style="font-size:13px;padding:7px 14px;cursor:pointer;">🔄 Refresh Data</button>
+          </div>
+        </div>
+
+        <div class="cards" style="margin-bottom:20px;">
+          <div class="card">
+            <div class="label">Status Worker G1</div>
+            <div class="value" id="g1-worker-status" style="color:#10b981;">AKTIF</div>
+            <small id="g1-worker-pid">PID —</small>
+          </div>
+          <div class="card">
+            <div class="label">Target Rules</div>
+            <div class="value" style="color:#38bdf8;">TP +50%</div>
+            <small>SL -6% · Trailing +35%/8%</small>
+          </div>
+          <div class="card">
+            <div class="label">Token Genesis Dipantau</div>
+            <div class="value" id="g1-token-count">0</div>
+            <small id="g1-token-watching">0 sedang evaluasi gate</small>
+          </div>
+          <div class="card">
+            <div class="label">Klaster Sindikat Terkoneksi</div>
+            <div class="value" id="g1-cluster-wallets">1.237</div>
+            <small style="color:#f59e0b;">Anti-Dump Watchdog On</small>
+          </div>
+          <div class="card highlight">
+            <div class="label">Win Rate Historis Sindikat</div>
+            <div class="value" style="color:#10b981;">72.7%</div>
+            <small>8 dari 11 token pump &gt;50%</small>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-bottom:20px;">
+          <div class="row">
+            <h2>🎯 Token Genesis Sedang Dipantau (Live Watching)</h2>
+            <span id="g1-watching-badge" class="badge">0 token</span>
+          </div>
+          <p>Daftar token airdrop sindikat 360.500 yang sedang dianalisis secara real-time untuk kondisi sweet-spot sniper flow.</p>
+          <div class="table-wrap table-scroll-bounded">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Symbol</th>
+                  <th>Fase</th>
+                  <th>Waktu Deteksi WIB</th>
+                  <th>Harga Entry / Live</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="g1-watching-rows">
+                <tr><td colspan="6" class="muted">Memuat token yang sedang dipantau…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="row">
+            <h2>📋 Log Keputusan Evaluasi Gate G1 Real-Time</h2>
+            <span class="badge paper">Stream Event</span>
+          </div>
+          <p>Keputusan Gate 1 (Dev &lt;2%), Gate 2 (Anti-Dump Sindikat), Gate 3 (MC $7k–$35k), dan Gate 4 (Sniper Flow).</p>
+          <div class="table-wrap table-scroll-bounded">
+            <table>
+              <thead>
+                <tr>
+                  <th>Waktu WIB</th>
+                  <th>Token</th>
+                  <th>Keputusan / Event</th>
+                  <th>Reasons / Catatan</th>
+                  <th>Harga Saat Cek</th>
+                </tr>
+              </thead>
+              <tbody id="g1-decision-rows">
+                <tr><td colspan="5" class="muted">Memuat log keputusan evaluasi…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
       <footer id="historical"></footer>
     </main>
     <dialog id="real-audit-dialog">
@@ -1253,7 +1470,12 @@
           >📜 <span class="count" data-count="history">0</span></span
         >Riwayat</button
       ><button class="tab-button" data-tab="onchain">
-        <span class="icon">💳</span>On-Chain
+        <span class="icon">💳</span>On-Chain</button
+      ><button class="tab-button" data-tab="clusters">
+        <span class="icon">🌐</span>Cluster
+      </button
+      ><button class="tab-button" data-tab="genesis">
+        <span class="icon">🚀</span>Lane G1
       </button>
     </nav>
     <script>
@@ -1389,8 +1611,22 @@
         .forEach((a) => (a.href = `${basePath}/${a.dataset.link}`));
       const laneOf = (p) =>
         p.laneLabel ||
-        (/profit4/.test(p.version || "")
+        (/genesis-surge-g1/.test(p.version || "")
+          ? "G1"
+          : /profit4/.test(p.version || "")
           ? "P4"
+          : /s4/.test(p.version || "")
+            ? "S4"
+          : /s3/.test(p.version || "")
+            ? "S3"
+          : /s2/.test(p.version || "")
+            ? "S2"
+          : /s1/.test(p.version || "")
+            ? "S1"
+          : /v7/.test(p.version || "")
+            ? "V7"
+          : /v6/.test(p.version || "")
+            ? "V6"
           : /v5/.test(p.version || "")
             ? "V5"
             : /v4/.test(p.version || "")
@@ -1474,6 +1710,10 @@
         `<span class="mono" title="${esc(p.wallet)}">${esc(short(p.wallet))}</span>`;
       const facts = (p) =>
         `<td>${num(p.facts?.holderCount, 0)} / ${num(p.facts?.holderGrowth15s, 0)}</td><td>${pct(p.facts?.buyShareUsdPercent)}</td>`;
+      function setHtml(id, html) {
+        const el = typeof id === "string" ? $(id) : id;
+        if (el && el.innerHTML !== html) el.innerHTML = html;
+      }
       function options(id, rows, label) {
         const value = $(id).value;
         $(id).innerHTML =
@@ -1542,9 +1782,24 @@
           const hasLive = state.runs.some((r) => r.live);
           session = hasLive ? "live" : "all";
         }
-        const newHtml = choices
-          .map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`)
-          .join("");
+        const liveChoices = runChoices.filter(([v]) => v === "live");
+        const archiveChoices = runChoices.filter(([v]) => v !== "live");
+        let newHtml = '<option value="all">Semua sesi</option>';
+        if (liveChoices.length) {
+          newHtml += '<optgroup label="🟢 Sesi Live">';
+          newHtml += liveChoices.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join("");
+          newHtml += '</optgroup>';
+        }
+        if (hourChoices.length) {
+          newHtml += '<optgroup label="⏰ Jam (WIB)">';
+          newHtml += hourChoices.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join("");
+          newHtml += '</optgroup>';
+        }
+        if (archiveChoices.length) {
+          newHtml += '<optgroup label="📁 Arsip Sesi">';
+          newHtml += archiveChoices.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join("");
+          newHtml += '</optgroup>';
+        }
         if ($("run").innerHTML !== newHtml) {
           $("run").innerHTML = newHtml;
         }
@@ -1619,33 +1874,54 @@
         $("session-trades").textContent = `${s.closed} trade selesai`;
         const lanes = [...new Set(rows.map(laneOf))].sort();
         $("lane-count").textContent = `${lanes.length} lane`;
-        $("lane-rows").innerHTML =
+        const byLane = new Map();
+        for (const p of rows) {
+          const l = laneOf(p);
+          let list = byLane.get(l);
+          if (!list) { list = []; byLane.set(l, list); }
+          list.push(p);
+        }
+        setHtml("lane-rows",
           lanes
             .map((l) => {
-              const x = summary(rows.filter((p) => laneOf(p) === l));
+              const x = summary(byLane.get(l) || []);
               return `<tr><td><span class="badge">${esc(l)}</span></td><td>${x.entries}</td><td>${x.closed}</td><td>${x.profit} / ${x.loss}</td><td>${pct(x.winRate)}</td><td class="${tone(x.pnl)}">${money(x.pnl)}</td><td>${pct(x.mean)}</td><td>${x.missing}</td></tr>`;
             })
-            .join("") || empty(8, "Belum ada lane pada sesi ini.");
-        const hours = [
-          ...new Set(rows.map(hourOf).filter((h) => h != null)),
-        ].sort((a, b) => b - a);
-        $("hourly-head").innerHTML =
-          `<tr><th>Jam WIB</th>${lanes.map((l) => `<th>${esc(l)} W/L</th><th>${esc(l)} PnL</th>`).join("")}<th>Total PnL</th></tr>`;
-        $("hourly-rows").innerHTML =
+            .join("") || empty(8, "Belum ada lane pada sesi ini.")
+        );
+
+        const hourBuckets = new Map();
+        for (const p of rows) {
+          const h = hourOf(p);
+          if (h == null) continue;
+          let b = hourBuckets.get(h);
+          if (!b) { b = { all: [], byLane: new Map() }; hourBuckets.set(h, b); }
+          b.all.push(p);
+          const l = laneOf(p);
+          let lb = b.byLane.get(l);
+          if (!lb) { lb = []; b.byLane.set(l, lb); }
+          lb.push(p);
+        }
+        const hours = Array.from(hourBuckets.keys()).sort((a, b) => b - a);
+        setHtml("hourly-head",
+          `<tr><th>Jam WIB</th>${lanes.map((l) => `<th>${esc(l)} W/L</th><th>${esc(l)} PnL</th>`).join("")}<th>Total PnL</th></tr>`
+        );
+        setHtml("hourly-rows",
           hours
             .map((h) => {
-              const items = rows.filter((p) => hourOf(p) === h),
-                x = summary(items);
+              const b = hourBuckets.get(h);
+              const x = summary(b.all);
               return `<tr><td>${time(h)}–${time(h + 3600000)
                 .split(" ")
                 .pop()}</td>${lanes
                 .map((l) => {
-                  const t = summary(items.filter((p) => laneOf(p) === l));
+                  const t = summary(b.byLane.get(l) || []);
                   return `<td>${t.profit}/${t.loss}</td><td class="${tone(t.pnl)}">${money(t.pnl)}</td>`;
                 })
                 .join("")}<td class="${tone(x.pnl)}">${money(x.pnl)}</td></tr>`;
             })
-            .join("") || empty(2 + lanes.length * 2, "Belum ada data per jam.");
+            .join("") || empty(2 + lanes.length * 2, "Belum ada data per jam.")
+        );
         options(
           "lane",
           lanes.map((l) => [l, l]),
@@ -1658,27 +1934,33 @@
         );
         const obs = rows.filter((p) => !entered(p));
         $("observation-count").textContent = `${obs.length} observasi`;
-        $("observations").innerHTML =
-          obs
+        const displayObs = obs.length > 50 ? obs.slice(0, 50) : obs;
+        setHtml("observations",
+          displayObs
             .map(
               (p) =>
                 `<tr><td>${token(p)}</td><td>${time(stamp(p))}</td><td>${laneBadge(p)}</td><td>${wallet(p)}</td><td>${esc(p.phase)}</td>${facts(p)}<td class="reason">${esc(explain(p))}</td></tr>`,
             )
-            .join("") || empty(8, "Belum ada token tanpa entry pada sesi ini.");
-        const events = scoped(
-          state.recentEventsByRun
-            ? Object.values(state.recentEventsByRun).flat()
-            : state.recentEvents || [],
-        )
+            .join("") || empty(8, "Belum ada token tanpa entry pada sesi ini.")
+        );
+        const noteEl = $("observation-note");
+        if (noteEl) {
+          noteEl.textContent = obs.length > 50 ? `💡 Menampilkan 50 observasi terbaru dari total ${obs.length} token agar dashboard tetap responsif.` : "";
+        }
+        const allEvents = state.recentEventsByRun
+          ? Object.values(state.recentEventsByRun).flat()
+          : state.recentEvents || [];
+        const events = scoped(allEvents)
           .sort((a, b) => b.observedAt - a.observedAt)
           .slice(0, 60);
-        $("events").innerHTML =
+        setHtml("events",
           events
             .map(
               (e) =>
                 `<div>${time(e.observedAt)} · ${esc(e.type)} · ${esc(e.transfer?.symbol || short(e.mint))}${e.reason ? " · " + esc(reasons[e.reason] ?? e.reason) : ""}</div>`,
             )
-            .join("") || "Belum ada event pada sesi ini.";
+            .join("") || "Belum ada event pada sesi ini."
+        );
         renderRules();
       }
       function renderPositions(rows) {
@@ -1795,6 +2077,174 @@
           ? `Pembanding historis terpisah: ${h.closed} trade, ${h.profit} profit / ${h.loss} rugi, PnL ${money(h.totalPnlUsd)}.`
           : "Profit4 · Paper research · Waktu Asia/Jakarta (WIB)";
       }
+      function renderClusters() {
+        const cData = state?.airdropClusters;
+        if (!cData || !Array.isArray(cData.clusters) || !cData.clusters.length) {
+          setHtml("cluster-count", "0");
+          setHtml("cluster-stat-total", "0");
+          setHtml("cluster-stat-wallets", "0");
+          setHtml("cluster-stat-tokens", "0");
+          setHtml(
+            "clusters-container",
+            '<div class="empty">Data cluster sindikat belum dimuat. Klik "Scan Ulang On-Chain" untuk memindai transaksi.</div>',
+          );
+          return;
+        }
+
+        setHtml("cluster-count", String(cData.totalClusters || cData.clusters.length));
+        setHtml("cluster-stat-total", String(cData.totalClusters || cData.clusters.length));
+        setHtml("cluster-stat-wallets", String(cData.totalWallets || 0));
+        setHtml("cluster-stat-tokens", String(cData.totalTokens || 0));
+
+        const activeTrackedCount = cData.clusters.reduce(
+          (sum, c) => sum + (c.wallets || []).filter((w) => w.isTracked || wallets.includes(w.address)).length,
+          0,
+        );
+        setHtml("cluster-stat-tracked", `${activeTrackedCount} sedang dipantau worker`);
+        setHtml("cluster-stat-sync-desc", `${activeTrackedCount} wallet aktif di dashboard-config`);
+
+        const clusterHtml = cData.clusters
+          .map((c) => {
+            const tokenBadges = (c.tokens || [])
+              .map(
+                (t) =>
+                  `<span class="token-badge" title="Mint: ${esc(t.mint)}">${esc(t.symbol || "UNKNOWN")} <span style="opacity:0.7;font-size:10px;">(${t.txCount || 1}x)</span></span>`,
+              )
+              .join("");
+
+            const walletRows = (c.wallets || [])
+              .map((w, idx) => {
+                const isTracked = w.isTracked || wallets.includes(w.address);
+                const statusBadge = isTracked
+                  ? '<span class="pill win" style="font-size:11px;">🟢 AKTIF PANTAU</span>'
+                  : '<span class="pill" style="font-size:11px;background:#1b2d4b;color:#60a5fa;border:1px solid #2563eb;">🔵 DISCOVERED</span>';
+
+                const addBtn = isTracked
+                  ? ""
+                  : `<button type="button" class="small-btn primary btn-add-cluster-wallet" data-wallet="${esc(w.address)}" style="font-size:11px;margin-left:6px;">+ Pantau</button>`;
+
+                return `<tr>
+                  <td style="width:30px;color:var(--muted);">${idx + 1}</td>
+                  <td class="mono" style="font-size:12px;">
+                    <span>${esc(w.address)}</span>
+                    <button type="button" class="small-btn btn-copy" data-copy="${esc(w.address)}" style="padding:1px 5px;margin-left:6px;font-size:10px;" title="Salin Address">📋</button>
+                  </td>
+                  <td>${statusBadge}</td>
+                  <td style="text-align:right;">
+                    <a href="https://solscan.io/account/${esc(w.address)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">Solscan ↗</a>
+                    <a href="https://gmgn.ai/sol/address/${esc(w.address)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;margin-left:8px;">GMGN ↗</a>
+                    ${addBtn}
+                  </td>
+                </tr>`;
+              })
+              .join("");
+
+            const allClusterWallets = (c.wallets || []).map((w) => w.address).join("\n");
+
+            return `<div class="cluster-card">
+              <div class="cluster-header">
+                <div>
+                  <h3 style="margin:0 0 4px 0;font-size:16px;color:#93c5fd;">${esc(c.label || c.id)}</h3>
+                  <div class="muted" style="font-size:12px;">
+                    Target utama: <span class="mono" style="color:#e2e8f0;">${esc(c.primaryTracked || "—")}</span> ·
+                    ${c.walletsCount || (c.wallets || []).length} Wallets ·
+                    ${c.tokensCount || (c.tokens || []).length} Token airdrop ·
+                    Aktivitas terakhir: ${time(c.lastActivityAt)}
+                  </div>
+                  <div class="token-badge-list">
+                    ${tokenBadges || '<span class="muted" style="font-size:11px;">Belum ada token tercatat</span>'}
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button type="button" class="small-btn btn-copy" data-copy="${esc(allClusterWallets)}" title="Salin seluruh address di cluster ini">📋 Salin 8 Wallet</button>
+                  <button type="button" class="small-btn secondary btn-add-all-cluster" data-cluster-id="${esc(c.id)}" title="Tambahkan semua wallet cluster ini ke daftar pantau worker">➕ Pantau Semua</button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Address Wallet Solana</th>
+                      <th>Status Worker</th>
+                      <th style="text-align:right;">Aksi & Link</th>
+                    </tr>
+                  </thead>
+                  <tbody>${walletRows}</tbody>
+                </table>
+              </div>
+            </div>`;
+          })
+          .join("");
+
+        setHtml("clusters-container", clusterHtml);
+
+        // Bind copy buttons
+        $("clusters-container")
+          .querySelectorAll(".btn-copy")
+          .forEach((btn) => {
+            btn.onclick = () => {
+              const text = btn.dataset.copy;
+              if (!text) return;
+              navigator.clipboard?.writeText(text).then(() => {
+                const orig = btn.textContent;
+                btn.textContent = "✓ Disalin!";
+                setTimeout(() => (btn.textContent = orig), 1500);
+              });
+            };
+          });
+
+        // Bind single add wallet buttons
+        $("clusters-container")
+          .querySelectorAll(".btn-add-cluster-wallet")
+          .forEach((btn) => {
+            btn.onclick = async () => {
+              const addr = btn.dataset.wallet;
+              if (!addr || wallets.includes(addr)) return;
+              wallets.push(addr);
+              try {
+                const v = await action("/api/wallets", { addresses: wallets });
+                if (v) {
+                  showSuccessModal("Wallet Ditambahkan", `Address ${addr.slice(0, 8)}... berhasil ditambahkan ke pemantauan.`);
+                  await refresh();
+                }
+              } catch (e) {
+                alert("Gagal menambahkan wallet: " + e.message);
+              }
+            };
+          });
+
+        // Bind add all cluster wallets buttons
+        $("clusters-container")
+          .querySelectorAll(".btn-add-all-cluster")
+          .forEach((btn) => {
+            btn.onclick = async () => {
+              const cId = btn.dataset.clusterId;
+              const cl = (cData.clusters || []).find((x) => x.id === cId);
+              if (!cl) return;
+              let added = 0;
+              for (const w of cl.wallets || []) {
+                if (!wallets.includes(w.address)) {
+                  wallets.push(w.address);
+                  added++;
+                }
+              }
+              if (added > 0) {
+                try {
+                  const v = await action("/api/wallets", { addresses: wallets });
+                  if (v) {
+                    showSuccessModal("Cluster Ditambahkan", `${added} wallet baru dari ${cl.label || cl.id} berhasil ditambahkan ke worker.`);
+                    await refresh();
+                  }
+                } catch (e) {
+                  alert("Gagal menambahkan cluster: " + e.message);
+                }
+              } else {
+                showSuccessModal("Sudah Terpantau", "Seluruh wallet di cluster ini sudah ada dalam daftar pantauan worker.");
+              }
+            };
+          });
+      }
       function render() {
         renderSessions();
         const rows = scoped(state.positions);
@@ -1804,7 +2254,63 @@
         renderQuotes(rows);
         renderWorker();
         renderLivePanel();
+        renderClusters();
+        void renderGenesis();
         void fetchRealTrades();
+      }
+      async function renderGenesis() {
+        try {
+          const res = await fetch(`${basePath}/api/genesis-surge/status`);
+          if (!res.ok) return;
+          const data = await res.json();
+          if ($("g1-worker-status")) {
+            $("g1-worker-status").textContent = data.workerActive ? "AKTIF" : "OFFLINE";
+            $("g1-worker-status").style.color = data.workerActive ? "#10b981" : "#ef4444";
+          }
+          if ($("g1-worker-pid")) $("g1-worker-pid").textContent = data.workerPid ? `PID ${data.workerPid}` : "—";
+          if ($("g1-token-count")) $("g1-token-count").textContent = String(data.activeLanesCount || (data.activePositions || []).length);
+          if ($("g1-token-watching")) $("g1-token-watching").textContent = `${(data.activePositions || []).length} sedang evaluasi gate`;
+          if ($("genesis-count")) $("genesis-count").textContent = String((data.activePositions || []).length);
+          if (data.trackedClustersWallets && $("g1-cluster-wallets")) {
+            $("g1-cluster-wallets").textContent = Number(data.trackedClustersWallets).toLocaleString();
+          }
+
+          if ($("g1-watching-rows")) {
+            const watchingRows = (data.activePositions || []).map(p => {
+              const gmgnUrl = `https://gmgn.ai/sol/token/${esc(p.mint)}`;
+              return `<tr>
+                <td class="mono"><a href="${gmgnUrl}" target="_blank" rel="noopener noreferrer">${esc(p.mint.slice(0, 6))}…${esc(p.mint.slice(-4))} ↗</a></td>
+                <td><strong>${esc(p.symbol || '—')}</strong></td>
+                <td><span class="badge ${p.phase === 'OPEN' ? 'good' : ''}">${esc(p.phase)}</span></td>
+                <td>${p.detectedAt ? time(p.detectedAt) : '—'}</td>
+                <td class="mono">${p.entryPrice ? '$' + Number(p.entryPrice).toFixed(6) : '—'}</td>
+                <td><a href="${gmgnUrl}" target="_blank" rel="noopener noreferrer" class="small-btn">Buka GMGN ↗</a></td>
+              </tr>`;
+            }).join("") || empty(6, "Tidak ada token yang sedang dipantau saat ini.");
+            setHtml("g1-watching-rows", watchingRows);
+            if ($("g1-watching-badge")) $("g1-watching-badge").textContent = `${(data.activePositions || []).length} token`;
+          }
+
+          if ($("g1-decision-rows")) {
+            const trRes = await fetch(`${basePath}/api/genesis-surge/trades`);
+            if (trRes.ok) {
+              const trades = await trRes.json();
+              const decRows = (trades || []).slice(0, 30).map(t => {
+                const gmgnUrl = `https://gmgn.ai/sol/token/${esc(t.mint)}`;
+                const reasons = (t.reasons || []).join(", ") || t.reason || "—";
+                const isAllowed = t.allowed === true || t.type === 'PAPER_BUY';
+                return `<tr>
+                  <td>${t.observedAt ? time(t.observedAt) : '—'}</td>
+                  <td class="mono"><a href="${gmgnUrl}" target="_blank" rel="noopener noreferrer">${esc(t.mint?.slice(0, 6) || '—')}… ↗</a></td>
+                  <td><span class="badge ${isAllowed ? 'good' : 'paper'}">${esc(t.type || 'DECISION')}</span></td>
+                  <td><small class="${isAllowed ? 'good' : 'muted'}">${esc(reasons)}</small></td>
+                  <td class="mono">${t.facts?.price ? '$' + Number(t.facts.price).toFixed(6) : (t.priceUsd ? '$' + Number(t.priceUsd).toFixed(6) : '—')}</td>
+                </tr>`;
+              }).join("") || empty(5, "Belum ada log keputusan evaluasi.");
+              setHtml("g1-decision-rows", decRows);
+            }
+          }
+        } catch (e) {}
       }
       function renderWallets() {
         $("wallets").innerHTML =
@@ -1894,7 +2400,7 @@
         el.hidden = false;
       }
       function switchTab(tab, persist = true) {
-        if (!["overview", "positions", "history", "onchain"].includes(tab))
+        if (!["overview", "positions", "history", "onchain", "clusters", "genesis"].includes(tab))
           tab = "overview";
         document
           .querySelectorAll(".tab-pane")
@@ -2349,6 +2855,66 @@
           await fetchRealTrades();
         } catch {}
       };
+      $("btn-scan-clusters").onclick = async () => {
+        const btn = $("btn-scan-clusters");
+        const origText = btn.textContent;
+        btn.textContent = "⏳ Memindai...";
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`${basePath}/api/clusters/scan`, { method: "POST" });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const res = await resp.json();
+          if (state) state.airdropClusters = res;
+          renderClusters();
+          showSuccessModal(
+            "Scan Selesai",
+            `Berhasil memindai on-chain: ${res.totalClusters} cluster (${res.totalWallets} wallet) terpetakan.`
+          );
+        } catch (e) {
+          alert(`Gagal scan cluster: ${e.message}`);
+        } finally {
+          btn.textContent = origText;
+          btn.disabled = false;
+        }
+      };
+      $("btn-sync-clusters").onclick = async () => {
+        const btn = $("btn-sync-clusters");
+        const origText = btn.textContent;
+        btn.textContent = "⏳ Menyinkronkan...";
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`${basePath}/api/cluster-sync/trigger`, { method: "POST" });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const res = await resp.json();
+          await fetch(`${basePath}/api/clusters`).then(r => r.json()).then(d => {
+            if (state) state.airdropClusters = d;
+            renderClusters();
+          });
+          showSuccessModal(
+            "Sinkronisasi Berhasil",
+            `Sinkronisasi selesai! Total ${res.totalClusters} cluster, ${res.syncedWalletsCount} wallet perwakilan aktif dipantau oleh Profit4 worker.`
+          );
+        } catch (e) {
+          alert(`Gagal sync cluster: ${e.message}`);
+        } finally {
+          btn.textContent = origText;
+          btn.disabled = false;
+        }
+      };
+      if ($("btn-refresh-genesis")) {
+        $("btn-refresh-genesis").onclick = async () => {
+          const btn = $("btn-refresh-genesis");
+          const orig = btn.textContent;
+          btn.textContent = "⏳ Memuat...";
+          btn.disabled = true;
+          try {
+            await renderGenesis();
+          } finally {
+            btn.textContent = orig;
+            btn.disabled = false;
+          }
+        };
+      }
       loop();
     </script>
   </body>

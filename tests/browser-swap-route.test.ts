@@ -140,3 +140,87 @@ test('DistributionProfit4Runtime triggers buy and dual sell swap probes and stor
   assert.equal(p.swapSellPrice2, 0.0682);
   assert.ok(p.swapSellDeltaPct !== null);
 });
+
+test('DistributionProfit4Runtime triggers buy and dual sell swap probes for Lane G1 Genesis Surge', async () => {
+  const data = mkdtempSync(join(tmpdir(), 'profit4-g1-swap-test-')), run = join(data, 'run');
+  mkdirSync(run);
+  const events: any[] = [];
+  const runtime = new DistributionProfit4Runtime(run, (_n, e) => events.push(e), data, 'bounce');
+
+  let buyProbed = false;
+  let sellProbed = false;
+
+  runtime.setSwapProbeHandlers({
+    getBuyQuote: async (mint: string) => {
+      buyProbed = true;
+      return {
+        status: 200,
+        latencyMs: 75,
+        ok: true,
+        quote: { inAmount: '34482758', outAmount: '500000000', inDecimals: 9, outDecimals: 6, priceImpactPct: '0.04', exchange: 'pump', amountInUsd: 5, amountOutUsd: 5 },
+        impliedPriceUsd: 0.000010,
+      };
+    },
+    getSellQuotes: async (mint: string, inputTokens?: string) => {
+      sellProbed = true;
+      return {
+        quote1: {
+          status: 200, latencyMs: 80, ok: true,
+          quote: { inAmount: inputTokens ?? '500000000', outAmount: '52000000', inDecimals: 6, outDecimals: 9, priceImpactPct: '0.04', exchange: 'pump', amountInUsd: 5, amountOutUsd: 7.5 },
+          impliedPriceUsd: 0.000015,
+        },
+        quote2: {
+          status: 200, latencyMs: 82, ok: true,
+          quote: { inAmount: inputTokens ?? '500000000', outAmount: '52100000', inDecimals: 6, outDecimals: 9, priceImpactPct: '0.04', exchange: 'pump', amountInUsd: 5, amountOutUsd: 7.51 },
+          impliedPriceUsd: 0.00001502,
+        },
+        priceDeltaPct: 0.133,
+        avgPriceUsd: 0.00001501,
+      };
+    },
+  });
+
+  const now = 1000;
+  runtime.register({ mint: 'g1Mint', wallet: 'deployer1', timestamp: 1 }, now);
+
+  // Initial sniper volume within sweet spot MC (0.000010 * 1B = 10k MC)
+  runtime.trade('g1Mint', { at: 2000, timestamp: 2, price: 0.000010, side: 'buy', wallet: 'sniper1', usd: 600, signature: 'sn1' });
+  runtime.evaluate(2000);
+
+  // Advance time past 20s observation window (at: 23_000)
+  runtime.trade('g1Mint', { at: 23000, timestamp: 23, price: 0.000010, side: 'buy', wallet: 'buyer2', usd: 50, signature: 'eval1' });
+  runtime.evaluate(23000);
+
+  // Confirm second tick (at: 24_500 -> ENTRY_SIGNAL)
+  runtime.trade('g1Mint', { at: 24500, timestamp: 24, price: 0.000010, side: 'buy', wallet: 'buyer2', usd: 50, signature: 'eval2' });
+  runtime.evaluate(24500);
+
+  // Fill tick after executionDelayMs (at: 26_000 -> PAPER_BUY)
+  runtime.trade('g1Mint', { at: 26000, timestamp: 26, price: 0.000010, side: 'buy', wallet: 'buyer2', usd: 50, signature: 'eval3' });
+  runtime.evaluate(26000);
+
+  // Wait tick for async buy probe
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(buyProbed, true);
+
+  // Price surges +60% to 0.000016 (target is +50%) -> EXIT_SIGNAL
+  runtime.trade('g1Mint', { at: 27000, timestamp: 27, price: 0.000016, side: 'buy', wallet: 'buyer3', usd: 100, signature: 'surge1' });
+  runtime.evaluate(27000);
+
+  // Fill tick after executionDelayMs -> PAPER_SELL
+  runtime.trade('g1Mint', { at: 29000, timestamp: 29, price: 0.000016, side: 'buy', wallet: 'buyer3', usd: 100, signature: 'surge2' });
+  runtime.evaluate(29000);
+
+  // Wait tick for async dual sell probe
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(sellProbed, true);
+
+  const state = JSON.parse(readFileSync(join(run, 'profit4-state.json'), 'utf8'));
+  const g1Pos = state.positions.find((p: any) => p.laneLabel === 'G1');
+  assert.ok(g1Pos, 'Lane G1 position must be recorded');
+  assert.equal(g1Pos.mint, 'g1Mint');
+  assert.equal(g1Pos.swapBuyPrice, 0.000010);
+  assert.equal(g1Pos.swapSellPrice1, 0.000015);
+  assert.equal(g1Pos.swapSellPrice2, 0.00001502);
+  assert.ok(g1Pos.swapSellDeltaPct !== null);
+});

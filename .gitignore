@@ -10,3 +10,5 @@ research/
 dist/*.zip
 *.png
 filter_analysis_results.json
+__pycache__/
+*.pyc

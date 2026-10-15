@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
@@ -9,26 +10,54 @@ import { validMint } from '../src/parser.ts';
 import { createProfit4Admin } from '../src/profit4-admin.ts';
 import { readProfit4WalletBalance } from '../src/profit4-wallet-balance.ts';
 import { LIVE_ACTIVE, readLiveState, readLiveConfig, saveLiveConfig, buysCompleted, commandId, sanitizeAudit } from '../src/profit4-live-store.ts';
+import { runClusterScan } from './scan-airdrop-clusters.mjs';
 
 const defaultRoot = fileURLToPath(new URL('../', import.meta.url)), exec = promisify(execFile);
 const defaults = ['5bmpgSv6LHyfX6EQ9XnreapgW2VoaDJNAK8mRSNZGZoT', '3dKvjSVXCa2s5ysv5MGtjQ8CF4XZ6MKKTds2uGotXpwD', '2dVDVvzH4D3ihpUTbiG9yNSEsQBs8iFNRifcZP6TLqVK'];
 const read = (p, fallback = null) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return fallback; } };
 const alive = pid => { if (!Number.isSafeInteger(pid) || pid < 1) return false; try { process.kill(pid, 0); return true; } catch { return false; } };
-const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(value));
+const json = (res, status, value, req = null) => {
+  const payload = Buffer.from(JSON.stringify(value));
+  if (req?.headers?.['accept-encoding']?.includes('gzip') && payload.length > 2048) {
+    const compressed = gzipSync(payload);
+    return res.writeHead(status, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-encoding': 'gzip',
+      'cache-control': 'no-store'
+    }).end(compressed);
+  }
+  return res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(payload);
+};
 async function body(req) {
   let raw = '', bytes = 0;
   for await (const chunk of req) { bytes += chunk.length; if (bytes > 20000) throw new Error('Payload terlalu besar.'); raw += chunk; }
   const value = JSON.parse(raw || '{}'); if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('JSON tidak valid.'); return value;
 }
+const runCache = new Map();
+
 export function profit4Snapshot(root, worker) {
   const base = join(root, 'data', 'profit4-watch');
   const positions = [], runs = [], recentEvents = [], recentEventsByRun = {};
   for (const dir of readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-    const state = read(join(base, dir.name, 'profit4-state.json'));
-    if (!state?.positions) continue;
+    const stateFile = join(base, dir.name, 'profit4-state.json');
+    if (!existsSync(stateFile)) continue;
+    let stat;
+    try { stat = statSync(stateFile); } catch { continue; }
     const runPath = join(base, dir.name), current = worker.run && resolve(root, worker.run) === resolve(runPath);
-    const live = current && worker.active;
-    const manifest = read(join(runPath, 'manifest.json'), {});
+    const live = Boolean(current && worker.active);
+    let state, manifest;
+    const cached = runCache.get(dir.name);
+    if (!live && cached && cached.mtimeMs === stat.mtimeMs) {
+      state = cached.state;
+      manifest = cached.manifest;
+    } else {
+      state = read(stateFile);
+      if (!state?.positions) continue;
+      manifest = read(join(runPath, 'manifest.json'), {});
+      if (!live) {
+        runCache.set(dir.name, { mtimeMs: stat.mtimeMs, state, manifest });
+      }
+    }
     runs.push({ id: dir.name, observedAt: state.observedAt, current: Boolean(current), live: Boolean(live),
       startedAt: manifest.startedAt ?? null, execution: state.execution ?? null,
       rules: state.rules ?? null, targetPercent: state.targetPercent ?? null, paperLane: state.paperLane ?? null });
@@ -44,6 +73,76 @@ export function profit4Snapshot(root, worker) {
     recentEventsByRun[dir.name] = runEvents;
     recentEvents.push(...runEvents);
   }
+  const surgeDir = join(root, 'data', 'genesis-surge');
+  const surgeStateFile = join(surgeDir, 'genesis-surge-state.json');
+  if (existsSync(surgeStateFile)) {
+    try {
+      const surgeState = read(surgeStateFile);
+      const surgeControl = read(join(surgeDir, 'worker-control.json'), {});
+      const surgeLive = Boolean(surgeControl?.pid && alive(surgeControl.pid));
+      const currentRunId = worker?.run ? worker.run.split('/').pop() : runs.find(r => r.live || r.current)?.id || 'genesis-surge';
+      if (Array.isArray(surgeState?.activePositions)) {
+        for (const ap of surgeState.activePositions) {
+          positions.push({
+            mint: ap.mint,
+            symbol: ap.symbol || 'GenesisToken',
+            wallet: 'Cluster-Tracking',
+            from: ap.devWallet || 'Syndicate-Dev',
+            timestamp: Math.floor((ap.detectedAt || surgeState.observedAt) / 1000),
+            captureActive: ap.phase === 'WATCHING' || ap.phase === 'OPEN',
+            laneLabel: 'G1',
+            phase: ap.phase || 'WATCHING',
+            version: 'distribution-genesis-surge-g1',
+            targetPercent: 50,
+            entryAt: ap.entryAt ?? null,
+            entryPrice: ap.entryPrice ?? null,
+            exitAt: ap.exitAt ?? null,
+            exitPrice: ap.exitPrice ?? null,
+            netReturnPercent: ap.netReturnPercent ?? null,
+            pnlUsd: ap.pnlUsd ?? null,
+            estimatedOpenNetPercent: ap.estimatedOpenNetPercent ?? null,
+            live: surgeLive,
+            run: currentRunId,
+            lastEvent: {
+              type: ap.phase === 'WATCHING' ? 'GENESIS_WATCHING' : ap.phase,
+              observedAt: ap.detectedAt || surgeState.observedAt,
+              reason: 'GATE_EVALUATION'
+            }
+          });
+        }
+      }
+      if (Array.isArray(surgeState?.recentPositions)) {
+        for (const rp of surgeState.recentPositions) {
+          positions.push({
+            mint: rp.mint,
+            symbol: rp.symbol || 'GenesisToken',
+            wallet: 'Cluster-Tracking',
+            from: 'Syndicate-Dev',
+            timestamp: Math.floor((rp.detectedAt || surgeState.observedAt) / 1000),
+            captureActive: false,
+            laneLabel: 'G1',
+            phase: 'CLOSED',
+            version: 'distribution-genesis-surge-g1',
+            targetPercent: 50,
+            entryAt: rp.entryAt ?? null,
+            entryPrice: rp.entryPriceUsd ?? rp.entryPrice ?? null,
+            exitAt: rp.exitAt ?? null,
+            exitPrice: rp.exitPriceUsd ?? rp.exitPrice ?? null,
+            netReturnPercent: rp.pnlPercent ?? rp.netReturnPercent ?? null,
+            pnlUsd: rp.pnlUsd ?? (rp.pnlPercent ? (rp.pnlPercent / 100) * 5 : null),
+            estimatedOpenNetPercent: null,
+            live: false,
+            run: currentRunId,
+            lastEvent: {
+              type: rp.event || 'PAPER_SELL',
+              observedAt: surgeState.observedAt,
+              reason: rp.reason
+            }
+          });
+        }
+      }
+    } catch {}
+  }
   function summarize(items) {
     const ent = items.filter(p => p.entryAt != null), cls = ent.filter(p => p.phase === 'CLOSED' && Number.isFinite(p.netReturnPercent));
     return {
@@ -56,11 +155,18 @@ export function profit4Snapshot(root, worker) {
       winRatePercent: cls.length ? cls.filter(p => p.netReturnPercent > 0).length / cls.length * 100 : null,
     };
   }
-  const v1Positions = positions.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2') && !p.version?.includes('v3') && !p.version?.includes('v4') && !p.version?.includes('v5')));
+  const v1Positions = positions.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2') && !p.version?.includes('v3') && !p.version?.includes('v4') && !p.version?.includes('v5') && !p.version?.includes('v6') && !p.version?.includes('v7')));
   const v2Positions = positions.filter(p => (p.version || '').includes('v2') || p.laneLabel === 'V2');
   const v3Positions = positions.filter(p => (p.version || '').includes('v3') || p.laneLabel === 'V3');
   const v4Positions = positions.filter(p => (p.version || '').includes('v4') || p.laneLabel === 'V4');
   const v5Positions = positions.filter(p => (p.version || '').includes('v5') || p.laneLabel === 'V5');
+  const v6Positions = positions.filter(p => (p.version || '').includes('v6') || p.laneLabel === 'V6');
+  const v7Positions = positions.filter(p => (p.version || '').includes('v7') || p.laneLabel === 'V7');
+  const s1Positions = positions.filter(p => (p.version || '').includes('s1') || p.laneLabel === 'S1');
+  const s2Positions = positions.filter(p => (p.version || '').includes('s2') || p.laneLabel === 'S2');
+  const s3Positions = positions.filter(p => (p.version || '').includes('s3') || p.laneLabel === 'S3');
+  const s4Positions = positions.filter(p => (p.version || '').includes('s4') || p.laneLabel === 'S4');
+  const g1Positions = positions.filter(p => (p.version || '').includes('genesis-surge-g1') || p.laneLabel === 'G1');
   const hourMap = new Map();
   for (const p of positions) {
     const time = p.entryAt ?? p.lastEvent?.observedAt ?? (p.timestamp ? p.timestamp * 1000 : null);
@@ -72,11 +178,18 @@ export function profit4Snapshot(root, worker) {
   const hourlyComparison = Array.from(hourMap.entries())
     .sort((a, b) => b[0] - a[0])
     .map(([hour, items]) => {
-      const v1 = items.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2') && !p.version?.includes('v3') && !p.version?.includes('v4') && !p.version?.includes('v5')));
+      const v1 = items.filter(p => (p.version || '').includes('v1') || p.laneLabel === 'V1' || (!p.laneLabel && !p.version?.includes('v2') && !p.version?.includes('v3') && !p.version?.includes('v4') && !p.version?.includes('v5') && !p.version?.includes('v6') && !p.version?.includes('v7')));
       const v2 = items.filter(p => (p.version || '').includes('v2') || p.laneLabel === 'V2');
       const v3 = items.filter(p => (p.version || '').includes('v3') || p.laneLabel === 'V3');
       const v4 = items.filter(p => (p.version || '').includes('v4') || p.laneLabel === 'V4');
       const v5 = items.filter(p => (p.version || '').includes('v5') || p.laneLabel === 'V5');
+      const v6 = items.filter(p => (p.version || '').includes('v6') || p.laneLabel === 'V6');
+      const v7 = items.filter(p => (p.version || '').includes('v7') || p.laneLabel === 'V7');
+      const s1 = items.filter(p => (p.version || '').includes('s1') || p.laneLabel === 'S1');
+      const s2 = items.filter(p => (p.version || '').includes('s2') || p.laneLabel === 'S2');
+      const s3 = items.filter(p => (p.version || '').includes('s3') || p.laneLabel === 'S3');
+      const s4 = items.filter(p => (p.version || '').includes('s4') || p.laneLabel === 'S4');
+      const g1 = items.filter(p => (p.version || '').includes('genesis-surge-g1') || p.laneLabel === 'G1');
       const d = new Date(hour), endD = new Date(hour + 3600000);
       const dayStr = d.toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit' });
       const startH = d.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -89,6 +202,13 @@ export function profit4Snapshot(root, worker) {
         v3: summarize(v3),
         v4: summarize(v4),
         v5: summarize(v5),
+        v6: summarize(v6),
+        v7: summarize(v7),
+        s1: summarize(s1),
+        s2: summarize(s2),
+        s3: summarize(s3),
+        s4: summarize(s4),
+        g1: summarize(g1),
         total: summarize(items),
       };
     });
@@ -99,6 +219,13 @@ export function profit4Snapshot(root, worker) {
     summaryV3: summarize(v3Positions),
     summaryV4: summarize(v4Positions),
     summaryV5: summarize(v5Positions),
+    summaryV6: summarize(v6Positions),
+    summaryV7: summarize(v7Positions),
+    summaryS1: summarize(s1Positions),
+    summaryS2: summarize(s2Positions),
+    summaryS3: summarize(s3Positions),
+    summaryS4: summarize(s4Positions),
+    summaryG1: summarize(g1Positions),
     hourlyComparison,
   };
 }
@@ -245,9 +372,17 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
       }
       if (['GET', 'HEAD'].includes(req.method) && (path === '/' || path === '/dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/comparison' || path === '/v1-vs-v4' || rawPath === '/comparison')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-v1-vs-v4.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/comparison-v6-v7' || path === '/v6-vs-v7' || rawPath === '/v6-vs-v7' || rawPath === '/comparison-v6-v7')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-v6-vs-v7.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/staircase' || path === '/staircase-85wr' || path === '/staircase-runner' || rawPath === '/staircase' || rawPath === '/staircase-85wr' || rawPath === '/profit4/staircase')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-staircase-85wr.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/audit' || rawPath === '/audit' || path === '/audit-dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-audit-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/smart-money' || path === '/smart-money.html' || rawPath === '/smart-money')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'smart-money-wallets.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/api/comparison-v1-v4' || path === '/comparison-v1-v4.json')) {
         const compPath = join(data, 'comparison-v1-v4.json');
+        if (existsSync(compPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(compPath));
+        return json(res, 200, []);
+      }
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/comparison-v6-v7' || path === '/comparison-v6-v7.json' || path === '/api/comparison-v6-v7-all')) {
+        const compPath = join(data, 'comparison-v6-v7.json');
         if (existsSync(compPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(compPath));
         return json(res, 200, []);
       }
@@ -256,14 +391,61 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
         if (existsSync(cachePath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(cachePath));
         return json(res, 200, []);
       }
-      if (req.method === 'GET' && path === '/api/state') {
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/airdrop-clusters' || path === '/api/clusters')) {
+        const clusterPath = join(data, 'airdrop-clusters.json');
+        if (existsSync(clusterPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(clusterPath));
+        return json(res, 200, { totalClusters: 0, totalWallets: 0, clusters: [] });
+      }
+      if (['GET', 'HEAD'].includes(req.method) && path === '/api/cluster-sync/status') {
+        const statusPath = join(data, 'cluster-sync-status.json');
+        const controlPath = join(data, 'cluster-sync-control.json');
+        let syncStatus = existsSync(statusPath) ? read(statusPath, {}) : { status: 'idle' };
+        const ctrl = existsSync(controlPath) ? read(controlPath, {}) : null;
+        if (ctrl) syncStatus.workerActive = alive(ctrl.pid);
+        return json(res, 200, syncStatus);
+      }
+      if (req.method === 'POST' && path === '/api/cluster-sync/trigger') {
+        try {
+          const { runClusterSyncIteration } = await import('./run-cluster-sync-worker.mjs');
+          const result = await runClusterSyncIteration({ root });
+          return json(res, 200, result);
+        } catch (e) {
+          return json(res, 500, { error: e.message });
+        }
+      }
+      if (['GET', 'HEAD'].includes(req.method) && path === '/api/genesis-surge/status') {
+        const surgeData = join(root, 'data', 'genesis-surge');
+        const statePath = join(surgeData, 'genesis-surge-state.json');
+        const controlPath = join(surgeData, 'worker-control.json');
+        let surgeState = existsSync(statePath) ? read(statePath, {}) : { activeLanesCount: 0 };
+        const ctrl = existsSync(controlPath) ? read(controlPath, {}) : null;
+        if (ctrl) surgeState.workerActive = alive(ctrl.pid);
+        return json(res, 200, surgeState);
+      }
+      if (['GET', 'HEAD'].includes(req.method) && path === '/api/genesis-surge/trades') {
+        const tradesPath = join(root, 'data', 'genesis-surge', 'trades.jsonl');
+        const trades = existsSync(tradesPath)
+          ? readFileSync(tradesPath, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+          : [];
+        return json(res, 200, { trades: trades.slice(-50).reverse() });
+      }
+      if (req.method === 'POST' && (path === '/api/airdrop-clusters/scan' || path === '/api/clusters/scan')) {
+        try {
+          const fresh = await runClusterScan({ root, fetchRemote: true });
+          return json(res, 200, fresh);
+        } catch (e) {
+          return json(res, 500, { error: e.message });
+        }
+      }
+      if (['GET', 'HEAD'].includes(req.method) && path === '/api/state') {
         const current = read(controlFile), worker = current ? { ...current, active: alive(current.pid) } : { active: false, status: 'stopped' };
         const history = profit4Snapshot(root, worker);
         const historical = read(join(root, 'reports', 'distribution-profit-search', 'analysis.json'))?.bestKnownPnlDescriptive?.all ?? null;
         const live = liveStatus();
         if (live.readiness.wallet) Object.assign(live.readiness, await readProfit4WalletBalance(live.readiness.wallet));
+        const airdropClusters = read(join(data, 'airdrop-clusters.json'), null);
         return json(res, 200, { mode: 'PROFIT4_PAPER', admin: { authenticated: admin.authenticated(req) }, autoBuy: { ...live, positions: undefined }, config: config(), worker, rules: { ...PROFIT4_RULES, targetPercent: PROFIT4_TARGET_PERCENT, trailingEnabled: false, flowExitEnabled: false, rounds: 1 },
-          historical, ...history, logs, paths: { data, workerLog: join(data, 'worker.log') } });
+          historical, ...history, airdropClusters, logs, paths: { data, workerLog: join(data, 'worker.log') } }, req);
       }
       if (req.method === 'POST' && ['/api/worker/start', '/api/worker/stop', '/api/wallets'].includes(path)) {
         if (transition) return json(res, 409, { error: 'Worker sedang start/stop. Tunggu sebentar.' });

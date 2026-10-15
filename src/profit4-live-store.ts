@@ -9,7 +9,23 @@ import {
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-export type LiveLane = "P4" | "V1" | "V2" | "V3" | "V4" | "V5";
+export type LiveLane =
+  | "P4"
+  | "V1"
+  | "V2"
+  | "V3"
+  | "V4"
+  | "V5"
+  | "V6"
+  | "V7"
+  | "S1"
+  | "S2"
+  | "S3"
+  | "S4"
+  | "V7+S1"
+  | "V7+S2"
+  | "V7+S3"
+  | "V7+S4";
 export type LiveConfig = {
   enabled: boolean;
   activeLane: LiveLane;
@@ -160,7 +176,24 @@ export function saveLiveConfig(
   const c = { ...readLiveConfig(dir), ...patch } as LiveConfig;
   delete (c as any).executionWallet;
   if (
-    !["P4", "V1", "V2", "V3", "V4"].includes(c.activeLane) ||
+    ![
+      "P4",
+      "V1",
+      "V2",
+      "V3",
+      "V4",
+      "V5",
+      "V6",
+      "V7",
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "V7+S1",
+      "V7+S2",
+      "V7+S3",
+      "V7+S4",
+    ].includes(c.activeLane) ||
     !["usd", "sol"].includes(c.stakeMode)
   )
     throw Error("Lane atau mode modal tidak valid.");

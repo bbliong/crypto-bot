@@ -565,9 +565,9 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
 }
 
 export const BOUNCE_DUMP_LANE_V5 = 'distribution-bounce-dump-v5';
-export const BOUNCE_TARGET_PERCENT_V5 = 35; // Target keuntungan besar: 30% - 40% (default 35% net)
-export const BOUNCE_MIN_TARGET_PERCENT_V5 = 30;
-export const BOUNCE_MAX_TARGET_PERCENT_V5 = 40;
+export const BOUNCE_TARGET_PERCENT_V5 = 22; // Target keuntungan sweet spot teruji: 20% - 22% (default 22% net)
+export const BOUNCE_MIN_TARGET_PERCENT_V5 = 20;
+export const BOUNCE_MAX_TARGET_PERCENT_V5 = 22;
 
 export const BOUNCE_RULES_V5: Readonly<TargetRules> = Object.freeze(validateTargetRules({
   version: 'distribution-bounce-dump-v5',
@@ -588,8 +588,8 @@ export const BOUNCE_RULES_V5: Readonly<TargetRules> = Object.freeze(validateTarg
   maxEntryReturnPercent: 100,
   maxDrawdownPercent: 99,
   stopLossPercent: 12,
-  trailingStartPercent: 20, // Filter quant: Aktifkan trailing lebih awal di +20%
-  trailingDrawdownPercent: 4,
+  trailingStartPercent: 18, // Filter quant: Aktifkan trailing saat profit mendekati target (+18%)
+  trailingDrawdownPercent: 3,
   maxHoldSeconds: 300,
   executionDelayMs: 1000,
   maxFillWaitMs: 5000,
@@ -739,22 +739,22 @@ export class DistributionBounceLaneV5 extends DistributionTargetLane {
           return 'HARD_CAP_RUGPULL_PROTECTION';
         }
 
-        // 1. Target Take Profit Penuh: 30% - 40% (default 30-35% net)
+        // 1. Target Take Profit Penuh: 20% - 22% (sweet spot teruji: default min 20% net)
         if (net >= BOUNCE_MIN_TARGET_PERCENT_V5) {
-          return 'TARGET_BOUNCE_30_40';
+          return 'TARGET_BOUNCE_20_22';
         }
 
         // 2. V5 KHUSUS - Profit Lock & Breakeven Bertingkat:
-        // Level 2: Jika sudah pernah mencapai profit >= +20%, kunci profit minimal di +12% atau trailing -4% dari pucuk
-        if (this.peakNetSeen >= 20) {
-          if (this.peakNetSeen - net >= 4 || net <= 12) {
-            return 'PROFIT_LOCK_20_EXIT';
+        // Level 2: Jika sudah pernah mencapai profit >= +18%, kunci profit minimal di +14% atau trailing -3% dari pucuk
+        if (this.peakNetSeen >= 18) {
+          if (this.peakNetSeen - net >= 3 || net <= 14) {
+            return 'PROFIT_LOCK_18_EXIT';
           }
         }
 
-        // Level 1 Quant: Jika sudah pernah mencapai profit >= +15%, kunci profit minimal di +10% atau trailing -4% dari pucuk
+        // Level 1 Quant: Jika sudah pernah mencapai profit >= +15%, kunci profit minimal di +10% atau trailing -3% dari pucuk
         if (this.peakNetSeen >= 15) {
-          if (this.peakNetSeen - net >= 4 || net <= 10) {
+          if (this.peakNetSeen - net >= 3 || net <= 10) {
             return 'PROFIT_LOCK_15_EXIT';
           }
         }
@@ -799,6 +799,493 @@ export class DistributionBounceLaneV5 extends DistributionTargetLane {
     super.step(f);
   }
 }
+
+export const BOUNCE_DUMP_LANE_V6 = 'distribution-bounce-dump-v6';
+export const BOUNCE_TARGET_PERCENT_V6 = 22; // Target keuntungan sweet spot teruji: 20% - 22% (default 22% net)
+export const BOUNCE_MIN_TARGET_PERCENT_V6 = 20;
+export const BOUNCE_MAX_TARGET_PERCENT_V6 = 22;
+
+export const BOUNCE_RULES_V6: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-bounce-dump-v6',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: BOUNCE_MAX_TARGET_PERCENT_V6,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 600,
+  confirmSeconds: 1,
+  minBuySharePercent: 55,
+  minMeaningfulBuyUsd: 18, // Solusi 3: Naikkan volume pemulihan ke $18 untuk memastikan likuiditas kolam tebal
+  minMeaningfulBuyers: 3, // Solusi 3: Wajib minimal 3 distinct buyers berbeda (bukan bot 2-wallet)
+  maxBuyerSharePercent: 70, // Solusi 3: Maksimal 70% per buyer agar terdistribusi merata
+  minMomentumPercent: 0,
+  maxMomentumPercent: 50,
+  maxEntryReturnPercent: 100,
+  maxDrawdownPercent: 99,
+  stopLossPercent: 12,
+  trailingStartPercent: 18,
+  trailingDrawdownPercent: 3,
+  maxHoldSeconds: 300,
+  executionDelayMs: 1000,
+  maxFillWaitMs: 5000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
+export class DistributionBounceLaneV6 extends DistributionTargetLane {
+  private dumpObserved = false;
+  private maxDrawdownSeen = 0;
+  private entryTime: number | null = null;
+  private entryBuyPrice: number | null = null;
+  private lastPriceMoveTime: number | null = null;
+  private lastPriceMove: number | null = null;
+  private peakNetSeen = -Infinity;
+  private lastWhaleSellSeenAt: number | null = null;
+
+  // Progressive Staircase Confirmation Tracking
+  private initialStep: { price: number; time: number; troughAtStep: number } | null = null;
+  private staircaseConfirmed = false;
+  private staircaseInvalidated = false;
+  private staircaseInvalidReason = '';
+
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, { ...BOUNCE_RULES_V6 }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT_V6, version: 'distribution-bounce-dump-v6' }), {
+      name: 'dump-bounce-v6',
+      paperLane: BOUNCE_DUMP_LANE_V6,
+      prioritizeCustomExit: true,
+      trailingEnabled: true,
+      flowExitEnabled: false,
+      overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
+        const reasons: string[] = [];
+        if (!r.enabled) reasons.push('LANE_DISABLED');
+        if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
+        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+
+        // Gate 1: Dev Supply Dump Check (Anti-Rugpull Dev Trap)
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+        } else if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+        }
+
+        // Gate 2: Rapid Holder Flight / Bundler Scam Check
+        if (f.holderDeclineEverSeen || (f.holderGrowth15s !== null && f.holderGrowth15s < -3)) {
+          reasons.push('HOLDERS_DECLINING_FLIGHT_RISK');
+        }
+
+        // Gate 3: Whale Dump Active Protection & Cooldown 45s
+        if (f.largestSellUsd >= 150) {
+          this.lastWhaleSellSeenAt = f.now;
+          reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
+        }
+        if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
+          reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
+        }
+
+        // Gate 4: Token harus sudah pernah mengalami DUMP TUNTAS (drawdown >= 75% dari peak)
+        const dd = f.drawdownPercent ?? 0;
+        if (dd >= 75) {
+          this.dumpObserved = true;
+        }
+        if (dd > this.maxDrawdownSeen) {
+          this.maxDrawdownSeen = dd;
+        }
+
+        if (!this.dumpObserved && this.maxDrawdownSeen < 75) {
+          reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // Gate 5 (Solusi 3): Volume Pemulihan Tebal (min 3 pembeli & volume $18+)
+        if ((f.buyShareUsdPercent ?? 0) < r.minBuySharePercent || f.meaningfulBuyUsd < r.minMeaningfulBuyUsd) {
+          reasons.push('BUY_FLOW_NOT_RECOVERED');
+        }
+        if (f.meaningfulBuyers < r.minMeaningfulBuyers) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+        }
+        if (f.topBuyerSharePercent !== null && f.topBuyerSharePercent > r.maxBuyerSharePercent) {
+          reasons.push('BUYER_CONCENTRATION_TOO_HIGH_SINGLE_WALLET');
+        }
+
+        const bounce = f.bounceFromTroughPercent ?? 0;
+        const currentPrice = f.price ?? 0;
+        const currentTrough = f.troughPrice ?? currentPrice;
+
+        // Progressive Staircase Logic dengan Dwell Time (3.0 - 7.0 detik)
+        if (!this.initialStep) {
+          if (bounce < 3.5) {
+            reasons.push('BOUNCE_FROM_TROUGH_TOO_SMALL');
+          } else if (bounce > 15.0) {
+            reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+          } else if (currentPrice > 0) {
+            this.initialStep = {
+              price: currentPrice,
+              time: f.now,
+              troughAtStep: currentTrough,
+            };
+            reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+          }
+        } else if (!this.staircaseConfirmed) {
+          const dtSeconds = (f.now - this.initialStep.time) / 1000;
+
+          if (currentPrice < this.initialStep.troughAtStep * 0.98) {
+            this.staircaseInvalidated = true;
+            this.staircaseInvalidReason = 'BREAKDOWN_BELOW_TROUGH';
+            this.initialStep = null;
+            reasons.push('STAIRCASE_BREAKDOWN_BELOW_TROUGH');
+          } else if (dtSeconds < 3.0) {
+            reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+          } else if (dtSeconds >= 3.0 && dtSeconds <= 7.0) {
+            if (currentPrice < this.initialStep.price * 0.90) {
+              this.initialStep = null;
+              reasons.push('STAIRCASE_SPIKE_COLLAPSED');
+            } else if (bounce > 16.0) {
+              this.initialStep = null;
+              reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+            } else if (currentPrice >= this.initialStep.price * 0.97) {
+              this.staircaseConfirmed = true;
+            } else {
+              reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+            }
+          } else {
+            this.initialStep = null;
+            reasons.push('STAIRCASE_CONFIRMATION_TIMEOUT');
+          }
+        }
+
+        return reasons;
+      },
+      exitReason: (f: TargetFacts, net: number) => {
+        if (net > this.peakNetSeen) {
+          this.peakNetSeen = net;
+        }
+
+        // Hard-Cap Rugpull Loss Protection
+        if (net <= -25) {
+          return 'HARD_CAP_RUGPULL_PROTECTION';
+        }
+
+        // 1. Target Take Profit Penuh: 20% - 22% (sweet spot teruji: default min 20% net)
+        if (net >= BOUNCE_MIN_TARGET_PERCENT_V6) {
+          return 'TARGET_BOUNCE_20_22';
+        }
+
+        // 2. V6 - Profit Lock & Breakeven Bertingkat:
+        // Level 2: Jika sudah pernah mencapai profit >= +18%, kunci profit minimal di +14% atau trailing -3% dari pucuk
+        if (this.peakNetSeen >= 18) {
+          if (this.peakNetSeen - net >= 3 || net <= 14) {
+            return 'PROFIT_LOCK_18_EXIT';
+          }
+        }
+
+        // Level 1 Quant: Jika sudah pernah mencapai profit >= +15%, kunci profit minimal di +10% atau trailing -3% dari pucuk
+        if (this.peakNetSeen >= 15) {
+          if (this.peakNetSeen - net >= 3 || net <= 10) {
+            return 'PROFIT_LOCK_15_EXIT';
+          }
+        }
+
+        // 3. Early Warning Whale Sell saat Sedang Untung:
+        if (net >= 8 && f.largestSellUsd >= 80) {
+          return 'PROFIT_SECURED_ON_WHALE_SELL';
+        }
+
+        // 4. Exit jika Stagnan setelah dump
+        if (this.entryTime !== null && f.price !== null) {
+          const holdSeconds = (f.now - this.entryTime) / 1000;
+
+          if (this.lastPriceMove === null || Math.abs(f.price - this.lastPriceMove) / (this.lastPriceMove || 1) >= 0.01) {
+            this.lastPriceMove = f.price;
+            this.lastPriceMoveTime = f.now;
+          }
+
+          const stagnationTimeMs = this.lastPriceMoveTime ? f.now - this.lastPriceMoveTime : 0;
+          if (holdSeconds >= 90 && stagnationTimeMs >= 60_000 && net < 10) {
+            return 'STAGNANT_NO_MOVEMENT_AFTER_DUMP';
+          }
+        }
+
+        return null;
+      },
+    });
+  }
+
+  override step(f: TargetFacts) {
+    if (this.entryAt !== null && this.entryTime === null) {
+      this.entryTime = this.entryAt;
+      this.entryBuyPrice = this.entryPrice;
+      this.lastPriceMoveTime = this.entryAt;
+      this.lastPriceMove = this.entryPrice;
+      this.peakNetSeen = 0;
+    }
+    if (f.priceAt !== null && f.priceAt > f.now) {
+      f = { ...f, price: null, priceAt: null };
+    }
+    super.step(f);
+  }
+}
+
+export const BOUNCE_DUMP_LANE_V7 = 'distribution-bounce-dump-v7';
+export const BOUNCE_TARGET_PERCENT_V7 = 22;
+export const BOUNCE_MIN_TARGET_PERCENT_V7 = 20;
+export const BOUNCE_MAX_TARGET_PERCENT_V7 = 22;
+
+export const BOUNCE_RULES_V7: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-bounce-dump-v7',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: BOUNCE_MAX_TARGET_PERCENT_V7,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 600,
+  confirmSeconds: 1,
+  minBuySharePercent: 55,
+  minMeaningfulBuyUsd: 28, // Rekomendasi 1: Naikkan dari $18 ke $28 untuk mengeliminasi trap staircase semu (MarsX $20.89 & TRALA $24.71)
+  minMeaningfulBuyers: 3, // Rekomendasi 1: Wajib minimal 3 distinct buyers dengan transaksi >= $1
+  maxBuyerSharePercent: 65, // Rekomendasi 1: Diturunkan dari 70% ke 65% agar modal pembeli tersebar organik
+  minMomentumPercent: 0,
+  maxMomentumPercent: 50,
+  maxEntryReturnPercent: 100,
+  maxDrawdownPercent: 99,
+  stopLossPercent: 12,
+  trailingStartPercent: 18,
+  trailingDrawdownPercent: 3,
+  maxHoldSeconds: 300,
+  executionDelayMs: 1000,
+  maxFillWaitMs: 5000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
+export class DistributionBounceLaneV7 extends DistributionTargetLane {
+  private dumpObserved = false;
+  private maxDrawdownSeen = 0;
+  private entryTime: number | null = null;
+  private entryBuyPrice: number | null = null;
+  private lastPriceMoveTime: number | null = null;
+  private lastPriceMove: number | null = null;
+  private peakNetSeen = -Infinity;
+  private lastWhaleSellSeenAt: number | null = null;
+  private lastWhaleSellUsd = 0;
+  private whaleSellHistory: { time: number; usd: number }[] = [];
+
+  // Progressive Staircase Confirmation Tracking
+  private initialStep: { price: number; time: number; troughAtStep: number } | null = null;
+  private staircaseConfirmed = false;
+  private staircaseInvalidated = false;
+  private staircaseInvalidReason = '';
+
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, { ...BOUNCE_RULES_V7 }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT_V7, version: 'distribution-bounce-dump-v7' }), {
+      name: 'dump-bounce-v7',
+      paperLane: BOUNCE_DUMP_LANE_V7,
+      prioritizeCustomExit: true,
+      trailingEnabled: true,
+      flowExitEnabled: false,
+      overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
+        const reasons: string[] = [];
+        if (!r.enabled) reasons.push('LANE_DISABLED');
+        if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
+        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+
+        // Gate 1: Dev Supply Dump Check (Rekomendasi 3: Anti-Rugpull Dev Trap / Residual Supply)
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 1.5) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+        } else if (f.devBalance != null && f.devBalance > 15_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+        }
+
+        // Gate 2: Rapid Holder Flight / Bundler Scam Check
+        if (f.holderDeclineEverSeen || (f.holderGrowth15s !== null && f.holderGrowth15s < -3)) {
+          reasons.push('HOLDERS_DECLINING_FLIGHT_RISK');
+        }
+
+        // Gate 3: Whale Dump Active Protection & Multi-Wave Staggered Dump Detection (Rekomendasi 2)
+        // Bersihkan riwayat sell paus lebih tua dari 120 detik
+        this.whaleSellHistory = this.whaleSellHistory.filter(w => (f.now - w.time) <= 120_000);
+
+        if (f.largestSellUsd >= 150) {
+          // Gabungkan sell dalam rentang 10 detik sebagai 1 wave dump tunggal
+          const recentWave = this.whaleSellHistory.find(w => Math.abs(f.now - w.time) < 10_000);
+          if (recentWave) {
+            recentWave.usd = Math.max(recentWave.usd, f.largestSellUsd);
+            recentWave.time = f.now;
+          } else {
+            this.whaleSellHistory.push({ time: f.now, usd: f.largestSellUsd });
+          }
+          this.lastWhaleSellSeenAt = f.now;
+          this.lastWhaleSellUsd = f.largestSellUsd;
+          reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
+        }
+
+        // Deteksi Staggered Multi-Wave Whale Dump: jika paus menjual di multiple wave terpisah (>1 wave berjarak >10s) dalam 120 detik
+        if (this.whaleSellHistory.length >= 2) {
+          reasons.push('STAGGERED_WHALE_DUMP_ACTIVE');
+        }
+
+        // Dynamic Whale Cooldown: Jika dump terakhir >= $2,000 USD beri 60s cooldown; jika dump standar beri 45s cooldown
+        const requiredCooldownMs = this.lastWhaleSellUsd >= 2000 ? 60_000 : 45_000;
+        if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < requiredCooldownMs) {
+          reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
+        }
+
+        // Gate 4: Token harus sudah pernah mengalami DUMP TUNTAS (drawdown >= 75% dari peak)
+        const dd = f.drawdownPercent ?? 0;
+        if (dd >= 75) {
+          this.dumpObserved = true;
+        }
+        if (dd > this.maxDrawdownSeen) {
+          this.maxDrawdownSeen = dd;
+        }
+
+        if (!this.dumpObserved && this.maxDrawdownSeen < 75) {
+          reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // Gate 5: Volume Pemulihan Organik & Filter Noise Wash Trading (Rekomendasi 1)
+        if ((f.buyShareUsdPercent ?? 0) < r.minBuySharePercent || f.meaningfulBuyUsd < r.minMeaningfulBuyUsd) {
+          reasons.push('BUY_FLOW_NOT_RECOVERED');
+        }
+        if (f.meaningfulBuyers < r.minMeaningfulBuyers) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+        }
+        if (f.topBuyerSharePercent !== null && f.topBuyerSharePercent > r.maxBuyerSharePercent) {
+          reasons.push('BUYER_CONCENTRATION_TOO_HIGH_SINGLE_WALLET');
+        }
+
+        const bounce = f.bounceFromTroughPercent ?? 0;
+        const currentPrice = f.price ?? 0;
+        const currentTrough = f.troughPrice ?? currentPrice;
+
+        // Jika ada gate sebelumnya yang memblokir (cooldown paus, dev holding, volume belum pulih), reset staircase
+        if (reasons.length > 0) {
+          this.initialStep = null;
+          return reasons;
+        }
+
+        // Progressive Staircase Logic dengan Dwell Time (3.0 - 7.0 detik)
+        if (!this.initialStep) {
+          if (bounce < 3.5) {
+            reasons.push('BOUNCE_FROM_TROUGH_TOO_SMALL');
+          } else if (bounce > 15.0) {
+            reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+          } else if (currentPrice > 0) {
+            this.initialStep = {
+              price: currentPrice,
+              time: f.now,
+              troughAtStep: currentTrough,
+            };
+            reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+          }
+        } else if (!this.staircaseConfirmed) {
+          const dtSeconds = (f.now - this.initialStep.time) / 1000;
+
+          if (currentPrice < this.initialStep.troughAtStep * 0.98) {
+            this.staircaseInvalidated = true;
+            this.staircaseInvalidReason = 'BREAKDOWN_BELOW_TROUGH';
+            this.initialStep = null;
+            reasons.push('STAIRCASE_BREAKDOWN_BELOW_TROUGH');
+          } else if (dtSeconds < 3.0) {
+            reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+          } else if (dtSeconds >= 3.0 && dtSeconds <= 7.0) {
+            if (currentPrice < this.initialStep.price * 0.90) {
+              this.initialStep = null;
+              reasons.push('STAIRCASE_SPIKE_COLLAPSED');
+            } else if (bounce > 16.0) {
+              this.initialStep = null;
+              reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
+            } else if (currentPrice >= this.initialStep.price * 0.97) {
+              this.staircaseConfirmed = true;
+            } else {
+              reasons.push('STAIRCASE_WAITING_CONFIRMATION');
+            }
+          } else {
+            this.initialStep = null;
+            reasons.push('STAIRCASE_CONFIRMATION_TIMEOUT');
+          }
+        }
+
+        return reasons;
+      },
+      exitReason: (f: TargetFacts, net: number) => {
+        if (net > this.peakNetSeen) {
+          this.peakNetSeen = net;
+        }
+
+        // Hard-Cap Rugpull Loss Protection
+        if (net <= -25) {
+          return 'HARD_CAP_RUGPULL_PROTECTION';
+        }
+
+        // 1. Target Take Profit Penuh: 20% - 22% (sweet spot teruji: default min 20% net)
+        if (net >= BOUNCE_MIN_TARGET_PERCENT_V7) {
+          return 'TARGET_BOUNCE_20_22';
+        }
+
+        // 2. V7 - Profit Lock & Breakeven Bertingkat:
+        // Level 2: Jika sudah pernah mencapai profit >= +18%, kunci profit minimal di +14% atau trailing -3% dari pucuk
+        if (this.peakNetSeen >= 18) {
+          if (this.peakNetSeen - net >= 3 || net <= 14) {
+            return 'PROFIT_LOCK_18_EXIT';
+          }
+        }
+
+        // Level 1: Jika sudah pernah mencapai profit >= +15%, kunci profit minimal di +10% atau trailing -3% dari pucuk
+        if (this.peakNetSeen >= 15) {
+          if (this.peakNetSeen - net >= 3 || net <= 10) {
+            return 'PROFIT_LOCK_15_EXIT';
+          }
+        }
+
+        // 3. Early Warning Whale Sell saat Sedang Untung:
+        if (net >= 8 && f.largestSellUsd >= 80) {
+          return 'PROFIT_SECURED_ON_WHALE_SELL';
+        }
+
+        // 4. Exit jika Stagnan setelah dump
+        if (this.entryTime !== null && f.price !== null) {
+          const holdSeconds = (f.now - this.entryTime) / 1000;
+
+          if (this.lastPriceMove === null || Math.abs(f.price - this.lastPriceMove) / (this.lastPriceMove || 1) >= 0.01) {
+            this.lastPriceMove = f.price;
+            this.lastPriceMoveTime = f.now;
+          }
+
+          const stagnationTimeMs = this.lastPriceMoveTime ? f.now - this.lastPriceMoveTime : 0;
+          if (holdSeconds >= 90 && stagnationTimeMs >= 60_000 && net < 10) {
+            return 'STAGNANT_NO_MOVEMENT_AFTER_DUMP';
+          }
+        }
+
+        return null;
+      },
+    });
+  }
+
+  override step(f: TargetFacts) {
+    if (this.entryAt !== null && this.entryTime === null) {
+      this.entryTime = this.entryAt;
+      this.entryBuyPrice = this.entryPrice;
+      this.lastPriceMoveTime = this.entryAt;
+      this.lastPriceMove = this.entryPrice;
+      this.peakNetSeen = 0;
+    }
+    if (f.priceAt !== null && f.priceAt > f.now) {
+      f = { ...f, price: null, priceAt: null };
+    }
+    super.step(f);
+  }
+}
+
 
 
 

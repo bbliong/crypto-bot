@@ -51,6 +51,7 @@ const { values } = parseArgs({
     profileName: { type: "string", default: "Default" },
     paperLane: { type: "string", default: "target" },
     dataDir: { type: "string", default: "data/distribution-watch" },
+    maxDetails: { type: "string", default: "3" },
   },
 });
 if (!["target", "profit4", "bounce"].includes(values.paperLane!))
@@ -68,7 +69,7 @@ const addressInput =
   ) && Array.isArray(savedAddresses)
     ? savedAddresses.join(",")
     : values.addresses!;
-const addresses = [
+let addresses = [
   ...new Set(
     addressInput
       .split(",")
@@ -89,7 +90,9 @@ if (!Number.isFinite(walletPollMilliseconds) || walletPollMilliseconds < 250)
   throw new Error("--walletPollMilliseconds minimal 250.");
 if (!existsSync(values.profileDir!))
   throw new Error("Profile Chrome research tidak ditemukan.");
-const maxDetails = addresses.length;
+const parsedMax = Number(values.maxDetails ?? 3);
+const maxDetails =
+  Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 3) : 3;
 
 const dataDirectory = values.dataDir!;
 const output = join(
@@ -192,10 +195,18 @@ const context = await chromium.launchPersistentContext(values.profileDir!, {
   channel: "chrome",
   headless: false,
   viewport: null,
-  args: ["--start-maximized", `--profile-directory=${values.profileName}`],
+  args: [
+    "--start-maximized",
+    `--profile-directory=${values.profileName}`,
+    "--js-flags=--max-old-space-size=512",
+    "--disable-dev-shm-usage",
+  ],
 });
 const controller = context.pages()[0] ?? (await context.newPage());
-const details = new Map<string, { page: Page; watch: Watch }>();
+const details = new Map<
+  string,
+  { page: Page; watch: Watch; openedAt: number }
+>();
 const seen = new Set<string>();
 let liveEngine: Profit4LiveEngine | null = null;
 if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
@@ -204,7 +215,7 @@ if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
     dataDirectory,
     output,
     adapter,
-    values.paperLane === "bounce" ? ["V1", "V2", "V3", "V4", "V5"] : ["P4"],
+    values.paperLane === "bounce" ? ["V1", "V2", "V3", "V4", "V5", "V6", "V7", "S1", "S2", "S3", "S4"] : ["P4"],
   );
   adapter.setMonitorHook((mint, body, at) =>
     liveEngine?.monitorFrame(mint, body, at),
@@ -493,14 +504,54 @@ async function openOrReplaceDetail(next: Transfer) {
   const existing = details.get(next.wallet);
   if (existing?.watch.transfer.mint === next.mint) return;
   if (!existing && details.size >= maxDetails) {
-    write("watch-events.jsonl", {
-      type: "DETAIL_SKIPPED_CAPACITY",
-      observedAt: Date.now(),
-      trackedWallet: next.wallet,
-      transfer: next,
-      maxDetails,
-    });
-    return;
+    let evictCandidate: string | null = null;
+    let oldestOpen = Infinity;
+    for (const [w, item] of details.entries()) {
+      const m = item.watch.transfer.mint;
+      if (liveEngine?.hasActiveMint(m)) continue;
+      const isPaperLive =
+        typeof (targetLane as any).isMintActive === "function"
+          ? (targetLane as any).isMintActive(m)
+          : false;
+      if (!isPaperLive) {
+        evictCandidate = w;
+        break;
+      }
+      if (item.openedAt < oldestOpen) {
+        oldestOpen = item.openedAt;
+        evictCandidate = w;
+      }
+    }
+
+    const candidateItem = evictCandidate ? details.get(evictCandidate) : null;
+    const canEvict =
+      candidateItem &&
+      (!((targetLane as any).isMintActive?.(
+        candidateItem.watch.transfer.mint,
+      )) ||
+        Date.now() - candidateItem.openedAt > 60_000);
+
+    if (evictCandidate && canEvict && candidateItem) {
+      write("watch-events.jsonl", {
+        type: "DETAIL_EVICTED_CAPACITY",
+        observedAt: Date.now(),
+        evictedWallet: evictCandidate,
+        evictedMint: candidateItem.watch.transfer.mint,
+        newWallet: next.wallet,
+        newMint: next.mint,
+      });
+      details.delete(evictCandidate);
+      void candidateItem.page.close().catch(() => {});
+    } else {
+      write("watch-events.jsonl", {
+        type: "DETAIL_SKIPPED_CAPACITY",
+        observedAt: Date.now(),
+        trackedWallet: next.wallet,
+        transfer: next,
+        maxDetails,
+      });
+      return;
+    }
   }
   const page = existing?.page ?? (await context.newPage());
   if (!existing) attachDetailSocket(page, next.wallet);
@@ -526,7 +577,7 @@ async function openOrReplaceDetail(next: Transfer) {
       );
   }
   const watch: Watch = { transfer: next };
-  details.set(next.wallet, { page, watch });
+  details.set(next.wallet, { page, watch, openedAt: Date.now() });
   targetLane.register(next, Date.now());
   write("watch-events.jsonl", {
     type: "TOKEN_DETAIL_OPENED",
@@ -553,9 +604,39 @@ write("watch-events.jsonl", {
   execution: "READ_ONLY",
 });
 const targetTimer = setInterval(() => {
-  targetLane.evaluate(Date.now());
+  const now = Date.now();
+  targetLane.evaluate(now);
+
+  for (const [wallet, item] of details.entries()) {
+    const mint = item.watch.transfer.mint;
+    const isRealActive = liveEngine?.hasActiveMint(mint);
+    if (isRealActive) continue;
+    const isPaperLive =
+      typeof (targetLane as any).isMintActive === "function"
+        ? (targetLane as any).isMintActive(mint)
+        : false;
+    const ageMs = now - (item.openedAt || now);
+    if ((!isPaperLive && ageMs > 30_000) || ageMs > 600_000) {
+      write("watch-events.jsonl", {
+        type: "DETAIL_AUTO_CLOSED",
+        observedAt: now,
+        trackedWallet: wallet,
+        mint,
+        ageSeconds: Math.round(ageMs / 1000),
+        reason: !isPaperLive ? "ALL_LANES_FINISHED" : "MAX_OBSERVATION_EXPIRED",
+      });
+      details.delete(wallet);
+      void item.page.close().catch(() => {});
+    }
+  }
+
   if (profit4 && !stopping)
-    writeControl({ ...control, ...health, heartbeatAt: Date.now() });
+    writeControl({
+      ...control,
+      ...health,
+      heartbeatAt: now,
+      openTabs: details.size + 1,
+    });
   if (profit4 && existsSync(stopFile)) {
     try {
       const request = JSON.parse(readFileSync(stopFile, "utf8"));
@@ -585,8 +666,36 @@ process.once("SIGTERM", () => {
   targetLane.shutdown(Date.now());
 });
 let nextWallet = 0;
+let lastConfigReloadAt = Date.now();
 while (!controller.isClosed() && !stopping) {
   const pollStartedAt = Date.now();
+  if (profit4 && pollStartedAt - lastConfigReloadAt > 15000) {
+    lastConfigReloadAt = pollStartedAt;
+    try {
+      const freshCfg = readJson<{ addresses?: string[] }>(
+        join(values.dataDir!, "dashboard-config.json"),
+        {},
+      );
+      if (Array.isArray(freshCfg.addresses) && freshCfg.addresses.length > 0) {
+        const freshAddresses = [
+          ...new Set(freshCfg.addresses.map((x) => x.trim()).filter(Boolean)),
+        ];
+        if (
+          freshAddresses.length > 0 &&
+          (freshAddresses.length !== addresses.length ||
+            freshAddresses.some((a, i) => a !== addresses[i]))
+        ) {
+          addresses = freshAddresses;
+          if (nextWallet >= addresses.length) nextWallet = 0;
+          write("watch-events.jsonl", {
+            type: "WALLET_LIST_RELOADED_DYNAMICALLY",
+            observedAt: pollStartedAt,
+            totalWallets: addresses.length,
+          });
+        }
+      }
+    } catch {}
+  }
   const jitter = Math.floor(Math.random() * 500);
   const waitForNextWallet = () => wait(
     profit4

@@ -1,8 +1,25 @@
 cr.bbliong.io {
+    encode zstd gzip
+
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }
     handle /profit4* {
+        reverse_proxy 127.0.0.1:4178
+    }
+    handle /v6-vs-v7* {
+        reverse_proxy 127.0.0.1:4178
+    }
+    handle /staircase* {
+        reverse_proxy 127.0.0.1:4178
+    }
+    handle /staircase-85wr* {
+        reverse_proxy 127.0.0.1:4178
+    }
+    handle /comparison-v6-v7* {
+        reverse_proxy 127.0.0.1:4178
+    }
+    handle /api/comparison-v6-v7* {
         reverse_proxy 127.0.0.1:4178
     }
     handle {
