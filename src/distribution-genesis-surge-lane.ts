@@ -42,6 +42,42 @@ export const GENESIS_SURGE_RULES: Readonly<TargetRules> = Object.freeze(validate
   blockKnownDumpSellers: false,
 }));
 
+// --- G1.2: Aggressive Runner Surge (TP +80%, Trailing 6%) ---
+export const GENESIS_SURGE_LANE_G1_2 = 'distribution-genesis-surge-g1-2';
+export const GENESIS_SURGE_TARGET_PERCENT_G1_2 = 80;
+export const GENESIS_SURGE_STOP_LOSS_PERCENT_G1_2 = 6;
+
+export const GENESIS_SURGE_RULES_G1_2: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-genesis-surge-g1-2',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: GENESIS_SURGE_TARGET_PERCENT_G1_2,
+  observationSeconds: 4, // Konfirmasi super cepat (4 detik)
+  minTransferAgeSeconds: 30,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 90,
+  confirmSeconds: 1,
+  minBuySharePercent: 55,
+  minMeaningfulBuyUsd: 10,
+  minMeaningfulBuyers: 2,
+  maxBuyerSharePercent: 70,
+  minMomentumPercent: 3,
+  maxMomentumPercent: 300,
+  maxEntryReturnPercent: 90,
+  maxDrawdownPercent: 6.0,
+  stopLossPercent: GENESIS_SURGE_STOP_LOSS_PERCENT_G1_2,
+  trailingStartPercent: 25, // Trailing stop mulai aktif saat +25%
+  trailingDrawdownPercent: 6, // Toleransi pullback lebih ketat 6% untuk kunci cuan
+  maxHoldSeconds: 600,
+  executionDelayMs: 500,
+  maxFillWaitMs: 3000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
 export class DistributionGenesisSurgeLaneG1 extends DistributionTargetLane {
   private firstPrice: number | null = null;
   private peakPrice: number = 0;
@@ -50,15 +86,20 @@ export class DistributionGenesisSurgeLaneG1 extends DistributionTargetLane {
   public lastEvaluatedReasons: string[] = [];
   public cumulativeBuyVolumeUsd = 0;
 
-  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
-    super(mint, { ...GENESIS_SURGE_RULES }, e => emit({
+  constructor(
+    mint: string,
+    emit: (event: TargetEvent) => void = () => {},
+    customRules: TargetRules = GENESIS_SURGE_RULES,
+    customLabel: string = 'G1'
+  ) {
+    super(mint, { ...customRules }, e => emit({
       ...e,
-      targetPercent: GENESIS_SURGE_TARGET_PERCENT,
-      version: 'distribution-genesis-surge-g1',
-      laneLabel: 'G1'
+      targetPercent: customRules.targetPercent,
+      version: customRules.version,
+      laneLabel: customLabel as any
     }), {
-      name: 'genesis-surge-g1',
-      paperLane: GENESIS_SURGE_LANE,
+      name: customRules.version,
+      paperLane: customRules.version,
       prioritizeCustomExit: true,
       trailingEnabled: true,
       flowExitEnabled: false,
@@ -141,5 +182,11 @@ export class DistributionGenesisSurgeLaneG1 extends DistributionTargetLane {
     if (trade.side === 'buy' && Number.isFinite(trade.usd) && trade.usd! > 0) {
       this.cumulativeBuyVolumeUsd += trade.usd!;
     }
+  }
+}
+
+export class DistributionGenesisSurgeLaneG1_2 extends DistributionGenesisSurgeLaneG1 {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, emit, GENESIS_SURGE_RULES_G1_2, 'G1.2');
   }
 }

@@ -284,19 +284,19 @@ export class DistributionMomentumV3Lane extends DistributionTargetLane {
   }
 }
 
-// 8. R5 Band Lane (Sweet Spot 5-10% return)
+// 8. R5 Band Lane (Sweet Spot Momentum - Optimized)
 export const R5_BAND_LANE_RULES = createResearchRules({
   version: 'distribution-momentum-r5-band',
   targetPercent: 25,
-  minBuySharePercent: 60,
-  minMeaningfulBuyUsd: 10,
-  minMeaningfulBuyers: 2,
-  maxBuyerSharePercent: 65,
-  minMomentumPercent: 5.0,
-  maxMomentumPercent: 10.0,
-  maxDrawdownPercent: 2.5,
-  stopLossPercent: 4,
-  trailingStartPercent: 10,
+  minBuySharePercent: 55,
+  minMeaningfulBuyUsd: 5,
+  minMeaningfulBuyers: 1,
+  maxBuyerSharePercent: 85, // Diperlonggar dari 65% ke 85% untuk pump.fun sniper
+  minMomentumPercent: 3.0, // Diperluas dari 5.0% ke 3.0%
+  maxMomentumPercent: 25.0, // Diperluas dari 10.0% ke 25.0%
+  maxDrawdownPercent: 5.0, // Dari 2.5% ke 5.0%
+  stopLossPercent: 6,
+  trailingStartPercent: 12,
   trailingDrawdownPercent: 5,
 });
 

@@ -10,10 +10,10 @@ export const STAIRCASE_RULES_S1: Readonly<TargetRules> = Object.freeze(validateT
   paperOnly: true,
   enabled: true,
   targetPercent: STAIRCASE_TARGET_PERCENT_S1,
-  observationSeconds: 120,
-  minTransferAgeSeconds: 30,
+  observationSeconds: 30, // Dioptimasi dari 120s ke 30s agar token pump.fun tidak kadaluarsa
+  minTransferAgeSeconds: 15,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 180,
+  maxEntryWaitSeconds: 90,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -22,10 +22,10 @@ export const STAIRCASE_RULES_S1: Readonly<TargetRules> = Object.freeze(validateT
   minMomentumPercent: 0,
   maxMomentumPercent: 100,
   maxEntryReturnPercent: 100,
-  maxDrawdownPercent: 2.5,
+  maxDrawdownPercent: 5.0, // Diperlebar dari 2.5% ke 5.0% untuk toleransi wick mikro
   stopLossPercent: STAIRCASE_STOP_LOSS_PERCENT_S1,
-  trailingStartPercent: 20,
-  trailingDrawdownPercent: 5,
+  trailingStartPercent: 15, // Trail aktif lebih cepat di +15%
+  trailingDrawdownPercent: 4,
   maxHoldSeconds: 300, // 5 menit
   executionDelayMs: 1000,
   maxFillWaitMs: 5000,
@@ -50,10 +50,10 @@ export const STAIRCASE_RULES_S2: Readonly<TargetRules> = Object.freeze(validateT
   paperOnly: true,
   enabled: true,
   targetPercent: STAIRCASE_TARGET_PERCENT_S2,
-  observationSeconds: 120,
-  minTransferAgeSeconds: 30,
+  observationSeconds: 45, // Dioptimasi dari 120s ke 45s
+  minTransferAgeSeconds: 20,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 180,
+  maxEntryWaitSeconds: 120,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -62,10 +62,10 @@ export const STAIRCASE_RULES_S2: Readonly<TargetRules> = Object.freeze(validateT
   minMomentumPercent: 0,
   maxMomentumPercent: 100,
   maxEntryReturnPercent: 100,
-  maxDrawdownPercent: 2.5,
+  maxDrawdownPercent: 6.0, // Diperlebar dari 2.5% ke 6.0%
   stopLossPercent: STAIRCASE_STOP_LOSS_PERCENT_S2,
-  trailingStartPercent: 40,
-  trailingDrawdownPercent: 6,
+  trailingStartPercent: 30,
+  trailingDrawdownPercent: 5,
   maxHoldSeconds: 900, // 15 menit runway
   executionDelayMs: 1000,
   maxFillWaitMs: 5000,
