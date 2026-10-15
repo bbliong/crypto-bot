@@ -181,28 +181,38 @@ export class SolanaWalletStream extends EventEmitter {
     }
   }
 
-  private async resolveTransaction(wallet: string, signature: string) {
-    const res = await fetch(this.rpcHttpUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getTransaction",
-        params: [
-          signature,
-          {
-            encoding: "jsonParsed",
-            maxSupportedTransactionVersion: 0,
-          },
-        ],
-      }),
-    });
+  private async resolveTransaction(wallet: string, signature: string, attempt = 1): Promise<void> {
+    try {
+      const res = await fetch(this.rpcHttpUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getTransaction",
+          params: [
+            signature,
+            {
+              encoding: "jsonParsed",
+              maxSupportedTransactionVersion: 0,
+            },
+          ],
+        }),
+      });
 
-    if (!res.ok) return;
-    const body: any = await res.json();
-    const tx = body.result;
-    if (!tx || !tx.meta) return;
+      if (res.status === 429 && attempt <= 3) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        return this.resolveTransaction(wallet, signature, attempt + 1);
+      }
+
+      if (!res.ok) return;
+      const body: any = await res.json();
+      if (body.error && attempt <= 3) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        return this.resolveTransaction(wallet, signature, attempt + 1);
+      }
+      const tx = body.result;
+      if (!tx || !tx.meta) return;
 
     const blockTime = tx.blockTime ? tx.blockTime * 1000 : Date.now();
     const preBalances = tx.meta.preTokenBalances || [];
@@ -253,7 +263,10 @@ export class SolanaWalletStream extends EventEmitter {
         this.emit("sell", sellEvent);
       }
     }
+  } catch {
+    // Ignore RPC error or rate limit
   }
+}
 
   public stopSockets() {
     for (const timer of this.reconnectTimers) clearTimeout(timer);
