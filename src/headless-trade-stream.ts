@@ -272,7 +272,11 @@ export class HeadlessTradeStream extends EventEmitter {
       // Validasi batas harga pump.fun yang realistis ($0.000001 - $10.0)
       const lastKnown = this.trackedMints.get(mint)?.lastPrice;
       if (price < 0.000001 || price > 10.0 || !Number.isFinite(price)) {
-        price = (lastKnown && lastKnown >= 0.000001) ? lastKnown : 0.000004;
+        if (lastKnown && lastKnown >= 0.000001) {
+          price = lastKnown;
+        } else {
+          return;
+        }
       }
 
       const usd = (Number(msg.solAmount) || 0) * this.solPriceUsd;

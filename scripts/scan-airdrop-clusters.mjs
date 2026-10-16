@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getSolanaRpcUrl } from './solana-rpc-config.mjs';
 
 const defaultRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -65,7 +66,7 @@ export function parseTransactionRecipients(txResult) {
   return recipients;
 }
 
-export function buildClustersFromTransfers({ root = defaultRoot, rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', fetchRemote = true } = {}) {
+export function buildClustersFromTransfers({ root = defaultRoot, rpcUrl = getSolanaRpcUrl(root), fetchRemote = true } = {}) {
   const dataDir = join(root, 'data', 'profit4-watch');
   mkdirSync(dataDir, { recursive: true });
   const cacheFile = join(dataDir, 'tx-cluster-cache.json');
@@ -128,6 +129,7 @@ export async function runClusterScan(options = {}) {
   }
 
   for (const [txHash, cached] of Object.entries(txCache)) {
+    if (!cached || cached.isAirdrop === false || !cached.recipients || cached.recipients.length < 2) continue;
     if (!uniqueTxs.has(txHash)) {
       uniqueTxs.set(txHash, {
         tx: txHash,

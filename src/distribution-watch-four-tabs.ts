@@ -11,12 +11,13 @@ import {
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { decodeFrame } from "./parser.js";
-import { fetchWalletActivityPair } from "./wallet-activity-poll.js";
+import { fetchWalletActivityPair, fetchSingleWalletActivity } from "./wallet-activity-poll.js";
 import { LOG_CHUNK_MS, RotatingJsonlWriter } from "./rotating-jsonl.js";
 import { DistributionTargetRuntime } from "./distribution-target-runtime.js";
 import { Profit4LiveEngine } from "./profit4-live-engine.js";
 import { GmgnLiveAdapter } from "./profit4-gmgn-execution.js";
 import { readJson } from "./profit4-live-store.js";
+import { getSmartWalletsWatchlist } from "./distribution-smart-money-lane.js";
 import {
   DistributionProfit4Runtime,
   atomicProfit4Json,
@@ -40,6 +41,9 @@ type Transfer = {
   amount?: string;
   from?: string;
   tx?: string;
+  source?: string;
+  syndicateWalletsCount?: number;
+  syndicateTier?: string;
 };
 type Watch = { transfer: Transfer };
 const defaults = [
@@ -383,6 +387,8 @@ if (useHeadlessStream) {
         symbol: token.symbol || "UNKNOWN",
         timestamp: Math.floor(Date.now() / 1000),
         from: token.traderPublicKey || "creator",
+        source: "pumpportal_ws",
+        priceUsd,
       }, Date.now());
       targetLane.trade(token.mint, {
         at: Date.now(),
@@ -470,6 +476,8 @@ attachCapture(
             symbol,
             timestamp: Math.floor(now / 1000),
             from: wallet,
+            source: "gmgn_research_ws",
+            priceUsd,
           }, now);
           if (priceUsd > 0) {
             targetLane.trade(f.mint, {
@@ -779,6 +787,7 @@ function attachDetailSocket(page: Page, wallet: string) {
 }
 
 async function openOrReplaceDetail(next: Transfer) {
+  if (!next.source) next.source = "syndicate_inflow";
   const key = `${next.wallet}:${next.mint}:${next.tx || next.timestamp || ""}`;
   if (seen.has(key)) return;
   seen.add(key);
@@ -1054,30 +1063,81 @@ const targetTimer = setInterval(() => {
 targetTimer.unref();
 process.once("SIGINT", () => {
   walletStream?.stop();
+  smartMoneyStream?.stop();
   clearInterval(targetTimer);
   targetLane.shutdown(Date.now());
 });
 process.once("SIGTERM", () => {
   walletStream?.stop();
+  smartMoneyStream?.stop();
   clearInterval(targetTimer);
   targetLane.shutdown(Date.now());
 });
+let heliusApiKey = process.env.HELIUS_API_KEY || "";
+if (!heliusApiKey) {
+  try {
+    const envPath = join(process.cwd(), ".env");
+    if (existsSync(envPath)) {
+      const envContent = readFileSync(envPath, "utf8");
+      const m = envContent.match(/HELIUS_API_KEY=([^\s\r\n]+)/);
+      if (m) heliusApiKey = m[1].trim();
+    }
+  } catch {}
+}
+const solanaRpcWsUrl = heliusApiKey
+  ? `wss://mainnet.helius-rpc.com/?api-key=${heliusApiKey}`
+  : "wss://api.mainnet-beta.solana.com";
+const solanaRpcHttpUrl = heliusApiKey
+  ? `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}`
+  : "https://api.mainnet-beta.solana.com";
+if (heliusApiKey) {
+  console.log(`[helius-rpc] Activated dedicated Helius RPC for WebSocket & HTTP transactions`);
+}
+
 let walletStream: SolanaWalletStream | null = null;
 if (useSolanaWalletWs) {
   walletStream = new SolanaWalletStream({
-    maxWalletsPerSocket: 75,
-    staggerMs: 20,
+    rpcWsUrl: solanaRpcWsUrl,
+    rpcHttpUrl: solanaRpcHttpUrl,
+    maxWalletsPerSocket: 125,
+    staggerMs: 30,
   });
 
   walletStream.on("rawActivity", () => {
     recordHourlyEvent("solanaWs");
   });
 
+  walletStream.on("error", (err) => {
+    console.warn(`[wallet-stream-error] ${err.message}`);
+  });
+
+function getSyndicateAirdropMeta(mint: string): { walletCount: number; tier: string } {
+  try {
+    const cachePath = join(process.cwd(), "data", "profit4-watch", "tx-cluster-cache.json");
+    if (existsSync(cachePath)) {
+      const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+      const recipients = new Set<string>();
+      for (const item of Object.values(cache) as any[]) {
+        if (item && item.mint === mint && Array.isArray(item.recipients)) {
+          for (const r of item.recipients) recipients.add(r);
+        }
+      }
+      const count = recipients.size;
+      let tier = "Tier 1 (8-48 W)";
+      if (count >= 56 && count <= 80) tier = "Tier 2 (56-80 W)";
+      else if (count >= 88 && count <= 112) tier = "Tier 3 (88-112 W)";
+      else if (count >= 120) tier = "Tier 4 (120+ W)";
+      return { walletCount: count, tier };
+    }
+  } catch {}
+  return { walletCount: 0, tier: "Unknown" };
+}
+
   walletStream.on("transfer", async (t) => {
-    recordHourlyEvent("transfer");
-    pushActiveDetail({
+    write("watch-events.jsonl", {
+      type: "TARGET_TOKEN_REGISTERED",
+      observedAt: Date.now(),
       mint: t.mint,
-      symbol: t.symbol || "UNKNOWN",
       wallet: t.wallet,
       openedAt: Date.now(),
       source: "syndicate_inflow",
@@ -1093,6 +1153,7 @@ if (useSolanaWalletWs) {
       amount: t.amount,
       tx: t.tx,
     });
+    const synMeta = getSyndicateAirdropMeta(t.mint);
     const candidate: Transfer = {
       wallet: t.wallet,
       mint: t.mint,
@@ -1102,6 +1163,9 @@ if (useSolanaWalletWs) {
       amount: t.amount,
       from: t.from,
       tx: t.tx,
+      source: "syndicate_inflow",
+      syndicateWalletsCount: synMeta.walletCount,
+      syndicateTier: synMeta.tier,
     };
     await openOrReplaceDetail(candidate);
   });
@@ -1115,6 +1179,9 @@ if (useSolanaWalletWs) {
       tx: s.tx,
       source: "solana_rpc_ws",
     });
+    // Pemicu On-Chain Balance Sensor: Beri tahu seluruh active lanes bahwa wallet sindikat menjual!
+    (targetLane as any).onTrackedWalletSold?.(s.mint, s.wallet, Date.now());
+
     if (values.paperLane !== "bounce") {
       details.delete(s.wallet);
       if (![...details.values()].some((d) => d.watch.transfer.mint === s.mint)) {
@@ -1126,7 +1193,113 @@ if (useSolanaWalletWs) {
   void walletStream.start(addresses);
   process.once("exit", () => walletStream?.stop());
 }
+
+// ========================================================
+// DEDICATED TRACKER 117 SMART MONEY WALLETS
+// ========================================================
+const SMART_MONEY_BLACKLIST_SYMBOLS = new Set([
+  "CASH", "USDC", "USDT", "USDS", "SOL", "BSOL", "JITOSOL", "JUP", "KMNO", "EURC", "WBTC", "WETH"
+]);
+
+let smartMoneyStream: SolanaWalletStream | null = null;
+const smartWalletsSet = getSmartWalletsWatchlist();
+const smartAddresses = [...smartWalletsSet];
+const seenSmartTrades = new Set<string>();
+
+if (useSolanaWalletWs && smartAddresses.length > 0) {
+  smartMoneyStream = new SolanaWalletStream({
+    rpcWsUrl: solanaRpcWsUrl,
+    rpcHttpUrl: solanaRpcHttpUrl,
+    maxWalletsPerSocket: 125,
+    staggerMs: 30,
+  });
+
+  smartMoneyStream.on("rawActivity", () => {
+    recordHourlyEvent("solanaWs");
+  });
+
+  smartMoneyStream.on("error", (err) => {
+    console.warn(`[smart-money-error] ${err.message}`);
+  });
+
+  smartMoneyStream.on("transfer", async (t) => {
+    recordHourlyEvent("transfer");
+    const sym = (t.symbol || "").toUpperCase();
+    if (SMART_MONEY_BLACKLIST_SYMBOLS.has(sym)) {
+      return;
+    }
+    console.log(`[smart-money-ws] 🐋 Whale ${t.wallet.slice(0, 6)}.. bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
+    const smartCandidate: Transfer = {
+      wallet: t.wallet,
+      mint: t.mint,
+      symbol: t.symbol || "SMART",
+      timestamp: t.timestamp || Math.floor(Date.now() / 1000),
+      priceUsd: t.priceUsd,
+      amount: t.amount,
+      from: t.from,
+      tx: t.tx,
+      source: "smart_money_inflow",
+    };
+    pushActiveDetail({
+      mint: t.mint,
+      symbol: t.symbol || "SMART",
+      wallet: t.wallet,
+      openedAt: Date.now(),
+      source: "smart_money_inflow",
+      priceUsd: t.priceUsd,
+      tx: t.tx,
+      status: "EVALUATING_G2_LANES",
+    });
+    write("watch-events.jsonl", {
+      type: "SMART_MONEY_WHALE_TRANSFER_IN",
+      observedAt: Date.now(),
+      wallet: t.wallet,
+      mint: t.mint,
+      amount: t.amount,
+      tx: t.tx,
+      source: "smart_money_inflow",
+    });
+
+    if (targetLane instanceof DistributionProfit4Runtime) {
+      targetLane.register(smartCandidate, Date.now());
+      if (t.priceUsd && t.priceUsd > 0) {
+        targetLane.trade(t.mint, {
+          at: Date.now(),
+          timestamp: t.timestamp || Math.floor(Date.now() / 1000),
+          price: t.priceUsd,
+          side: "buy",
+          wallet: t.wallet,
+          usd: 50,
+          signature: t.tx || `sm_${Date.now()}`,
+        });
+      }
+    }
+    if (useHeadlessStream && tradeStream) {
+      tradeStream.registerMint(t.mint, {
+        symbol: t.symbol,
+        priceUsd: t.priceUsd,
+      });
+    }
+    gmgnWsManager.subscribeToken(t.mint).catch(() => {});
+  });
+
+  smartMoneyStream.on("sell", (s) => {
+    write("watch-events.jsonl", {
+      type: "SMART_MONEY_WHALE_SOLD",
+      observedAt: Date.now(),
+      trackedWallet: s.wallet,
+      mint: s.mint,
+      tx: s.tx,
+      source: "solana_rpc_ws",
+    });
+  });
+
+  void smartMoneyStream.start(smartAddresses);
+  process.once("exit", () => smartMoneyStream?.stop());
+}
 let nextWallet = 0;
+let nextSmartWallet = 0;
+let loopCounter = 0;
 let lastConfigReloadAt = Date.now();
 while (!controller.isClosed() && !stopping) {
   const pollStartedAt = Date.now();
@@ -1248,6 +1421,7 @@ while (!controller.isClosed() && !stopping) {
           transfer: tracked.watch.transfer,
           sell,
         });
+        (targetLane as any).onTrackedWalletSold?.(tracked.watch.transfer.mint, wallet, Date.now());
         if (values.paperLane !== "bounce") {
           details.delete(wallet);
           if (
@@ -1268,6 +1442,91 @@ while (!controller.isClosed() && !stopping) {
     }
     const candidate = latestUnsold(result.body, wallet);
     if (candidate) await openOrReplaceDetail(candidate);
+
+    // Dedicated periodic poller for 117 Smart Money Wallets
+    if (smartAddresses.length > 0 && loopCounter++ % 3 === 2) {
+      const sw = smartAddresses[nextSmartWallet];
+      nextSmartWallet = (nextSmartWallet + 1) % smartAddresses.length;
+      try {
+        const swUrl = `/vas/api/v1/wallet_activity/sol?wallet=${sw}&limit=10&cost=usd`;
+        const swRes = await controller.evaluate(fetchSingleWalletActivity, { url: swUrl });
+        if (swRes && swRes.valid && swRes.body?.data?.activities) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          for (const act of swRes.body.data.activities as any[]) {
+            const ev = String(act.event_type || act.event || "").toLowerCase();
+            if (ev === "buy" || ev === "swap_buy") {
+              const ts = Number(act.timestamp) || nowSec;
+              // Hanya proses transaksi baru (< 5 menit / 300 detik)
+              if (nowSec - ts > 300) continue;
+
+              const symbol = String(act.token?.symbol || "SMART");
+              if (SMART_MONEY_BLACKLIST_SYMBOLS.has(symbol.toUpperCase())) continue;
+
+              const mint = String(act.token?.address || act.token_address || "");
+              const key = `${sw}:${mint}:${ts}`;
+              if (mint && !seenSmartTrades.has(key)) {
+                seenSmartTrades.add(key);
+                const costUsd = Number(act.cost_usd || 50);
+                const amount = Number(act.token_amount || act.amount || 0);
+                const priceUsd = Number(act.price_usd || (costUsd > 0 && amount > 0 ? costUsd / amount : 0));
+                if (priceUsd <= 0) continue;
+
+                console.log(`[smart-wallet-poller] Whale ${sw.slice(0, 6)}.. bought ${symbol} ($${costUsd.toFixed(1)})`);
+                pushActiveDetail({
+                  mint,
+                  symbol,
+                  wallet: sw,
+                  openedAt: Date.now(),
+                  source: "smart_money_inflow",
+                  priceUsd,
+                  tx: act.tx_hash,
+                  status: "EVALUATING_G2_LANES",
+                });
+                write("watch-events.jsonl", {
+                  type: "SMART_MONEY_POLL_BUY_DETECTED",
+                  observedAt: Date.now(),
+                  wallet: sw,
+                  mint,
+                  symbol,
+                  costUsd,
+                  priceUsd,
+                  tx: act.tx_hash,
+                  source: "smart_money_inflow",
+                });
+                const swCandidate: Transfer = {
+                  wallet: sw,
+                  mint,
+                  symbol,
+                  timestamp: ts,
+                  priceUsd,
+                  amount: String(amount),
+                  tx: act.tx_hash,
+                  source: "smart_money_inflow",
+                };
+                if (targetLane instanceof DistributionProfit4Runtime) {
+                  targetLane.register(swCandidate, Date.now());
+                  if (priceUsd > 0) {
+                    targetLane.trade(mint, {
+                      at: Date.now(),
+                      timestamp: ts,
+                      price: priceUsd,
+                      side: "buy",
+                      wallet: sw,
+                      usd: costUsd,
+                      signature: act.tx_hash || `sm_poll_${ts}`,
+                    });
+                  }
+                }
+                if (useHeadlessStream && tradeStream) {
+                  tradeStream.registerMint(mint, { symbol, priceUsd });
+                }
+                gmgnWsManager.subscribeToken(mint).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch {}
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     write("watch-events.jsonl", {
@@ -1289,6 +1548,7 @@ while (!controller.isClosed() && !stopping) {
 clearInterval(targetTimer);
 clearInterval(liveTimer);
 walletStream?.stop();
+smartMoneyStream?.stop();
 targetLane.shutdown(Date.now());
 if (profit4) {
   await context.close();

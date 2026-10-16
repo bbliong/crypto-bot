@@ -618,8 +618,8 @@ export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLan
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;
-        if (elapsedMs < 30_000) {
-          reasons.push(`STAIRCASE_OBSERVING_30S_${Math.floor(elapsedMs / 1000)}S`);
+        if (elapsedMs < 60_000) {
+          reasons.push(`STAIRCASE_OBSERVING_60S_${Math.floor(elapsedMs / 1000)}S`);
           return reasons;
         }
         if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
@@ -628,10 +628,124 @@ export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLan
           return reasons;
         }
 
+        // Drawdown guard: jika token sudah drop > 2.5% dari peak, batalkan entry!
+        const dd = f.drawdownPercent ?? 0;
+        if (dd > 2.5) {
+          reasons.push('MAX_DRAWDOWN_EXCEEDED');
+          return reasons;
+        }
+
+        // Upward momentum: harga harus naik minimal +2% dari harga awal untuk konfirmasi tangga
+        const startPrice = this.firstPrice ?? f.price;
+        if (startPrice && f.price < startPrice * 1.02) {
+          reasons.push('STEP1_GAIN_TOO_LOW');
+          return reasons;
+        }
+
         // Higher Low check
         if (this.trades.length < 3) reasons.push('INSUFFICIENT_TRADES');
         return reasons;
       },
     });
+  }
+}
+
+// --- Implementation S5: Syndicate Tier-4 Pre-Dump Rider (TP +25%, Hard Time Limit 420s / 7 Menit) ---
+export const STAIRCASE_LANE_S5 = 'distribution-staircase-s5';
+export const STAIRCASE_TARGET_PERCENT_S5 = 25;
+export const STAIRCASE_STOP_LOSS_PERCENT_S5 = 8;
+
+export const STAIRCASE_RULES_S5: Readonly<TargetRules> = Object.freeze(validateTargetRules({
+  version: 'distribution-staircase-s5',
+  paperOnly: true,
+  enabled: true,
+  targetPercent: STAIRCASE_TARGET_PERCENT_S5,
+  observationSeconds: 45, // Observasi awal 45 detik
+  minTransferAgeSeconds: 15,
+  maxTransferLagSeconds: 60,
+  maxEntryWaitSeconds: 240, // Hanya boleh masuk di 4 menit pertama
+  confirmSeconds: 1,
+  minBuySharePercent: 60,
+  minMeaningfulBuyUsd: 1,
+  minMeaningfulBuyers: 1,
+  maxBuyerSharePercent: 100,
+  minMomentumPercent: 0,
+  maxMomentumPercent: 100,
+  maxEntryReturnPercent: 100,
+  maxDrawdownPercent: 2.5,
+  stopLossPercent: STAIRCASE_STOP_LOSS_PERCENT_S5,
+  trailingStartPercent: 15,
+  trailingDrawdownPercent: 4,
+  maxHoldSeconds: 420, // HARD TIME LIMIT 7 MENIT (Keluar sebelum jendela dump menit ke-15)
+  executionDelayMs: 1000,
+  maxFillWaitMs: 5000,
+  feePercentPerSide: 1,
+  slippagePercentPerSide: 0.5,
+  fixedFeeUsdPerSide: 0.005,
+  stakeUsd: 5,
+  blockKnownDumpSellers: false,
+}));
+
+export class DistributionStaircaseLaneS5 extends BaseDistributionStaircaseLane {
+  private syndicateWalletsCount: number = 0;
+  private syndicateTier: string = '';
+
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}, meta?: { walletsCount?: number; tier?: string }) {
+    super(mint, { ...STAIRCASE_RULES_S5 }, e => emit({ ...e, laneLabel: 'S5' as any, targetPercent: STAIRCASE_TARGET_PERCENT_S5 }), {
+      name: 'staircase-tier4-rider-s5',
+      paperLane: STAIRCASE_LANE_S5,
+      trailingEnabled: true,
+      flowExitEnabled: false,
+      overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
+        const reasons: string[] = [];
+        if (!r.enabled) reasons.push('LANE_DISABLED');
+
+        // 1. FILTER TIER MUTLAK: Hanya terima Tier 4 (120+ Wallets) atau Tier 3 tinggi (>=88 Wallets)
+        // Token Tier 1 & Tier 2 langsung ditolak (DISCARDED)!
+        if (this.syndicateWalletsCount > 0 && this.syndicateWalletsCount < 88) {
+          reasons.push('TIER_1_OR_2_DISCARDED_BELOW_88W');
+          return reasons;
+        }
+
+        const t0 = this.firstTradeAt ?? f.firstAt;
+        if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
+
+        const elapsedMs = f.now - t0;
+        if (elapsedMs < 45_000) {
+          reasons.push(`STAIRCASE_OBSERVING_45S_${Math.floor(elapsedMs / 1000)}S`);
+          return reasons;
+        }
+        if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
+          reasons.push('PRICE_MISSING_OR_STALE');
+          return reasons;
+        }
+
+        // Drawdown guard: jika token sudah drop > 2.5% dari peak, batalkan entry!
+        const dd = f.drawdownPercent ?? 0;
+        if (dd > 2.5) {
+          reasons.push('MAX_DRAWDOWN_EXCEEDED');
+          return reasons;
+        }
+
+        // Upward momentum: harga harus naik minimal +2.5% dari baseline
+        const startPrice = this.firstPrice ?? f.price;
+        if (startPrice && f.price < startPrice * 1.025) {
+          reasons.push('STEP1_GAIN_TOO_LOW');
+          return reasons;
+        }
+
+        // Higher Low check
+        if (this.trades.length < 3) reasons.push('INSUFFICIENT_TRADES');
+        return reasons;
+      },
+    });
+    if (meta?.walletsCount) this.syndicateWalletsCount = meta.walletsCount;
+    if (meta?.tier) this.syndicateTier = meta.tier;
+  }
+
+  public setSyndicateMeta(walletsCount: number, tier: string) {
+    this.syndicateWalletsCount = walletsCount;
+    this.syndicateTier = tier;
   }
 }

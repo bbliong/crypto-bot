@@ -1,4 +1,34 @@
 // Self-contained so Playwright can evaluate this function inside the controller page.
+export async function fetchSingleWalletActivity(options: { url: string }) {
+  try {
+    const startedAt = Date.now();
+    const response = await fetch(options.url, { credentials: 'include', signal: AbortSignal.timeout(20_000) });
+    const contentType = response.headers.get('content-type') ?? '';
+    const text = await response.text();
+    let body: { data?: { activities?: unknown[] } } | null = null;
+    try { body = JSON.parse(text); } catch {}
+    const valid = response.ok && Array.isArray(body?.data?.activities);
+    return {
+      startedAt,
+      finishedAt: Date.now(),
+      status: response.status,
+      contentType,
+      valid,
+      body,
+      rawBody: valid ? undefined : text,
+    };
+  } catch (err: any) {
+    return {
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+      status: 0,
+      contentType: '',
+      valid: false,
+      error: err?.message,
+    };
+  }
+}
+
 export async function fetchWalletActivityPair(options: { incomingUrl: string; sellUrl: string; requestGapMs: number }) {
   const requests = [];
   for (const url of [options.incomingUrl, options.sellUrl]) {

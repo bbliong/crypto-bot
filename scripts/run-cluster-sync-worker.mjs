@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expandDeployerClusters } from './expand-deployer-clusters.mjs';
+import { getSolanaRpcUrl } from './solana-rpc-config.mjs';
 
 const defaultRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -14,8 +15,8 @@ function logEvent(dataDir, event) {
 
 export async function runClusterSyncIteration({
   root = defaultRoot,
-  rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-  maxWalletsToSync = 64
+  rpcUrl = getSolanaRpcUrl(root),
+  maxWalletsToSync = 50
 } = {}) {
   const dataDir = join(root, 'data', 'profit4-watch');
   mkdirSync(dataDir, { recursive: true });
@@ -38,47 +39,54 @@ export async function runClusterSyncIteration({
   const newClustersFound = Math.max(0, (clusterResult.totalClusters || 0) - prevTotalClusters);
   console.log(`[SYNC] Selesai dalam ${(durationMs / 1000).toFixed(1)}s. Total Cluster: ${clusterResult.totalClusters} (+${newClustersFound} baru).`);
 
-  // 2. Kumpulkan wallet representatif untuk disinkronkan ke dashboard-config.json
-  // Ambil primaryTracked dari setiap cluster agar mencakup semua grup sindikat
-  const representativeWallets = [];
+  // 2. Kumpulkan Top 50 wallet representatif berdasarkan aktivitas paling segar & aktif
   const clusters = clusterResult.clusters || [];
+  const sortedClusters = [...clusters]
+    .filter(cl => cl.primaryTracked)
+    .sort((a, b) => {
+      const timeA = a.lastActivityAt || 0;
+      const timeB = b.lastActivityAt || 0;
+      if (timeB !== timeA) return timeB - timeA;
+      const txA = a.txCount || 0;
+      const txB = b.txCount || 0;
+      if (txB !== txA) return txB - txA;
+      return (b.tokensCount || 0) - (a.tokensCount || 0);
+    });
 
-  for (const cl of clusters) {
-    if (cl.primaryTracked && !representativeWallets.includes(cl.primaryTracked)) {
-      representativeWallets.push(cl.primaryTracked);
+  const topWallets = [];
+  for (const cl of sortedClusters) {
+    if (!topWallets.includes(cl.primaryTracked)) {
+      topWallets.push(cl.primaryTracked);
     }
+    if (topWallets.length >= maxWalletsToSync) break;
   }
 
-  // Batasi agar tidak overload loop polling (prioritaskan cluster yang paling aktif / banyak token)
-  const walletsToSync = representativeWallets.slice(0, maxWalletsToSync);
-
-  // 3. Baca konfigurasi saat ini dan gabungkan
+  // 3. Baca konfigurasi saat ini dan periksa perbedaan
   let currentAddresses = [];
   try {
     const cfg = JSON.parse(readFileSync(configFile, 'utf8'));
     if (Array.isArray(cfg.addresses)) currentAddresses = cfg.addresses;
   } catch {}
 
-  const mergedAddresses = [...new Set([...currentAddresses, ...walletsToSync])];
-  const newlyAdded = mergedAddresses.filter(a => !currentAddresses.includes(a));
+  const isChanged = topWallets.length !== currentAddresses.length ||
+    topWallets.some((addr, i) => addr !== currentAddresses[i]);
 
-  if (newlyAdded.length > 0) {
-    console.log(`[SYNC] Menyuntikkan ${newlyAdded.length} wallet cluster baru ke dashboard-config.json...`);
+  if (isChanged) {
+    console.log(`[SYNC] Memperbarui dashboard-config.json dengan Top ${topWallets.length} cluster teraktif...`);
     writeFileSync(configFile, JSON.stringify({
-      addresses: mergedAddresses,
+      addresses: topWallets,
       updatedAt: Date.now(),
       autoSyncedBy: 'cluster-sync-worker',
       lastSyncedAt: new Date().toISOString()
     }, null, 2), 'utf8');
 
     logEvent(dataDir, {
-      type: 'AUTO_SYNCED_NEW_WALLETS',
-      newlyAddedCount: newlyAdded.length,
-      totalAddresses: mergedAddresses.length,
-      sampleAdded: newlyAdded.slice(0, 3)
+      type: 'AUTO_SYNCED_TOP_WALLETS',
+      totalAddresses: topWallets.length,
+      sampleAdded: topWallets.slice(0, 3)
     });
   } else {
-    console.log(`[SYNC] Konfigurasi dashboard sudah up-to-date (${mergedAddresses.length} wallet).`);
+    console.log(`[SYNC] Konfigurasi dashboard sudah up-to-date (Top ${topWallets.length} wallet).`);
   }
 
   // 4. Update status file
@@ -90,8 +98,8 @@ export async function runClusterSyncIteration({
     totalWallets: clusterResult.totalWallets || 0,
     totalTokens: clusterResult.totalTokens || 0,
     newClustersFound,
-    syncedWalletsCount: mergedAddresses.length,
-    newlyAddedToWatch: newlyAdded.length
+    syncedWalletsCount: topWallets.length,
+    newlyAddedToWatch: isChanged ? topWallets.length : 0
   };
   writeFileSync(statusFile, JSON.stringify(status, null, 2), 'utf8');
 

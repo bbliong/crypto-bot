@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchTransactionWithRetry, parseTransactionRecipients, runClusterScan } from './scan-airdrop-clusters.mjs';
+import { getSolanaRpcUrl } from './solana-rpc-config.mjs';
 
 const defaultRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -42,7 +43,7 @@ async function fetchSignaturesWithRetry(rpcUrl, address, limit = 20, maxRetries 
 
 export async function expandDeployerClusters({
   root = defaultRoot,
-  rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+  rpcUrl = getSolanaRpcUrl(root),
   limitPerDeployer = 20
 } = {}) {
   const dataDir = join(root, 'data', 'profit4-watch');
@@ -78,6 +79,7 @@ export async function expandDeployerClusters({
     console.log(`\n[DEPLOYER] Menyisir aktivitas on-chain deployer: ${deployer.slice(0, 12)}...`);
     const sigs = await fetchSignaturesWithRetry(rpcUrl, deployer, limitPerDeployer);
     console.log(`  -> Menemukan ${sigs.length} signature transaksi.`);
+    await new Promise(r => setTimeout(r, 120));
 
     for (const sig of sigs) {
       if (txCache[sig]) continue; // Sudah ada di cache
@@ -120,9 +122,16 @@ export async function expandDeployerClusters({
         newlyFoundTx++;
         // Update cache langsung agar tersimpan permanen
         writeFileSync(cacheFile, JSON.stringify(txCache, null, 2), 'utf8');
+      } else {
+        txCache[sig] = {
+          tx: sig,
+          isAirdrop: false,
+          fetchedAt: Date.now()
+        };
+        writeFileSync(cacheFile, JSON.stringify(txCache, null, 2), 'utf8');
       }
 
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 120));
     }
   }
 

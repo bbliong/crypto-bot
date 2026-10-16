@@ -124,7 +124,11 @@ export class SolanaWalletStream extends EventEmitter {
       });
 
       ws.on("error", (err) => {
-        this.emit("error", new Error(`Solana RPC WebSocket error (socket ${socketIndex}): ${err.message}`));
+        const msg = `Solana RPC WebSocket error (socket ${socketIndex}): ${err.message}`;
+        this.emit("warn", msg);
+        if (this.listenerCount("error") > 0) {
+          this.emit("error", new Error(msg));
+        }
       });
 
       ws.on("close", (code, reason) => {
