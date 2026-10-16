@@ -1030,7 +1030,12 @@ const targetTimer = setInterval(() => {
           "S2",
           "S3",
           "S4",
-          "G1",
+          "S1.2",
+          "S5",
+          "G2",
+          "G2.1",
+          "G2.2",
+          "OZ1",
           "Safe",
           "Optimal",
           "Wide",
@@ -1039,6 +1044,7 @@ const targetTimer = setInterval(() => {
           "Momentum V2",
           "Momentum V3",
           "R5 Band",
+          "R5-v2 Band",
         ],
       },
     });
@@ -1291,6 +1297,7 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
         });
       }
     }
+    write("transfers.jsonl", smartCandidate);
     gmgnWsManager.subscribeToken(t.mint).catch(() => {});
   });
 
@@ -1459,15 +1466,23 @@ while (!controller.isClosed() && !stopping) {
     const candidate = latestUnsold(result.body, wallet);
     if (candidate) await openOrReplaceDetail(candidate);
 
-    // Dedicated periodic poller for 117 Smart Money Wallets
+    // Dedicated periodic poller for Smart Money Wallets & Oezank
     if (smartAddresses.length > 0 && loopCounter++ % 3 === 2) {
-      const sw = smartAddresses[nextSmartWallet];
-      nextSmartWallet = (nextSmartWallet + 1) % smartAddresses.length;
+      const pollOezankPriority = loopCounter % 9 === 0;
+      const sw = pollOezankPriority ? OEZANK_WALLET : smartAddresses[nextSmartWallet];
+      if (!pollOezankPriority) {
+        nextSmartWallet = (nextSmartWallet + 1) % smartAddresses.length;
+      }
       try {
         const swUrl = `/vas/api/v1/wallet_activity/sol?wallet=${sw}&limit=10&cost=usd`;
         const swRes = await controller.evaluate(fetchSingleWalletActivity, { url: swUrl });
         if (swRes && swRes.valid && swRes.body?.data?.activities) {
           const nowSec = Math.floor(Date.now() / 1000);
+          const isOezank = sw === OEZANK_WALLET;
+          const sourceTag = isOezank ? "oezank_inflow" : "smart_money_inflow";
+          const statusTag = isOezank ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
+          const eventType = isOezank ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_POLL_BUY_DETECTED";
+
           for (const act of swRes.body.data.activities as any[]) {
             const ev = String(act.event_type || act.event || "").toLowerCase();
             if (ev === "buy" || ev === "swap_buy") {
@@ -1475,7 +1490,7 @@ while (!controller.isClosed() && !stopping) {
               // Hanya proses transaksi baru (< 5 menit / 300 detik)
               if (nowSec - ts > 300) continue;
 
-              const symbol = String(act.token?.symbol || "SMART");
+              const symbol = String(act.token?.symbol || (isOezank ? "OEZANK" : "SMART"));
               if (SMART_MONEY_BLACKLIST_SYMBOLS.has(symbol.toUpperCase())) continue;
 
               const mint = String(act.token?.address || act.token_address || "");
@@ -1487,19 +1502,24 @@ while (!controller.isClosed() && !stopping) {
                 const priceUsd = Number(act.price_usd || (costUsd > 0 && amount > 0 ? costUsd / amount : 0));
                 if (priceUsd <= 0) continue;
 
-                console.log(`[smart-wallet-poller] Whale ${sw.slice(0, 6)}.. bought ${symbol} ($${costUsd.toFixed(1)})`);
+                if (isOezank) {
+                  console.log(`[oezank-poller] 🇮🇩 Trader Oezank IDC bought ${symbol} ($${costUsd.toFixed(1)})`);
+                } else {
+                  console.log(`[smart-wallet-poller] Whale ${sw.slice(0, 6)}.. bought ${symbol} ($${costUsd.toFixed(1)})`);
+                }
+
                 pushActiveDetail({
                   mint,
                   symbol,
                   wallet: sw,
                   openedAt: Date.now(),
-                  source: "smart_money_inflow",
+                  source: sourceTag,
                   priceUsd,
                   tx: act.tx_hash,
-                  status: "EVALUATING_G2_LANES",
+                  status: statusTag,
                 });
                 write("watch-events.jsonl", {
-                  type: "SMART_MONEY_POLL_BUY_DETECTED",
+                  type: eventType,
                   observedAt: Date.now(),
                   wallet: sw,
                   mint,
@@ -1507,7 +1527,7 @@ while (!controller.isClosed() && !stopping) {
                   costUsd,
                   priceUsd,
                   tx: act.tx_hash,
-                  source: "smart_money_inflow",
+                  source: sourceTag,
                 });
                 const swCandidate: Transfer = {
                   wallet: sw,
@@ -1517,8 +1537,9 @@ while (!controller.isClosed() && !stopping) {
                   priceUsd,
                   amount: String(amount),
                   tx: act.tx_hash,
-                  source: "smart_money_inflow",
+                  source: sourceTag,
                 };
+                write("transfers.jsonl", swCandidate);
                 if (targetLane instanceof DistributionProfit4Runtime) {
                   targetLane.register(swCandidate, Date.now());
                   if (priceUsd > 0) {
@@ -1537,6 +1558,16 @@ while (!controller.isClosed() && !stopping) {
                   tradeStream.registerMint(mint, { symbol, priceUsd });
                 }
                 gmgnWsManager.subscribeToken(mint).catch(() => {});
+              }
+            } else if (ev === "sell" || ev === "swap_sell") {
+              const mint = String(act.token?.address || act.token_address || "");
+              if (mint) {
+                if (isOezank) {
+                  console.log(`[oezank-poller] 🚨 Oezank IDC sold token ${mint.slice(0, 6)}.. Triggering mirror exit!`);
+                }
+                if (targetLane instanceof DistributionProfit4Runtime) {
+                  targetLane.onTrackedWalletSold(mint, sw, Date.now());
+                }
               }
             }
           }

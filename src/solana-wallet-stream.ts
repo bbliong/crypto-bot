@@ -137,6 +137,10 @@ export class SolanaWalletStream extends EventEmitter {
           "status",
           `Solana RPC socket ${socketIndex} closed (${code}: ${reason}). Reconnecting in 3s...`,
         );
+        const idx = this.sockets.indexOf(ws);
+        if (idx !== -1) {
+          this.sockets[idx] = null as any;
+        }
         const timer = setTimeout(() => {
           if (this.running) {
             this.initSocket(wallets, socketIndex).catch(() => {});
@@ -166,13 +170,20 @@ export class SolanaWalletStream extends EventEmitter {
       }
     }
 
-    // Check if logs touch SPL token or pump.fun / raydium
+    // Check if logs touch SPL token, Token-2022, pump.fun, raydium, jupiter, or transfers
     const hasSpl = logs.some(
       (l) =>
         l.includes("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") ||
+        l.includes("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb") ||
         l.includes("Instruction: Transfer") ||
+        l.includes("Instruction: TransferChecked") ||
         l.includes("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P") ||
-        l.includes("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"),
+        l.includes("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA") ||
+        l.includes("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8") ||
+        l.includes("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK") ||
+        l.includes("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C") ||
+        l.includes("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc") ||
+        l.includes("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"),
     );
     if (!hasSpl) return;
 
@@ -204,32 +215,53 @@ export class SolanaWalletStream extends EventEmitter {
         }),
       });
 
-      if (res.status === 429 && attempt <= 3) {
-        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      if (res.status === 429 && attempt <= 4) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
         return this.resolveTransaction(wallet, signature, attempt + 1);
       }
 
       if (!res.ok) return;
       const body: any = await res.json();
-      if (body.error && attempt <= 3) {
-        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      if (body.error && attempt <= 4) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
         return this.resolveTransaction(wallet, signature, attempt + 1);
       }
       const tx = body.result;
+      if ((!tx || !tx.meta) && attempt <= 4) {
+        // Transaction may be processed but not yet indexed in RPC block store
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+        return this.resolveTransaction(wallet, signature, attempt + 1);
+      }
       if (!tx || !tx.meta) return;
 
     const blockTime = tx.blockTime ? tx.blockTime * 1000 : Date.now();
     const preBalances = tx.meta.preTokenBalances || [];
     const postBalances = tx.meta.postTokenBalances || [];
 
+    // Skip native SOL wrapped or common stablecoins
+    const ignoredMints = new Set([
+      "So11111111111111111111111111111111111111112",
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      "7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT",
+      "USDH1SM1ojcxkgmunbKc98QmTXpnStephenbpTREg9Dh7",
+    ]);
+
     // Find token balance changes for our monitored wallet
     const relevantMints = new Set<string>();
     preBalances.forEach((b: any) => {
-      if (b.owner === wallet && b.mint) relevantMints.add(b.mint);
+      if (b.owner === wallet && b.mint && !ignoredMints.has(b.mint)) relevantMints.add(b.mint);
     });
     postBalances.forEach((b: any) => {
-      if (b.owner === wallet && b.mint) relevantMints.add(b.mint);
+      if (b.owner === wallet && b.mint && !ignoredMints.has(b.mint)) relevantMints.add(b.mint);
     });
+
+    // Check SOL spent / received for price estimation
+    const accountKeys = tx.transaction?.message?.accountKeys || [];
+    const walletIdx = accountKeys.findIndex((k: any) => (typeof k === "string" ? k : k.pubkey) === wallet);
+    const preSolLamports = walletIdx !== -1 ? (tx.meta.preBalances?.[walletIdx] || 0) : 0;
+    const postSolLamports = walletIdx !== -1 ? (tx.meta.postBalances?.[walletIdx] || 0) : 0;
+    const solDiff = (postSolLamports - preSolLamports) / 1e9;
 
     for (const mint of relevantMints) {
       const pre = preBalances.find((b: any) => b.owner === wallet && b.mint === mint);
@@ -246,6 +278,12 @@ export class SolanaWalletStream extends EventEmitter {
           (b: any) => b.mint === mint && b.owner !== wallet && Number(b.uiTokenAmount?.uiAmount || 0) > 0,
         );
 
+        let estimatedPriceUsd: number | undefined = undefined;
+        if (solDiff < -0.001) {
+          const solSpent = Math.abs(solDiff);
+          estimatedPriceUsd = (solSpent * 150) / diff; // baseline SOL $150
+        }
+
         const transferEvent: WalletTransferEvent = {
           wallet,
           mint,
@@ -253,6 +291,7 @@ export class SolanaWalletStream extends EventEmitter {
           timestamp: Math.floor(blockTime / 1000),
           from: sender?.owner || "",
           tx: signature,
+          priceUsd: estimatedPriceUsd,
         };
         this.emit("transfer", transferEvent);
       } else if (diff < 0) {

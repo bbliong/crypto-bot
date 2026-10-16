@@ -127,6 +127,7 @@ type RuntimeState = {
     | DistributionMomentumR5BandLaneV2;
   facts: TargetFacts | null;
   active: boolean;
+  registeredAt?: number;
   laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1';
   version: string;
   lastDecision: unknown;
@@ -240,9 +241,11 @@ export class DistributionProfit4Runtime {
   }
 
   register(transfer: Transfer, now: number) {
-    if (this.observations.has(transfer.mint)) return;
-    const observation = new TargetObservation((transfer.timestamp ?? now / 1000) * 1000);
-    this.observations.set(transfer.mint, observation);
+    let observation = this.observations.get(transfer.mint);
+    if (!observation) {
+      observation = new TargetObservation((transfer.timestamp ?? now / 1000) * 1000);
+      this.observations.set(transfer.mint, observation);
+    }
 
     const makeOnEvent = (laneKey: string, laneLabel: RuntimeState['laneLabel']) => (event: TargetEvent) => {
       const state = this.states.get(laneKey);
@@ -285,6 +288,16 @@ export class DistributionProfit4Runtime {
       // ==========================================
       if (source === 'syndicate_inflow') {
         const keyV1 = `${transfer.mint}:v1`;
+        if (this.states.has(keyV1)) {
+          if (transfer.syndicateWalletsCount) {
+            const s5State = this.states.get(`${transfer.mint}:s5`);
+            if (s5State) {
+              (s5State.lane as any).updateAirdropMeta?.(transfer.syndicateWalletsCount, transfer.syndicateTier);
+            }
+          }
+          return;
+        }
+
         const keyV2 = `${transfer.mint}:v2`;
         const keyV3 = `${transfer.mint}:v3`;
         const keyV4 = `${transfer.mint}:v4`;
@@ -315,26 +328,29 @@ export class DistributionProfit4Runtime {
           tier: transfer.syndicateTier
         });
 
-        laneS1.setInitialTrades(observation.trades);
-        laneS2.setInitialTrades(observation.trades);
-        laneS3.setInitialTrades(observation.trades);
-        laneS4.setInitialTrades(observation.trades);
-        laneS1_2.setInitialTrades(observation.trades);
-        laneS5.setInitialTrades(observation.trades);
+        const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
+        const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 30000);
 
-        this.states.set(keyV1, { key: keyV1, transfer, observation, lane: laneV1, facts: null, active: true, laneLabel: 'V1', version: BOUNCE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV2, { key: keyV2, transfer, observation, lane: laneV2, facts: null, active: true, laneLabel: 'V2', version: BOUNCE_RULES_V2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV3, { key: keyV3, transfer, observation, lane: laneV3, facts: null, active: true, laneLabel: 'V3', version: BOUNCE_RULES_V3.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV4, { key: keyV4, transfer, observation, lane: laneV4, facts: null, active: true, laneLabel: 'V4', version: BOUNCE_RULES_V4.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV5, { key: keyV5, transfer, observation, lane: laneV5, facts: null, active: true, laneLabel: 'V5', version: BOUNCE_RULES_V5.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV6, { key: keyV6, transfer, observation, lane: laneV6, facts: null, active: true, laneLabel: 'V6', version: BOUNCE_RULES_V6.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV7, { key: keyV7, transfer, observation, lane: laneV7, facts: null, active: true, laneLabel: 'V7', version: BOUNCE_RULES_V7.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS1, { key: keyS1, transfer, observation, lane: laneS1, facts: null, active: true, laneLabel: 'S1', version: STAIRCASE_RULES_S1.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS2, { key: keyS2, transfer, observation, lane: laneS2, facts: null, active: true, laneLabel: 'S2', version: STAIRCASE_RULES_S2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS3, { key: keyS3, transfer, observation, lane: laneS3, facts: null, active: true, laneLabel: 'S3', version: STAIRCASE_RULES_S3.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS4, { key: keyS4, transfer, observation, lane: laneS4, facts: null, active: true, laneLabel: 'S4', version: STAIRCASE_RULES_S4.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS1_2, { key: keyS1_2, transfer, observation, lane: laneS1_2, facts: null, active: true, laneLabel: 'S1.2', version: STAIRCASE_RULES_S1_V2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS5, { key: keyS5, transfer, observation, lane: laneS5, facts: null, active: true, laneLabel: 'S5', version: STAIRCASE_RULES_S5.version, lastDecision: null, lastEvent: null });
+        laneS1.setInitialTrades(recentTrades);
+        laneS2.setInitialTrades(recentTrades);
+        laneS3.setInitialTrades(recentTrades);
+        laneS4.setInitialTrades(recentTrades);
+        laneS1_2.setInitialTrades(recentTrades);
+        laneS5.setInitialTrades(recentTrades);
+
+        this.states.set(keyV1, { key: keyV1, transfer, observation, lane: laneV1, facts: null, active: true, registeredAt: now, laneLabel: 'V1', version: BOUNCE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV2, { key: keyV2, transfer, observation, lane: laneV2, facts: null, active: true, registeredAt: now, laneLabel: 'V2', version: BOUNCE_RULES_V2.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV3, { key: keyV3, transfer, observation, lane: laneV3, facts: null, active: true, registeredAt: now, laneLabel: 'V3', version: BOUNCE_RULES_V3.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV4, { key: keyV4, transfer, observation, lane: laneV4, facts: null, active: true, registeredAt: now, laneLabel: 'V4', version: BOUNCE_RULES_V4.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV5, { key: keyV5, transfer, observation, lane: laneV5, facts: null, active: true, registeredAt: now, laneLabel: 'V5', version: BOUNCE_RULES_V5.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV6, { key: keyV6, transfer, observation, lane: laneV6, facts: null, active: true, registeredAt: now, laneLabel: 'V6', version: BOUNCE_RULES_V6.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV7, { key: keyV7, transfer, observation, lane: laneV7, facts: null, active: true, registeredAt: now, laneLabel: 'V7', version: BOUNCE_RULES_V7.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyS1, { key: keyS1, transfer, observation, lane: laneS1, facts: null, active: true, registeredAt: now, laneLabel: 'S1', version: STAIRCASE_RULES_S1.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyS2, { key: keyS2, transfer, observation, lane: laneS2, facts: null, active: true, registeredAt: now, laneLabel: 'S2', version: STAIRCASE_RULES_S2.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyS3, { key: keyS3, transfer, observation, lane: laneS3, facts: null, active: true, registeredAt: now, laneLabel: 'S3', version: STAIRCASE_RULES_S3.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyS4, { key: keyS4, transfer, observation, lane: laneS4, facts: null, active: true, registeredAt: now, laneLabel: 'S4', version: STAIRCASE_RULES_S4.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyS1_2, { key: keyS1_2, transfer, observation, lane: laneS1_2, facts: null, active: true, registeredAt: now, laneLabel: 'S1.2', version: STAIRCASE_RULES_S1_V2.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyS5, { key: keyS5, transfer, observation, lane: laneS5, facts: null, active: true, registeredAt: now, laneLabel: 'S5', version: STAIRCASE_RULES_S5.version, lastDecision: null, lastEvent: null });
 
         if (this.bought.has(`${transfer.mint}:v1`)) laneV1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneV1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
@@ -369,6 +385,8 @@ export class DistributionProfit4Runtime {
       // ==========================================
       else if (source === 'gmgn_research_ws') {
         const keySafe = `${transfer.mint}:safe`;
+        if (this.states.has(keySafe)) return;
+
         const keyOpt = `${transfer.mint}:opt`;
         const keyWide = `${transfer.mint}:wide`;
         const keySwing = `${transfer.mint}:swing`;
@@ -388,15 +406,15 @@ export class DistributionProfit4Runtime {
         const laneR5 = new DistributionMomentumR5BandLane(transfer.mint, makeOnEvent(keyR5, 'R5'));
         const laneR5_1 = new DistributionMomentumR5BandLaneV2(transfer.mint, makeOnEvent(keyR5_1, 'R5.1'));
 
-        this.states.set(keySafe, { key: keySafe, transfer, observation, lane: laneSafe, facts: null, active: true, laneLabel: 'Safe', version: SAFE_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyOpt, { key: keyOpt, transfer, observation, lane: laneOpt, facts: null, active: true, laneLabel: 'Opt', version: OPTIMAL_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyWide, { key: keyWide, transfer, observation, lane: laneWide, facts: null, active: true, laneLabel: 'Wide', version: WIDE_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keySwing, { key: keySwing, transfer, observation, lane: laneSwing, facts: null, active: true, laneLabel: 'Swing', version: SWING_100K_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyWave, { key: keyWave, transfer, observation, lane: laneWave, facts: null, active: true, laneLabel: 'Wave', version: WAVE_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV2M, { key: keyV2M, transfer, observation, lane: laneV2M, facts: null, active: true, laneLabel: 'V2M', version: MOMENTUM_V2_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV3M, { key: keyV3M, transfer, observation, lane: laneV3M, facts: null, active: true, laneLabel: 'V3M', version: MOMENTUM_V3_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyR5, { key: keyR5, transfer, observation, lane: laneR5, facts: null, active: true, laneLabel: 'R5', version: R5_BAND_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyR5_1, { key: keyR5_1, transfer, observation, lane: laneR5_1, facts: null, active: true, laneLabel: 'R5.1', version: R5_BAND_LANE_RULES_V2.version, lastDecision: null, lastEvent: null });
+        this.states.set(keySafe, { key: keySafe, transfer, observation, lane: laneSafe, facts: null, active: true, registeredAt: now, laneLabel: 'Safe', version: SAFE_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyOpt, { key: keyOpt, transfer, observation, lane: laneOpt, facts: null, active: true, registeredAt: now, laneLabel: 'Opt', version: OPTIMAL_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyWide, { key: keyWide, transfer, observation, lane: laneWide, facts: null, active: true, registeredAt: now, laneLabel: 'Wide', version: WIDE_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keySwing, { key: keySwing, transfer, observation, lane: laneSwing, facts: null, active: true, registeredAt: now, laneLabel: 'Swing', version: SWING_100K_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyWave, { key: keyWave, transfer, observation, lane: laneWave, facts: null, active: true, registeredAt: now, laneLabel: 'Wave', version: WAVE_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV2M, { key: keyV2M, transfer, observation, lane: laneV2M, facts: null, active: true, registeredAt: now, laneLabel: 'V2M', version: MOMENTUM_V2_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyV3M, { key: keyV3M, transfer, observation, lane: laneV3M, facts: null, active: true, registeredAt: now, laneLabel: 'V3M', version: MOMENTUM_V3_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyR5, { key: keyR5, transfer, observation, lane: laneR5, facts: null, active: true, registeredAt: now, laneLabel: 'R5', version: R5_BAND_LANE_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyR5_1, { key: keyR5_1, transfer, observation, lane: laneR5_1, facts: null, active: true, registeredAt: now, laneLabel: 'R5.1', version: R5_BAND_LANE_RULES_V2.version, lastDecision: null, lastEvent: null });
 
         if (this.bought.has(`${transfer.mint}:safe`)) laneSafe.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneSafe.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
@@ -422,9 +440,16 @@ export class DistributionProfit4Runtime {
       // PIPELINE 3: SMART MONEY INFLOW (117 Wallets: G2.1 Single Whale & G2.2 Multi-Whale)
       // ==========================================
       else if (source === 'smart_money_inflow') {
+        const keyG2 = `${transfer.mint}:g2`;
+        if (this.states.has(keyG2)) {
+          (this.states.get(keyG2)?.lane as any)?.registerSmartWallet?.(transfer.wallet);
+          (this.states.get(`${transfer.mint}:g2_1`)?.lane as any)?.registerSmartWallet?.(transfer.wallet);
+          (this.states.get(`${transfer.mint}:g2_2`)?.lane as any)?.registerSmartWallet?.(transfer.wallet);
+          return;
+        }
+
         const keyG2_1 = `${transfer.mint}:g2_1`;
         const keyG2_2 = `${transfer.mint}:g2_2`;
-        const keyG2 = `${transfer.mint}:g2`;
 
         const laneG2_1 = new DistributionSmartMoneyLaneG2_1(transfer.mint, makeOnEvent(keyG2_1, 'G2.1'));
         const laneG2_2 = new DistributionSmartMoneyConvergenceLaneG2_2(transfer.mint, makeOnEvent(keyG2_2, 'G2.2'));
@@ -434,13 +459,16 @@ export class DistributionProfit4Runtime {
         laneG2_2.registerSmartWallet(transfer.wallet);
         laneG2.registerSmartWallet(transfer.wallet);
 
-        laneG2_1.setInitialTrades(observation.trades);
-        laneG2_2.setInitialTrades(observation.trades);
-        laneG2.setInitialTrades(observation.trades);
+        const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
+        const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 60000);
 
-        this.states.set(keyG2_1, { key: keyG2_1, transfer, observation, lane: laneG2_1, facts: null, active: true, laneLabel: 'G2.1', version: SMART_MONEY_RULES_G2_1.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyG2_2, { key: keyG2_2, transfer, observation, lane: laneG2_2, facts: null, active: true, laneLabel: 'G2.2', version: SMART_MONEY_RULES_G2_2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyG2, { key: keyG2, transfer, observation, lane: laneG2, facts: null, active: true, laneLabel: 'G2', version: SMART_MONEY_RULES_G2.version, lastDecision: null, lastEvent: null });
+        laneG2_1.setInitialTrades(recentTrades);
+        laneG2_2.setInitialTrades(recentTrades);
+        laneG2.setInitialTrades(recentTrades);
+
+        this.states.set(keyG2_1, { key: keyG2_1, transfer, observation, lane: laneG2_1, facts: null, active: true, registeredAt: now, laneLabel: 'G2.1', version: SMART_MONEY_RULES_G2_1.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyG2_2, { key: keyG2_2, transfer, observation, lane: laneG2_2, facts: null, active: true, registeredAt: now, laneLabel: 'G2.2', version: SMART_MONEY_RULES_G2_2.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyG2, { key: keyG2, transfer, observation, lane: laneG2, facts: null, active: true, registeredAt: now, laneLabel: 'G2', version: SMART_MONEY_RULES_G2.version, lastDecision: null, lastEvent: null });
 
         if (this.bought.has(`${transfer.mint}:g2_1`)) laneG2_1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneG2_1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
@@ -455,8 +483,13 @@ export class DistributionProfit4Runtime {
       // ==========================================
       else if (source === 'oezank_inflow') {
         const keyOZ1 = `${transfer.mint}:oz1`;
+        if (this.states.has(keyOZ1)) return;
+
         const laneOZ1 = new DistributionOezankLaneOZ1(transfer.mint, makeOnEvent(keyOZ1, 'OZ1'));
-        laneOZ1.setInitialTrades(observation.trades);
+        const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
+        const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 30000);
+        laneOZ1.setInitialTrades(recentTrades);
+
         this.states.set(keyOZ1, {
           key: keyOZ1,
           transfer,
@@ -464,6 +497,7 @@ export class DistributionProfit4Runtime {
           lane: laneOZ1,
           facts: null,
           active: true,
+          registeredAt: now,
           laneLabel: 'OZ1',
           version: OEZANK_RULES_OZ1.version,
           lastDecision: null,
@@ -476,7 +510,7 @@ export class DistributionProfit4Runtime {
     } else {
       const key = transfer.mint;
       const lane = new DistributionProfit4Lane(transfer.mint, makeOnEvent(key, 'P4'));
-      this.states.set(key, { key, transfer, observation, lane, facts: null, active: true, laneLabel: 'P4', version: PROFIT4_RULES.version, lastDecision: null, lastEvent: null });
+      this.states.set(key, { key, transfer, observation, lane, facts: null, active: true, registeredAt: now, laneLabel: 'P4', version: PROFIT4_RULES.version, lastDecision: null, lastEvent: null });
       if (this.bought.has(transfer.mint)) lane.end(now, 'ONE_ROUND_ALREADY_ENTERED');
       else if (!Number.isFinite(transfer.timestamp) || !transfer.timestamp || transfer.timestamp * 1000 > now + 2000) lane.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
     }
@@ -512,7 +546,8 @@ export class DistributionProfit4Runtime {
     for (const state of this.states.values()) {
       if (!state.active) continue;
       const facts = state.observation.facts(now, [], state.transfer.from); state.facts = facts;
-      if (state.lane.entryAt === null && facts.firstAt !== null && now - facts.firstAt > state.lane.rules.maxEntryWaitSeconds * 1000) {
+      const waitStart = state.registeredAt ?? facts.firstAt;
+      if (state.lane.entryAt === null && waitStart !== null && now - waitStart > state.lane.rules.maxEntryWaitSeconds * 1000) {
         state.lane.end(now, 'ENTRY_WINDOW_EXPIRED');
         state.active = false;
         this.states.delete(state.key);
