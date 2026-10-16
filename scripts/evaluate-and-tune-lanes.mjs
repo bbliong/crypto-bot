@@ -66,9 +66,11 @@ export async function runEvaluation() {
       losses: 0,
       pnlUsd: 0,
       rets: [],
-      recentCount: 0,
-      recentPnl: 0,
+      recentClosed: 0,
       recentWins: 0,
+      recentLosses: 0,
+      recentPnl: 0,
+      recentRets: [],
       rejections: {}
     };
   }
@@ -77,7 +79,23 @@ export async function runEvaluation() {
   entered.forEach(p => {
     const l = p.laneLabel || 'Unknown';
     if (!laneStats[l]) {
-      laneStats[l] = { label: l, total: 0, open: 0, closed: 0, wins: 0, losses: 0, pnlUsd: 0, rets: [], recentCount: 0, recentPnl: 0, recentWins: 0, rejections: {} };
+      laneStats[l] = { 
+        label: l, 
+        total: 0, 
+        open: 0, 
+        closed: 0, 
+        wins: 0, 
+        losses: 0, 
+        pnlUsd: 0, 
+        rets: [], 
+        // 30 menit terakhir saja
+        recentClosed: 0, 
+        recentWins: 0, 
+        recentLosses: 0,
+        recentPnl: 0, 
+        recentRets: [],
+        rejections: {} 
+      };
     }
     const s = laneStats[l];
     s.total++;
@@ -94,16 +112,21 @@ export async function runEvaluation() {
         return;
       }
 
+      // Kumulatif
       s.closed++;
       s.pnlUsd += pnl;
       s.rets.push(ret);
       if (ret > 0) s.wins++;
       else s.losses++;
 
-      if ((p.exitAt || p.entryAt || 0) >= window30m) {
-        s.recentCount++;
+      // Khusus jendela 30 menit terakhir
+      const exitTime = p.exitAt || p.entryAt || 0;
+      if (exitTime >= window30m) {
+        s.recentClosed++;
         s.recentPnl += pnl;
+        s.recentRets.push(ret);
         if (ret > 0) s.recentWins++;
+        else s.recentLosses++;
       }
     }
   });
@@ -124,35 +147,36 @@ export async function runEvaluation() {
     }
   });
 
-  // Ranking data
+  // Ranking data khusus 30 MENIT TERAKHIR
   const statList = Object.values(laneStats);
 
-  // 1. Diurutkan berdasarkan PnL (Paling Untung ➔ Terendah)
-  const byProfit = [...statList]
-    .filter(l => l.closed > 0)
-    .sort((a, b) => b.pnlUsd - a.pnlUsd);
+  // 1. Diurutkan berdasarkan PnL 30 Menit (Paling Untung ➔ Terendah)
+  const byProfit30m = [...statList]
+    .filter(l => l.recentClosed > 0)
+    .sort((a, b) => b.recentPnl - a.recentPnl);
 
-  // 2. Diurutkan berdasarkan Win Rate Tertinggi
-  const byWinRate = [...statList]
-    .filter(l => l.closed >= 3)
-    .sort((a, b) => (b.wins / b.closed) - (a.wins / a.closed));
+  // 2. Diurutkan berdasarkan Win Rate Tertinggi 30 Menit
+  const byWinRate30m = [...statList]
+    .filter(l => l.recentClosed >= 3)
+    .sort((a, b) => (b.recentWins / b.recentClosed) - (a.recentWins / a.recentClosed));
 
-  // 3. Lane yang Merugi
-  const lossLanes = [...statList]
-    .filter(l => l.closed > 0 && l.pnlUsd < 0)
-    .sort((a, b) => a.pnlUsd - b.pnlUsd);
+  // 3. Lane yang Merugi 30 Menit
+  const lossLanes30m = [...statList]
+    .filter(l => l.recentClosed > 0 && l.recentPnl < 0)
+    .sort((a, b) => a.recentPnl - b.recentPnl);
 
-  // 4. Lane Sepi (0 Entry)
-  const starvedLanes = [...statList].filter(l => l.total === 0);
+  // 4. Lane Sepi / Tidak Ada Aktivitas 30 Menit
+  const starvedLanes = [...statList].filter(l => l.recentClosed === 0);
 
-  // 5. Metrik 30 Menit Terakhir
+  // 5. Metrik Total 30 Menit Terakhir
   const recent30mPnl = statList.reduce((sum, l) => sum + l.recentPnl, 0);
-  const recent30mTrades = statList.reduce((sum, l) => sum + l.recentCount, 0);
+  const recent30mTrades = statList.reduce((sum, l) => sum + l.recentClosed, 0);
+  const recent30mWins = statList.reduce((sum, l) => sum + l.recentWins, 0);
+  const recent30mWinRate = recent30mTrades > 0 ? ((recent30mWins / recent30mTrades) * 100).toFixed(1) : '0.0';
+
   const totalClosed = statList.reduce((sum, l) => sum + l.closed, 0);
   const totalOpen = statList.reduce((sum, l) => sum + l.open, 0);
   const totalPnl = statList.reduce((sum, l) => sum + l.pnlUsd, 0);
-  const totalWins = statList.reduce((sum, l) => sum + l.wins, 0);
-  const overallWinRate = totalClosed > 0 ? ((totalWins / totalClosed) * 100).toFixed(1) : '0.0';
 
   const nowWib = new Date().toLocaleString('id-ID', {
     timeZone: 'Asia/Jakarta',
@@ -165,51 +189,51 @@ export async function runEvaluation() {
   });
 
   // Format Pesan Markdown
-  let md = `📊 **LAPORAN EVALUASI & AUDIT PERFORMA LANE PROFIT4 (DATA BERSIH)**\n`;
-  md += `🕒 *Waktu Evaluasi*: ${nowWib} WIB\n`;
+  let md = `📊 **LAPORAN PERFORMA LANE PROFIT4 (MURNI 30 MENIT TERAKHIR)**\n`;
+  md += `🕒 *Waktu Evaluasi*: ${nowWib} WIB (Jendela: 30 menit ke belakang)\n`;
   if (anomalyCount > 0) {
     md += `🛡️ *Filter Glitch*: **${anomalyCount} trade anomali dibersihkan** (harga < $0.000001 diabaikan)\n`;
   }
-  md += `⏱️ *Kinerja 30 Menit Terakhir*: **${recent30mTrades} Trade** | PnL: **${recent30mPnl >= 0 ? '+' : ''}$${recent30mPnl.toFixed(2)} USD**\n`;
-  md += `📈 *Akumulasi Riil*: **${totalClosed} Trade Selesai** | **${totalOpen} Aktif** | Win Rate: **${overallWinRate}%** | Total PnL Riil: **${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} USD**\n\n`;
+  md += `⏱️ *Hasil 30 Menit Ini*: **${recent30mTrades} Trade** | Win Rate: **${recent30mWinRate}%** | PnL: **${recent30mPnl >= 0 ? '+' : ''}$${recent30mPnl.toFixed(2)} USD**\n`;
+  md += `📈 *Akumulasi Riil Sejak Mulai*: ${totalClosed} Trade Selesai | ${totalOpen} Aktif | Total PnL: ${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} USD\n\n`;
 
-  // Bagian 1: Diurutkan Berdasarkan Yang Paling Untung (PnL)
-  md += `💰 **1. DIURUTKAN PALING UNTUNG (PnL Terbesar)**:\n`;
-  const profitableLanes = byProfit.filter(l => l.pnlUsd > 0);
+  // Bagian 1: Diurutkan Berdasarkan Yang Paling Untung (PnL 30 Menit)
+  md += `💰 **1. DIURUTKAN PALING UNTUNG (30 Menit Terakhir)**:\n`;
+  const profitableLanes = byProfit30m.filter(l => l.recentPnl > 0);
   if (profitableLanes.length) {
     profitableLanes.forEach((l, idx) => {
-      const wr = ((l.wins / l.closed) * 100).toFixed(1);
-      const avg = l.rets.length ? (l.rets.reduce((a,b)=>a+b,0)/l.rets.length).toFixed(1) : '0';
-      md += `${idx + 1}. **Lane ${l.label}**: **+$${l.pnlUsd.toFixed(2)} USD** (${l.closed} trade | WR: **${wr}%** | avg: +${avg}%)\n`;
+      const wr = ((l.recentWins / l.recentClosed) * 100).toFixed(1);
+      const avg = l.recentRets.length ? (l.recentRets.reduce((a,b)=>a+b,0)/l.recentRets.length).toFixed(1) : '0';
+      md += `${idx + 1}. **Lane ${l.label}**: **+$${l.recentPnl.toFixed(2)} USD** (${l.recentClosed} trade | WR: **${wr}%** | avg: +${avg}%)\n`;
     });
   } else {
-    md += `• *(Belum ada lane dengan profit)*\n`;
+    md += `• *(Tidak ada lane profit dalam 30 menit terakhir)*\n`;
   }
 
-  // Bagian 2: Diurutkan Berdasarkan Win Rate Tertinggi
-  md += `\n🎯 **2. DIURUTKAN WIN RATE TERTINGGI (Min 3 Trade)**:\n`;
-  if (byWinRate.length) {
-    byWinRate.forEach((l, idx) => {
-      const wr = ((l.wins / l.closed) * 100).toFixed(1);
-      md += `${idx + 1}. **Lane ${l.label}**: Win Rate **${wr}%** (${l.wins} win / ${l.closed} trade | PnL: ${l.pnlUsd >= 0 ? '+' : ''}$${l.pnlUsd.toFixed(2)})\n`;
+  // Bagian 2: Diurutkan Berdasarkan Win Rate Tertinggi (30 Menit)
+  md += `\n🎯 **2. DIURUTKAN WIN RATE TERTINGGI (Min 3 Trade - 30 Menit Terakhir)**:\n`;
+  if (byWinRate30m.length) {
+    byWinRate30m.forEach((l, idx) => {
+      const wr = ((l.recentWins / l.recentClosed) * 100).toFixed(1);
+      md += `${idx + 1}. **Lane ${l.label}**: Win Rate **${wr}%** (${l.recentWins}W / ${l.recentLosses}L dari ${l.recentClosed} trade | PnL: ${l.recentPnl >= 0 ? '+' : ''}$${l.recentPnl.toFixed(2)})\n`;
     });
   } else {
-    md += `• *(Data sampel trade belum mencukupi)*\n`;
+    md += `• *(Data sampel trade belum mencukupi min 3 trade)*\n`;
   }
 
-  // Bagian 3: Diurutkan Berdasarkan Yang Merugi
-  md += `\n⚠️ **3. DIURUTKAN YANG MERUGI (Loss Terbesar)**:\n`;
-  if (lossLanes.length) {
-    lossLanes.forEach((l, idx) => {
-      const avg = l.rets.length ? (l.rets.reduce((a,b)=>a+b,0)/l.rets.length).toFixed(1) : '0';
-      md += `${idx + 1}. **Lane ${l.label}**: **-$${Math.abs(l.pnlUsd).toFixed(2)} USD** (${l.losses} loss / ${l.closed} trade | avg: ${avg}%)\n`;
+  // Bagian 3: Diurutkan Berdasarkan Yang Merugi (30 Menit)
+  md += `\n⚠️ **3. DIURUTKAN YANG MERUGI (Loss Terbesar - 30 Menit Terakhir)**:\n`;
+  if (lossLanes30m.length) {
+    lossLanes30m.forEach((l, idx) => {
+      const avg = l.recentRets.length ? (l.recentRets.reduce((a,b)=>a+b,0)/l.recentRets.length).toFixed(1) : '0';
+      md += `${idx + 1}. **Lane ${l.label}**: **-$${Math.abs(l.recentPnl).toFixed(2)} USD** (${l.recentLosses} loss / ${l.recentClosed} trade | avg: ${avg}%)\n`;
     });
   } else {
-    md += `• *Nihil (Tidak ada lane yang mengalami kerugian)*\n`;
+    md += `• *Nihil (Tidak ada lane yang merugi dalam 30 menit terakhir)*\n`;
   }
 
-  // Bagian 4: Head-to-Head Perbandingan Baseline vs Varian Baru
-  md += `\n⚖️ **4. KOMPARASI HEAD-TO-HEAD (Baseline vs Varian Baru - Tidak Ditiban)**:\n`;
+  // Bagian 4: Head-to-Head Perbandingan Baseline vs Varian Baru (30 Menit)
+  md += `\n⚖️ **4. KOMPARASI HEAD-TO-HEAD (30 Menit Terakhir)**:\n`;
   const pairs = [
     { base: 'G1', variant: 'G1.2', name: 'Genesis Surge' },
     { base: 'S1', variant: 'S1.2', name: 'Staircase Fast' },
@@ -217,27 +241,27 @@ export async function runEvaluation() {
   ];
 
   pairs.forEach(p => {
-    const b = laneStats[p.base] || { closed: 0, pnlUsd: 0, wins: 0, open: 0 };
-    const v = laneStats[p.variant] || { closed: 0, pnlUsd: 0, wins: 0, open: 0 };
-    const bWr = b.closed ? ((b.wins / b.closed) * 100).toFixed(1) : '0';
-    const vWr = v.closed ? ((v.wins / v.closed) * 100).toFixed(1) : '0';
+    const b = laneStats[p.base] || { recentClosed: 0, recentPnl: 0, recentWins: 0, open: 0 };
+    const v = laneStats[p.variant] || { recentClosed: 0, recentPnl: 0, recentWins: 0, open: 0 };
+    const bWr = b.recentClosed ? ((b.recentWins / b.recentClosed) * 100).toFixed(1) : '0';
+    const vWr = v.recentClosed ? ((v.recentWins / v.recentClosed) * 100).toFixed(1) : '0';
 
     md += `• **${p.name}**:\n`;
-    md += `  - Baseline **${p.base}**: ${b.closed} trade, WR ${bWr}%, PnL **${b.pnlUsd >= 0 ? '+' : ''}$${b.pnlUsd.toFixed(2)}**\n`;
-    md += `  - Varian Baru **${p.variant}**: ${v.closed} trade (${v.open} aktif), WR ${vWr}%, PnL **${v.pnlUsd >= 0 ? '+' : ''}$${v.pnlUsd.toFixed(2)}**\n`;
+    md += `  - Baseline **${p.base}**: ${b.recentClosed} trade, WR ${bWr}%, PnL **${b.recentPnl >= 0 ? '+' : ''}$${b.recentPnl.toFixed(2)}**\n`;
+    md += `  - Varian Baru **${p.variant}**: ${v.recentClosed} trade (${v.open} aktif), WR ${vWr}%, PnL **${v.recentPnl >= 0 ? '+' : ''}$${v.recentPnl.toFixed(2)}**\n`;
   });
 
-  // Bagian 5: Lane Sepi (0 Token Masuk) & Akar Masalah
+  // Bagian 5: Lane Sepi (0 Token Masuk dalam 30 Menit) & Akar Masalah
   if (starvedLanes.length) {
-    md += `\n🔍 **5. LANE SEPI (0 Token Masuk) & PENYEBAB**:\n`;
+    md += `\n🔍 **5. LANE SEPI (0 Trade Masuk 30 Menit Ini)**:\n`;
     starvedLanes.forEach(l => {
       const topRej = Object.entries(l.rejections).sort((a,b)=>b[1]-a[1]).slice(0, 1);
       const rej = topRej.length ? `${topRej[0][0]} (${topRej[0][1]}x)` : 'Menunggu kriteria trigger';
-      md += `• **Lane ${l.label}**: 0 entry → *${rej}*\n`;
+      md += `• **Lane ${l.label}**: 0 entry 30m → *${rej}*\n`;
     });
   }
 
-  md += `\n🔄 *Auto-tuning loop berjalan mandiri tiap 30m. Rekap akumulatif semalam disiapkan untuk review pagi besok.*`;
+  md += `\n🔄 *Evaluator berjalan otomatis tiap 30 menit. Review harian semalam dikirim pukul 07:00 WIB.*`;
 
   // Simpan arsip
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
