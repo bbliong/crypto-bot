@@ -51,7 +51,7 @@ export async function runEvaluation() {
   // Grouping per lane (Baseline + Varian Baru)
   const laneStats = {};
   const allLanes = new Set([
-    'G1', 'G1.2', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7',
+    'G1', 'G1.2', 'G2', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7',
     'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M',
     'S1', 'S2', 'S3', 'S4', 'S1.2', 'R5', 'R5.1'
   ]);
@@ -235,9 +235,10 @@ export async function runEvaluation() {
   // Bagian 4: Head-to-Head Perbandingan Baseline vs Varian Baru (30 Menit)
   md += `\n⚖️ **4. KOMPARASI HEAD-TO-HEAD (30 Menit Terakhir)**:\n`;
   const pairs = [
-    { base: 'G1', variant: 'G1.2', name: 'Genesis Surge' },
-    { base: 'S1', variant: 'S1.2', name: 'Staircase Fast' },
-    { base: 'R5', variant: 'R5.1', name: 'Momentum Dynamic' }
+    { base: 'G1', variant: 'G1.2', name: 'Genesis Surge (G1 vs G1.2 Sunset)' },
+    { base: 'G1.2', variant: 'G2', name: 'Smart Money Convergence (G2 Baru)' },
+    { base: 'S1', variant: 'S1.2', name: 'Staircase Fast (S1 vs S1.2)' },
+    { base: 'R5', variant: 'R5.1', name: 'Momentum Dynamic (R5 vs R5.1)' }
   ];
 
   pairs.forEach(p => {
