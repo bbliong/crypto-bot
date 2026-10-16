@@ -174,7 +174,10 @@ export function profit4Snapshot(root, worker) {
   const s2Positions = positions.filter(p => (p.version || '').includes('s2') || p.laneLabel === 'S2');
   const s3Positions = positions.filter(p => (p.version || '').includes('s3') || p.laneLabel === 'S3');
   const s4Positions = positions.filter(p => (p.version || '').includes('s4') || p.laneLabel === 'S4');
+  const s1_2Positions = positions.filter(p => p.laneLabel === 'S1.2');
   const g1Positions = positions.filter(p => (p.version || '').includes('genesis-surge-g1') || p.laneLabel === 'G1');
+  const g1_2Positions = positions.filter(p => p.laneLabel === 'G1.2');
+  const g2Positions = positions.filter(p => (p.version || '').includes('smart-money-g2') || p.laneLabel === 'G2');
   const hourMap = new Map();
   for (const p of positions) {
     const time = p.entryAt ?? p.lastEvent?.observedAt ?? (p.timestamp ? p.timestamp * 1000 : null);
@@ -197,7 +200,10 @@ export function profit4Snapshot(root, worker) {
       const s2 = items.filter(p => (p.version || '').includes('s2') || p.laneLabel === 'S2');
       const s3 = items.filter(p => (p.version || '').includes('s3') || p.laneLabel === 'S3');
       const s4 = items.filter(p => (p.version || '').includes('s4') || p.laneLabel === 'S4');
+      const s1_2 = items.filter(p => p.laneLabel === 'S1.2');
       const g1 = items.filter(p => (p.version || '').includes('genesis-surge-g1') || p.laneLabel === 'G1');
+      const g1_2 = items.filter(p => p.laneLabel === 'G1.2');
+      const g2 = items.filter(p => (p.version || '').includes('smart-money-g2') || p.laneLabel === 'G2');
       const d = new Date(hour), endD = new Date(hour + 3600000);
       const dayStr = d.toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit' });
       const startH = d.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -216,7 +222,10 @@ export function profit4Snapshot(root, worker) {
         s2: summarize(s2),
         s3: summarize(s3),
         s4: summarize(s4),
+        s1_2: summarize(s1_2),
         g1: summarize(g1),
+        g1_2: summarize(g1_2),
+        g2: summarize(g2),
         total: summarize(items),
       };
     });
@@ -236,7 +245,10 @@ export function profit4Snapshot(root, worker) {
     summaryS2: summarize(s2Positions),
     summaryS3: summarize(s3Positions),
     summaryS4: summarize(s4Positions),
+    summaryS1_2: summarize(s1_2Positions),
     summaryG1: summarize(g1Positions),
+    summaryG1_2: summarize(g1_2Positions),
+    summaryG2: summarize(g2Positions),
     hourlyComparison,
   };
 }
