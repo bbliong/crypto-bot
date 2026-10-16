@@ -18,6 +18,7 @@ import { Profit4LiveEngine } from "./profit4-live-engine.js";
 import { GmgnLiveAdapter } from "./profit4-gmgn-execution.js";
 import { readJson } from "./profit4-live-store.js";
 import { getSmartWalletsWatchlist } from "./distribution-smart-money-lane.js";
+import { OEZANK_WALLET } from "./distribution-oezank-lane.js";
 import {
   DistributionProfit4Runtime,
   atomicProfit4Json,
@@ -1203,6 +1204,7 @@ const SMART_MONEY_BLACKLIST_SYMBOLS = new Set([
 
 let smartMoneyStream: SolanaWalletStream | null = null;
 const smartWalletsSet = getSmartWalletsWatchlist();
+smartWalletsSet.add(OEZANK_WALLET);
 const smartAddresses = [...smartWalletsSet];
 const seenSmartTrades = new Set<string>();
 
@@ -1228,70 +1230,84 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
     if (SMART_MONEY_BLACKLIST_SYMBOLS.has(sym)) {
       return;
     }
-    console.log(`[smart-money-ws] 🐋 Whale ${t.wallet.slice(0, 6)}.. bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
+    const isOezank = t.wallet === OEZANK_WALLET;
+    const sourceTag = isOezank ? "oezank_inflow" : "smart_money_inflow";
+    const statusTag = isOezank ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
+    const eventType = isOezank ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_WHALE_TRANSFER_IN";
+
+    if (isOezank) {
+      console.log(`[oezank-tracker] 🇮🇩 Trader Oezank IDC bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
+    } else {
+      console.log(`[smart-money-ws] 🐋 Whale ${t.wallet.slice(0, 6)}.. bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
+    }
+
     const smartCandidate: Transfer = {
       wallet: t.wallet,
       mint: t.mint,
-      symbol: t.symbol || "SMART",
+      symbol: t.symbol || (isOezank ? "OEZANK" : "SMART"),
       timestamp: t.timestamp || Math.floor(Date.now() / 1000),
       priceUsd: t.priceUsd,
       amount: t.amount,
       from: t.from,
       tx: t.tx,
-      source: "smart_money_inflow",
+      source: sourceTag,
     };
     pushActiveDetail({
       mint: t.mint,
-      symbol: t.symbol || "SMART",
+      symbol: t.symbol || (isOezank ? "OEZANK" : "SMART"),
       wallet: t.wallet,
       openedAt: Date.now(),
-      source: "smart_money_inflow",
+      source: sourceTag,
       priceUsd: t.priceUsd,
       tx: t.tx,
-      status: "EVALUATING_G2_LANES",
+      status: statusTag,
     });
     write("watch-events.jsonl", {
-      type: "SMART_MONEY_WHALE_TRANSFER_IN",
+      type: eventType,
       observedAt: Date.now(),
       wallet: t.wallet,
       mint: t.mint,
       amount: t.amount,
       tx: t.tx,
-      source: "smart_money_inflow",
+      source: sourceTag,
     });
-
-    if (targetLane instanceof DistributionProfit4Runtime) {
-      targetLane.register(smartCandidate, Date.now());
-      if (t.priceUsd && t.priceUsd > 0) {
-        targetLane.trade(t.mint, {
-          at: Date.now(),
-          timestamp: t.timestamp || Math.floor(Date.now() / 1000),
-          price: t.priceUsd,
-          side: "buy",
-          wallet: t.wallet,
-          usd: 50,
-          signature: t.tx || `sm_${Date.now()}`,
-        });
-      }
-    }
     if (useHeadlessStream && tradeStream) {
       tradeStream.registerMint(t.mint, {
         symbol: t.symbol,
         priceUsd: t.priceUsd,
       });
     }
+    if (targetLane instanceof DistributionProfit4Runtime) {
+      targetLane.register(smartCandidate, Date.now());
+      if (t.priceUsd && t.priceUsd > 0) {
+        targetLane.trade(t.mint, {
+          at: Date.now(),
+          timestamp: Math.floor(Date.now() / 1000),
+          price: t.priceUsd,
+          side: "buy",
+          wallet: t.wallet,
+          usd: 25,
+          signature: t.tx || `sm_${Date.now()}`,
+        });
+      }
+    }
     gmgnWsManager.subscribeToken(t.mint).catch(() => {});
   });
 
   smartMoneyStream.on("sell", (s) => {
+    const isOezank = s.wallet === OEZANK_WALLET;
     write("watch-events.jsonl", {
-      type: "SMART_MONEY_WHALE_SOLD",
+      type: isOezank ? "OEZANK_TRADER_SOLD" : "SMART_MONEY_WHALE_SOLD",
       observedAt: Date.now(),
       trackedWallet: s.wallet,
       mint: s.mint,
       tx: s.tx,
       source: "solana_rpc_ws",
     });
+    if (isOezank) {
+      console.log(`[oezank-tracker] 🚨 Oezank IDC sold token ${s.mint.slice(0, 6)}.. Triggering mirror exit!`);
+      (targetLane as any).onTrackedWalletSold?.(s.mint, s.wallet, Date.now());
+    }
   });
 
   void smartMoneyStream.start(smartAddresses);

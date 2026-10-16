@@ -51,7 +51,7 @@ export async function runEvaluation() {
   // Grouping per lane (Baseline + Varian Baru)
   const laneStats = {};
   const allLanes = new Set([
-    'G1', 'G1.2', 'G2', 'G2.1', 'G2.2', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7',
+    'G1', 'G1.2', 'G2', 'G2.1', 'G2.2', 'OZ1', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7',
     'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M',
     'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5', 'R5', 'R5.1'
   ]);

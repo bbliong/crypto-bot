@@ -42,6 +42,12 @@ import {
   SMART_MONEY_LANE_G2_2,
 } from './distribution-smart-money-lane.js';
 import {
+  DistributionOezankLaneOZ1,
+  OEZANK_RULES_OZ1,
+  OEZANK_LANE_OZ1,
+  OEZANK_WALLET
+} from './distribution-oezank-lane.js';
+import {
   DistributionMomentumSafeLane,
   DistributionMomentumOptimalLane,
   DistributionMomentumWideLane,
@@ -106,6 +112,7 @@ type RuntimeState = {
     | DistributionStaircaseLaneS5
     | DistributionGenesisSurgeLaneG1
     | DistributionGenesisSurgeLaneG1_2
+    | DistributionOezankLaneOZ1
     | DistributionSmartMoneyLaneG2_1
     | DistributionSmartMoneyConvergenceLaneG2_2
     | DistributionSmartMoneyConvergenceLaneG2
@@ -120,7 +127,7 @@ type RuntimeState = {
     | DistributionMomentumR5BandLaneV2;
   facts: TargetFacts | null;
   active: boolean;
-  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -442,6 +449,30 @@ export class DistributionProfit4Runtime {
         if (this.bought.has(`${transfer.mint}:g2`)) laneG2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneG2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
+
+      // ==========================================
+      // PIPELINE 4: OEZANK TRADER MIRROR INFLOW (Lane OZ1)
+      // ==========================================
+      else if (source === 'oezank_inflow') {
+        const keyOZ1 = `${transfer.mint}:oz1`;
+        const laneOZ1 = new DistributionOezankLaneOZ1(transfer.mint, makeOnEvent(keyOZ1, 'OZ1'));
+        laneOZ1.setInitialTrades(observation.trades);
+        this.states.set(keyOZ1, {
+          key: keyOZ1,
+          transfer,
+          observation,
+          lane: laneOZ1,
+          facts: null,
+          active: true,
+          laneLabel: 'OZ1',
+          version: OEZANK_RULES_OZ1.version,
+          lastDecision: null,
+          lastEvent: null
+        });
+
+        if (this.bought.has(keyOZ1)) laneOZ1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneOZ1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+      }
     } else {
       const key = transfer.mint;
       const lane = new DistributionProfit4Lane(transfer.mint, makeOnEvent(key, 'P4'));
@@ -536,6 +567,11 @@ export class DistributionProfit4Runtime {
         // 2. BOUNCE LANES: V1 - V7 -> Inform that syndicate selling has begun
         else if (laneLabel.startsWith('V')) {
           (state.lane as any).onSyndicateSell?.(wallet, now);
+        }
+        // 3. OEZANK TRADER MIRROR: If Oezank wallet sold, mirror exit immediately!
+        else if (laneLabel === 'OZ1' && wallet === OEZANK_WALLET) {
+          (state.lane as any).onOezankSold?.(now);
+          state.active = false;
         }
       }
     }
