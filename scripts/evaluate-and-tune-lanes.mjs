@@ -73,6 +73,7 @@ export async function runEvaluation() {
     };
   }
 
+  let anomalyCount = 0;
   entered.forEach(p => {
     const l = p.laneLabel || 'Unknown';
     if (!laneStats[l]) {
@@ -82,9 +83,18 @@ export async function runEvaluation() {
     s.total++;
     if (p.phase === 'OPEN') s.open++;
     if (p.phase === 'CLOSED') {
-      s.closed++;
+      const entryPrice = p.entryPrice;
+      const exitPrice = p.exitPrice;
       const ret = p.netReturnPercent || 0;
       const pnl = p.pnlUsd || 0;
+
+      // Filter anomali glitch desimal harga (< 0.000001 atau return > 300% pada TP normal 25-80%)
+      if ((entryPrice != null && entryPrice < 0.000001) || (exitPrice != null && exitPrice < 0.000001) || ret > 300) {
+        anomalyCount++;
+        return;
+      }
+
+      s.closed++;
       s.pnlUsd += pnl;
       s.rets.push(ret);
       if (ret > 0) s.wins++;
@@ -155,10 +165,13 @@ export async function runEvaluation() {
   });
 
   // Format Pesan Markdown
-  let md = `📊 **LAPORAN EVALUASI PERFORMA LANE PROFIT4 (30 MENITAN)**\n`;
+  let md = `📊 **LAPORAN EVALUASI & AUDIT PERFORMA LANE PROFIT4 (DATA BERSIH)**\n`;
   md += `🕒 *Waktu Evaluasi*: ${nowWib} WIB\n`;
+  if (anomalyCount > 0) {
+    md += `🛡️ *Filter Glitch*: **${anomalyCount} trade anomali dibersihkan** (harga < $0.000001 diabaikan)\n`;
+  }
   md += `⏱️ *Kinerja 30 Menit Terakhir*: **${recent30mTrades} Trade** | PnL: **${recent30mPnl >= 0 ? '+' : ''}$${recent30mPnl.toFixed(2)} USD**\n`;
-  md += `📈 *Akumulasi Total*: **${totalClosed} Trade Selesai** | **${totalOpen} Aktif** | Win Rate: **${overallWinRate}%** | Total PnL: **+$${totalPnl.toFixed(2)} USD**\n\n`;
+  md += `📈 *Akumulasi Riil*: **${totalClosed} Trade Selesai** | **${totalOpen} Aktif** | Win Rate: **${overallWinRate}%** | Total PnL Riil: **${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} USD**\n\n`;
 
   // Bagian 1: Diurutkan Berdasarkan Yang Paling Untung (PnL)
   md += `💰 **1. DIURUTKAN PALING UNTUNG (PnL Terbesar)**:\n`;

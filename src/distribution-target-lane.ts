@@ -172,7 +172,7 @@ export function assessTargetEntry(f: TargetFacts, r: TargetRules): string[] {
   if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
   if (f.firstAt !== null && f.firstAt - f.transferAt > r.maxTransferLagSeconds * 1000) reasons.push('MONITOR_STARTED_TOO_LATE');
   if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-  if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+  if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
   if (f.holderCount === null || f.holderGrowth15s === null) reasons.push('HOLDER_HISTORY_MISSING_OR_STALE');
   else if (f.holderGrowth15s < 0) reasons.push('HOLDERS_DECLINING');
   if (f.buyShareUsdPercent === null || f.buyShareUsdPercent < r.minBuySharePercent || f.meaningfulBuyUsd < r.minMeaningfulBuyUsd || f.meaningfulBuyers < r.minMeaningfulBuyers) reasons.push('MEANINGFUL_BUY_FLOW_WEAK');
@@ -218,6 +218,9 @@ export class DistributionTargetLane {
     this.policy = Object.freeze({ ...policy });
   }
   private entryReasons(f: TargetFacts) {
+    if (f.price === null || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
+      return ['PRICE_OUTSIDE_REALISTIC_BOUNDS'];
+    }
     if (this.policy.overrideEntryReasons) {
       return this.policy.overrideEntryReasons(f, this.rules);
     }
@@ -227,7 +230,7 @@ export class DistributionTargetLane {
     this.emit({ type, observedAt: now, paperLane: this.policy.paperLane ?? DISTRIBUTION_TARGET_LANE, version: this.rules.version, mint: this.mint, paperOnly: true, policyName: this.policy.name, ...data });
   }
   net(price: number): number | null {
-    if (!this.entryPrice) return null;
+    if (!this.entryPrice || this.entryPrice < 0.000001 || price < 0.000001 || !Number.isFinite(price)) return null;
     const r = this.rules, fee = r.feePercentPerSide / 100, slip = r.slippagePercentPerSide / 100;
     const tokens = (r.stakeUsd * (1 - fee) - r.fixedFeeUsdPerSide) / (this.entryPrice * (1 + slip));
     const proceeds = tokens * price * (1 - slip) * (1 - fee) - r.fixedFeeUsdPerSide;

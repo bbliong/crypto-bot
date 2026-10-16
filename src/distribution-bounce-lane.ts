@@ -55,7 +55,7 @@ export class DistributionBounceLane extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
 
         // Syarat 1: Token harus sudah pernah mengalami DUMP PARAH (drawdown >= 60% dari peak)
@@ -158,7 +158,7 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
 
         // Syarat 1: Token harus sudah pernah mengalami DUMP PARAH (drawdown >= 60% dari peak)
@@ -294,7 +294,7 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // V3 Guard 1: Token harus pernah mengalami DUMP PARAH (>= 60%)
         const dd = f.drawdownPercent ?? 0;
@@ -444,7 +444,7 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
 
         // Syarat 1 Dasar V1: Token harus sudah pernah mengalami DUMP PARAH (>= 60%)
@@ -628,7 +628,7 @@ export class DistributionBounceLaneV5 extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // Solusi 2 Gate 1: Dev Supply Dump Check (Anti-Rugpull Dev Trap)
         // Jika dev (transfer.from) terdeteksi masih memegang > 2% supply (> 20M token), dev belum dump tuntas!
@@ -864,7 +864,7 @@ export class DistributionBounceLaneV6 extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // Gate 1: Dev Supply Dump Check (Anti-Rugpull Dev Trap)
         if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
@@ -1095,7 +1095,7 @@ export class DistributionBounceLaneV7 extends DistributionTargetLane {
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
         if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) reasons.push('PRICE_MISSING_OR_STALE');
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // Gate 1: Dev Supply Dump Check (Rekomendasi 3: Anti-Rugpull Dev Trap / Residual Supply)
         if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 1.5) {

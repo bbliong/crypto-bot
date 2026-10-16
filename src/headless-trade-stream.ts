@@ -208,9 +208,14 @@ export class HeadlessTradeStream extends EventEmitter {
 
     // 1. Deteksi New Token Create
     if (txType === 'create' && msg.mint) {
-      const vSol = Number(msg.vSolInBondingCurve) || 30;
-      const vTokens = Number(msg.vTokensInBondingCurve) || 1_073_000_000;
-      const initialPrice = vTokens > 0 ? (vSol / vTokens) * this.solPriceUsd : 0.000004;
+      let vSol = Number(msg.vSolInBondingCurve) || 30;
+      let vTokens = Number(msg.vTokensInBondingCurve) || 1_073_000_000;
+      if (vSol > 1e6) vSol /= 1e9;
+      if (vTokens > 1e12) vTokens /= 1e6;
+      let initialPrice = vTokens > 0 ? (vSol / vTokens) * this.solPriceUsd : 0.000004;
+      if (initialPrice < 0.000001 || initialPrice > 10.0 || !Number.isFinite(initialPrice)) {
+        initialPrice = 0.000004;
+      }
 
       const event: NewTokenEvent = {
         mint: msg.mint,
@@ -248,20 +253,33 @@ export class HeadlessTradeStream extends EventEmitter {
       const mint = msg.mint;
       if (!this.trackedMints.has(mint)) return;
 
-      const vSol = Number(msg.vSolInBondingCurve);
-      const vTokens = Number(msg.vTokensInBondingCurve);
+      let vSol = Number(msg.vSolInBondingCurve);
+      let vTokens = Number(msg.vTokensInBondingCurve);
+      if (vSol > 1e6) vSol /= 1e9;
+      if (vTokens > 1e12) vTokens /= 1e6;
+
       let price = 0;
       if (vSol > 0 && vTokens > 0) {
         price = (vSol / vTokens) * this.solPriceUsd;
       } else if (msg.solAmount && msg.tokenAmount && Number(msg.tokenAmount) > 0) {
-        price = (Number(msg.solAmount) / Number(msg.tokenAmount)) * this.solPriceUsd;
+        let sol = Number(msg.solAmount);
+        let tok = Number(msg.tokenAmount);
+        if (sol > 1e6) sol /= 1e9;
+        if (tok > 1e12) tok /= 1e6;
+        price = (sol / tok) * this.solPriceUsd;
+      }
+
+      // Validasi batas harga pump.fun yang realistis ($0.000001 - $10.0)
+      const lastKnown = this.trackedMints.get(mint)?.lastPrice;
+      if (price < 0.000001 || price > 10.0 || !Number.isFinite(price)) {
+        price = (lastKnown && lastKnown >= 0.000001) ? lastKnown : 0.000004;
       }
 
       const usd = (Number(msg.solAmount) || 0) * this.solPriceUsd;
       const trade: TargetTrade = {
         at: now,
         timestamp: Math.floor(now / 1000),
-        price: price > 0 ? price : (this.trackedMints.get(mint)?.lastPrice || 0.000005),
+        price,
         side: txType,
         wallet: msg.traderPublicKey || 'trader',
         usd: usd > 0 ? usd : 10,

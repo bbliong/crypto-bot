@@ -193,7 +193,7 @@ export class DistributionStaircaseLaneS1 extends BaseDistributionStaircaseLane {
           return reasons;
         }
         if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) {
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
           reasons.push('PRICE_MISSING_OR_STALE');
           return reasons;
         }
@@ -292,7 +292,7 @@ export class DistributionStaircaseLaneS2 extends BaseDistributionStaircaseLane {
           return reasons;
         }
         if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) {
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
           reasons.push('PRICE_MISSING_OR_STALE');
           return reasons;
         }
@@ -391,7 +391,7 @@ export class DistributionStaircaseLaneS3 extends BaseDistributionStaircaseLane {
           return reasons;
         }
         if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) {
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
           reasons.push('PRICE_MISSING_OR_STALE');
           return reasons;
         }
@@ -490,7 +490,7 @@ export class DistributionStaircaseLaneS4 extends BaseDistributionStaircaseLane {
           return reasons;
         }
         if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) {
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
           reasons.push('PRICE_MISSING_OR_STALE');
           return reasons;
         }
@@ -623,7 +623,7 @@ export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLan
           return reasons;
         }
         if (elapsedMs > r.maxEntryWaitSeconds * 1000) { reasons.push('ENTRY_WINDOW_EXPIRED'); return reasons; }
-        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000) {
+        if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
           reasons.push('PRICE_MISSING_OR_STALE');
           return reasons;
         }
