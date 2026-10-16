@@ -218,11 +218,11 @@ export class DistributionTargetLane {
     this.policy = Object.freeze({ ...policy });
   }
   private entryReasons(f: TargetFacts) {
-    if (f.price === null || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
-      return ['PRICE_OUTSIDE_REALISTIC_BOUNDS'];
-    }
     if (this.policy.overrideEntryReasons) {
       return this.policy.overrideEntryReasons(f, this.rules);
+    }
+    if (f.price === null || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) {
+      return ['PRICE_OUTSIDE_REALISTIC_BOUNDS'];
     }
     return [...assessTargetEntry(f, this.rules), ...(this.policy.entryReasons?.(f) ?? [])];
   }
