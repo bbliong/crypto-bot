@@ -76,6 +76,7 @@ export async function expandDeployerClusters({
 
   let newlyFoundTx = 0;
   for (const deployer of deployers) {
+    if (!deployer || typeof deployer !== 'string') continue;
     console.log(`\n[DEPLOYER] Menyisir aktivitas on-chain deployer: ${deployer.slice(0, 12)}...`);
     const sigs = await fetchSignaturesWithRetry(rpcUrl, deployer, limitPerDeployer);
     console.log(`  -> Menemukan ${sigs.length} signature transaksi.`);
