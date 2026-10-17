@@ -10,8 +10,8 @@ import {
 
 export const OEZANK_WALLET = 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy';
 export const OEZANK_LANE_OZ1 = 'distribution-oezank-oz1';
-export const OEZANK_TARGET_PERCENT = 15; // Target TP rata-rata Oezank (+15%)
-export const OEZANK_STOP_LOSS_PERCENT = 8; // SL disiplin (-8%)
+export const OEZANK_TARGET_PERCENT = 9999; // 100% Mirror Exit: tidak ada TP mekanis, tunggu Oezank sell
+export const OEZANK_STOP_LOSS_PERCENT = 75; // Catastrophic safety floor only (-75%)
 
 export const OEZANK_RULES_OZ1: Readonly<TargetRules> = Object.freeze(validateTargetRules({
   ...DEFAULT_TARGET_RULES,
@@ -29,19 +29,19 @@ export const OEZANK_RULES_OZ1: Readonly<TargetRules> = Object.freeze(validateTar
   minMeaningfulBuyers: 1,
   maxBuyerSharePercent: 100,
   minMomentumPercent: 0,
-  maxMomentumPercent: 200,
-  maxEntryReturnPercent: 200,
-  maxDrawdownPercent: 10.0,
+  maxMomentumPercent: 500,
+  maxEntryReturnPercent: 500,
+  maxDrawdownPercent: 99.0,
   stopLossPercent: OEZANK_STOP_LOSS_PERCENT,
-  trailingStartPercent: 10, // Trailing aktif di +10%
-  trailingDrawdownPercent: 3, // Trail 3% dari peak
-  maxHoldSeconds: 2700, // Maksimal hold 45 menit (sebelum timeout 60m bot GMGN)
+  trailingStartPercent: 9999, // Nonaktifkan trailing stop mekanis
+  trailingDrawdownPercent: 9999,
+  maxHoldSeconds: 3600, // 60 menit sinkron dengan batas timeout bot Oezank
   executionDelayMs: 500,
   maxFillWaitMs: 5000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
-  stakeUsd: 15, // Stake sebanding ~$15 - $25 USD (0.1 - 0.2 SOL)
+  stakeUsd: 5,
   blockKnownDumpSellers: false,
 }));
 
@@ -54,8 +54,10 @@ export class DistributionOezankLaneOZ1 extends DistributionTargetLane {
     super(mint, { ...OEZANK_RULES_OZ1 }, e => emit({ ...e, laneLabel: 'OZ1' as any, targetPercent: OEZANK_TARGET_PERCENT }), {
       name: 'oezank-mirror-oz1',
       paperLane: OEZANK_LANE_OZ1,
-      trailingEnabled: true,
-      flowExitEnabled: false,
+      trailingEnabled: false, // 100% Mirror Exit
+      flowExitEnabled: false, // 100% Mirror Exit
+      prioritizeCustomExit: true,
+      exitReason: () => null, // Tidak ada exit internal mekanis, murni onOezankSold
       overrideEntryReasons: (f: TargetFacts, r: TargetRules) => {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
@@ -79,7 +81,7 @@ export class DistributionOezankLaneOZ1 extends DistributionTargetLane {
   }
 
   onOezankSold(now: number) {
-    // Mirror Exit: Jika Oezank menjual tokennya di Solana on-chain, bot ikut exit seketika!
+    // 100% Mirror Exit: Saat Oezank menjual tokennya di Solana on-chain, bot ikut exit seketika!
     if (this.phase !== 'CLOSED' && this.phase !== 'CENSORED') {
       this.end(now, 'OEZANK_TRADER_SOLD_MIRROR_EXIT');
     }

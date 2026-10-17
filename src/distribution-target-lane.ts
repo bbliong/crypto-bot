@@ -238,6 +238,7 @@ export class DistributionTargetLane {
   }
   end(now: number, reason: string) {
     if (this.phase === 'CLOSED' || this.phase === 'CENSORED') return;
+    this.exitReason = reason;
     if (this.entryAt !== null) {
       const exitPrice = this.lastKnownPrice ?? this.entryPrice;
       if (exitPrice !== null) {

@@ -10,6 +10,7 @@ export type WalletTransferEvent = {
   from?: string;
   tx: string;
   priceUsd?: number;
+  solSpent?: number;
 };
 
 export type WalletSellEvent = {
@@ -279,9 +280,10 @@ export class SolanaWalletStream extends EventEmitter {
         );
 
         let estimatedPriceUsd: number | undefined = undefined;
-        if (solDiff < -0.001) {
-          const solSpent = Math.abs(solDiff);
-          estimatedPriceUsd = (solSpent * 150) / diff; // baseline SOL $150
+        let solSpentAmount: number | undefined = undefined;
+        if (solDiff < -0.0001) {
+          solSpentAmount = Math.abs(solDiff);
+          estimatedPriceUsd = (solSpentAmount * 150) / diff; // baseline SOL $150
         }
 
         const transferEvent: WalletTransferEvent = {
@@ -292,6 +294,7 @@ export class SolanaWalletStream extends EventEmitter {
           from: sender?.owner || "",
           tx: signature,
           priceUsd: estimatedPriceUsd,
+          solSpent: solSpentAmount,
         };
         this.emit("transfer", transferEvent);
       } else if (diff < 0) {

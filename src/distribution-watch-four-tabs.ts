@@ -1243,6 +1243,11 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
       return;
     }
     const isOezank = t.wallet === OEZANK_WALLET;
+    // Anti-Dust Filter khusus Oezank: Real trades Oezank adalah >= 0.05 SOL (~$6-$25 USD).
+    // Abaikan swap micro-dust / test ping (0.0002 SOL / $0.02 USD)
+    if (isOezank && t.solSpent !== undefined && t.solSpent < 0.05) {
+      return;
+    }
     const sourceTag = isOezank ? "oezank_inflow" : "smart_money_inflow";
     const statusTag = isOezank ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
     const eventType = isOezank ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_WHALE_TRANSFER_IN";
@@ -1501,10 +1506,13 @@ while (!controller.isClosed() && !stopping) {
               if (SMART_MONEY_BLACKLIST_SYMBOLS.has(symbol.toUpperCase())) continue;
 
               const mint = String(act.token?.address || act.token_address || "");
+              const costUsd = Number(act.cost_usd || (isOezank ? 0 : 50));
+              // Anti-Dust Filter: Abaikan micro-swap Oezank < $5 USD
+              if (isOezank && costUsd > 0 && costUsd < 5.0) continue;
+
               const key = `${sw}:${mint}:${ts}`;
               if (mint && !seenSmartTrades.has(key)) {
                 seenSmartTrades.add(key);
-                const costUsd = Number(act.cost_usd || 50);
                 const amount = Number(act.token_amount || act.amount || 0);
                 const priceUsd = Number(act.price_usd || (costUsd > 0 && amount > 0 ? costUsd / amount : 0));
                 if (priceUsd <= 0) continue;
