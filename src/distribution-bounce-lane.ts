@@ -43,6 +43,7 @@ export class DistributionBounceLane extends DistributionTargetLane {
   private entryBuyPrice: number | null = null;
   private lastPriceMoveTime: number | null = null;
   private lastPriceMove: number | null = null;
+  private lastWhaleSellSeenAt: number | null = null;
 
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
     super(mint, { ...BOUNCE_RULES }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT }), {
@@ -72,10 +73,12 @@ export class DistributionBounceLane extends DistributionTargetLane {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
         }
 
-        // Syarat 2: Harus ada tanda-tanda MULAI BERANJAK NAIK (Bounce dari titik terendah / trough >= 4.0%)
+        // Syarat 2: Rebound dari trough minimal 4.0% dan tidak overextended
         const bounce = f.bounceFromTroughPercent ?? 0;
         if (bounce < 4.0) {
           reasons.push('BOUNCE_FROM_TROUGH_TOO_SMALL');
+        } else if (bounce > 15.0) {
+          reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
         }
 
         // Syarat 3: Harus ada aliran BUY baru masuk (reversal flow dominan)
@@ -93,6 +96,15 @@ export class DistributionBounceLane extends DistributionTargetLane {
         // Syarat Multi-Buyer: Wajib ada minimal 2 distinct buyers
         if (f.meaningfulBuyers < 2) {
           reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+        }
+
+        // Whale Sell Cooldown 45s
+        if (f.largestSellUsd >= 150) {
+          this.lastWhaleSellSeenAt = f.now;
+          reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
+        }
+        if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
+          reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
         }
 
         return reasons;
@@ -159,6 +171,7 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
   private peakNetSeen = -Infinity;
   private lastPriceMoveTime: number | null = null;
   private lastPriceMove: number | null = null;
+  private lastWhaleSellSeenAt: number | null = null;
 
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
     super(mint, { ...BOUNCE_RULES_V2 }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT, version: 'distribution-bounce-dump-v2' }), {
@@ -184,10 +197,12 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
         }
 
-        // Syarat 2: Rebound dari trough minimal 4.0%
+        // Syarat 2: Rebound dari trough minimal 4.0% dan tidak overextended
         const bounce = f.bounceFromTroughPercent ?? 0;
         if (bounce < 4.0) {
           reasons.push('BOUNCE_FROM_TROUGH_TOO_SMALL');
+        } else if (bounce > 15.0) {
+          reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
         }
 
         // Syarat 3: Buy flow memadai
@@ -208,6 +223,13 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
         }
 
         // V2 KHUSUS: Filter Anti-Whale Dump Sebelum Entry
+        if (f.largestSellUsd >= 150) {
+          this.lastWhaleSellSeenAt = f.now;
+          reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
+        }
+        if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
+          reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
+        }
         if (f.largestSellUsd >= 300) {
           reasons.push('WHALE_SELL_PRESENT_BEFORE_ENTRY');
         }
@@ -308,6 +330,7 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
   private peakNetSeen = -Infinity;
   private lastPriceMoveTime: number | null = null;
   private lastPriceMove: number | null = null;
+  private lastWhaleSellSeenAt: number | null = null;
 
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
     super(mint, { ...BOUNCE_RULES_V3 }, e => emit({ ...e, targetPercent: BOUNCE_TARGET_PERCENT_V3, version: 'distribution-bounce-dump-v3' }), {
@@ -340,10 +363,25 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
           reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
         }
 
-        // V3 Guard 3: GENUINE BROAD BUYERS (minimal 8 pembeli riil)
-        // Menolak token manipulasi wash trading 1-3 wallet (seperti LEGO & Muse AI)
-        if ((f.meaningfulBuyers ?? 0) < 8) {
+        // V3 Guard 3: GENUINE BROAD BUYERS (minimal 2 pembeli riil)
+        if ((f.meaningfulBuyers ?? 0) < 2) {
           reasons.push('INSUFFICIENT_BUYERS');
+        }
+
+        // Anti-Rug Guard: Dev Supply Dump Check
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+        } else if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+        }
+
+        // Whale Sell Cooldown 45s
+        if (f.largestSellUsd >= 150) {
+          this.lastWhaleSellSeenAt = f.now;
+          reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
+        }
+        if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
+          reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
         }
 
         // V3 Guard 4: RECOVERY FLOW & SELL PRESSURE
@@ -491,6 +529,18 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
         // Syarat 2 Dasar V1: Buy flow memadai
         if ((f.buyShareUsdPercent ?? 0) < 50 || f.meaningfulBuyUsd < 2) {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
+        }
+
+        // Anti-Rug Guard: Dev Supply Dump Check
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+        } else if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+        }
+
+        // Syarat Multi-Buyer: Wajib ada minimal 2 distinct buyers
+        if (f.meaningfulBuyers < 2) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
         }
 
         const bounce = f.bounceFromTroughPercent ?? 0;
