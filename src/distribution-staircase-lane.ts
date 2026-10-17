@@ -635,6 +635,36 @@ export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLan
           return reasons;
         }
 
+        // Anti-Rug Guard: Dev Supply Dump Check
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+          return reasons;
+        }
+        if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+          return reasons;
+        }
+
+        // Anti-Whale / Large Sell
+        if (f.largestSellUsd >= 100) {
+          reasons.push('LARGE_SELL_DETECTED');
+          return reasons;
+        }
+
+        // Multi-Buyer & Flow Dominance
+        if (f.meaningfulBuyers < 2) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+          return reasons;
+        }
+        if ((f.buyShareUsdPercent ?? 0) < 55) {
+          reasons.push('BUY_FLOW_NOT_DOMINANT');
+          return reasons;
+        }
+        if (f.holderDeclineEverSeen) {
+          reasons.push('HOLDER_DECLINE_EVER_SEEN');
+          return reasons;
+        }
+
         // Upward momentum: harga harus naik minimal +2% dari harga awal untuk konfirmasi tangga
         const startPrice = this.firstPrice ?? f.price;
         if (startPrice && f.price < startPrice * 1.02) {
@@ -643,7 +673,7 @@ export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLan
         }
 
         // Higher Low check
-        if (this.trades.length < 3) reasons.push('INSUFFICIENT_TRADES');
+        if (this.trades.length < 5) reasons.push('INSUFFICIENT_TRADES');
         return reasons;
       },
     });
@@ -702,7 +732,11 @@ export class DistributionStaircaseLaneS5 extends BaseDistributionStaircaseLane {
 
         // 1. FILTER TIER MUTLAK: Hanya terima Tier 4 (120+ Wallets) atau Tier 3 tinggi (>=88 Wallets)
         // Token Tier 1 & Tier 2 langsung ditolak (DISCARDED)!
-        if (this.syndicateWalletsCount > 0 && this.syndicateWalletsCount < 88) {
+        if (
+          this.syndicateTier.startsWith('Tier 1') ||
+          this.syndicateTier.startsWith('Tier 2') ||
+          (this.syndicateWalletsCount > 0 && this.syndicateWalletsCount < 88)
+        ) {
           reasons.push('TIER_1_OR_2_DISCARDED_BELOW_88W');
           return reasons;
         }
@@ -728,6 +762,36 @@ export class DistributionStaircaseLaneS5 extends BaseDistributionStaircaseLane {
           return reasons;
         }
 
+        // Anti-Rug Guard: Dev Supply Dump Check
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+          return reasons;
+        }
+        if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+          return reasons;
+        }
+
+        // Anti-Whale / Large Sell
+        if (f.largestSellUsd >= 100) {
+          reasons.push('LARGE_SELL_DETECTED');
+          return reasons;
+        }
+
+        // Multi-Buyer & Flow Dominance
+        if (f.meaningfulBuyers < 2) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+          return reasons;
+        }
+        if ((f.buyShareUsdPercent ?? 0) < 55) {
+          reasons.push('BUY_FLOW_NOT_DOMINANT');
+          return reasons;
+        }
+        if (f.holderDeclineEverSeen) {
+          reasons.push('HOLDER_DECLINE_EVER_SEEN');
+          return reasons;
+        }
+
         // Upward momentum: harga harus naik minimal +2.5% dari baseline
         const startPrice = this.firstPrice ?? f.price;
         if (startPrice && f.price < startPrice * 1.025) {
@@ -736,7 +800,7 @@ export class DistributionStaircaseLaneS5 extends BaseDistributionStaircaseLane {
         }
 
         // Higher Low check
-        if (this.trades.length < 3) reasons.push('INSUFFICIENT_TRADES');
+        if (this.trades.length < 5) reasons.push('INSUFFICIENT_TRADES');
         return reasons;
       },
     });
@@ -747,5 +811,9 @@ export class DistributionStaircaseLaneS5 extends BaseDistributionStaircaseLane {
   public setSyndicateMeta(walletsCount: number, tier: string) {
     this.syndicateWalletsCount = walletsCount;
     this.syndicateTier = tier;
+  }
+
+  public updateAirdropMeta(walletsCount: number, tier: string) {
+    this.setSyndicateMeta(walletsCount, tier);
   }
 }

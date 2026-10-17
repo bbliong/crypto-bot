@@ -83,6 +83,18 @@ export class DistributionBounceLane extends DistributionTargetLane {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
         }
 
+        // Anti-Rug Guard: Dev Supply Dump Check
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+        } else if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+        }
+
+        // Syarat Multi-Buyer: Wajib ada minimal 2 distinct buyers
+        if (f.meaningfulBuyers < 2) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+        }
+
         return reasons;
       },
       exitReason: (f: TargetFacts, net: number) => {
@@ -181,6 +193,18 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
         // Syarat 3: Buy flow memadai
         if ((f.buyShareUsdPercent ?? 0) < 50 || f.meaningfulBuyUsd < 2) {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
+        }
+
+        // Anti-Rug Guard: Dev Supply Dump Check
+        if (f.devHoldingSharePercent != null && f.devHoldingSharePercent > 2.0) {
+          reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+        } else if (f.devBalance != null && f.devBalance > 20_000_000) {
+          reasons.push('DEV_BALANCE_TOO_LARGE');
+        }
+
+        // Syarat Multi-Buyer: Wajib ada minimal 2 distinct buyers
+        if (f.meaningfulBuyers < 2) {
+          reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
         }
 
         // V2 KHUSUS: Filter Anti-Whale Dump Sebelum Entry

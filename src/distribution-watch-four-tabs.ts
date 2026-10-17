@@ -1135,9 +1135,10 @@ function getSyndicateAirdropMeta(mint: string): { walletCount: number; tier: str
         }
       }
       const count = recipients.size;
-      let tier = "Tier 1 (8-48 W)";
-      if (count >= 56 && count <= 80) tier = "Tier 2 (56-80 W)";
-      else if (count >= 88 && count <= 112) tier = "Tier 3 (88-112 W)";
+      let tier = "Pending / Unknown";
+      if (count >= 8 && count < 56) tier = "Tier 1 (8-48 W)";
+      else if (count >= 56 && count < 88) tier = "Tier 2 (56-80 W)";
+      else if (count >= 88 && count < 120) tier = "Tier 3 (88-112 W)";
       else if (count >= 120) tier = "Tier 4 (120+ W)";
       return { walletCount: count, tier };
     }
