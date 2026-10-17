@@ -13,7 +13,7 @@ export const BOUNCE_RULES: Readonly<TargetRules> = Object.freeze(validateTargetR
   observationSeconds: 20,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 600, // Memberi waktu observasi sampai dump selesai dan bounce mulai terbentuk
+  maxEntryWaitSeconds: 1500, // 25 menit waktu observasi sampai dump selesai dan bounce mulai terbentuk
   confirmSeconds: 1,
   minBuySharePercent: 50, // Saat mulai rebound, buy volume mendominasi sell volume
   minMeaningfulBuyUsd: 3,
@@ -54,7 +54,8 @@ export class DistributionBounceLane extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
 
@@ -157,7 +158,8 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
 
@@ -251,7 +253,7 @@ export const BOUNCE_RULES_V3: Readonly<TargetRules> = Object.freeze(validateTarg
   observationSeconds: 20,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 600,
+  maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
   minBuySharePercent: 50,
   minMeaningfulBuyUsd: 3,
@@ -293,7 +295,8 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // V3 Guard 1: Token harus pernah mengalami DUMP PARAH (>= 60%)
@@ -396,7 +399,7 @@ export const BOUNCE_RULES_V4: Readonly<TargetRules> = Object.freeze(validateTarg
   observationSeconds: 20,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 600,
+  maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
   minBuySharePercent: 50,
   minMeaningfulBuyUsd: 2,
@@ -443,7 +446,8 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
 
@@ -577,7 +581,7 @@ export const BOUNCE_RULES_V5: Readonly<TargetRules> = Object.freeze(validateTarg
   observationSeconds: 20,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 600,
+  maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
   minBuySharePercent: 55,
   minMeaningfulBuyUsd: 5, // Filter quant: Naikkan dari $2 ke $5 untuk menyaring debu/fake bot pump
@@ -627,7 +631,8 @@ export class DistributionBounceLaneV5 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // Solusi 2 Gate 1: Dev Supply Dump Check (Anti-Rugpull Dev Trap)
@@ -813,7 +818,7 @@ export const BOUNCE_RULES_V6: Readonly<TargetRules> = Object.freeze(validateTarg
   observationSeconds: 20,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 600,
+  maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
   minBuySharePercent: 55,
   minMeaningfulBuyUsd: 18, // Solusi 3: Naikkan volume pemulihan ke $18 untuk memastikan likuiditas kolam tebal
@@ -863,7 +868,8 @@ export class DistributionBounceLaneV6 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // Gate 1: Dev Supply Dump Check (Anti-Rugpull Dev Trap)
@@ -1042,7 +1048,7 @@ export const BOUNCE_RULES_V7: Readonly<TargetRules> = Object.freeze(validateTarg
   observationSeconds: 20,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 600,
+  maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
   minBuySharePercent: 55,
   minMeaningfulBuyUsd: 28, // Rekomendasi 1: Naikkan dari $18 ke $28 untuk mengeliminasi trap staircase semu (MarsX $20.89 & TRALA $24.71)
@@ -1094,7 +1100,8 @@ export class DistributionBounceLaneV7 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
+        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
         // Gate 1: Dev Supply Dump Check (Rekomendasi 3: Anti-Rugpull Dev Trap / Residual Supply)

@@ -13,7 +13,7 @@ export const STAIRCASE_RULES_S1: Readonly<TargetRules> = Object.freeze(validateT
   observationSeconds: 120, // Baseline S1 tetap 120s
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 180,
+  maxEntryWaitSeconds: 300,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -53,7 +53,7 @@ export const STAIRCASE_RULES_S2: Readonly<TargetRules> = Object.freeze(validateT
   observationSeconds: 120, // Baseline S2 tetap 120s
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 180,
+  maxEntryWaitSeconds: 300,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -89,7 +89,7 @@ export const STAIRCASE_RULES_S3: Readonly<TargetRules> = Object.freeze(validateT
   observationSeconds: 120,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 180,
+  maxEntryWaitSeconds: 300,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -125,7 +125,7 @@ export const STAIRCASE_RULES_S4: Readonly<TargetRules> = Object.freeze(validateT
   observationSeconds: 120,
   minTransferAgeSeconds: 30,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 180,
+  maxEntryWaitSeconds: 300,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -184,7 +184,7 @@ export class DistributionStaircaseLaneS1 extends BaseDistributionStaircaseLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
 
-        const t0 = this.firstTradeAt ?? f.firstAt;
+        const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;
@@ -283,7 +283,7 @@ export class DistributionStaircaseLaneS2 extends BaseDistributionStaircaseLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
 
-        const t0 = this.firstTradeAt ?? f.firstAt;
+        const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;
@@ -382,7 +382,7 @@ export class DistributionStaircaseLaneS3 extends BaseDistributionStaircaseLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
 
-        const t0 = this.firstTradeAt ?? f.firstAt;
+        const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;
@@ -481,7 +481,7 @@ export class DistributionStaircaseLaneS4 extends BaseDistributionStaircaseLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
 
-        const t0 = this.firstTradeAt ?? f.firstAt;
+        const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;
@@ -580,7 +580,7 @@ export const STAIRCASE_RULES_S1_V2: Readonly<TargetRules> = Object.freeze(valida
   observationSeconds: 30, // 30s observasi cepat
   minTransferAgeSeconds: 15,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 90,
+  maxEntryWaitSeconds: 180,
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -614,7 +614,7 @@ export class DistributionStaircaseLaneS1_v2 extends BaseDistributionStaircaseLan
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
 
-        const t0 = this.firstTradeAt ?? f.firstAt;
+        const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;
@@ -663,7 +663,7 @@ export const STAIRCASE_RULES_S5: Readonly<TargetRules> = Object.freeze(validateT
   observationSeconds: 45, // Observasi awal 45 detik
   minTransferAgeSeconds: 15,
   maxTransferLagSeconds: 60,
-  maxEntryWaitSeconds: 240, // Hanya boleh masuk di 4 menit pertama
+  maxEntryWaitSeconds: 300, // Diperpanjang ke 5 menit pertama
   confirmSeconds: 1,
   minBuySharePercent: 60,
   minMeaningfulBuyUsd: 1,
@@ -707,7 +707,7 @@ export class DistributionStaircaseLaneS5 extends BaseDistributionStaircaseLane {
           return reasons;
         }
 
-        const t0 = this.firstTradeAt ?? f.firstAt;
+        const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
         if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
         const elapsedMs = f.now - t0;

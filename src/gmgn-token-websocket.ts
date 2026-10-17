@@ -24,15 +24,18 @@ export interface GmgnTokenStatTick {
 
 export class GmgnTokenWebSocketManager extends EventEmitter {
   private page: Page;
-  private maxTokens: number;
-  private subscribedMints: string[] = [];
+  private maxVipTokens: number;
+  private maxRegularTokens: number;
+  private vipMints: string[] = [];
+  private regularMints: string[] = [];
   private cdpSession: CDPSession | null = null;
   private isInitialized = false;
 
-  constructor(page: Page, maxTokens: number = 20) {
+  constructor(page: Page, maxRegularTokens: number = 18, maxVipTokens: number = 12) {
     super();
     this.page = page;
-    this.maxTokens = Math.max(1, Math.min(20, maxTokens));
+    this.maxRegularTokens = Math.max(5, Math.min(25, maxRegularTokens));
+    this.maxVipTokens = Math.max(5, Math.min(15, maxVipTokens));
   }
 
   public async init(): Promise<void> {
@@ -104,43 +107,89 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
     }
   }
 
-  public async subscribeToken(mint: string): Promise<boolean> {
+  public async subscribeToken(mint: string, isVip = false): Promise<boolean> {
     if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) return false;
 
-    // Check if already subscribed; if so, move to tail (most recent)
-    const existingIdx = this.subscribedMints.indexOf(mint);
-    if (existingIdx !== -1) {
-      this.subscribedMints.splice(existingIdx, 1);
-      this.subscribedMints.push(mint);
-      return true;
-    }
-
-    // Enforce max 20 tokens constraint (FIFO unregister oldest)
-    while (this.subscribedMints.length >= this.maxTokens) {
-      const oldest = this.subscribedMints.shift();
-      if (oldest) {
-        await this.sendFrame("unsubscribe", oldest).catch(() => {});
+    if (isVip) {
+      // Remove from regular if it was previously registered there
+      const regIdx = this.regularMints.indexOf(mint);
+      if (regIdx !== -1) {
+        this.regularMints.splice(regIdx, 1);
       }
-    }
 
-    this.subscribedMints.push(mint);
-    return await this.sendFrame("subscribe", mint);
+      // If already in VIP, move to tail (most recent)
+      const vipIdx = this.vipMints.indexOf(mint);
+      if (vipIdx !== -1) {
+        this.vipMints.splice(vipIdx, 1);
+        this.vipMints.push(mint);
+        return true;
+      }
+
+      // Enforce VIP slots constraint (FIFO within VIP only)
+      while (this.vipMints.length >= this.maxVipTokens) {
+        const oldest = this.vipMints.shift();
+        if (oldest) {
+          await this.sendFrame("unsubscribe", oldest).catch(() => {});
+        }
+      }
+
+      this.vipMints.push(mint);
+      return await this.sendFrame("subscribe", mint);
+    } else {
+      // Regular token: if already in VIP, do NOT downgrade
+      if (this.vipMints.includes(mint)) return true;
+
+      // If already in regular, move to tail
+      const regIdx = this.regularMints.indexOf(mint);
+      if (regIdx !== -1) {
+        this.regularMints.splice(regIdx, 1);
+        this.regularMints.push(mint);
+        return true;
+      }
+
+      // Enforce Regular slots constraint (never evicts VIP tokens!)
+      while (this.regularMints.length >= this.maxRegularTokens) {
+        const oldest = this.regularMints.shift();
+        if (oldest) {
+          await this.sendFrame("unsubscribe", oldest).catch(() => {});
+        }
+      }
+
+      this.regularMints.push(mint);
+      return await this.sendFrame("subscribe", mint);
+    }
   }
 
   public async unsubscribeToken(mint: string): Promise<boolean> {
-    const idx = this.subscribedMints.indexOf(mint);
-    if (idx !== -1) {
-      this.subscribedMints.splice(idx, 1);
+    const vipIdx = this.vipMints.indexOf(mint);
+    if (vipIdx !== -1) {
+      this.vipMints.splice(vipIdx, 1);
+    }
+    const regIdx = this.regularMints.indexOf(mint);
+    if (regIdx !== -1) {
+      this.regularMints.splice(regIdx, 1);
     }
     return await this.sendFrame("unsubscribe", mint);
   }
 
   public getSubscribedMints(): string[] {
-    return [...this.subscribedMints];
+    return [...this.vipMints, ...this.regularMints];
   }
 
   public getSubscribedCount(): number {
-    return this.subscribedMints.length;
+    return this.vipMints.length + this.regularMints.length;
+  }
+
+  public getVipCount(): number {
+    return this.vipMints.length;
+  }
+
+  public getRegularCount(): number {
+    return this.regularMints.length;
+  }
+
+  public isVip(mint: string): boolean {
+    return this.vipMints.includes(mint);
   }
 
   private async sendFrame(action: "subscribe" | "unsubscribe", mint: string): Promise<boolean> {

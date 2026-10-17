@@ -28,6 +28,7 @@ interface TrackedMintMeta {
   lastTradeAt: number;
   lastVolumeUsd: number;
   symbol?: string;
+  isVip?: boolean;
 }
 
 export class HeadlessTradeStream extends EventEmitter {
@@ -82,14 +83,26 @@ export class HeadlessTradeStream extends EventEmitter {
     this.wsConnected = false;
   }
 
-  public registerMint(mint: string, meta?: { symbol?: string; priceUsd?: number }): void {
+  public registerMint(mint: string, meta?: { symbol?: string; priceUsd?: number; isVip?: boolean }): void {
     if (!mint || typeof mint !== 'string') return;
     const now = Date.now();
     const existing = this.trackedMints.get(mint);
     if (!existing) {
-      if (this.trackedMints.size >= 30) {
-        const oldestKey = this.trackedMints.keys().next().value;
-        if (oldestKey) this.unregisterMint(oldestKey);
+      const maxCapacity = 45; // 15 VIP + 30 Regular
+      if (this.trackedMints.size >= maxCapacity) {
+        // Cari mint non-VIP tertua untuk di-evict terlebih dahulu
+        let evictKey: string | null = null;
+        for (const [k, v] of this.trackedMints.entries()) {
+          if (!v.isVip) {
+            evictKey = k;
+            break;
+          }
+        }
+        // Jika semua VIP, baru ambil yang paling lama
+        if (!evictKey) {
+          evictKey = this.trackedMints.keys().next().value ?? null;
+        }
+        if (evictKey) this.unregisterMint(evictKey);
       }
       this.trackedMints.set(mint, {
         registeredAt: now,
@@ -97,6 +110,7 @@ export class HeadlessTradeStream extends EventEmitter {
         lastTradeAt: now,
         lastVolumeUsd: 0,
         symbol: meta?.symbol,
+        isVip: Boolean(meta?.isVip),
       });
 
       // Jika kita punya API key PumpPortal, subscribe ke token trades via WebSocket
@@ -108,6 +122,8 @@ export class HeadlessTradeStream extends EventEmitter {
           }));
         } catch {}
       }
+    } else if (meta?.isVip && !existing.isVip) {
+      existing.isVip = true;
     }
   }
 

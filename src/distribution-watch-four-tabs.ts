@@ -799,13 +799,16 @@ async function openOrReplaceDetail(next: Transfer) {
     tradeStream.registerMint(next.mint, {
       symbol: next.symbol,
       priceUsd: next.priceUsd,
+      isVip: true,
     });
+    gmgnWsManager.subscribeToken(next.mint, true).catch(() => {});
     write("watch-events.jsonl", {
       type: "TOKEN_MONITOR_HEADLESS_ATTACHED",
       observedAt: Date.now(),
       trackedWallet: next.wallet,
       transfer: next,
       mode: "headless-websocket",
+      isVip: true,
     });
     return;
   }
@@ -994,7 +997,9 @@ const targetTimer = setInterval(() => {
       controllerBrowser: controllerInfo,
       gmgnBrowserWs: {
         status: "ACTIVE",
-        maxTokens: 20,
+        maxTokens: 30,
+        vipCount: gmgnWsManager.getVipCount(),
+        regularCount: gmgnWsManager.getRegularCount(),
         subscribedCount: gmgnWsManager.getSubscribedCount(),
         subscribedMints: gmgnWsManager.getSubscribedMints(),
       },
@@ -1281,6 +1286,7 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
       tradeStream.registerMint(t.mint, {
         symbol: t.symbol,
         priceUsd: t.priceUsd,
+        isVip: true,
       });
     }
     if (targetLane instanceof DistributionProfit4Runtime) {
@@ -1298,7 +1304,7 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
       }
     }
     write("transfers.jsonl", smartCandidate);
-    gmgnWsManager.subscribeToken(t.mint).catch(() => {});
+    gmgnWsManager.subscribeToken(t.mint, true).catch(() => {});
   });
 
   smartMoneyStream.on("sell", (s) => {
@@ -1555,9 +1561,9 @@ while (!controller.isClosed() && !stopping) {
                   }
                 }
                 if (useHeadlessStream && tradeStream) {
-                  tradeStream.registerMint(mint, { symbol, priceUsd });
+                  tradeStream.registerMint(mint, { symbol, priceUsd, isVip: true });
                 }
-                gmgnWsManager.subscribeToken(mint).catch(() => {});
+                gmgnWsManager.subscribeToken(mint, true).catch(() => {});
               }
             } else if (ev === "sell" || ev === "swap_sell") {
               const mint = String(act.token?.address || act.token_address || "");
