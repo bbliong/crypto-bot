@@ -15,9 +15,9 @@ export const BOUNCE_RULES: Readonly<TargetRules> = Object.freeze(validateTargetR
   maxTransferLagSeconds: 60,
   maxEntryWaitSeconds: 1500, // 25 menit waktu observasi sampai dump selesai dan bounce mulai terbentuk
   confirmSeconds: 1,
-  minBuySharePercent: 50, // Saat mulai rebound, buy volume mendominasi sell volume
-  minMeaningfulBuyUsd: 3,
-  minMeaningfulBuyers: 1,
+  minBuySharePercent: 55, // Saat mulai rebound, buy volume mendominasi sell volume
+  minMeaningfulBuyUsd: 15, // Reversal akumulasi nyata minimal $15 USD
+  minMeaningfulBuyers: 2,
   maxBuyerSharePercent: 100,
   minMomentumPercent: 0,
   maxMomentumPercent: 50,
@@ -73,6 +73,11 @@ export class DistributionBounceLane extends DistributionTargetLane {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
         }
 
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
+        }
+
         // Syarat 2: Rebound dari trough minimal 4.0% dan tidak overextended
         const bounce = f.bounceFromTroughPercent ?? 0;
         if (bounce < 4.0) {
@@ -81,8 +86,8 @@ export class DistributionBounceLane extends DistributionTargetLane {
           reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
         }
 
-        // Syarat 3: Harus ada aliran BUY baru masuk (reversal flow dominan)
-        if ((f.buyShareUsdPercent ?? 0) < 50 || f.meaningfulBuyUsd < 2) {
+        // Syarat 3: Harus ada aliran BUY baru masuk (reversal flow dominan >= 55% dan volume >= $15)
+        if ((f.buyShareUsdPercent ?? 0) < 55 || f.meaningfulBuyUsd < 15) {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
         }
 
@@ -197,6 +202,11 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
         }
 
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
+        }
+
         // Syarat 2: Rebound dari trough minimal 4.0% dan tidak overextended
         const bounce = f.bounceFromTroughPercent ?? 0;
         if (bounce < 4.0) {
@@ -205,8 +215,8 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
           reasons.push('BOUNCE_OVEREXTENDED_LATE_ENTRY');
         }
 
-        // Syarat 3: Buy flow memadai
-        if ((f.buyShareUsdPercent ?? 0) < 50 || f.meaningfulBuyUsd < 2) {
+        // Syarat 3: Buy flow memadai (>= 55% dan >= $15)
+        if ((f.buyShareUsdPercent ?? 0) < 55 || f.meaningfulBuyUsd < 15) {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
         }
 
@@ -301,9 +311,9 @@ export const BOUNCE_RULES_V3: Readonly<TargetRules> = Object.freeze(validateTarg
   maxTransferLagSeconds: 60,
   maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
-  minBuySharePercent: 50,
-  minMeaningfulBuyUsd: 3,
-  minMeaningfulBuyers: 8, // Broad demand: minimal 8 buyers riil
+  minBuySharePercent: 55,
+  minMeaningfulBuyUsd: 15,
+  minMeaningfulBuyers: 2, // Broad demand: minimal 2 buyers riil
   maxBuyerSharePercent: 100,
   minMomentumPercent: 0,
   maxMomentumPercent: 50,
@@ -354,6 +364,11 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
         }
 
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
+        }
+
         // V3 Guard 2: EARLY REVERSAL ZONE ONLY (4% <= bounce <= 15%)
         // Menolak jika belum memantul (<4%) ATAU sudah memantul terlalu tinggi (>15%) agar tidak beli di pucuk
         const bounce = f.bounceFromTroughPercent ?? 0;
@@ -385,7 +400,7 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
         }
 
         // V3 Guard 4: RECOVERY FLOW & SELL PRESSURE
-        if ((f.buyShareUsdPercent ?? 0) < 50 || (f.meaningfulBuyUsd ?? 0) < 3) {
+        if ((f.buyShareUsdPercent ?? 0) < 55 || (f.meaningfulBuyUsd ?? 0) < 15) {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
         }
         if (f.sellUsd > (f.meaningfulBuyUsd ?? 1) * 3 && f.sellUsd > 100) {
@@ -463,9 +478,9 @@ export const BOUNCE_RULES_V4: Readonly<TargetRules> = Object.freeze(validateTarg
   maxTransferLagSeconds: 60,
   maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
-  minBuySharePercent: 50,
-  minMeaningfulBuyUsd: 2,
-  minMeaningfulBuyers: 1,
+  minBuySharePercent: 55,
+  minMeaningfulBuyUsd: 15,
+  minMeaningfulBuyers: 2,
   maxBuyerSharePercent: 100,
   minMomentumPercent: 0,
   maxMomentumPercent: 50,
@@ -526,8 +541,13 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
         }
 
-        // Syarat 2 Dasar V1: Buy flow memadai
-        if ((f.buyShareUsdPercent ?? 0) < 50 || f.meaningfulBuyUsd < 2) {
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
+        }
+
+        // Syarat 2 Dasar V1: Buy flow memadai (>= 55% dan >= $15)
+        if ((f.buyShareUsdPercent ?? 0) < 55 || f.meaningfulBuyUsd < 15) {
           reasons.push('BUY_FLOW_NOT_RECOVERED');
         }
 
@@ -541,6 +561,11 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
         // Syarat Multi-Buyer: Wajib ada minimal 2 distinct buyers
         if (f.meaningfulBuyers < 2) {
           reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
+        }
+
+        // Whale Sell Cooldown 45s
+        if (f.largestSellUsd >= 150) {
+          reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
         }
 
         const bounce = f.bounceFromTroughPercent ?? 0;
@@ -658,7 +683,7 @@ export const BOUNCE_RULES_V5: Readonly<TargetRules> = Object.freeze(validateTarg
   maxEntryWaitSeconds: 1500,
   confirmSeconds: 1,
   minBuySharePercent: 55,
-  minMeaningfulBuyUsd: 5, // Filter quant: Naikkan dari $2 ke $5 untuk menyaring debu/fake bot pump
+  minMeaningfulBuyUsd: 15, // Filter quant: Naikkan ke $15 untuk menyaring debu/fake bot pump
   minMeaningfulBuyers: 2, // Filter quant: Wajib minimal 2 distinct buyers (bukan single dev buy)
   maxBuyerSharePercent: 80, // Filter quant: Maksimal 80% per buyer agar terdistribusi organik
   minMomentumPercent: 0,
@@ -745,6 +770,11 @@ export class DistributionBounceLaneV5 extends DistributionTargetLane {
 
         if (!this.dumpObserved && this.maxDrawdownSeen < 75) {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
         }
 
         // Syarat 2 Dasar V5 Quant: Multi-buyer filter & volume memadai
@@ -978,6 +1008,11 @@ export class DistributionBounceLaneV6 extends DistributionTargetLane {
 
         if (!this.dumpObserved && this.maxDrawdownSeen < 75) {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
         }
 
         // Gate 5 (Solusi 3): Volume Pemulihan Tebal (min 3 pembeli & volume $18+)
@@ -1230,6 +1265,11 @@ export class DistributionBounceLaneV7 extends DistributionTargetLane {
 
         if (!this.dumpObserved && this.maxDrawdownSeen < 75) {
           reasons.push('NOT_YET_DUMPED_SEVERELY');
+        }
+
+        // Syarat Lembah Stabil: Token tidak boleh baru saja membuat lower low dalam 15s terakhir
+        if (f.troughAgeSeconds !== null && f.troughAgeSeconds !== undefined && f.troughAgeSeconds < 15) {
+          reasons.push('TROUGH_STILL_FORMING_TOO_FRESH');
         }
 
         // Gate 5: Volume Pemulihan Organik & Filter Noise Wash Trading (Rekomendasi 1)

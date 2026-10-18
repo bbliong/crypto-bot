@@ -441,6 +441,17 @@ gmgnWsManager.on("stat", (stat) => {
   });
 });
 
+gmgnWsManager.on("frame", (frame: any) => {
+  if (Array.isArray(frame?.data)) {
+    for (const item of frame.data) {
+      const mint = item.ta || item.token_address || item.a;
+      if (mint) {
+        targetLane.holderFrame(mint, frame, Date.now());
+      }
+    }
+  }
+});
+
 attachCapture(
   controller,
   (ev) => {

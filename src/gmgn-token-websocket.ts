@@ -97,6 +97,12 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
                 this.emit("stat", stat);
               }
             }
+          } else if (
+            msg.channel === "token_holding" ||
+            msg.channel === "token_tag_holding" ||
+            msg.channel === "token_general_stat_num"
+          ) {
+            this.emit("frame", msg);
           }
         } catch {}
       });
@@ -218,6 +224,16 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
               channel: "token_stat",
               f: "w",
               id: `${id}_stat`,
+              data: [{ chain: "sol", addresses: mint }],
+            })
+          );
+
+          ws.send(
+            JSON.stringify({
+              action,
+              channel: "token_holding",
+              f: "w",
+              id: `${id}_hold`,
               data: [{ chain: "sol", addresses: mint }],
             })
           );

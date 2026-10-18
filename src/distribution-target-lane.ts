@@ -48,6 +48,8 @@ export type TargetFacts = {
   riskWalletsPresent: string[];
   peakPrice?: number | null;
   troughPrice?: number | null;
+  troughAgeSeconds?: number | null;
+  troughAt?: number | null;
   bounceFromTroughPercent?: number | null;
   devWallet?: string | null;
   devBalance?: number | null;
@@ -67,6 +69,7 @@ export class TargetObservation {
   private firstPrice: number | null = null;
   private peak = 0;
   private trough = Infinity;
+  private troughAt = 0;
   private ids = new Map<string, number>();
   private holderDeclineEverSeen = false;
   constructor(readonly transferAt: number) {}
@@ -77,6 +80,14 @@ export class TargetObservation {
     if (this.ids.has(id)) return;
     this.ids.set(id, t.at); this.trades.push(t);
     if (this.firstAt === null) { this.firstAt = t.at; this.firstPrice = t.price; }
+    if (t.price > this.peak) {
+      this.peak = t.price;
+      this.trough = t.price;
+      this.troughAt = t.at;
+    } else if (t.price < this.trough) {
+      this.trough = t.price;
+      this.troughAt = t.at;
+    }
     const cutoff = t.at - 120000;
     while (this.trades.length && this.trades[0]!.at < cutoff) this.trades.shift();
     // Keep dedup identities longer than the accepted source replay interval.
@@ -98,8 +109,9 @@ export class TargetObservation {
   }
   facts(now: number, risks: RiskSeller[], devWallet?: string | null): TargetFacts {
     const rows = this.trades.filter(t => t.at <= now);
-    const recent = rows.filter(t => t.at > now - 5000);
-    const before = rows.filter(t => t.at > now - 10000 && t.at <= now - 5000);
+    const recent = rows.filter(t => t.at > now - 30000); // Window 30 detik untuk volume beli & deteksi dump
+    const immediate = rows.filter(t => t.at > now - 5000); // 5 detik untuk momentum instan
+    const before = rows.filter(t => t.at > now - 60000 && t.at <= now - 30000);
     const quotes = rows.filter(t => t.at > now - 1000 && now - t.timestamp * 1000 <= 5000);
     const last = rows.at(-1);
     const price = median(quotes.map(t => t.price)) ?? (last && now - last.at <= 2000 && now - last.timestamp * 1000 <= 5000 ? last.price : null);
@@ -107,11 +119,13 @@ export class TargetObservation {
       if (price > this.peak) {
         this.peak = price;
         this.trough = price; // reset trough when a new peak is reached
+        this.troughAt = now;
       } else if (price < this.trough) {
         this.trough = price;
+        this.troughAt = now;
       }
     }
-    const a = median(recent.map(t => t.price)), b = median(before.map(t => t.price));
+    const a = median(immediate.map(t => t.price)), b = median(before.map(t => t.price));
     const currentCount = this.counts.filter(t => t.at <= now && now - t.at <= 15000).at(-1);
     const priorCount = this.counts.filter(t => t.at <= now - 15000 && now - 15000 - t.at <= 15000).at(-1);
     const holderGrowth15s = currentCount && priorCount ? currentCount.count - priorCount.count : null;
@@ -130,6 +144,9 @@ export class TargetObservation {
     )).map(r => r.wallet);
     const bounceFromTroughPercent = (price !== null && Number.isFinite(this.trough) && this.trough > 0 && price >= this.trough)
       ? ((price - this.trough) / this.trough) * 100
+      : null;
+    const troughAgeSeconds = (this.troughAt > 0 && price !== null)
+      ? Math.max(0, (now - this.troughAt) / 1000)
       : null;
 
     // Pelacakan dev wallet & dev balance
@@ -159,6 +176,8 @@ export class TargetObservation {
       sellUsd, largestSellUsd: Math.max(0, ...sell.map(t => t.usd ?? 0)), riskWalletsPresent: [...new Set(present)],
       peakPrice: this.peak > 0 ? this.peak : null,
       troughPrice: Number.isFinite(this.trough) ? this.trough : null,
+      troughAgeSeconds,
+      troughAt: this.troughAt > 0 ? this.troughAt : null,
       bounceFromTroughPercent,
       devWallet: devWallet ?? null,
       devBalance,
