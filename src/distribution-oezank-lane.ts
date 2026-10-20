@@ -9,6 +9,16 @@ import {
 } from './distribution-target-lane.js';
 
 export const OEZANK_WALLET = 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy';
+export const COPY_TRADING_WALLETS = [
+  'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy', // Oezank IDC
+  'Dq2UkKj2bAWusWGDkuJsRRz52y3NQpYvmqgyhd8PkRzA', // Copy Trader Dq2UkK
+  '9pGcr4S4eVaihGNZMX5LbDJUuUrQ79QKw6npiCgfausK', // Copy Trader 9pGcr4
+] as const;
+export const COPY_TRADING_WALLETS_SET = new Set<string>(COPY_TRADING_WALLETS);
+export function isCopyTradingWallet(wallet: string): boolean {
+  return COPY_TRADING_WALLETS_SET.has(wallet);
+}
+
 export const OEZANK_LANE_OZ1 = 'distribution-oezank-oz1';
 export const OEZANK_TARGET_PERCENT = 9999; // 100% Mirror Exit: tidak ada TP mekanis, tunggu Oezank sell
 export const OEZANK_STOP_LOSS_PERCENT = 75; // Catastrophic safety floor only (-75%)

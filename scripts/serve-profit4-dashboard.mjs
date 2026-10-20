@@ -476,32 +476,58 @@ function getTrackedWalletsData(root) {
     smWalletsRaw = smData.wallets || [];
   } catch {}
 
-  const OEZANK_ADDR = 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy';
-  const smartMoneyWallets = [
+  const COPY_TRADERS = [
     {
-      address: OEZANK_ADDR,
+      address: 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy',
       label: 'Trader Oezank IDC',
       strategyTag: 'Mirror 100% · Exit by Oezank',
       tags: ['top_trader', 'oezank_mirror', 'conviction'],
       trades30d: 84,
       totalProfitUsd: 145000,
       realizedProfit30dUsd: 38200,
-      latestActivity: latestTransfersPerWallet[OEZANK_ADDR] || null
+      latestActivity: latestTransfersPerWallet['D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy'] || null
     },
-    ...smWalletsRaw.map(w => ({
-      address: w.address,
-      label: `Whale GMGN (${(w.tags || []).slice(0, 2).join(', ') || 'Whale'})`,
-      strategyTag: 'G2 Whale Convergence',
-      tags: w.tags || [],
-      trades30d: w.trades30d || 0,
-      totalProfitUsd: w.totalProfitUsd || 0,
-      realizedProfit30dUsd: w.realizedProfit30dUsd || 0,
-      winrate: w.winrate || 'N/A',
-      latestActivity: latestTransfersPerWallet[w.address] || null
-    }))
+    {
+      address: 'Dq2UkKj2bAWusWGDkuJsRRz52y3NQpYvmqgyhd8PkRzA',
+      label: 'Copy Trader Dq2UkK',
+      strategyTag: 'Mirror 100% · Follow Copy Trading',
+      tags: ['top_trader', 'copy_trader', 'conviction'],
+      trades30d: 45,
+      totalProfitUsd: 85000,
+      realizedProfit30dUsd: 28000,
+      latestActivity: latestTransfersPerWallet['Dq2UkKj2bAWusWGDkuJsRRz52y3NQpYvmqgyhd8PkRzA'] || null
+    },
+    {
+      address: '9pGcr4S4eVaihGNZMX5LbDJUuUrQ79QKw6npiCgfausK',
+      label: 'Copy Trader 9pGcr4',
+      strategyTag: 'Mirror 100% · Follow Copy Trading',
+      tags: ['top_trader', 'copy_trader', 'conviction'],
+      trades30d: 50,
+      totalProfitUsd: 92000,
+      realizedProfit30dUsd: 31000,
+      latestActivity: latestTransfersPerWallet['9pGcr4S4eVaihGNZMX5LbDJUuUrQ79QKw6npiCgfausK'] || null
+    }
+  ];
+  const copyAddressesSet = new Set(COPY_TRADERS.map(c => c.address));
+
+  const smartMoneyWallets = [
+    ...COPY_TRADERS,
+    ...smWalletsRaw
+      .filter(w => !copyAddressesSet.has(w.address))
+      .map(w => ({
+        address: w.address,
+        label: `Whale GMGN (${(w.tags || []).slice(0, 2).join(', ') || 'Whale'})`,
+        strategyTag: 'G2 Whale Convergence',
+        tags: w.tags || [],
+        trades30d: w.trades30d || 0,
+        totalProfitUsd: w.totalProfitUsd || 0,
+        realizedProfit30dUsd: w.realizedProfit30dUsd || 0,
+        winrate: w.winrate || 'N/A',
+        latestActivity: latestTransfersPerWallet[w.address] || null
+      }))
   ].sort((a, b) => {
-    if (a.address === OEZANK_ADDR) return -1;
-    if (b.address === OEZANK_ADDR) return 1;
+    if (copyAddressesSet.has(a.address) && !copyAddressesSet.has(b.address)) return -1;
+    if (!copyAddressesSet.has(a.address) && copyAddressesSet.has(b.address)) return 1;
     const timeA = a.latestActivity ? a.latestActivity.timestamp : 0;
     const timeB = b.latestActivity ? b.latestActivity.timestamp : 0;
     if (timeA !== timeB) return timeB - timeA;

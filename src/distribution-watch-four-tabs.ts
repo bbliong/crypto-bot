@@ -18,7 +18,7 @@ import { Profit4LiveEngine } from "./profit4-live-engine.js";
 import { GmgnLiveAdapter } from "./profit4-gmgn-execution.js";
 import { readJson } from "./profit4-live-store.js";
 import { getSmartWalletsWatchlist } from "./distribution-smart-money-lane.js";
-import { OEZANK_WALLET } from "./distribution-oezank-lane.js";
+import { OEZANK_WALLET, COPY_TRADING_WALLETS, isCopyTradingWallet } from "./distribution-oezank-lane.js";
 import {
   DistributionProfit4Runtime,
   atomicProfit4Json,
@@ -1834,7 +1834,9 @@ const SMART_MONEY_BLACKLIST_SYMBOLS = new Set([
 
 let smartMoneyStream: SolanaWalletStream | null = null;
 const smartWalletsSet = getSmartWalletsWatchlist();
-smartWalletsSet.add(OEZANK_WALLET);
+for (const w of COPY_TRADING_WALLETS) {
+  smartWalletsSet.add(w);
+}
 const smartAddresses = [...smartWalletsSet];
 const seenSmartTrades = new Set<string>();
 
@@ -1860,23 +1862,24 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
     if (SMART_MONEY_BLACKLIST_SYMBOLS.has(sym)) {
       return;
     }
+    const isCopyTrader = isCopyTradingWallet(t.wallet);
     const isOezank = t.wallet === OEZANK_WALLET;
-    // Anti-Dust Filter khusus Oezank: Real trades Oezank adalah >= 0.05 SOL (~$6-$25 USD).
+    // Anti-Dust Filter khusus Copy Trader: Real trades adalah >= 0.05 SOL (~$6-$25 USD).
     // Abaikan swap micro-dust / test ping (0.0002 SOL / $0.02 USD)
-    if (isOezank && t.solSpent !== undefined && t.solSpent < 0.05) {
+    if (isCopyTrader && t.solSpent !== undefined && t.solSpent < 0.05) {
       return;
     }
     // Anti-Dust Filter khusus Smart Money Inflow: Minimal $50 USD atau 0.35 SOL
-    if (!isOezank) {
+    if (!isCopyTrader) {
       if (t.solSpent !== undefined && t.solSpent < 0.35) return;
       if (t.amount !== undefined && t.priceUsd !== undefined && (t.amount * t.priceUsd) < 50.0) return;
     }
-    const sourceTag = isOezank ? "oezank_inflow" : "smart_money_inflow";
-    const statusTag = isOezank ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
-    const eventType = isOezank ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_WHALE_TRANSFER_IN";
+    const sourceTag = isCopyTrader ? "oezank_inflow" : "smart_money_inflow";
+    const statusTag = isCopyTrader ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
+    const eventType = isCopyTrader ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_WHALE_TRANSFER_IN";
 
-    if (isOezank) {
-      console.log(`[oezank-tracker] 🇮🇩 Trader Oezank IDC bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
+    if (isCopyTrader) {
+      console.log(`[copy-trader-ws] 🇮🇩 Copy Trader (${t.wallet.slice(0, 6)}..) bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
     } else {
       console.log(`[smart-money-ws] 🐋 Whale ${t.wallet.slice(0, 6)}.. bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
     }
@@ -1966,24 +1969,24 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
   });
 
   smartMoneyStream.on("sell", (s) => {
-    const isOezank = s.wallet === OEZANK_WALLET;
+    const isCopyTrader = isCopyTradingWallet(s.wallet);
     feedHub.broadcast({
       type: "TRACKED_WALLET_SOLD",
-      source: isOezank ? "oezank" : "smart_money",
+      source: isCopyTrader ? "oezank" : "smart_money",
       mint: s.mint,
       wallet: s.wallet,
       observedAt: Date.now(),
     });
     write("watch-events.jsonl", {
-      type: isOezank ? "OEZANK_TRADER_SOLD" : "SMART_MONEY_WHALE_SOLD",
+      type: isCopyTrader ? "OEZANK_TRADER_SOLD" : "SMART_MONEY_WHALE_SOLD",
       observedAt: Date.now(),
       trackedWallet: s.wallet,
       mint: s.mint,
       tx: s.tx,
       source: "solana_rpc_ws",
     });
-    if (isOezank) {
-      console.log(`[oezank-tracker] 🚨 Oezank IDC sold token ${s.mint.slice(0, 6)}.. Triggering mirror exit!`);
+    if (isCopyTrader) {
+      console.log(`[copy-trader-ws] 🚨 Copy Trader (${s.wallet.slice(0, 6)}..) sold token ${s.mint.slice(0, 6)}.. Triggering mirror exit!`);
       (targetLane as any).onTrackedWalletSold?.(s.mint, s.wallet, Date.now());
     }
   });
@@ -2160,11 +2163,15 @@ while (!controller.isClosed() && !stopping) {
     const candidate = latestUnsold(result.body, wallet);
     if (candidate) await openOrReplaceDetail(candidate);
 
-    // Dedicated periodic poller for Smart Money Wallets & Oezank
+    // Dedicated periodic poller for Smart Money Wallets & Copy Traders
     if (smartAddresses.length > 0 && loopCounter++ % 3 === 2) {
-      const pollOezankPriority = loopCounter % 9 === 0;
-      const sw = pollOezankPriority ? OEZANK_WALLET : smartAddresses[nextSmartWallet];
-      if (!pollOezankPriority) {
+      const pollCopyTraderPriority = loopCounter % 6 === 0;
+      let sw: string;
+      if (pollCopyTraderPriority) {
+        const copyIdx = Math.floor(loopCounter / 6) % COPY_TRADING_WALLETS.length;
+        sw = COPY_TRADING_WALLETS[copyIdx];
+      } else {
+        sw = smartAddresses[nextSmartWallet];
         nextSmartWallet = (nextSmartWallet + 1) % smartAddresses.length;
       }
       try {
@@ -2172,10 +2179,10 @@ while (!controller.isClosed() && !stopping) {
         const swRes = await controller.evaluate(fetchSingleWalletActivity, { url: swUrl });
         if (swRes && swRes.valid && swRes.body?.data?.activities) {
           const nowSec = Math.floor(Date.now() / 1000);
-          const isOezank = sw === OEZANK_WALLET;
-          const sourceTag = isOezank ? "oezank_inflow" : "smart_money_inflow";
-          const statusTag = isOezank ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
-          const eventType = isOezank ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_POLL_BUY_DETECTED";
+          const isCopyTrader = isCopyTradingWallet(sw);
+          const sourceTag = isCopyTrader ? "oezank_inflow" : "smart_money_inflow";
+          const statusTag = isCopyTrader ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
+          const eventType = isCopyTrader ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_POLL_BUY_DETECTED";
 
           for (const act of swRes.body.data.activities as any[]) {
             const ev = String(act.event_type || act.event || "").toLowerCase();
@@ -2184,15 +2191,15 @@ while (!controller.isClosed() && !stopping) {
               // Hanya proses transaksi baru (< 5 menit / 300 detik)
               if (nowSec - ts > 300) continue;
 
-              const symbol = String(act.token?.symbol || (isOezank ? "OEZANK" : "SMART"));
+              const symbol = String(act.token?.symbol || (isCopyTrader ? "COPY_TRADER" : "SMART"));
               if (SMART_MONEY_BLACKLIST_SYMBOLS.has(symbol.toUpperCase())) continue;
 
               const mint = String(act.token?.address || act.token_address || "");
-              const costUsd = Number(act.cost_usd || (isOezank ? 0 : 50));
-              // Anti-Dust Filter: Abaikan micro-swap Oezank < $5 USD
-              if (isOezank && costUsd > 0 && costUsd < 5.0) continue;
+              const costUsd = Number(act.cost_usd || (isCopyTrader ? 0 : 50));
+              // Anti-Dust Filter: Abaikan micro-swap Copy Trader < $5 USD
+              if (isCopyTrader && costUsd > 0 && costUsd < 5.0) continue;
               // Anti-Dust Filter: Abaikan micro-swap Smart Money < $50 USD
-              if (!isOezank && costUsd > 0 && costUsd < 50.0) continue;
+              if (!isCopyTrader && costUsd > 0 && costUsd < 50.0) continue;
 
               const key = `${sw}:${mint}:${ts}`;
               if (mint && !seenSmartTrades.has(key)) {
@@ -2201,8 +2208,8 @@ while (!controller.isClosed() && !stopping) {
                 const priceUsd = Number(act.price_usd || (costUsd > 0 && amount > 0 ? costUsd / amount : 0));
                 if (priceUsd <= 0) continue;
 
-                if (isOezank) {
-                  console.log(`[oezank-poller] 🇮🇩 Trader Oezank IDC bought ${symbol} ($${costUsd.toFixed(1)})`);
+                if (isCopyTrader) {
+                  console.log(`[copy-trader-poller] 🇮🇩 Copy Trader (${sw.slice(0, 6)}..) bought ${symbol} ($${costUsd.toFixed(1)})`);
                 } else {
                   console.log(`[smart-wallet-poller] Whale ${sw.slice(0, 6)}.. bought ${symbol} ($${costUsd.toFixed(1)})`);
                 }
@@ -2284,12 +2291,12 @@ while (!controller.isClosed() && !stopping) {
             } else if (ev === "sell" || ev === "swap_sell") {
               const mint = String(act.token?.address || act.token_address || "");
               if (mint) {
-                if (isOezank) {
-                  console.log(`[oezank-poller] 🚨 Oezank IDC sold token ${mint.slice(0, 6)}.. Triggering mirror exit!`);
+                if (isCopyTrader) {
+                  console.log(`[copy-trader-poller] 🚨 Copy Trader (${sw.slice(0, 6)}..) sold token ${mint.slice(0, 6)}.. Triggering mirror exit!`);
                 }
                 feedHub.broadcast({
                   type: "TRACKED_WALLET_SOLD",
-                  source: isOezank ? "oezank" : "smart_money",
+                  source: isCopyTrader ? "oezank" : "smart_money",
                   mint,
                   wallet: sw,
                   observedAt: Date.now(),

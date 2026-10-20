@@ -45,7 +45,9 @@ import {
   DistributionOezankLaneOZ1,
   OEZANK_RULES_OZ1,
   OEZANK_LANE_OZ1,
-  OEZANK_WALLET
+  OEZANK_WALLET,
+  COPY_TRADING_WALLETS,
+  isCopyTradingWallet
 } from './distribution-oezank-lane.js';
 import {
   DistributionMomentumSafeLane,
@@ -450,9 +452,9 @@ export class DistributionProfit4Runtime {
       }
 
       // ==========================================
-      // PIPELINE 3: SMART MONEY INFLOW (117 Wallets: G2.1 Single Whale & G2.2 Multi-Whale)
+      // PIPELINE 3: SMART MONEY INFLOW (G2.1 Single Whale & G2.2 Multi-Whale Convergence)
       // ==========================================
-      else if (source === 'smart_money_inflow' && (this.laneType === 'bounce' || this.laneType === 'smartmoney')) {
+      else if ((source === 'smart_money_inflow' || source === 'oezank_inflow') && (this.laneType === 'bounce' || this.laneType === 'smartmoney')) {
         const keyG2 = `${transfer.mint}:g2`;
         const numAmount = typeof transfer.amount === 'string' ? parseFloat(transfer.amount) : (transfer.amount ?? 0);
         const costUsd = transfer.costUsd ?? (numAmount > 0 && transfer.priceUsd ? numAmount * transfer.priceUsd : 50);
@@ -460,67 +462,64 @@ export class DistributionProfit4Runtime {
           (this.states.get(keyG2)?.lane as any)?.registerSmartWallet?.(transfer.wallet, costUsd);
           (this.states.get(`${transfer.mint}:g2_1`)?.lane as any)?.registerSmartWallet?.(transfer.wallet, costUsd);
           (this.states.get(`${transfer.mint}:g2_2`)?.lane as any)?.registerSmartWallet?.(transfer.wallet, costUsd);
-          return;
+        } else {
+          const keyG2_1 = `${transfer.mint}:g2_1`;
+          const keyG2_2 = `${transfer.mint}:g2_2`;
+
+          const laneG2_1 = new DistributionSmartMoneyLaneG2_1(transfer.mint, makeOnEvent(keyG2_1, 'G2.1'));
+          const laneG2_2 = new DistributionSmartMoneyConvergenceLaneG2_2(transfer.mint, makeOnEvent(keyG2_2, 'G2.2'));
+          const laneG2 = new DistributionSmartMoneyConvergenceLaneG2(transfer.mint, makeOnEvent(keyG2, 'G2'));
+
+          laneG2_1.registerSmartWallet(transfer.wallet, costUsd);
+          laneG2_2.registerSmartWallet(transfer.wallet, costUsd);
+          laneG2.registerSmartWallet(transfer.wallet, costUsd);
+
+          const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
+          const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 60000);
+
+          laneG2_1.setInitialTrades(recentTrades);
+          laneG2_2.setInitialTrades(recentTrades);
+          laneG2.setInitialTrades(recentTrades);
+
+          this.states.set(keyG2_1, { key: keyG2_1, transfer, observation, lane: laneG2_1, facts: null, active: true, registeredAt: now, laneLabel: 'G2.1', version: SMART_MONEY_RULES_G2_1.version, lastDecision: null, lastEvent: null });
+          this.states.set(keyG2_2, { key: keyG2_2, transfer, observation, lane: laneG2_2, facts: null, active: true, registeredAt: now, laneLabel: 'G2.2', version: SMART_MONEY_RULES_G2_2.version, lastDecision: null, lastEvent: null });
+          this.states.set(keyG2, { key: keyG2, transfer, observation, lane: laneG2, facts: null, active: true, registeredAt: now, laneLabel: 'G2', version: SMART_MONEY_RULES_G2.version, lastDecision: null, lastEvent: null });
+
+          if (this.bought.has(`${transfer.mint}:g2_1`)) laneG2_1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          else if (invalidTime) laneG2_1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          if (this.bought.has(`${transfer.mint}:g2_2`)) laneG2_2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          else if (invalidTime) laneG2_2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          if (this.bought.has(`${transfer.mint}:g2`)) laneG2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          else if (invalidTime) laneG2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
         }
 
-        const keyG2_1 = `${transfer.mint}:g2_1`;
-        const keyG2_2 = `${transfer.mint}:g2_2`;
+        // COPY TRADING / OEZANK MIRROR INFLOW (Lane OZ1)
+        if (source === 'oezank_inflow' || isCopyTradingWallet(transfer.wallet)) {
+          const keyOZ1 = `${transfer.mint}:oz1`;
+          if (!this.states.has(keyOZ1)) {
+            const laneOZ1 = new DistributionOezankLaneOZ1(transfer.mint, makeOnEvent(keyOZ1, 'OZ1'));
+            const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
+            const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 30000);
+            laneOZ1.setInitialTrades(recentTrades);
 
-        const laneG2_1 = new DistributionSmartMoneyLaneG2_1(transfer.mint, makeOnEvent(keyG2_1, 'G2.1'));
-        const laneG2_2 = new DistributionSmartMoneyConvergenceLaneG2_2(transfer.mint, makeOnEvent(keyG2_2, 'G2.2'));
-        const laneG2 = new DistributionSmartMoneyConvergenceLaneG2(transfer.mint, makeOnEvent(keyG2, 'G2'));
+            this.states.set(keyOZ1, {
+              key: keyOZ1,
+              transfer,
+              observation,
+              lane: laneOZ1,
+              facts: null,
+              active: true,
+              registeredAt: now,
+              laneLabel: 'OZ1',
+              version: OEZANK_RULES_OZ1.version,
+              lastDecision: null,
+              lastEvent: null
+            });
 
-        laneG2_1.registerSmartWallet(transfer.wallet, costUsd);
-        laneG2_2.registerSmartWallet(transfer.wallet, costUsd);
-        laneG2.registerSmartWallet(transfer.wallet, costUsd);
-
-        const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
-        const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 60000);
-
-        laneG2_1.setInitialTrades(recentTrades);
-        laneG2_2.setInitialTrades(recentTrades);
-        laneG2.setInitialTrades(recentTrades);
-
-        this.states.set(keyG2_1, { key: keyG2_1, transfer, observation, lane: laneG2_1, facts: null, active: true, registeredAt: now, laneLabel: 'G2.1', version: SMART_MONEY_RULES_G2_1.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyG2_2, { key: keyG2_2, transfer, observation, lane: laneG2_2, facts: null, active: true, registeredAt: now, laneLabel: 'G2.2', version: SMART_MONEY_RULES_G2_2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyG2, { key: keyG2, transfer, observation, lane: laneG2, facts: null, active: true, registeredAt: now, laneLabel: 'G2', version: SMART_MONEY_RULES_G2.version, lastDecision: null, lastEvent: null });
-
-        if (this.bought.has(`${transfer.mint}:g2_1`)) laneG2_1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneG2_1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:g2_2`)) laneG2_2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneG2_2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:g2`)) laneG2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneG2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-      }
-
-      // ==========================================
-      // PIPELINE 4: OEZANK TRADER MIRROR INFLOW (Lane OZ1)
-      // ==========================================
-      else if (source === 'oezank_inflow' && (this.laneType === 'bounce' || this.laneType === 'smartmoney')) {
-        const keyOZ1 = `${transfer.mint}:oz1`;
-        if (this.states.has(keyOZ1)) return;
-
-        const laneOZ1 = new DistributionOezankLaneOZ1(transfer.mint, makeOnEvent(keyOZ1, 'OZ1'));
-        const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
-        const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 30000);
-        laneOZ1.setInitialTrades(recentTrades);
-
-        this.states.set(keyOZ1, {
-          key: keyOZ1,
-          transfer,
-          observation,
-          lane: laneOZ1,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'OZ1',
-          version: OEZANK_RULES_OZ1.version,
-          lastDecision: null,
-          lastEvent: null
-        });
-
-        if (this.bought.has(keyOZ1)) laneOZ1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneOZ1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+            if (this.bought.has(keyOZ1)) laneOZ1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+            else if (invalidTime) laneOZ1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          }
+        }
       }
 
       // ==========================================
@@ -706,8 +705,8 @@ export class DistributionProfit4Runtime {
         else if (laneLabel.startsWith('V')) {
           (state.lane as any).onSyndicateSell?.(wallet, now);
         }
-        // 3. OEZANK TRADER MIRROR: If Oezank wallet sold, mirror exit immediately!
-        else if (laneLabel === 'OZ1' && wallet === OEZANK_WALLET) {
+        // 3. COPY TRADING / OEZANK TRADER MIRROR: If tracked copy trader wallet sold, mirror exit immediately!
+        else if (laneLabel === 'OZ1' && (wallet === state.transfer.wallet || isCopyTradingWallet(wallet))) {
           (state.lane as any).onOezankSold?.(now);
           state.active = false;
         }
