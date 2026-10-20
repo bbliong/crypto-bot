@@ -429,6 +429,9 @@ export class DistributionProfit4Runtime {
       // PIPELINE 2: GMGN RESEARCH NEW PAIR (Momentum Lanes)
       // ==========================================
       else if ((source === 'gmgn_research_ws' || source === 'new_pair') && this.laneType === 'momentum') {
+        const mcap = transfer.marketCapUsd ?? (transfer.priceUsd ? transfer.priceUsd * 1_000_000_000 : null);
+        if (!mcap || mcap < 10000 || mcap > 100000) return;
+
         const keyScalp = `${transfer.mint}:mscalp`;
         if (this.states.has(keyScalp)) return;
 

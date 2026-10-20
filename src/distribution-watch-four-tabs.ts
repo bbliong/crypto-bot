@@ -66,7 +66,7 @@ const { values } = parseArgs({
     paperLane: { type: "string", default: "target" },
     dataDir: { type: "string", default: "data/distribution-watch" },
     maxDetails: { type: "string", default: "0" },
-    headlessStream: { type: "string", default: "true" },
+    headlessStream: { type: "string", default: "false" },
     solanaWalletWs: { type: "string", default: "true" },
   },
 });
@@ -624,22 +624,25 @@ attachCapture(
         const wallet = String(f.token?.creator || (row as any).creator || "gmgn_research");
         const rawPrice = Number(f.token?.price_usd || (row as any).price_usd || 0);
         const priceUsd = rawPrice > 0.000004 ? rawPrice : 0;
-        candidateMeta.set(f.mint, { symbol, creator: wallet, originalSource: "gmgn_research_ws" });
-        feedHub.broadcast({
-          type: "CANDIDATE",
-          source: "gmgn_research_ws",
-          transfer: {
-            mint: f.mint,
-            wallet,
-            symbol,
-            timestamp: Math.floor(now / 1000),
-            from: wallet,
+        const estMcap = priceUsd > 0 ? priceUsd * 1_000_000_000 : 0;
+        if (estMcap >= 10000 && estMcap <= 100000) {
+          candidateMeta.set(f.mint, { symbol, creator: wallet, originalSource: "gmgn_research_ws" });
+          feedHub.broadcast({
+            type: "CANDIDATE",
             source: "gmgn_research_ws",
-            priceUsd: priceUsd > 0 ? priceUsd : undefined,
-            marketCapUsd: priceUsd > 0 ? priceUsd * 1_000_000_000 : undefined,
-          },
-          observedAt: now,
-        });
+            transfer: {
+              mint: f.mint,
+              wallet,
+              symbol,
+              timestamp: Math.floor(now / 1000),
+              from: wallet,
+              source: "gmgn_research_ws",
+              priceUsd: priceUsd > 0 ? priceUsd : undefined,
+              marketCapUsd: estMcap,
+            },
+            observedAt: now,
+          });
+        }
         if (priceUsd > 0) {
           tradeStream?.registerMint(f.mint, { symbol, priceUsd });
           promoteTokenIfQualified(f.mint, priceUsd, now, wallet, "gmgn_research_ws");
@@ -658,7 +661,7 @@ attachCapture(
             observedAt: now,
           });
         }
-        if (targetLane instanceof DistributionProfit4Runtime) {
+        if (targetLane instanceof DistributionProfit4Runtime && estMcap >= 10000 && estMcap <= 100000) {
           targetLane.register({
             mint: f.mint,
             wallet,
@@ -667,6 +670,7 @@ attachCapture(
             from: wallet,
             source: "gmgn_research_ws",
             priceUsd,
+            marketCapUsd: estMcap,
           }, now);
           if (priceUsd > 0) {
             targetLane.trade(f.mint, {
@@ -684,6 +688,64 @@ attachCapture(
     }
   },
 );
+
+controller.on("response", async (response) => {
+  const url = response.url();
+  if (url.includes("/api/v1/pairs/sol/new_pairs")) {
+    try {
+      const text = await response.text();
+      const json = JSON.parse(text);
+      const pairs = json.data?.pairs || [];
+      const now = Date.now();
+      for (const pair of pairs) {
+        const info = pair.base_token_info;
+        if (!info?.address) continue;
+        const mint = String(info.address);
+        const symbol = String(info.symbol || pair.symbol || "NEW_PAIR");
+        const wallet = String(info.creator || pair.creator || "gmgn_new_pairs");
+        const priceUsd = Number(info.price || pair.price || 0);
+        const marketCapUsd = Number(info.market_cap || pair.market_cap || (priceUsd * 1_000_000_000));
+
+        // Sesuai filter Tab 1 New Pairs: MC $10k - $100k
+        if (marketCapUsd < 10000 || marketCapUsd > 100000) continue;
+
+        candidateMeta.set(mint, { symbol, creator: wallet, originalSource: "gmgn_research_ws" });
+        feedHub.broadcast({
+          type: "CANDIDATE",
+          source: "gmgn_research_ws",
+          transfer: {
+            mint,
+            wallet,
+            symbol,
+            timestamp: Math.floor(now / 1000),
+            from: wallet,
+            source: "gmgn_research_ws",
+            priceUsd: priceUsd > 0 ? priceUsd : undefined,
+            marketCapUsd,
+          },
+          observedAt: now,
+        });
+
+        if (priceUsd > 0) {
+          feedHub.broadcast({
+            type: "TRADE_TICK",
+            mint,
+            trade: {
+              at: now,
+              timestamp: Math.floor(now / 1000),
+              price: priceUsd,
+              side: "buy",
+              wallet,
+              usd: 25,
+              signature: `gmgn_pair_${now}`,
+            },
+            observedAt: now,
+          });
+        }
+      }
+    } catch {}
+  }
+});
 
 let liveEngine: Profit4LiveEngine | null = null;
 if (isPaperRunner && targetLane instanceof DistributionProfit4Runtime) {
