@@ -75,7 +75,7 @@ if (!["target", "profit4", "bounce", "feed"].includes(values.paperLane!))
 const isPaperRunner =
   values.paperLane === "profit4" || values.paperLane === "bounce";
 const profit4 = isPaperRunner;
-const useHeadlessStream = values.headlessStream !== "false";
+const useHeadlessStream = values.headlessStream === "true";
 const useSolanaWalletWs = values.solanaWalletWs !== "false";
 const savedAddresses = readJson<{ addresses?: string[] }>(
   join(values.dataDir!, "dashboard-config.json"),
@@ -108,10 +108,9 @@ if (!Number.isFinite(walletPollMilliseconds) || walletPollMilliseconds < 250)
   throw new Error("--walletPollMilliseconds minimal 250.");
 if (!existsSync(values.profileDir!))
   throw new Error("Profile Chrome research tidak ditemukan.");
-const parsedMax = Number(values.maxDetails ?? (useHeadlessStream ? 0 : 3));
-const maxDetails = useHeadlessStream
-  ? 0
-  : (Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 3) : 0);
+const parsedMax = Number(values.maxDetails ?? 0);
+const maxDetails =
+  Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 3) : 0;
 
 const dataDirectory = values.dataDir!;
 const output = join(
@@ -248,7 +247,7 @@ const context = await chromium.launchPersistentContext(values.profileDir!, {
   ],
 });
 const controller = context.pages()[0] ?? (await context.newPage());
-const gmgnWsManager = new GmgnTokenWebSocketManager(controller, 10, 10);
+const gmgnWsManager = new GmgnTokenWebSocketManager(controller, 50, 50);
 const feedHub = new FeedHubServer(Number(process.env.FEED_HUB_PORT || 8765));
 await feedHub.start().catch((err: Error) => console.warn(`[feed-hub] Start warning: ${err.message}`));
 

@@ -49,15 +49,15 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
 
   constructor(
     page: Page,
-    maxPerPool: number = 10,
-    maxVipTokens: number = 10
+    maxPerPool: number = 50,
+    maxVipTokens: number = 50
   ) {
     super();
     this.page = page;
-    const clamped = Math.max(3, Math.min(25, maxPerPool));
+    const clamped = Math.max(10, Math.min(100, maxPerPool));
     this.poolCapacities = {
       momentum: clamped,
-      smartmoney: Math.max(3, Math.min(20, maxVipTokens)),
+      smartmoney: Math.max(10, Math.min(100, maxVipTokens)),
       trend20m: clamped,
     };
   }

@@ -36,10 +36,9 @@ const runtime = new DistributionProfit4Runtime(runDir, write, dataDir, 'momentum
 const client = new FeedHubClient(process.env.FEED_HUB_URL || 'ws://127.0.0.1:8765', 'worker-momentum');
 
 client.on('candidate', (ev) => {
-  if (ev.source === 'gmgn_research_ws' || ev.source === 'pumpportal_ws') {
+  if (ev.source === 'gmgn_research_ws' || ev.source === 'new_pair') {
     const mcap = ev.transfer?.marketCapUsd ?? (ev.transfer?.priceUsd ? ev.transfer.priceUsd * 1_000_000_000 : null);
-    if (mcap !== null && (mcap < 15000 || mcap > 100000)) {
-      // Tolak token di bawah $15k (M-Scalp $15k, M-Trend $20k) dari daftar watch agar hemat kuota GMGN WS
+    if (mcap !== null && (mcap < 10000 || mcap > 100000)) {
       return;
     }
     runtime.register(ev.transfer, ev.observedAt || Date.now());

@@ -163,7 +163,7 @@ type RuntimeState = {
   facts: TargetFacts | null;
   active: boolean;
   registeredAt?: number;
-  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'Trend20m';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -426,9 +426,9 @@ export class DistributionProfit4Runtime {
       }
 
       // ==========================================
-      // PIPELINE 2: GMGN RESEARCH NEW PAIR / PUMPPORTAL (Momentum Lanes)
+      // PIPELINE 2: GMGN RESEARCH NEW PAIR (Momentum Lanes)
       // ==========================================
-      else if ((source === 'gmgn_research_ws' || source === 'pumpportal_ws') && this.laneType === 'momentum') {
+      else if ((source === 'gmgn_research_ws' || source === 'new_pair') && this.laneType === 'momentum') {
         const keyScalp = `${transfer.mint}:mscalp`;
         if (this.states.has(keyScalp)) return;
 
