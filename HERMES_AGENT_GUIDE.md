@@ -4,7 +4,13 @@
 
 ---
 
-## 1. Ringkasan Eksekutif & Arsitektur Project
+## 0. Aturan Mutlak: Selalu Commit Setelah Eksekusi (Easy Rollback)
+**WAJIB DIPATUHI OLEH SETIAP AGENT**:
+- Setelah menyelesaikan setiap perubahan kode, pembuatan script, atau konfigurasi filter dan memverifikasinya:
+- **Segera lakukan `git add` dan `git commit` dengan pesan deskriptif sebelum melanjutkan ke fase/tugas berikutnya.**
+- Hal ini wajib agar user dapat melakukan rollback instan kapan pun (`git reset --hard HEAD~1` atau `git checkout`) jika diperlukan.
+
+---
 
 ### 1.1 Apa itu Crypto-Bot?
 `crypto-bot` adalah sistem automated algorithmic trading & paper monitor token Solana (fokus pada meme token / pump tokens) yang mengintegrasikan:
