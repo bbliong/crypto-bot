@@ -15,10 +15,15 @@ export function evaluateResearchMomentumEntry(f: TargetFacts, r: TargetRules): s
   if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
   if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
   if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 5000) reasons.push('PRICE_MISSING_OR_STALE');
+  // Hard Filter: Market Cap minimal untuk momentum (default $10k, menolak dev-dump genesis micro-cap)
+  const estimatedMcapUsd = (f.price ?? 0) * 1_000_000_000;
+  const requiredMcap = (r as any).minMarketCapUsd ?? 10000;
+  if (estimatedMcapUsd < requiredMcap) reasons.push(requiredMcap <= 10000 ? 'MARKET_CAP_BELOW_10K' : 'MARKET_CAP_BELOW_THRESHOLD');
   if (f.buyShareUsdPercent === null || f.buyShareUsdPercent < r.minBuySharePercent || f.meaningfulBuyUsd < r.minMeaningfulBuyUsd || f.meaningfulBuyers < r.minMeaningfulBuyers) reasons.push('MEANINGFUL_BUY_FLOW_WEAK');
   if (f.topBuyerSharePercent === null || f.topBuyerSharePercent > r.maxBuyerSharePercent) reasons.push('BUYER_CONCENTRATION_HIGH');
   if (f.momentumPercent === null || f.momentumPercent < r.minMomentumPercent || f.momentumPercent > r.maxMomentumPercent) reasons.push('MOMENTUM_OUTSIDE_RANGE');
-  if (f.drawdownPercent === null || f.drawdownPercent > r.maxDrawdownPercent || f.entryReturnPercent === null || f.entryReturnPercent > r.maxEntryReturnPercent) reasons.push('PRICE_UNSTABLE_OR_ENTRY_LATE');
+  // Proteksi drawdown: harga tidak boleh sedang anjlok dari peak lokal (maksimal r.maxDrawdownPercent)
+  if (f.drawdownPercent === null || f.drawdownPercent > r.maxDrawdownPercent) reasons.push('PRICE_DRAWDOWN_EXCEEDED');
   if (f.largestSellUsd >= 250) reasons.push('LARGE_SELL_ALREADY_PRESENT');
   if (typeof f.devHoldingSharePercent === 'number' && f.devHoldingSharePercent > 20) reasons.push('DEV_HOLDING_TOO_HIGH');
   return reasons;
@@ -33,7 +38,7 @@ function createResearchRules(overrides: Partial<TargetRules> & { version: string
     observationSeconds: 15,
     minTransferAgeSeconds: 30,
     maxTransferLagSeconds: 60,
-    maxEntryWaitSeconds: 300,
+    maxEntryWaitSeconds: 1800,
     confirmSeconds: 2,
     minBuySharePercent: 60,
     minMeaningfulBuyUsd: 10,

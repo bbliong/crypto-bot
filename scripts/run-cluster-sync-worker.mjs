@@ -16,7 +16,7 @@ function logEvent(dataDir, event) {
 export async function runClusterSyncIteration({
   root = defaultRoot,
   rpcUrl = getSolanaRpcUrl(root),
-  maxWalletsToSync = 50
+  maxWalletsToSync = 5
 } = {}) {
   const dataDir = join(root, 'data', 'profit4-watch');
   mkdirSync(dataDir, { recursive: true });
@@ -39,26 +39,100 @@ export async function runClusterSyncIteration({
   const newClustersFound = Math.max(0, (clusterResult.totalClusters || 0) - prevTotalClusters);
   console.log(`[SYNC] Selesai dalam ${(durationMs / 1000).toFixed(1)}s. Total Cluster: ${clusterResult.totalClusters} (+${newClustersFound} baru).`);
 
-  // 2. Kumpulkan Top 50 wallet representatif berdasarkan aktivitas paling segar & aktif
+  // 2. Kumpulkan Top 5 wallet representatif dengan DIVERSIFIKASI SINDIKAT MASTER (Round-Robin Fair Allocation)
+  // Mencegah dominasi 1 sindikat/botnet yang mengoperasikan puluhan token & ratusan wallet.
   const clusters = clusterResult.clusters || [];
-  const sortedClusters = [...clusters]
-    .filter(cl => cl.primaryTracked)
-    .sort((a, b) => {
-      const timeA = a.lastActivityAt || 0;
-      const timeB = b.lastActivityAt || 0;
-      if (timeB !== timeA) return timeB - timeA;
-      const txA = a.txCount || 0;
-      const txB = b.txCount || 0;
-      if (txB !== txA) return txB - txA;
-      return (b.tokensCount || 0) - (a.tokensCount || 0);
-    });
+  const nowMs = Date.now();
+
+  const validClusters = clusters
+    .filter(cl => {
+      if (!cl.primaryTracked) return false;
+      if ((cl.walletsCount || 0) < 4) return false; // Abaikan single/micro wallet anomaly
+      const toks = cl.tokens || [];
+      if (toks.some(t => t.mint === 'pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn')) return false; // Abaikan pump native token
+      return true;
+    })
+    .map(cl => {
+      const toks = cl.tokens || [];
+      const latestToken = toks[0] || null;
+      const lastAct = cl.lastActivityAt || 0;
+      const hoursAgo = lastAct ? (nowMs - lastAct) / (1000 * 3600) : 999;
+      const freshness = hoursAgo <= 6 ? 50 : (hoursAgo <= 24 ? 25 : 0);
+      const score = ((cl.tokensCount || toks.length) * 2) + ((cl.txCount || 0) * 1.5) + freshness;
+      return { cl, latestToken, score };
+    })
+    .sort((a, b) => b.score - a.score || (b.cl.lastActivityAt || 0) - (a.cl.lastActivityAt || 0));
+
+  // Kelompokkan per Sindikat Master
+  const syndMap = new Map();
+  for (const item of validClusters) {
+    const sid = item.cl.syndicateId || 'syn-default';
+    if (!syndMap.has(sid)) syndMap.set(sid, []);
+    syndMap.get(sid).push(item);
+  }
+
+  const syndList = Array.from(syndMap.entries())
+    .map(([sid, items]) => ({
+      sid,
+      name: items[0]?.cl?.syndicateName || sid,
+      items,
+      cursor: 0
+    }))
+    .sort((a, b) => b.items.length - a.items.length);
 
   const topWallets = [];
-  for (const cl of sortedClusters) {
-    if (!topWallets.includes(cl.primaryTracked)) {
-      topWallets.push(cl.primaryTracked);
+  const seenMints = new Set();
+  const seenDeployers = new Set();
+  const syndicateUsage = new Map();
+
+  // Round-Robin across syndicates
+  let hasProgress = true;
+  while (topWallets.length < maxWalletsToSync && hasProgress) {
+    hasProgress = false;
+    for (const syn of syndList) {
+      if (topWallets.length >= maxWalletsToSync) break;
+
+      while (syn.cursor < syn.items.length) {
+        const item = syn.items[syn.cursor++];
+        const mint = item.latestToken?.mint || null;
+        const primarySender = item.cl.senders?.[0] || null;
+
+        if (mint && seenMints.has(mint)) continue;
+        if (primarySender && seenDeployers.has(primarySender)) continue;
+
+        // Pilih wallet yang belum ada di topWallets
+        const candWallets = item.cl.wallets?.map(w => (typeof w === 'string' ? w : w.address)) || [item.cl.primaryTracked];
+        const wallet = candWallets.find(w => !topWallets.includes(w));
+        if (!wallet) continue;
+
+        topWallets.push(wallet);
+        if (mint) seenMints.add(mint);
+        if (primarySender) seenDeployers.add(primarySender);
+        syndicateUsage.set(syn.name, (syndicateUsage.get(syn.name) || 0) + 1);
+        hasProgress = true;
+        break; // Lanjut ke sindikat berikutnya (Round-Robin)
+      }
     }
-    if (topWallets.length >= maxWalletsToSync) break;
+  }
+
+  // Fallback jika belum mencapai kuota (relax filter deployer, pertahankan keunikan mint & wallet)
+  if (topWallets.length < maxWalletsToSync) {
+    for (const item of validClusters) {
+      const mint = item.latestToken?.mint || null;
+      if (mint && seenMints.has(mint)) continue;
+      const candWallets = item.cl.wallets?.map(w => (typeof w === 'string' ? w : w.address)) || [item.cl.primaryTracked];
+      const wallet = candWallets.find(w => !topWallets.includes(w));
+      if (!wallet) continue;
+
+      topWallets.push(wallet);
+      if (mint) seenMints.add(mint);
+      if (topWallets.length >= maxWalletsToSync) break;
+    }
+  }
+
+  console.log(`[SYNC] Distribusi Top ${topWallets.length} antar sindikat:`);
+  for (const [sName, cnt] of syndicateUsage.entries()) {
+    console.log(`  - ${sName}: ${cnt} wallet`);
   }
 
   // 3. Baca konfigurasi saat ini dan periksa perbedaan
@@ -102,6 +176,15 @@ export async function runClusterSyncIteration({
     newlyAddedToWatch: isChanged ? topWallets.length : 0
   };
   writeFileSync(statusFile, JSON.stringify(status, null, 2), 'utf8');
+
+  // 5. Auto-sync Canonical Syndicate Groups & Watched Targets for Profit4 Dashboard
+  try {
+    const { syncCanonicalSyndicateOutputs } = await import('../src/syndicate-canonical-grouper.js');
+    syncCanonicalSyndicateOutputs(root);
+    console.log('[SYNC] Canonical syndicate groups & watched targets auto-synced.');
+  } catch (syncErr) {
+    console.warn('[SYNC] Auto-sync canonical error:', syncErr?.message);
+  }
 
   return status;
 }

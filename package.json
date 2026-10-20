@@ -38,6 +38,7 @@
     "typecheck": "node scripts/run.mjs typecheck",
     "wallet:profit4-watch": "node scripts/run-profit4-watch.mjs",
     "wallet:bounce-watch": "node scripts/run-bounce-watch.mjs",
+    "monitor:cadence": "node --import tsx scripts/run-syndicate-cadence-monitor.mjs",
     "dashboard:profit4": "node --import tsx scripts/serve-profit4-dashboard.mjs"
   },
   "dependencies": {

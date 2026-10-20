@@ -1,6 +1,11 @@
 cr.bbliong.io {
     encode zstd gzip
 
+    # Wallet sindikat review UI; strip /sindikat before proxying
+    handle_path /sindikat* {
+        reverse_proxy 127.0.0.1:8787
+    }
+
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }
@@ -20,6 +25,9 @@ cr.bbliong.io {
         reverse_proxy 127.0.0.1:4178
     }
     handle /api/comparison-v6-v7* {
+        reverse_proxy 127.0.0.1:4178
+    }
+    handle /simulasi* {
         reverse_proxy 127.0.0.1:4178
     }
     # Centralized Profit4 Dashboard as default root handler

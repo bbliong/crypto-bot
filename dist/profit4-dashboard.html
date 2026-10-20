@@ -921,6 +921,7 @@
       }
 
     </style>
+    <script src="/chart.umd.js"></script>
   </head>
   <body>
     <main>
@@ -955,18 +956,517 @@
         </div>
       </div>
       <div id="error" role="alert"></div>
-      <nav class="desktop-tabs" aria-label="Bagian dashboard">
-        <button class="tab-button active" data-tab="radar">
-          ⚡ Radar Live (Tersaring) <span class="count" id="radar-badge-count">0</span></button
-        ><button class="tab-button" data-tab="trading">
-          💼 Trading (Dibeli &amp; Dijual) <span class="count" id="trading-badge-count">0</span></button
-        ><button class="tab-button" data-tab="rekap">
-          📊 Rekap &amp; 20 Lane Matrix</button>
+            <!-- Primary Main Navigation Bar (4 Main Tabs) -->
+      <nav class="main-module-nav" id="main-module-nav" style="display: flex; gap: 10px; border-bottom: 2px solid var(--edge); padding-bottom: 14px; margin-bottom: 18px; flex-wrap: wrap;">
+        <button type="button" class="main-nav-btn active" data-nav="overview" id="nav-btn-overview" onclick="switchMainTab('overview')" style="display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid #3b82f6; background: #1e3a8a; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+          🏠 Dashboard Utama
+        </button>
+        <button type="button" class="main-nav-btn" data-nav="momentum" id="nav-btn-momentum" onclick="switchMainTab('momentum')" style="display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--edge); background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+          🚀 Group Momentum <span class="count" id="nav-badge-momentum">0</span>
+        </button>
+        <button type="button" class="main-nav-btn" data-nav="syndicate" id="nav-btn-syndicate" onclick="switchMainTab('syndicate')" style="display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--edge); background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+          👥 Group Sindikat <span class="count" id="nav-badge-syndicate">0</span>
+        </button>
+        <button type="button" class="main-nav-btn" data-nav="smartmoney" id="nav-btn-smartmoney" onclick="switchMainTab('smartmoney')" style="display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--edge); background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+          🐋 Group Smart Money <span class="count" id="nav-badge-smartmoney">0</span>
+        </button>
+        <button type="button" class="main-nav-btn" data-nav="trend20m" id="nav-btn-trend20m" onclick="switchMainTab('trend20m')" style="display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--edge); background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+          📈 Group Trend 20m <span class="count" id="nav-badge-trend20m">0</span>
+        </button>
       </nav>
-      <section id="pane-radar" class="tab-pane active" aria-label="Radar Live">
+
+      <!-- ========================================== -->
+      <!-- 1. DASHBOARD UTAMA (OVERVIEW PANE)        -->
+      <!-- ========================================== -->
+      <section id="pane-overview" class="tab-pane active" aria-label="Dashboard Utama">
+        <!-- 1.1 Executive Metric Charts Deck (3 Cards) -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
+          <!-- Chart 1: Hasil Keuntungan Tiap Group -->
+          <div class="panel" style="padding: 18px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--edge); background: var(--panel);">
+            <div class="row" style="margin-bottom: 2px;">
+              <h2 style="display: flex; align-items: center; gap: 8px; font-size: 15px;">
+                <span>💰</span> Keuntungan Tiap Group (Net PnL USD)
+              </h2>
+              <span class="badge" id="overview-total-pnl">$0.00</span>
+            </div>
+            <p style="font-size: 12px; margin: 0 0 6px; color: var(--muted);">Profit bersih posisi tertutup (Closed PnL) pasca fee &amp; slippage.</p>
+            <div style="position: relative; height: 210px; width: 100%;">
+              <canvas id="chart-pnl-group"></canvas>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px; margin-top: 6px; border: 1px solid rgba(255,255,255,0.05);">
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">🚀 Momentum</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-pnl-momentum">$0.00</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">👥 Sindikat</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-pnl-syndicate">$0.00</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">🐋 Smart Money</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-pnl-smartmoney">$0.00</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">📈 Trend 20m</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-pnl-trend20m">$0.00</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart 2: Total Watch per Group -->
+          <div class="panel" style="padding: 18px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--edge); background: var(--panel);">
+            <div class="row" style="margin-bottom: 2px;">
+              <h2 style="display: flex; align-items: center; gap: 8px; font-size: 15px;">
+                <span>📡</span> Total Watch per Group
+              </h2>
+              <span class="badge" id="overview-total-watch">0 Token</span>
+            </div>
+            <p style="font-size: 12px; margin: 0 0 6px; color: var(--muted);">Jumlah kandidat &amp; token aktif yang dipantau feed hub.</p>
+            <div style="position: relative; height: 210px; width: 100%;">
+              <canvas id="chart-watch-group"></canvas>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px; margin-top: 6px; border: 1px solid rgba(255,255,255,0.05);">
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">🚀 Momentum</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-watch-momentum">0</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">👥 Sindikat</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-watch-syndicate">0</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">🐋 Smart Money</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-watch-smartmoney">0</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">📈 Trend 20m</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-watch-trend20m">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart 3: Total Win & Loss per Group -->
+          <div class="panel" style="padding: 18px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--edge); background: var(--panel);">
+            <div class="row" style="margin-bottom: 2px;">
+              <h2 style="display: flex; align-items: center; gap: 8px; font-size: 15px;">
+                <span>🎯</span> Win &amp; Loss per Group
+              </h2>
+              <span class="badge" id="overview-winrate-avg">WR 0%</span>
+            </div>
+            <p style="font-size: 12px; margin: 0 0 6px; color: var(--muted);">Perbandingan rasio posisi menang vs kalah per worker grup.</p>
+            <div style="position: relative; height: 210px; width: 100%;">
+              <canvas id="chart-winloss-group"></canvas>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px; margin-top: 6px; border: 1px solid rgba(255,255,255,0.05);">
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">🚀 Momentum</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-wr-momentum">0%</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">👥 Sindikat</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-wr-syndicate">0%</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">🐋 Smart Money</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-wr-smartmoney">0%</div>
+              </div>
+              <div style="text-align: center;">
+                <div style="font-size: 11px; color: var(--muted);">📈 Trend 20m</div>
+                <div style="font-weight: 700; font-size: 13px;" id="metric-wr-trend20m">0%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.2 Datatable Sneakview Section -->
+        <!-- Sneakview 1: Summary Win & Loss per Group -->
+        <div class="panel" style="padding: 18px; border: 1px solid var(--edge); background: var(--panel);">
+          <div class="row" style="margin-bottom: 12px;">
+            <div>
+              <h2 style="font-size: 16px; display: flex; align-items: center; gap: 8px;">
+                <span>📋</span> Sneakview 1: Ringkasan Performa &amp; Win/Loss per Group
+              </h2>
+              <p style="font-size: 12px; margin: 2px 0 0; color: var(--muted);">
+                Perbandingan langsung metrik operasional antara Group Momentum, Sindikat, dan Smart Money.
+              </p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Kelompok Strategi</th>
+                  <th style="text-align: right;">Total Watched</th>
+                  <th style="text-align: right;">Posisi Open</th>
+                  <th style="text-align: right;">Posisi Closed</th>
+                  <th style="text-align: right;">Win / Loss</th>
+                  <th style="text-align: right;">Win Rate</th>
+                  <th style="text-align: right;">Realized PnL ($)</th>
+                  <th style="text-align: center;">Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="table-group-summary-body">
+                <!-- Populated dynamically via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Sneakview 2: Breakdown Keuntungan per Group per Lane -->
+        <div class="panel" style="padding: 18px; border: 1px solid var(--edge); background: var(--panel);">
+          <div class="row" style="margin-bottom: 12px;">
+            <div>
+              <h2 style="font-size: 16px; display: flex; align-items: center; gap: 8px;">
+                <span>🔍</span> Sneakview 2: Breakdown Keuntungan per Group per Lane
+              </h2>
+              <p style="font-size: 12px; margin: 2px 0 0; color: var(--muted);">
+                Breakdown detail setiap jalur (lane) trading yang aktif di masing-masing grup.
+              </p>
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="lane-breakdown-filters">
+              <button type="button" class="small-btn active" data-lane-filter="all" onclick="filterLaneTable('all')" style="padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;">Semua Lane</button>
+              <button type="button" class="small-btn" data-lane-filter="momentum" onclick="filterLaneTable('momentum')" style="padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;">🚀 Momentum</button>
+              <button type="button" class="small-btn" data-lane-filter="syndicate" onclick="filterLaneTable('syndicate')" style="padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;">👥 Sindikat</button>
+              <button type="button" class="small-btn" data-lane-filter="smartmoney" onclick="filterLaneTable('smartmoney')" style="padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;">🐋 Smart Money</button>
+              <button type="button" class="small-btn" data-lane-filter="trend20m" onclick="filterLaneTable('trend20m')" style="padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer;">📈 Trend 20m</button>
+            </div>
+          </div>
+          <div class="table-wrap" style="max-height: 560px; overflow-y: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Group &amp; Lane</th>
+                  <th style="text-align: left;">Target &amp; SL</th>
+                  <th style="text-align: right;">Watched</th>
+                  <th style="text-align: right;">Open</th>
+                  <th style="text-align: right;">Closed</th>
+                  <th style="text-align: right;">Win / Loss</th>
+                  <th style="text-align: right;">Win Rate</th>
+                  <th style="text-align: right;">Total PnL ($)</th>
+                </tr>
+              </thead>
+              <tbody id="table-lane-breakdown-body">
+                <!-- Populated dynamically via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 1.3 Konfigurasi Buy Asli (Real Auto-Buy) -->
+        <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 4px;">
+          <div class="panel control-panel" id="real-control-panel">
+          <div class="row">
+            <h2>⚡ Real Auto-Buy</h2>
+            <span id="real-enabled-badge" class="badge paper">OFF</span>
+          </div>
+          <p>
+            Eksekusi asli melalui wallet GMGN yang aktif. Posisi paper tetap
+            menjadi pembanding.
+          </p>
+          <div class="notice">
+            Kontrol Auto-Buy dan audit dapat digunakan tanpa password.
+          </div>
+          <div id="admin-session" class="row">
+            <span class="badge live">Kontrol terbuka</span>
+          </div>
+          <form id="autobuy-form">
+            <fieldset id="autobuy-fields" disabled>
+              <div class="autobuy-grid">
+                <div class="autobuy-card">
+                  <label class="config-label" for="real-lane"
+                    >🎯 Lane pemicu Real Buy</label
+                  >
+                  <select id="real-lane" class="config-select">
+                    <optgroup label="🚀 Group Momentum">
+                      <option value="M-Apex10k">M-Apex10k (Momentum Apex 10k Volume)</option>
+                      <option value="M-Safe10k">M-Safe10k (Momentum Safe 10k Volume)</option>
+                      <option value="M-Runner15k">M-Runner15k (Momentum Runner 15k Volume)</option>
+                      <option value="Safe">Safe (Momentum Safe Conservative)</option>
+                      <option value="Swing">Swing (Momentum Swing Trailing)</option>
+                      <option value="Opt">Opt (Momentum Optimal)</option>
+                      <option value="Wide">Wide (Momentum Wide)</option>
+                    </optgroup>
+                    <optgroup label="👥 Group Sindikat">
+                      <option value="V7" selected>V7 (Bounce Spesialis Dump Recovery)</option>
+                      <option value="S1">S1 (Staircase Conservative +25%)</option>
+                      <option value="S2">S2 (Staircase Max Profit +50%)</option>
+                      <option value="S3">S3 (Staircase Trailing +35%)</option>
+                      <option value="S4">S4 (Staircase Runner &gt;50% Hunter)</option>
+                      <option value="V6">V6 (Bounce Quick Exit)</option>
+                      <option value="V5">V5 (Bounce Flow Exit)</option>
+                      <option value="V4">V4 (Bounce Standar)</option>
+                    </optgroup>
+                    <optgroup label="🐋 Group Smart Money">
+                      <option value="OZ1">OZ1 (Oezank IDC Wallet Mirror)</option>
+                      <option value="G1">G1 (Genesis Surge +50% TP)</option>
+                      <option value="G2">G2 (117 Whale Smart Money Inflow)</option>
+                      <option value="G2.1">G2.1 (Whale Dual Convergence)</option>
+                      <option value="G2.2">G2.2 (Whale Triple Surge)</option>
+                    </optgroup>
+                    <optgroup label="⚡ Multi-Lane Combo">
+                      <option value="V7+G1">⚡ V7 + G1 (Bounce &amp; Genesis Surge)</option>
+                      <option value="V7+S1">⚡ V7 + S1 (Bounce &amp; Conservative)</option>
+                      <option value="V7+S2">⚡ V7 + S2 (Bounce &amp; Max Profit)</option>
+                      <option value="V7+S3">⚡ V7 + S3 (Bounce &amp; Trailing)</option>
+                      <option value="V7+S4">⚡ V7 + S4 (Bounce &amp; Runner Hunter)</option>
+                    </optgroup>
+                  </select>
+                  <p class="hint">
+                    Hanya sinyal dari lane Profit4 yang dipilih akan memicu
+                    order nyata.
+                  </p>
+                </div>
+                <div class="autobuy-card">
+                  <label class="config-label" for="real-stake-mode"
+                    >💵 Modal per BUY</label
+                  >
+                  <select id="real-stake-mode" class="config-select">
+                    <option value="usd">USD ($)</option>
+                    <option value="sol">SOL (◎)</option>
+                  </select>
+                  <label class="config-label" for="real-stake-usd"
+                    >Modal USD</label
+                  ><input
+                    id="real-stake-usd"
+                    type="number"
+                    min="0.01"
+                    max="10000"
+                    step="0.01"
+                    value="0.5"
+                  />
+                  <label class="config-label" for="real-stake-sol"
+                    >Modal SOL</label
+                  ><input
+                    id="real-stake-sol"
+                    type="number"
+                    min="0.00001"
+                    max="100"
+                    step="0.00001"
+                    value="0.003"
+                  />
+                </div>
+                <div class="autobuy-card">
+                  <label class="config-label"
+                    >🛑 Kuota & manajemen risiko</label
+                  >
+                  <div class="ab-input-grid">
+                    <label
+                      >Max BUY<input
+                        id="real-max-buys"
+                        type="number"
+                        min="0"
+                        max="100000"
+                        step="1"
+                        value="3" /></label
+                    ><label
+                      >Posisi aktif max<input
+                        id="real-max-positions"
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value="1"
+                    /></label>
+                  </div>
+                  <div class="actions">
+                    <button type="button" id="real-unlimited" class="small-btn">
+                      ♾️ Unlimited</button
+                    ><button type="button" id="real-reset" class="small-btn">
+                      ⟳ Reset kuota
+                    </button>
+                  </div>
+                  <div class="ab-input-grid">
+                    <label
+                      >Buy slip %<input
+                        id="real-buy-slip"
+                        type="number"
+                        min="0.1"
+                        max="50"
+                        step="0.1"
+                        value="9" /></label
+                    ><label
+                      >Sell slip %<input
+                        id="real-sell-slip"
+                        type="number"
+                        min="0.1"
+                        max="50"
+                        step="0.1"
+                        value="14"
+                    /></label>
+                  </div>
+                  <label class="config-label" for="real-priority"
+                    >Priority SOL</label
+                  ><input
+                    id="real-priority"
+                    type="number"
+                    min="0"
+                    max="0.1"
+                    step="0.00001"
+                    value="0.0001"
+                  />
+                  <div class="config-hint" id="real-quota-status"></div>
+                </div>
+                <div class="autobuy-card autobuy-wallet">
+                  <div class="config-label">💼 Wallet GMGN riil</div>
+                  <div id="real-wallet" class="mono wrap">Belum terdeteksi</div>
+                  <div id="real-balance" class="wallet-balance">—</div>
+                  <div>
+                    BUY terkonfirmasi / kuota: <b id="real-quota">0 / 3</b>
+                  </div>
+                  <div>
+                    Posisi riil aktif: <b id="real-active-count">0 / 1</b>
+                  </div>
+                  <p id="real-ready" role="status">Menunggu worker Profit4…</p>
+                </div>
+              </div>
+              <div class="actions" style="margin-top: 14px">
+                <button type="submit" class="primary" id="real-save">
+                  Simpan pengaturan</button
+                ><button type="button" id="real-toggle">
+                  Nyalakan Real Auto-Buy
+                </button>
+              </div>
+            </fieldset>
+          </form>
+          <p class="hint">
+            OFF menghentikan BUY baru. Auto-Sell posisi yang sudah dibeli tetap
+            mengikuti pengaturan.
+          </p>
+        </div>
         <div class="panel">
           <div class="row">
-            <h2>⚡ Detail &amp; Token Masuk Real-Time (Tersaring)</h2>
+            <h2>🎯 Posisi asli yang masih aktif</h2>
+            <span class="badge">Wallet saat ini</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Lane</th>
+                  <th>Status</th>
+                  <th>Token tersisa</th>
+                  <th>Alasan / error</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="real-positions"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h2>💳 Audit transaksi asli</h2>
+            <span id="real-pnl" class="badge">PnL terkonfirmasi —</span>
+          </div>
+          <div class="filter">
+            <select id="real-scope" aria-label="Cakupan audit">
+              <option value="all">Semua sesi</option>
+              <option value="session">Sesi terpilih</option></select
+            ><input
+              id="real-search"
+              placeholder="Cari token / mint"
+              aria-label="Cari transaksi asli"
+            ><select id="real-filter-lane" aria-label="Lane audit">
+              <option value="">Semua lane</option>
+              <option value="V7">V7</option>
+              <option value="G1">G1</option>
+              <option value="S1">S1</option>
+              <option value="S2">S2</option>
+              <option value="S3">S3</option>
+              <option value="S4">S4</option>
+              <option value="V6">V6</option>
+              <option value="V5">V5</option>
+              <option value="V4">V4</option>
+              <option value="V3">V3</option>
+              <option value="V2">V2</option>
+              <option value="V1">V1</option>
+              <option value="P4">P4</option></select
+            ><select id="real-filter-status" aria-label="Status audit">
+              <option value="">Semua status</option>
+              <option>BUY_PENDING</option>
+              <option>HOLDING</option>
+              <option>SELL_PENDING</option>
+              <option>CLOSED</option>
+              <option>FAILED</option>
+              <option>UNKNOWN</option>
+            </select>
+          </div>
+          <p>
+            Order terkirim masih menunggu konfirmasi. PnL berasal dari perubahan
+            saldo transaksi terkonfirmasi, termasuk fee dan rent/refund;
+            konversi USD memakai harga SOL saat setiap order.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Lane</th>
+                  <th>BUY WIB / order</th>
+                  <th>SELL WIB / order</th>
+                  <th>Status</th>
+                  <th>Modal aktual SOL</th>
+                  <th>Proceeds SOL</th>
+                  <th>Network fee SOL</th>
+                  <th>Net cashflow SOL / USD</th>
+                  <th>Audit</th>
+                </tr>
+              </thead>
+              <tbody id="real-trades"></tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <span id="real-page-info"
+              >Login untuk membuka audit transaksi.</span
+            >
+            <div class="actions">
+              <button id="real-prev">‹ Prev</button
+              ><span id="real-page-label">1 / 1</span
+              ><button id="real-next">Next ›</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- 2. GROUP DETAIL VIEW WRAPPER               -->
+      <!-- ========================================== -->
+      <div id="group-detail-wrapper" style="display: none; flex-direction: column; gap: 16px;">
+        <!-- Group Detail Header Banner -->
+        <div class="session-bar" style="background: linear-gradient(135deg, rgba(30, 58, 138, 0.25), var(--panel)); border: 1px solid rgba(59, 130, 246, 0.35); padding: 14px 18px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <span style="font-size: 30px;" id="detail-group-icon">🚀</span>
+            <div>
+              <h2 style="font-size: 18px; margin: 0; color: #fff;" id="detail-group-title">Group Momentum</h2>
+              <p style="font-size: 12px; margin: 3px 0 0; color: var(--muted);" id="detail-group-desc">Apex, Safe, Runner, Swing (GMGN New Pair Breakout)</p>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="badge live" id="detail-group-worker-status">Worker Aktif</span>
+            <button type="button" class="small-btn" onclick="switchMainTab('overview')" style="background: rgba(255,255,255,0.08); border: 1px solid var(--edge); color: #fff; padding: 7px 14px; border-radius: 8px; cursor: pointer; font-weight: 600;">← Kembali ke Dashboard Utama</button>
+          </div>
+        </div>
+
+        <!-- Sub-Tabs Navigation for Group Detail -->
+        <nav class="desktop-tabs" id="group-detail-nav" aria-label="Bagian detail group">
+          <button type="button" class="tab-button active" data-subtab="radar" onclick="switchGroupSubTab('radar')">
+            <span id="nav-group-radar-label">⚡ Radar Live</span> <span class="count" id="radar-badge-count">0</span>
+          </button>
+          <button type="button" class="tab-button" data-subtab="wallets" id="nav-btn-wallets" onclick="switchGroupSubTab('wallets')" style="display: none;">
+            <span id="nav-group-wallets-label">👛 Wallet Dipantau</span> <span class="count" id="wallets-badge-count">0</span>
+          </button>
+          <button type="button" class="tab-button" data-subtab="trading" onclick="switchGroupSubTab('trading')">
+            💼 Trading (Dibeli &amp; Dijual) <span class="count" id="trading-badge-count">0</span>
+          </button>
+          <button type="button" class="tab-button" data-subtab="rekap" onclick="switchGroupSubTab('rekap')">
+            <span id="nav-group-rekap-label">📊 Rekap &amp; 20 Lane Matrix</span>
+          </button>
+        </nav>
+<section id="pane-radar" class="tab-pane active" aria-label="Radar Live">
+        <div class="panel">
+          <div class="row">
+            <h2 id="active-details-title">⚡ Detail &amp; Token Masuk Real-Time (Tersaring)</h2>
             <div class="actions">
               <div class="view-toggle" id="active-toggle">
                 <button type="button" class="view-btn" data-target="active" data-view="card">📱 Kartu</button>
@@ -975,7 +1475,7 @@
               <span id="active-details-count" class="badge">0 Token</span>
             </div>
           </div>
-          <p>
+          <p id="active-details-desc">
             Daftar token yang tertangkap masuk radar detail secara real-time via Solana RPC WebSocket (inflow sindikat 149/235 wallet), GMGN Browser WS, dan PumpPortal WebSocket (koin baru 0s). Evaluasi 20 lane berjalan paralel.
           </p>
           <div id="active-details-cards" class="mobile-card-list" style="display:none;"></div>
@@ -986,7 +1486,7 @@
                   <th>Token</th>
                   <th>Sumber</th>
                   <th>Waktu Masuk · WIB</th>
-                  <th>Wallet Pemicu</th>
+                  <th id="th-active-col4">Wallet Pemicu</th>
                   <th>Harga Masuk</th>
                   <th>Status Evaluasi</th>
                   <th>Aksi</th>
@@ -1002,12 +1502,12 @@
           <h2>⚡ Event terbaru</h2>
           <div id="events" class="log">Belum ada event.</div>
         </div>
-        <details class="accordion-panel">
-          <summary>🔎 Observasi &amp; Token Belum Entry (Evaluasi Gate)</summary>
+        <details class="accordion-panel" id="panel-observasi">
+          <summary id="observasi-summary">🔎 Observasi &amp; Token Belum Entry (Evaluasi Gate)</summary>
           <div class="accordion-content">
             <div class="panel">
           <div class="row">
-            <h2>🔎 Observasi &amp; token belum entry</h2>
+            <h2 id="observasi-title">🔎 Observasi &amp; token belum entry</h2>
             <span id="observation-count" class="badge">0 token</span>
           </div>
           <div class="table-wrap table-scroll-bounded">
@@ -1017,7 +1517,7 @@
                   <th>Token</th>
                   <th>Waktu</th>
                   <th>Lane</th>
-                  <th>Wallet asal</th>
+                  <th id="th-obs-col4">Wallet asal</th>
                   <th>Status</th>
                   <th>Holder / Δ15s</th>
                   <th>Buy-share 5s</th>
@@ -1033,13 +1533,113 @@
         </details>
       </section>
 
+      <!-- Section: Wallet Dipantau & Aktivitas Terkini (Khusus Sindikat & Smart Money) -->
+      <section id="pane-wallets" class="tab-pane" aria-label="Wallet Dipantau">
+        <div class="panel">
+          <div class="row" style="flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <h2 style="font-size: 18px; margin: 0; color: #fff; display: flex; align-items: center; gap: 8px;" id="wallets-pane-title">
+                <span>👛</span> Wallet yang Dipantau &amp; Aktivitas Terkini
+              </h2>
+              <p style="font-size: 13px; margin: 4px 0 0; color: var(--muted);" id="wallets-pane-desc">
+                Memantau secara real-time setiap token baru yang ditransfer, dibeli, atau dijual oleh masing-masing wallet yang disadap.
+              </p>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <span class="badge live" id="wallets-conn-status">🟢 Solana RPC WebSocket</span>
+              <span class="badge" id="wallets-total-badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-weight: 700;">0 Wallet</span>
+              <span class="badge" id="wallets-active-badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; font-weight: 700;">0 Aktif di Sesi</span>
+            </div>
+          </div>
+
+          <!-- Filter & Search Controls -->
+          <div class="row" style="flex-wrap: wrap; gap: 10px; margin-bottom: 14px; background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--edge);">
+            <div style="flex: 1; min-width: 220px;">
+              <input type="text" id="wallets-search-input" placeholder="🔍 Cari address wallet, simbol token, atau nama..." style="width: 100%; padding: 8px 12px; border-radius: 6px; background: var(--bg); border: 1px solid var(--edge); color: #fff; font-size: 13px;" oninput="renderWalletsTable()" />
+            </div>
+            <div style="display: flex; gap: 6px;" id="wallets-filter-buttons">
+              <button type="button" class="small-btn active" data-wallet-filter="all" onclick="filterWallets('all')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">Semua Wallet</button>
+              <button type="button" class="small-btn" data-wallet-filter="active" onclick="filterWallets('active')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">⚡ Ada Transaksi di Sesi</button>
+              <button type="button" class="small-btn" data-wallet-filter="standby" onclick="filterWallets('standby')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">⏳ Standby</button>
+            </div>
+          </div>
+
+          <!-- Wallets Table -->
+          <div class="table-wrap table-scroll-bounded" style="max-height: 600px; overflow-y: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; width: 28%;">Wallet &amp; Identitas</th>
+                  <th style="text-align: left; width: 28%;">Token Terbaru &amp; Status</th>
+                  <th style="text-align: left; width: 22%;">Waktu Transaksi (WIB)</th>
+                  <th style="text-align: right; width: 22%;">Volume / Detail &amp; On-Chain</th>
+                </tr>
+              </thead>
+              <tbody id="wallets-table-body">
+                <!-- Populated dynamically via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Section Group Token Sindikat Terdeteksi (Urutan Kronologis Terkini) -->
+        <div class="panel" id="section-syndicate-tokens" style="margin-top: 20px; display: none;">
+          <div class="row" style="flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <h2 style="font-size: 18px; margin: 0; color: #fff; display: flex; align-items: center; gap: 8px;">
+                <span>🪙</span> Group Token Sindikat Terdeteksi (<span id="syndicate-tokens-count">0</span> Token)
+              </h2>
+              <p style="font-size: 13px; margin: 4px 0 0; color: var(--muted);">
+                Urutan kronologis seluruh token yang didistribusikan ke wallet sindikat oleh deployer (Helius Ingestion &amp; SQLite database), dari yang paling baru ke terlama. Lengkap dengan link GMGN Token &amp; Wallet.
+              </p>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 700;">⏱️ Urutan Kronologis Terbaru</span>
+              <span class="badge" id="syndicate-tokens-active-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 700;">5 Token Terpantau</span>
+            </div>
+          </div>
+
+          <!-- Token Filter Bar -->
+          <div class="row" style="flex-wrap: wrap; gap: 10px; margin-bottom: 14px; background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--edge);">
+            <div style="flex: 1; min-width: 220px;">
+              <input type="text" id="syndicate-tokens-search-input" placeholder="🔍 Cari nama koin, contract mint, atau nama kluster..." style="width: 100%; padding: 8px 12px; border-radius: 6px; background: var(--bg); border: 1px solid var(--edge); color: #fff; font-size: 13px;" oninput="renderSyndicateTokensTable()" />
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="syndicate-tokens-filter-buttons">
+              <button type="button" class="small-btn active" data-token-filter="all" onclick="filterSyndicateTokens('all')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">Semua (46 Group)</button>
+              <button type="button" class="small-btn" data-token-filter="watched" onclick="filterSyndicateTokens('watched')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">🎯 Top 5 Watching</button>
+              <button type="button" class="small-btn" data-token-filter="min50" onclick="filterSyndicateTokens('min50')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">⚡ Min 50 Wallet</button>
+              <button type="button" class="small-btn" data-token-filter="min100" onclick="filterSyndicateTokens('min100')" style="padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer;">🔥 Min 100 Wallet</button>
+            </div>
+          </div>
+
+          <!-- Syndicate Tokens Table -->
+          <div class="table-wrap table-scroll-bounded" style="max-height: 550px; overflow-y: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; width: 6%;">#</th>
+                  <th style="text-align: left; width: 30%;">Group Token Sindikat &amp; Full Mint</th>
+                  <th style="text-align: left; width: 16%;">Status Target</th>
+                  <th style="text-align: left; width: 16%;">Total Wallet Sindikat</th>
+                  <th style="text-align: left; width: 16%;">Waktu Transfer (WIB)</th>
+                  <th style="text-align: right; width: 16%;">Sample Wallet GMGN</th>
+                </tr>
+              </thead>
+              <tbody id="syndicate-tokens-table-body">
+                <!-- Populated dynamically via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section id="pane-trading" class="tab-pane" aria-label="Trading">
         <!-- Segmented Control for Subtabs -->
         <div class="segmented-control" id="trading-subnav">
-          <button type="button" class="seg-btn active" data-subtab="open">
+          <button type="button" class="seg-btn active" data-trade-tab="open" onclick="switchTradingSubtab('open')">
             🟢 Dibeli / Posisi Aktif <span class="count" data-count="open">0</span>
           </button>
-          <button type="button" class="seg-btn" data-subtab="closed">
+          <button type="button" class="seg-btn" data-trade-tab="closed" onclick="switchTradingSubtab('closed')">
             🔴 Dijual / Selesai <span class="count" data-count="history">0</span>
           </button>
         </div>
@@ -1336,7 +1936,7 @@
           </div>
         </details>
 
-        <details class="accordion-panel">
+        <details class="accordion-panel" id="section-cluster-sindikat">
           <summary>🌐 Cluster Sindikat (<span id="cluster-count">0</span> Cluster)</summary>
           <div class="accordion-content">
             
@@ -1381,7 +1981,7 @@
           </div>
         </details>
 
-        <details class="accordion-panel">
+        <details class="accordion-panel" id="section-lane-g1">
           <summary>🚀 Lane G1 Genesis Surge Status (<span id="genesis-count">0</span> Token)</summary>
           <div class="accordion-content">
             
@@ -1475,266 +2075,13 @@
           </div>
         </details>
 
-        <details class="accordion-panel">
-          <summary>💳 Kontrol On-Chain &amp; Auto-Buy</summary>
-          <div class="accordion-content">
-            
-        <div class="panel control-panel" id="real-control-panel">
+        <div class="panel" style="padding: 14px 18px; border: 1px solid var(--edge); background: rgba(59, 130, 246, 0.08); border-radius: 10px; margin: 12px 0;">
           <div class="row">
-            <h2>⚡ Real Auto-Buy</h2>
-            <span id="real-enabled-badge" class="badge paper">OFF</span>
-          </div>
-          <p>
-            Eksekusi asli melalui wallet GMGN yang aktif. Posisi paper tetap
-            menjadi pembanding.
-          </p>
-          <div class="notice">
-            Kontrol Auto-Buy dan audit dapat digunakan tanpa password.
-          </div>
-          <div id="admin-session" class="row">
-            <span class="badge live">Kontrol terbuka</span>
-          </div>
-          <form id="autobuy-form">
-            <fieldset id="autobuy-fields" disabled>
-              <div class="autobuy-grid">
-                <div class="autobuy-card">
-                  <label class="config-label" for="real-lane"
-                    >🎯 Lane pemicu Real Buy</label
-                  >
-                  <select id="real-lane" class="config-select">
-                    <option value="V7">V7 (Bounce Spesialis)</option>
-                    <option value="G1">G1 (Genesis Surge +50% TP)</option>
-                    <option value="S1">S1 (Staircase Conservative +25%)</option>
-                    <option value="S2">S2 (Staircase Max Profit +50%)</option>
-                    <option value="S3">S3 (Staircase Trailing +35%)</option>
-                    <option value="S4">S4 (Staircase Runner &gt;50% Hunter)</option>
-                    <option value="V7+G1">⚡ V7 + G1 (Bounce &amp; Genesis Surge)</option>
-                    <option value="V7+S1">⚡ V7 + S1 (Bounce &amp; Conservative)</option>
-                    <option value="V7+S2">⚡ V7 + S2 (Bounce &amp; Max Profit)</option>
-                    <option value="V7+S3">⚡ V7 + S3 (Bounce &amp; Trailing)</option>
-                    <option value="V7+S4">⚡ V7 + S4 (Bounce &amp; Runner Hunter)</option>
-                    <option value="V6">V6</option>
-                    <option value="V5">V5</option>
-                    <option value="V4">V4</option>
-                    <option value="V3">V3</option>
-                    <option value="V2">V2</option>
-                    <option value="V1">V1</option>
-                    <option value="P4">P4</option>
-                  </select>
-                  <p class="hint">
-                    Hanya sinyal dari lane Profit4 yang dipilih akan memicu
-                    order nyata.
-                  </p>
-                </div>
-                <div class="autobuy-card">
-                  <label class="config-label" for="real-stake-mode"
-                    >💵 Modal per BUY</label
-                  >
-                  <select id="real-stake-mode" class="config-select">
-                    <option value="usd">USD ($)</option>
-                    <option value="sol">SOL (◎)</option>
-                  </select>
-                  <label class="config-label" for="real-stake-usd"
-                    >Modal USD</label
-                  ><input
-                    id="real-stake-usd"
-                    type="number"
-                    min="0.01"
-                    max="10000"
-                    step="0.01"
-                    value="0.5"
-                  />
-                  <label class="config-label" for="real-stake-sol"
-                    >Modal SOL</label
-                  ><input
-                    id="real-stake-sol"
-                    type="number"
-                    min="0.00001"
-                    max="100"
-                    step="0.00001"
-                    value="0.003"
-                  />
-                </div>
-                <div class="autobuy-card">
-                  <label class="config-label"
-                    >🛑 Kuota & manajemen risiko</label
-                  >
-                  <div class="ab-input-grid">
-                    <label
-                      >Max BUY<input
-                        id="real-max-buys"
-                        type="number"
-                        min="0"
-                        max="100000"
-                        step="1"
-                        value="3" /></label
-                    ><label
-                      >Posisi aktif max<input
-                        id="real-max-positions"
-                        type="number"
-                        min="1"
-                        max="10"
-                        step="1"
-                        value="1"
-                    /></label>
-                  </div>
-                  <div class="actions">
-                    <button type="button" id="real-unlimited" class="small-btn">
-                      ♾️ Unlimited</button
-                    ><button type="button" id="real-reset" class="small-btn">
-                      ⟳ Reset kuota
-                    </button>
-                  </div>
-                  <div class="ab-input-grid">
-                    <label
-                      >Buy slip %<input
-                        id="real-buy-slip"
-                        type="number"
-                        min="0.1"
-                        max="50"
-                        step="0.1"
-                        value="9" /></label
-                    ><label
-                      >Sell slip %<input
-                        id="real-sell-slip"
-                        type="number"
-                        min="0.1"
-                        max="50"
-                        step="0.1"
-                        value="14"
-                    /></label>
-                  </div>
-                  <label class="config-label" for="real-priority"
-                    >Priority SOL</label
-                  ><input
-                    id="real-priority"
-                    type="number"
-                    min="0"
-                    max="0.1"
-                    step="0.00001"
-                    value="0.0001"
-                  />
-                  <div class="config-hint" id="real-quota-status"></div>
-                </div>
-                <div class="autobuy-card autobuy-wallet">
-                  <div class="config-label">💼 Wallet GMGN riil</div>
-                  <div id="real-wallet" class="mono wrap">Belum terdeteksi</div>
-                  <div id="real-balance" class="wallet-balance">—</div>
-                  <div>
-                    BUY terkonfirmasi / kuota: <b id="real-quota">0 / 3</b>
-                  </div>
-                  <div>
-                    Posisi riil aktif: <b id="real-active-count">0 / 1</b>
-                  </div>
-                  <p id="real-ready" role="status">Menunggu worker Profit4…</p>
-                </div>
-              </div>
-              <div class="actions" style="margin-top: 14px">
-                <button type="submit" class="primary" id="real-save">
-                  Simpan pengaturan</button
-                ><button type="button" id="real-toggle">
-                  Nyalakan Real Auto-Buy
-                </button>
-              </div>
-            </fieldset>
-          </form>
-          <p class="hint">
-            OFF menghentikan BUY baru. Auto-Sell posisi yang sudah dibeli tetap
-            mengikuti pengaturan.
-          </p>
-        </div>
-        <div class="panel">
-          <div class="row">
-            <h2>🎯 Posisi asli yang masih aktif</h2>
-            <span class="badge">Wallet saat ini</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Lane</th>
-                  <th>Status</th>
-                  <th>Token tersisa</th>
-                  <th>Alasan / error</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="real-positions"></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="row">
-            <h2>💳 Audit transaksi asli</h2>
-            <span id="real-pnl" class="badge">PnL terkonfirmasi —</span>
-          </div>
-          <div class="filter">
-            <select id="real-scope" aria-label="Cakupan audit">
-              <option value="all">Semua sesi</option>
-              <option value="session">Sesi terpilih</option></select
-            ><input
-              id="real-search"
-              placeholder="Cari token / mint"
-              aria-label="Cari transaksi asli"
-            ><select id="real-filter-lane" aria-label="Lane audit">
-              <option value="">Semua lane</option>
-              <option value="V7">V7</option>
-              <option value="G1">G1</option>
-              <option value="S1">S1</option>
-              <option value="S2">S2</option>
-              <option value="S3">S3</option>
-              <option value="S4">S4</option>
-              <option value="V6">V6</option>
-              <option value="V5">V5</option>
-              <option value="V4">V4</option>
-              <option value="V3">V3</option>
-              <option value="V2">V2</option>
-              <option value="V1">V1</option>
-              <option value="P4">P4</option></select
-            ><select id="real-filter-status" aria-label="Status audit">
-              <option value="">Semua status</option>
-              <option>BUY_PENDING</option>
-              <option>HOLDING</option>
-              <option>SELL_PENDING</option>
-              <option>CLOSED</option>
-              <option>FAILED</option>
-              <option>UNKNOWN</option>
-            </select>
-          </div>
-          <p>
-            Order terkirim masih menunggu konfirmasi. PnL berasal dari perubahan
-            saldo transaksi terkonfirmasi, termasuk fee dan rent/refund;
-            konversi USD memakai harga SOL saat setiap order.
-          </p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Lane</th>
-                  <th>BUY WIB / order</th>
-                  <th>SELL WIB / order</th>
-                  <th>Status</th>
-                  <th>Modal aktual SOL</th>
-                  <th>Proceeds SOL</th>
-                  <th>Network fee SOL</th>
-                  <th>Net cashflow SOL / USD</th>
-                  <th>Audit</th>
-                </tr>
-              </thead>
-              <tbody id="real-trades"></tbody>
-            </table>
-          </div>
-          <div class="pagination">
-            <span id="real-page-info"
-              >Login untuk membuka audit transaksi.</span
-            >
-            <div class="actions">
-              <button id="real-prev">‹ Prev</button
-              ><span id="real-page-label">1 / 1</span
-              ><button id="real-next">Next ›</button>
+            <div>
+              <strong style="color: #93c5fd;">💳 Konfigurasi Buy Asli:</strong>
+              <span style="font-size: 13px; color: var(--muted); margin-left: 6px;">Pengaturan order nyata, kuota wallet, dan audit transaksi on-chain berada di Dashboard Utama.</span>
             </div>
+            <button type="button" class="small-btn" onclick="switchMainTab('overview')" style="background: #1e3a8a; border: 1px solid #3b82f6; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600;">Ke Dashboard Utama ↗</button>
           </div>
         </div>
         <div class="panel control-panel">
@@ -1753,7 +2100,7 @@
           </div>
           <p id="worker-action-status" class="worker-action-status" role="status" hidden></p>
         </div>
-        <div class="panel control-panel">
+        <div class="panel control-panel" id="section-wallet-dipantau-editor">
           <h2>👛 Wallet yang dipantau</h2>
           <p>Alamat sumber transfer untuk observasi token.</p>
           <div class="row">
@@ -1818,6 +2165,7 @@
           </div>
         </details>
       </section>
+      </div> <!-- end group-detail-wrapper -->
       <footer id="historical"></footer>
     </main>
     <dialog id="real-audit-dialog">
@@ -1836,11 +2184,11 @@
       </div>
     </dialog>
 <nav class="bottom-nav" aria-label="Navigasi mobile">
-      <button class="tab-button active" data-tab="radar">
+      <button type="button" class="tab-button active" data-subtab="radar" onclick="switchGroupSubTab('radar')">
         <span class="icon">⚡</span>Radar Live</button
-      ><button class="tab-button" data-tab="trading">
+      ><button type="button" class="tab-button" data-subtab="trading" onclick="switchGroupSubTab('trading')">
         <span class="icon">💼 <span class="count" id="trading-total-count">0</span></span>Trading</button
-      ><button class="tab-button" data-tab="rekap">
+      ><button type="button" class="tab-button" data-subtab="rekap" onclick="switchGroupSubTab('rekap')">
         <span class="icon">📊</span>Rekap &amp; Lane</button>
     </nav>
     <script>
@@ -1967,7 +2315,8 @@
         sortKey = "entryAt",
         sortDir = -1,
         refreshPromise = null,
-        lastUpdated = null;
+        lastUpdated = null,
+        currentGroup = localStorage.getItem("profit4_active_group") || "all";
       const basePath = location.pathname.startsWith("/profit4")
         ? "/profit4"
         : "";
@@ -2310,11 +2659,17 @@
         const obs = rows.filter((p) => !entered(p));
         $("observation-count").textContent = `${obs.length} observasi`;
         const displayObs = obs.length > 50 ? obs.slice(0, 50) : obs;
+        const isMom = currentMainTab === 'momentum';
+        const isSyn = currentMainTab === 'syndicate';
         setHtml("observations",
           displayObs
             .map(
-              (p) =>
-                `<tr><td>${token(p)}</td><td>${time(stamp(p))}</td><td>${laneBadge(p)}</td><td>${wallet(p)}</td><td>${esc(p.phase)}</td>${facts(p)}<td class="reason">${esc(explain(p))}</td></tr>`,
+              (p) => {
+                const col4 = isMom
+                  ? `<span class="badge" style="background:rgba(16,185,129,0.12); color:#10b981; font-size:11px;">GMGN New Pair</span>`
+                  : wallet(p);
+                return `<tr><td>${token(p)}</td><td>${time(stamp(p))}</td><td>${laneBadge(p)}</td><td>${col4}</td><td>${esc(p.phase)}</td>${facts(p)}<td class="reason">${esc(explain(p))}</td></tr>`;
+              }
             )
             .join("") || empty(8, "Belum ada token tanpa entry pada sesi ini.")
         );
@@ -2589,32 +2944,46 @@
           if (list.length === 0) {
             const activePositions = (state.positions || []).filter(p => p.captureActive || ['WATCHING', 'OPEN', 'ENTRY_PENDING'].includes(p.phase));
             if (activePositions.length > 0) {
-              $("active-details-rows").innerHTML = activePositions.map(p => `
+              const isMom = currentMainTab === 'momentum';
+              const isSyn = currentMainTab === 'syndicate';
+              $("active-details-rows").innerHTML = activePositions.map(p => {
+                const srcLabel = isMom ? 'GMGN New Pair' : isSyn ? 'Sindikat Inflow' : (p.wallet === 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy' ? '🇮🇩 Oezank Mirror' : 'Whale Inflow');
+                const srcColor = isMom ? '#10b981' : isSyn ? 'var(--blue)' : '#a855f7';
+                const currentPrice = p.facts?.price ?? p.entryPrice ?? p.priceUsd;
+                const estimatedMcap = (currentPrice && currentPrice > 0) ? Math.round(currentPrice * 1_000_000_000) : null;
+                const col4Value = isMom 
+                  ? (estimatedMcap ? 'MC $' + estimatedMcap.toLocaleString() : (p.facts?.initialLiquidityUsd ? '$' + Number(p.facts.initialLiquidityUsd).toLocaleString() : 'GMGN Live'))
+                  : (p.wallet ? esc(shortAddress(p.wallet)) : '—');
+                return `
                 <tr>
                   <td><strong>${esc(p.symbol || 'Unknown')}</strong><br><span class="mono hint" style="font-size:10px;">${esc(p.mint)}</span></td>
-                  <td><span class="badge" style="background:rgba(59,130,246,0.15); color:var(--blue);">Sindikat Inflow</span></td>
+                  <td><span class="badge" style="background:${isMom ? 'rgba(16,185,129,0.15)' : 'rgba(59,130,246,0.15)'}; color:${srcColor};">${srcLabel}</span></td>
                   <td>${time(p.entryAt || (p.timestamp ? p.timestamp * 1000 : Date.now()))}</td>
-                  <td><span class="mono hint" style="font-size:10px;">${p.wallet ? esc(p.wallet.slice(0, 6) + '...' + p.wallet.slice(-4)) : '—'}</span></td>
+                  <td><span class="mono hint" style="font-size:10px;">${col4Value}</span></td>
                   <td>${p.entryPrice ? '$' + Number(p.entryPrice).toFixed(6) : (p.priceUsd ? '$' + Number(p.priceUsd).toFixed(6) : '—')}</td>
                   <td><span class="badge ${p.phase === 'OPEN' ? 'good' : 'paper'}">${esc(p.phase || 'EVALUATING')}</span></td>
                   <td><a href="https://gmgn.ai/sol/token/${esc(p.mint)}" target="_blank" rel="noopener" class="button mini">Buka GMGN</a></td>
                 </tr>
-              `).join('');
+              `;
+              }).join('');
               if ($("active-details-count")) $("active-details-count").textContent = `${activePositions.length} Token Aktif`;
               if ($("active-details-cards")) {
-                $("active-details-cards").innerHTML = activePositions.map(p => `
-                  <div class="mobile-trade-card" style="border-left: 3px solid var(--blue);">
+                $("active-details-cards").innerHTML = activePositions.map(p => {
+                  const srcLabel = isMom ? 'GMGN New Pair' : isSyn ? 'Sindikat Inflow' : 'Whale Inflow';
+                  const srcColor = isMom ? '#10b981' : isSyn ? 'var(--blue)' : '#a855f7';
+                  return `
+                  <div class="mobile-trade-card" style="border-left: 3px solid ${srcColor};">
                     <div class="mobile-trade-header">
                       <div class="mobile-token-title">
                         <span class="symbol">${esc(p.symbol || short(p.mint))}</span>
-                        <span class="badge" style="background:rgba(59,130,246,0.15); color:var(--blue);">Sindikat Inflow</span>
+                        <span class="badge" style="background:rgba(59,130,246,0.15); color:${srcColor};">${srcLabel}</span>
                       </div>
                       <span class="badge ${p.phase === 'OPEN' ? 'good' : 'paper'}">${esc(p.phase || 'EVALUATING')}</span>
                     </div>
                     <div class="mobile-trade-grid">
                       <div><span class="lbl">Waktu:</span> ${time(p.entryAt || Date.now())}</div>
                       <div><span class="lbl">Harga:</span> ${p.entryPrice ? '$' + Number(p.entryPrice).toFixed(6) : '—'}</div>
-                      <div style="grid-column: span 2;"><span class="lbl">Wallet:</span> <span class="mono hint">${p.wallet ? esc(p.wallet) : '—'}</span></div>
+                      <div style="grid-column: span 2;"><span class="lbl">${isMom ? 'Usia Pair/Liq:' : 'Wallet:'}</span> <span class="mono hint">${isMom ? (p.facts?.initialLiquidityUsd ? '$' + Number(p.facts.initialLiquidityUsd).toLocaleString() : 'GMGN Live') : (p.wallet ? esc(p.wallet) : '—')}</span></div>
                     </div>
                     <div class="mobile-trade-footer">
                       <div style="display:flex; gap:6px;">
@@ -2624,7 +2993,8 @@
                       <span class="mono hint" style="font-size:10px;">${esc(short(p.mint))}</span>
                     </div>
                   </div>
-                `).join('');
+                `;
+                }).join('');
               }
             } else {
               $("active-details-rows").innerHTML = '<tr><td colspan="7" class="empty">Belum ada token baru dalam antrean radar live.</td></tr>';
@@ -2632,17 +3002,28 @@
               if ($("active-details-cards")) $("active-details-cards").innerHTML = '<div class="card empty" style="text-align:center; padding:15px;">Belum ada token baru dalam antrean radar live.</div>';
             }
           } else {
-            $("active-details-rows").innerHTML = list.map(item => `
+            const isMom = currentMainTab === 'momentum';
+            const isSyn = currentMainTab === 'syndicate';
+            $("active-details-rows").innerHTML = list.map(item => {
+              const srcLabel = isMom
+                ? (item.source === 'pumpportal_ws' ? 'PumpPortal 0s' : 'GMGN New Pair')
+                : (item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? 'Riset Koin Baru (0s)' : (isSyn ? 'Sindikat Inflow' : 'Whale Inflow'));
+              const srcColor = isMom ? '#10b981' : isSyn ? 'var(--blue)' : '#a855f7';
+              const col4Value = isMom
+                ? (item.initialLiquidityUsd ? '$' + Number(item.initialLiquidityUsd).toLocaleString() : 'GMGN Radar')
+                : (item.wallet ? esc(shortAddress(item.wallet)) : '—');
+              return `
               <tr>
                 <td><strong>${esc(item.symbol || 'Unknown')}</strong><br><span class="mono hint" style="font-size:10px;">${esc(item.mint)}</span></td>
-                <td><span class="badge" style="background:${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? 'rgba(16,185,129,0.15)' : 'rgba(59,130,246,0.15)'}; color:${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? '#10b981' : 'var(--blue)'};">${item.source === 'pumpportal_ws' || item.source === 'research_discovery' ? 'Riset Koin Baru (0s)' : 'Sindikat Inflow'}</span></td>
+                <td><span class="badge" style="background:${isMom ? 'rgba(16,185,129,0.15)' : 'rgba(59,130,246,0.15)'}; color:${srcColor};">${srcLabel}</span></td>
                 <td>${time(item.openedAt)}</td>
-                <td><span class="mono hint" style="font-size:10px;">${item.wallet ? esc(item.wallet.slice(0, 6) + '...' + item.wallet.slice(-4)) : '—'}</span></td>
+                <td><span class="mono hint" style="font-size:10px;">${col4Value}</span></td>
                 <td>${item.priceUsd ? '$' + Number(item.priceUsd).toFixed(6) : '—'}</td>
-                <td><span class="badge ${item.status === 'BOUGHT' ? 'good' : 'paper'}">${esc(item.status || 'EVALUATING 20 LANES')}</span></td>
+                <td><span class="badge ${item.status === 'BOUGHT' ? 'good' : 'paper'}">${esc(item.status || 'EVALUATING')}</span></td>
                 <td><a href="https://gmgn.ai/sol/token/${esc(item.mint)}" target="_blank" rel="noopener" class="button mini">Buka GMGN</a></td>
               </tr>
-            `).join('');
+            `;
+            }).join('');
             if ($("active-details-count")) $("active-details-count").textContent = `${list.length} Token`;
             if ($("active-details-cards")) {
               $("active-details-cards").innerHTML = list.map(item => `
@@ -2883,6 +3264,8 @@
         renderClusters();
         void renderGenesis();
         void fetchRealTrades();
+        renderOverviewChartsAndSneakview();
+        renderWalletsTable();
       }
       async function renderGenesis() {
         try {
@@ -2956,7 +3339,8 @@
         if (refreshPromise) return refreshPromise;
         refreshPromise = (async () => {
           try {
-            const r = await fetch(`${basePath}/api/state`, {
+            const q = currentGroup ? `?group=${encodeURIComponent(currentGroup)}` : '';
+            const r = await fetch(`${basePath}/api/state${q}`, {
               signal: AbortSignal.timeout(10000),
             });
             if (!r.ok) throw Error(`Server HTTP ${r.status}`);
@@ -3027,15 +3411,897 @@
       }
       let currentTradingSubtab = "open";
       function switchTradingSubtab(subtab) {
-        currentTradingSubtab = subtab;
-        document.querySelectorAll("[data-subtab]").forEach((btn) => {
-          btn.classList.toggle("active", btn.dataset.subtab === subtab);
+        currentTradingSubtab = (subtab === "closed" ? "closed" : "open");
+        document.querySelectorAll("#trading-subnav [data-trade-tab]").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.tradeTab === currentTradingSubtab);
         });
-        const isOpen = subtab === "open";
+        const isOpen = currentTradingSubtab === "open";
         if ($("trading-open-container")) $("trading-open-container").style.display = isOpen ? "block" : "none";
         if ($("trading-closed-container")) $("trading-closed-container").style.display = isOpen ? "none" : "block";
         if ($("phase")) $("phase").style.display = isOpen ? "none" : "inline-block";
         if ($("hour")) $("hour").style.display = isOpen ? "none" : "inline-block";
+        try { localStorage.setItem("profit4_trading_subtab", currentTradingSubtab); } catch {}
+      }
+      window.switchTradingSubtab = switchTradingSubtab;
+
+      let currentMainTab = 'overview';
+      let currentGroupSubTab = 'radar';
+      let activeLaneFilter = 'all';
+      let chartPnl = null;
+      let chartWatch = null;
+      let chartWinLoss = null;
+
+      function renderOverviewChartsAndSneakview() {
+        const go = state?.groupsOverview || {};
+        const groups = go.groups || {};
+        const allLanes = go.allLanes || [];
+
+        const mom = groups.momentum || { watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0 };
+        const syn = groups.syndicate || { watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0 };
+        const sm = groups.smartmoney || { watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0 };
+        const trend = groups.trend20m || { watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0 };
+
+        // Update top main navigation counters
+        if ($("nav-badge-momentum")) $("nav-badge-momentum").textContent = `${mom.watched}`;
+        if ($("nav-badge-syndicate")) $("nav-badge-syndicate").textContent = `${syn.watched}`;
+        if ($("nav-badge-smartmoney")) $("nav-badge-smartmoney").textContent = `${sm.watched}`;
+        if ($("nav-badge-trend20m")) $("nav-badge-trend20m").textContent = `${trend.watched}`;
+
+        // Update summary badges
+        const totPnl = (mom.pnlUsd || 0) + (syn.pnlUsd || 0) + (sm.pnlUsd || 0) + (trend.pnlUsd || 0);
+        const totWatched = (mom.watched || 0) + (syn.watched || 0) + (sm.watched || 0) + (trend.watched || 0);
+        const totWin = (mom.win || 0) + (syn.win || 0) + (sm.win || 0) + (trend.win || 0);
+        const totClosed = (mom.closed || 0) + (syn.closed || 0) + (sm.closed || 0) + (trend.closed || 0);
+        const totWr = totClosed > 0 ? ((totWin / totClosed) * 100).toFixed(1) : '0.0';
+
+        if ($("overview-total-pnl")) {
+          $("overview-total-pnl").textContent = `${totPnl >= 0 ? '+' : ''}$${totPnl.toFixed(2)}`;
+          $("overview-total-pnl").className = `badge ${totPnl >= 0 ? 'good' : 'bad'}`;
+        }
+        if ($("overview-total-watch")) $("overview-total-watch").textContent = `${totWatched.toLocaleString()} Token`;
+        if ($("overview-winrate-avg")) {
+          $("overview-winrate-avg").textContent = `WR ${totWr}% (${totWin}/${totClosed})`;
+          $("overview-winrate-avg").className = `badge ${Number(totWr) >= 50 ? 'good' : ''}`;
+        }
+
+        // Mini metric labels underneath each chart
+        if ($("metric-pnl-momentum")) {
+          $("metric-pnl-momentum").textContent = `${mom.pnlUsd >= 0 ? '+' : ''}$${mom.pnlUsd.toFixed(2)}`;
+          $("metric-pnl-momentum").style.color = mom.pnlUsd >= 0 ? '#10b981' : '#ef4444';
+        }
+        if ($("metric-pnl-syndicate")) {
+          $("metric-pnl-syndicate").textContent = `${syn.pnlUsd >= 0 ? '+' : ''}$${syn.pnlUsd.toFixed(2)}`;
+          $("metric-pnl-syndicate").style.color = syn.pnlUsd >= 0 ? '#10b981' : '#ef4444';
+        }
+        if ($("metric-pnl-smartmoney")) {
+          $("metric-pnl-smartmoney").textContent = `${sm.pnlUsd >= 0 ? '+' : ''}$${sm.pnlUsd.toFixed(2)}`;
+          $("metric-pnl-smartmoney").style.color = sm.pnlUsd >= 0 ? '#10b981' : '#ef4444';
+        }
+        if ($("metric-pnl-trend20m")) {
+          $("metric-pnl-trend20m").textContent = `${trend.pnlUsd >= 0 ? '+' : ''}$${trend.pnlUsd.toFixed(2)}`;
+          $("metric-pnl-trend20m").style.color = trend.pnlUsd >= 0 ? '#10b981' : '#ef4444';
+        }
+
+        if ($("metric-watch-momentum")) $("metric-watch-momentum").textContent = `${mom.watched.toLocaleString()} (${mom.open} open)`;
+        if ($("metric-watch-syndicate")) $("metric-watch-syndicate").textContent = `${syn.watched.toLocaleString()} (${syn.open} open)`;
+        if ($("metric-watch-smartmoney")) $("metric-watch-smartmoney").textContent = `${sm.watched.toLocaleString()} (${sm.open} open)`;
+        if ($("metric-watch-trend20m")) $("metric-watch-trend20m").textContent = `${trend.watched.toLocaleString()} (${trend.open} open)`;
+
+        if ($("metric-wr-momentum")) $("metric-wr-momentum").textContent = `${mom.winRate}% (${mom.win}W / ${mom.loss}L)`;
+        if ($("metric-wr-syndicate")) $("metric-wr-syndicate").textContent = `${syn.winRate}% (${syn.win}W / ${syn.loss}L)`;
+        if ($("metric-wr-smartmoney")) $("metric-wr-smartmoney").textContent = `${sm.winRate}% (${sm.win}W / ${sm.loss}L)`;
+        if ($("metric-wr-trend20m")) $("metric-wr-trend20m").textContent = `${trend.winRate}% (${trend.win}W / ${trend.loss}L)`;
+
+        // Render Charts if Chart.js is loaded
+        if (typeof Chart !== 'undefined') {
+          const labels = ['🚀 Momentum', '👥 Sindikat', '🐋 Smart Money', '📈 Trend 20m'];
+
+          // 1. Chart Keuntungan Tiap Group (Net PnL USD)
+          const ctxPnl = document.getElementById('chart-pnl-group');
+          if (ctxPnl) {
+            const pnlData = [mom.pnlUsd, syn.pnlUsd, sm.pnlUsd, trend.pnlUsd];
+            const pnlColors = pnlData.map(v => v >= 0 ? 'rgba(16, 185, 129, 0.75)' : 'rgba(239, 68, 68, 0.75)');
+            const pnlBorders = pnlData.map(v => v >= 0 ? '#10b981' : '#ef4444');
+
+            if (chartPnl) {
+              chartPnl.data.labels = labels;
+              chartPnl.data.datasets[0].data = pnlData;
+              chartPnl.data.datasets[0].backgroundColor = pnlColors;
+              chartPnl.data.datasets[0].borderColor = pnlBorders;
+              chartPnl.update('none');
+            } else {
+              chartPnl = new Chart(ctxPnl, {
+                type: 'bar',
+                data: {
+                  labels,
+                  datasets: [{
+                    label: 'Realized PnL (USD)',
+                    data: pnlData,
+                    backgroundColor: pnlColors,
+                    borderColor: pnlBorders,
+                    borderWidth: 1.5,
+                    borderRadius: 6
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                      callbacks: {
+                        label: (ctx) => ` PnL: ${ctx.raw >= 0 ? '+' : ''}$${Number(ctx.raw).toFixed(2)} USD`
+                      }
+                    }
+                  },
+                  scales: {
+                    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af', font: { size: 11, weight: '600' } } },
+                    y: { grid: { color: 'rgba(255,255,255,0.07)' }, ticks: { color: '#9ca3af', callback: (v) => `$${v}` } }
+                  }
+                }
+              });
+            }
+          }
+
+          // 2. Chart Total Watch per Group
+          const ctxWatch = document.getElementById('chart-watch-group');
+          if (ctxWatch) {
+            const watchData = [mom.watched || 0, syn.watched || 0, sm.watched || 0, trend.watched || 0];
+            const watchTotal = watchData.reduce((a, b) => a + b, 0);
+            const displayData = watchTotal === 0 ? [1, 1, 1, 1] : watchData;
+
+            if (chartWatch) {
+              chartWatch.data.labels = labels;
+              chartWatch.data.datasets[0].data = displayData;
+              chartWatch.update('none');
+            } else {
+              chartWatch = new Chart(ctxWatch, {
+                type: 'doughnut',
+                data: {
+                  labels,
+                  datasets: [{
+                    data: displayData,
+                    backgroundColor: ['rgba(59, 130, 246, 0.75)', 'rgba(168, 85, 247, 0.75)', 'rgba(16, 185, 129, 0.75)', 'rgba(245, 158, 11, 0.75)'],
+                    borderColor: ['#3b82f6', '#a855f7', '#10b981', '#f59e0b'],
+                    borderWidth: 1.5,
+                    hoverOffset: 4
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  cutout: '62%',
+                  plugins: {
+                    legend: { position: 'bottom', labels: { color: '#9ca3af', boxWidth: 12, font: { size: 11 } } },
+                    tooltip: {
+                      callbacks: {
+                        label: (ctx) => ` ${ctx.label}: ${watchData[ctx.dataIndex].toLocaleString()} token`
+                      }
+                    }
+                  }
+                }
+              });
+            }
+          }
+
+          // 3. Chart Win & Loss per Group
+          const ctxWinLoss = document.getElementById('chart-winloss-group');
+          if (ctxWinLoss) {
+            const winData = [mom.win, syn.win, sm.win, trend.win];
+            const lossData = [mom.loss, syn.loss, sm.loss, trend.loss];
+
+            if (chartWinLoss) {
+              chartWinLoss.data.labels = labels;
+              chartWinLoss.data.datasets[0].data = winData;
+              chartWinLoss.data.datasets[1].data = lossData;
+              chartWinLoss.update('none');
+            } else {
+              chartWinLoss = new Chart(ctxWinLoss, {
+                type: 'bar',
+                data: {
+                  labels,
+                  datasets: [
+                    {
+                      label: 'Win (Menang)',
+                      data: winData,
+                      backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                      borderColor: '#10b981',
+                      borderWidth: 1,
+                      borderRadius: 5
+                    },
+                    {
+                      label: 'Loss (Kalah)',
+                      data: lossData,
+                      backgroundColor: 'rgba(239, 68, 68, 0.75)',
+                      borderColor: '#ef4444',
+                      borderWidth: 1,
+                      borderRadius: 5
+                    }
+                  ]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    legend: { position: 'bottom', labels: { color: '#9ca3af', boxWidth: 12, font: { size: 11 } } },
+                    tooltip: {
+                      callbacks: {
+                        afterLabel: (ctx) => {
+                          const idx = ctx.dataIndex;
+                          const w = winData[idx], l = lossData[idx], c = w + l;
+                          const wr = c > 0 ? ((w / c) * 100).toFixed(1) : 0;
+                          return `Win Rate: ${wr}% (${w}/${c})`;
+                        }
+                      }
+                    }
+                  },
+                  scales: {
+                    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                    y: { grid: { color: 'rgba(255,255,255,0.07)' }, ticks: { color: '#9ca3af', stepSize: 1 } }
+                  }
+                }
+              });
+            }
+          }
+        }
+
+        // Populate Sneakview Table 1: Summary Per Group
+        const groupTable = $("table-group-summary-body");
+        if (groupTable) {
+          const list = [
+            { key: 'momentum', icon: '🚀', name: 'Group Momentum', feed: 'GMGN WS New Pair & Surge Feed', stats: mom },
+            { key: 'syndicate', icon: '👥', name: 'Group Sindikat', feed: 'Bounce Dump Recovery & Staircase Akumulasi', stats: syn },
+            { key: 'smartmoney', icon: '🐋', name: 'Group Smart Money', feed: '117 Whale GMGN Inflow & Oezank IDC Mirror', stats: sm }
+          ];
+
+          groupTable.innerHTML = list.map(item => {
+            const s = item.stats;
+            const isProfitable = (s.pnlUsd || 0) >= 0;
+            const wrColor = s.winRate >= 50 ? '#10b981' : s.winRate >= 30 ? '#f59e0b' : '#ef4444';
+            return `
+              <tr style="border-bottom: 1px solid var(--edge);">
+                <td style="padding: 10px 8px; font-weight: 700;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">${item.icon}</span>
+                    <div>
+                      <div style="color: #fff; font-size: 13px;">${esc(item.name)}</div>
+                      <div style="font-size: 11px; color: var(--muted); font-weight: 400;">${esc(item.feed)}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 10px 8px; text-align: right; font-weight: 600;">${s.watched.toLocaleString()}</td>
+                <td style="padding: 10px 8px; text-align: right; font-weight: 600; color: #3b82f6;">${s.open}</td>
+                <td style="padding: 10px 8px; text-align: right;">${s.closed}</td>
+                <td style="padding: 10px 8px; text-align: right; white-space: nowrap;">
+                  <span style="color: #10b981; font-weight: 600;">${s.win}W</span> / <span style="color: #ef4444;">${s.loss}L</span>
+                </td>
+                <td style="padding: 10px 8px; text-align: right;">
+                  <span class="badge" style="background: rgba(255,255,255,0.06); color: ${wrColor}; font-weight: 700;">${s.winRate}%</span>
+                </td>
+                <td style="padding: 10px 8px; text-align: right; font-weight: 700; color: ${isProfitable ? '#10b981' : '#ef4444'};">
+                  ${isProfitable ? '+' : ''}$${(s.pnlUsd || 0).toFixed(2)}
+                </td>
+                <td style="padding: 10px 8px; text-align: center;">
+                  <button type="button" class="small-btn" onclick="switchMainTab('${item.key}')" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; font-weight: 600; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap;">
+                    Buka Detail ↗
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join("");
+        }
+
+        // Populate Sneakview Table 2: Breakdown Keuntungan per Lane
+        renderLaneBreakdownTable(allLanes);
+      }
+
+      function renderLaneBreakdownTable(lanes) {
+        const laneTable = $("table-lane-breakdown-body");
+        if (!laneTable) return;
+
+        const filtered = activeLaneFilter === 'all'
+          ? lanes
+          : lanes.filter(l => l.group === activeLaneFilter);
+
+        if (filtered.length === 0) {
+          laneTable.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--muted);">Tidak ada data lane untuk filter ini.</td></tr>`;
+          return;
+        }
+
+        const groupLabels = {
+          momentum: { badge: '🚀 Momentum', color: '#3b82f6' },
+          syndicate: { badge: '👥 Sindikat', color: '#a855f7' },
+          smartmoney: { badge: '🐋 Smart Money', color: '#10b981' },
+          trend20m: { badge: '📈 Trend 20m', color: '#f59e0b' }
+        };
+
+        laneTable.innerHTML = filtered.map(l => {
+          const grpInfo = groupLabels[l.group] || { badge: l.group, color: '#9ca3af' };
+          const isProfitable = (l.pnlUsd || 0) >= 0;
+          const wrColor = l.winRate >= 50 ? '#10b981' : l.winRate >= 30 ? '#f59e0b' : '#ef4444';
+          return `
+            <tr style="border-bottom: 1px solid var(--edge);">
+              <td style="padding: 9px 8px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="badge" style="background: rgba(255,255,255,0.06); color: ${grpInfo.color}; font-size: 10px; padding: 2px 5px;">
+                    ${grpInfo.badge}
+                  </span>
+                  <strong style="color: #fff; font-size: 13px;">${esc(l.lane)}</strong>
+                </div>
+              </td>
+              <td style="padding: 9px 8px; font-size: 11px; color: var(--muted); white-space: nowrap;">
+                TP +${l.targetPercent || 35}% · SL Gross Dip
+              </td>
+              <td style="padding: 9px 8px; text-align: right;">${l.watched.toLocaleString()}</td>
+              <td style="padding: 9px 8px; text-align: right; color: #3b82f6; font-weight: 600;">${l.open}</td>
+              <td style="padding: 9px 8px; text-align: right;">${l.closed}</td>
+              <td style="padding: 9px 8px; text-align: right; white-space: nowrap;">
+                <span style="color: #10b981; font-weight: 600;">${l.win}W</span> / <span style="color: #ef4444;">${l.loss}L</span>
+              </td>
+              <td style="padding: 9px 8px; text-align: right;">
+                <span class="badge" style="background: rgba(255,255,255,0.06); color: ${wrColor}; font-weight: 700; font-size: 11px;">${l.winRate}%</span>
+              </td>
+              <td style="padding: 9px 8px; text-align: right; font-weight: 700; color: ${isProfitable ? '#10b981' : '#ef4444'};">
+                ${isProfitable ? '+' : ''}$${(l.pnlUsd || 0).toFixed(2)}
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      function filterLaneTable(f) {
+        activeLaneFilter = f || 'all';
+        document.querySelectorAll("#lane-breakdown-filters button").forEach(b => {
+          const active = b.dataset.laneFilter === activeLaneFilter;
+          b.classList.toggle("active", active);
+          b.style.borderColor = active ? "#3b82f6" : "var(--edge)";
+          b.style.background = active ? "#1e3a8a" : "var(--panel)";
+          b.style.color = active ? "#ffffff" : "var(--muted)";
+        });
+        const allLanes = state?.groupsOverview?.allLanes || [];
+        renderLaneBreakdownTable(allLanes);
+      }
+
+      function switchMainTab(mainTab, persist = true) {
+        currentMainTab = mainTab || 'overview';
+
+        // Update top main navigation buttons
+        document.querySelectorAll("[data-nav]").forEach((b) => {
+          const active = b.dataset.nav === currentMainTab;
+          b.classList.toggle("active", active);
+          b.style.borderColor = active ? "#3b82f6" : "var(--edge)";
+          b.style.background = active ? "#1e3a8a" : "var(--panel)";
+          b.style.color = active ? "#ffffff" : "var(--muted)";
+        });
+
+        const paneOverview = $("pane-overview");
+        const groupWrapper = $("group-detail-wrapper");
+
+        if (currentMainTab === 'overview') {
+          if (paneOverview) paneOverview.style.display = "flex";
+          if (groupWrapper) groupWrapper.style.display = "none";
+          currentGroup = 'all';
+          if (persist) {
+            try { localStorage.setItem("profit4_main_tab", "overview"); } catch {}
+            if (location.pathname !== '/' && location.pathname !== '/overview') {
+              history.pushState({ main: 'overview' }, "", "/");
+            }
+          }
+          renderOverviewChartsAndSneakview();
+          refresh();
+        } else {
+          if (paneOverview) paneOverview.style.display = "none";
+          if (groupWrapper) groupWrapper.style.display = "flex";
+          currentGroup = currentMainTab;
+
+          const meta = {
+            momentum: { icon: "🚀", title: "Group Momentum", desc: "Apex, Safe, Runner, Swing (GMGN New Pair Breakout)" },
+            syndicate: { icon: "👥", title: "Group Sindikat", desc: "Bounce Dip V1-V7 & Staircase Akumulasi S1-S5" },
+            smartmoney: { icon: "🐋", title: "Group Smart Money", desc: "117 Whale GMGN Inflow, Convergence & Mirror Oezank" },
+            trend20m: { icon: "📈", title: "Group Trend 20m", desc: "GMGN Trend 20m Filter (Usia >= 20m, ATH MC >= $10k, Holder >= 100, Trailing 60%+)" }
+          }[currentMainTab] || { icon: "⚡", title: "Group Detail", desc: "" };
+
+          if ($("detail-group-icon")) $("detail-group-icon").textContent = meta.icon;
+          if ($("detail-group-title")) $("detail-group-title").textContent = meta.title;
+          if ($("detail-group-desc")) $("detail-group-desc").textContent = meta.desc;
+
+          // Per-group tab & label customization
+          const isMomentum = currentMainTab === 'momentum';
+          const isSyndicate = currentMainTab === 'syndicate';
+          const isSmartMoney = currentMainTab === 'smartmoney';
+          const isTrend20m = currentMainTab === 'trend20m';
+
+          // Group-specific panels in Radar & Rekap
+          if ($("section-cluster-sindikat")) {
+            $("section-cluster-sindikat").style.display = isSyndicate ? "block" : "none";
+          }
+          if ($("section-lane-g1")) {
+            $("section-lane-g1").style.display = isSmartMoney ? "block" : "none";
+          }
+          if ($("section-wallet-dipantau-editor")) {
+            $("section-wallet-dipantau-editor").style.display = isSyndicate ? "block" : "none";
+          }
+
+          if ($("th-active-col4")) {
+            $("th-active-col4").textContent = isMomentum ? "Usia Pair / Liq" : isSyndicate ? "Wallet Pemicu" : isTrend20m ? "Usia / ATH MC" : "Whale / Sumber";
+          }
+          if ($("th-obs-col4")) {
+            $("th-obs-col4").textContent = isMomentum ? "Sumber (GMGN)" : isSyndicate ? "Wallet Asal" : isTrend20m ? "Sumber (Trend WS)" : "Sumber Whale";
+          }
+          if ($("observasi-summary")) {
+            $("observasi-summary").textContent = isMomentum
+              ? "🔎 Observasi & Filter Gate Token Baru (GMGN New Pair)"
+              : isSyndicate
+              ? "🔎 Observasi & Inflow Belum Entry (Evaluasi Gate)"
+              : isTrend20m
+              ? "🔎 Observasi GMGN Trend 20m (Usia >= 20m, ATH MC >= 10k, Holder >= 100)"
+              : "🔎 Observasi Inflow Whale & Oezank (Evaluasi Gate)";
+          }
+          if ($("observasi-title")) {
+            $("observasi-title").textContent = isMomentum
+              ? "🔎 Evaluasi Gate Token Baru (Safe, Runner, Apex, Swing)"
+              : isSyndicate
+              ? "🔎 Observasi & Token Inflow Sindikat Belum Entry"
+              : isTrend20m
+              ? "🔎 Evaluasi Gate Trend 20m (Trailing 60%+, Target 20%, Floor 15%)"
+              : "🔎 Observasi Inflow Whale & Oezank Belum Entry";
+          }
+
+          if ($("nav-btn-wallets")) {
+            $("nav-btn-wallets").style.display = (isSyndicate || isSmartMoney) ? "inline-flex" : "none";
+          }
+          if ($("nav-group-radar-label")) {
+            $("nav-group-radar-label").textContent = isMomentum
+              ? "⚡ Radar & Monitoring (GMGN New Pair)"
+              : isSyndicate
+              ? "⚡ Radar Inflow Sindikat"
+              : isTrend20m
+              ? "⚡ Radar GMGN Trend 20m"
+              : "⚡ Radar Inflow Whale & Oezank";
+          }
+          if ($("nav-group-wallets-label")) {
+            $("nav-group-wallets-label").textContent = isSyndicate
+              ? "👛 5 Wallet & Group Token"
+              : "🐋 Wallet Smart Money Dipantau";
+          }
+          if ($("nav-group-rekap-label")) {
+            $("nav-group-rekap-label").textContent = isMomentum
+              ? "📊 Rekap Performa Momentum"
+              : isSyndicate
+              ? "📊 Rekap Performa Sindikat"
+              : isTrend20m
+              ? "📊 Rekap Performa Trend 20m"
+              : "📊 Rekap Performa Smart Money";
+          }
+          if ($("active-details-title")) {
+            $("active-details-title").textContent = isMomentum
+              ? "⚡ Detail & Token Masuk Real-Time (GMGN New Pair & PumpPortal WS)"
+              : isSyndicate
+              ? "⚡ Token Tertangkap Masuk Inflow Sindikat"
+              : isTrend20m
+              ? "⚡ Token Tertangkap Masuk Filter GMGN Trend 20m"
+              : "⚡ Token Masuk Inflow Whale Smart Money & Oezank IDC";
+          }
+          if ($("active-details-desc")) {
+            $("active-details-desc").textContent = isMomentum
+              ? "Daftar token new-pair yang tertangkap masuk radar evaluasi breakout momentum (Apex, Safe, Runner, Swing)."
+              : isSyndicate
+              ? "Daftar token yang ditransfer masuk ke wallet-wallet sindikat (inflow akumulasi bounce / staircase)."
+              : isTrend20m
+              ? "Daftar token dari tab GMGN Trend yang lolos filter (usia >= 20m, ATH MC >= 10k, holder >= 100)."
+              : "Daftar token yang baru dibeli oleh 117 Whale GMGN dan Trader Oezank IDC.";
+          }
+
+          if ((isMomentum || isTrend20m) && currentGroupSubTab === 'wallets') {
+            currentGroupSubTab = 'radar';
+          }
+
+          if (persist) {
+            try { localStorage.setItem("profit4_main_tab", currentMainTab); } catch {}
+            const targetPath = `/${currentMainTab}`;
+            if (location.pathname !== targetPath) {
+              history.pushState({ main: currentMainTab }, "", targetPath);
+            }
+          }
+          switchGroupSubTab(currentGroupSubTab || "radar", false);
+          renderWalletsTable();
+          refresh();
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      function switchGroupSubTab(subTab, persist = true) {
+        currentGroupSubTab = (["radar", "wallets", "trading", "rekap"].includes(subTab) ? subTab : 'radar');
+        ["radar", "wallets", "trading", "rekap"].forEach(paneId => {
+          const p = $(`pane-${paneId}`);
+          if (p) {
+            const isActive = (paneId === currentGroupSubTab);
+            p.classList.toggle("active", isActive);
+            p.style.display = isActive ? "flex" : "none";
+          }
+        });
+
+        document.querySelectorAll("#group-detail-nav button, .bottom-nav button, [data-subtab]").forEach(b => {
+          const active = (b.dataset.subtab === currentGroupSubTab || b.dataset.tab === currentGroupSubTab);
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-pressed", String(active));
+        });
+
+        if (currentGroupSubTab === 'wallets') {
+          renderWalletsTable();
+        }
+
+        if (persist && currentMainTab !== 'overview') {
+          try { localStorage.setItem("profit4_sub_tab", currentGroupSubTab); } catch {}
+          const targetUrl = (currentGroupSubTab === 'radar') 
+            ? `/${currentMainTab}` 
+            : `/${currentMainTab}?tab=${currentGroupSubTab}`;
+          history.replaceState({ main: currentMainTab, sub: currentGroupSubTab }, "", targetUrl);
+        }
+      }
+      window.switchGroupSubTab = switchGroupSubTab;
+      window.switchSubTab = switchGroupSubTab;
+
+      let currentWalletFilter = 'all';
+
+      function filterWallets(f) {
+        currentWalletFilter = f || 'all';
+        document.querySelectorAll("#wallets-filter-buttons button").forEach(b => {
+          const active = b.dataset.walletFilter === currentWalletFilter;
+          b.classList.toggle("active", active);
+          b.style.borderColor = active ? "#3b82f6" : "var(--edge)";
+          b.style.background = active ? "#1e3a8a" : "var(--panel)";
+          b.style.color = active ? "#ffffff" : "var(--muted)";
+        });
+        renderWalletsTable();
+      }
+
+      function timeAgo(ms) {
+        if (!ms) return '';
+        const diff = Math.floor((Date.now() - ms) / 1000);
+        if (diff < 60) return `${diff}s lalu`;
+        if (diff < 3600) return `${Math.floor(diff / 60)}m lalu`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}j ${Math.floor((diff % 3600) / 60)}m lalu`;
+        return `${Math.floor(diff / 86400)}h lalu`;
+      }
+
+      function shortAddress(addr) {
+        if (!addr) return '';
+        return addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
+      }
+
+      function renderWalletsTable() {
+        const body = $("wallets-table-body");
+        if (!body) return;
+
+        const isSyndicate = currentMainTab === 'syndicate';
+        const isSmartMoney = currentMainTab === 'smartmoney';
+
+        if (!isSyndicate && !isSmartMoney) {
+          body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 24px; color: var(--muted);">Group Momentum berfokus pada GMGN new pair &amp; token breakout (tidak menggunakan wallet tracking).</td></tr>`;
+          return;
+        }
+
+        const tw = state?.trackedWallets || {};
+        const groupData = isSyndicate ? (tw.syndicate || {}) : (tw.smartmoney || {});
+        const wallets = groupData.wallets || [];
+        const totalCount = groupData.total || wallets.length;
+        const activeCount = groupData.activeWithActivity || wallets.filter(w => w.latestActivity).length;
+
+        // Update badges
+        if ($("wallets-badge-count")) $("wallets-badge-count").textContent = `${totalCount}`;
+        if ($("wallets-total-badge")) $("wallets-total-badge").textContent = `${totalCount} Wallet Dipantau`;
+        if ($("wallets-active-badge")) $("wallets-active-badge").textContent = `${activeCount} Aktif di Sesi`;
+
+        // Update titles
+        if ($("wallets-pane-title")) {
+          $("wallets-pane-title").innerHTML = isSyndicate
+            ? `<span>👛</span> 5 Wallet Sindikat yang Dipantau &amp; Aktivitas Terkini`
+            : `<span>🐋</span> 117 Whale GMGN &amp; Trader Oezank IDC yang Dipantau`;
+        }
+        if ($("wallets-pane-desc")) {
+          $("wallets-pane-desc").textContent = isSyndicate
+            ? `Sadap transfer on-chain real-time dari 5 wallet sindikat akumulasi token (1 wallet per token dari top 5 koin terbaru sindikat >10 wallet).`
+            : `Pemantauan real-time transaksi 117 Whale GMGN (winrate >70%) dan 1 Wallet Copy-Trade Oezank IDC (100% Mirror).`;
+        }
+
+        const query = ($("wallets-search-input")?.value || "").toLowerCase().trim();
+
+        const filtered = wallets.filter(w => {
+          if (currentWalletFilter === 'active' && !w.latestActivity) return false;
+          if (currentWalletFilter === 'standby' && w.latestActivity) return false;
+
+          if (query) {
+            const addrMatch = (w.address || "").toLowerCase().includes(query);
+            const labelMatch = (w.label || "").toLowerCase().includes(query);
+            const tokenMatch = (w.latestActivity?.symbol || "").toLowerCase().includes(query) || (w.latestActivity?.mint || "").toLowerCase().includes(query);
+            return addrMatch || labelMatch || tokenMatch;
+          }
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 24px; color: var(--muted);">Tidak ada wallet yang sesuai dengan pencarian atau filter.</td></tr>`;
+          return;
+        }
+
+        body.innerHTML = filtered.map(w => {
+          const isOezank = w.address === 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy';
+          const act = w.latestActivity;
+          const isSell = act?.action === 'SELL';
+          const isBuy = act?.action === 'BUY' || (isSmartMoney && act?.action === 'TRANSFER_IN');
+
+          const actionBadge = isSell
+            ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-weight: 700; font-size: 11px;">📤 SELL / DUMP</span>`
+            : isBuy
+            ? `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-weight: 700; font-size: 11px;">🛒 BUY</span>`
+            : `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: 700; font-size: 11px;">📥 TRANSFER IN</span>`;
+
+          return `
+            <tr style="border-bottom: 1px solid var(--edge); background: ${act ? 'rgba(59, 130, 246, 0.03)' : 'transparent'};">
+              <!-- Kolom 1: Wallet & Identitas -->
+              <td style="padding: 12px 10px;">
+                <div style="display: flex; align-items: flex-start; gap: 8px;">
+                  <span style="font-size: 20px;">${isOezank ? '🇮🇩' : isSmartMoney ? '🐋' : '👥'}</span>
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                      <strong style="color: #fff; font-size: 13px;">${isOezank ? 'Trader Oezank IDC (Top Whale)' : esc(w.label)}</strong>
+                      ${w.strategyTag ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; font-size: 10px; padding: 2px 6px;">${esc(w.strategyTag)}</span>` : ''}
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;">
+                      <span class="mono" style="font-size: 11px; color: #93c5fd;" title="${esc(w.address)}">${esc(shortAddress(w.address))}</span>
+                      <button type="button" class="small-btn" onclick="navigator.clipboard.writeText('${esc(w.address)}')" title="Salin Address" style="padding: 1px 5px; font-size: 10px; border-radius: 4px; background: rgba(255,255,255,0.06); border: 1px solid var(--edge); color: var(--muted); cursor: pointer;">📋</button>
+                      <a href="https://gmgn.ai/sol/address/${esc(w.address)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #38bdf8; text-decoration: none; font-weight: 600; background: rgba(56, 189, 248, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">GMGN Wallet ↗</a>
+                      <a href="https://solscan.io/account/${esc(w.address)}" target="_blank" rel="noopener" style="font-size: 11px; color: #60a5fa; text-decoration: none;">Solscan ↗</a>
+                    </div>
+                    ${w.deployerAddress ? `
+                      <div style="font-size: 11px; color: #fbbf24; margin-top: 3px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                        <span>⚡ Bandar:</span>
+                        <a href="https://gmgn.ai/sol/address/${esc(w.deployerAddress)}" target="_blank" rel="noopener noreferrer" class="mono" style="color: #fde047; text-decoration: none; font-weight: 600;" title="Deployer / Pengirim Token">
+                          ${esc(shortAddress(w.deployerAddress))} ↗
+                        </a>
+                        <a href="https://solscan.io/account/${esc(w.deployerAddress)}" target="_blank" rel="noopener" style="font-size: 10px; color: #93c5fd; text-decoration: none;">Solscan</a>
+                      </div>
+                    ` : ''}
+                    ${w.totalProfitUsd ? `<div style="font-size: 11px; color: #10b981; margin-top: 3px;">Profit 30d: +$${Math.round(w.totalProfitUsd).toLocaleString()} · WR: ${esc(w.winrate)}</div>` : ''}
+                  </div>
+                </div>
+              </td>
+
+              <!-- Kolom 2: Token Terbaru & Status -->
+              <td style="padding: 12px 10px;">
+                ${act ? `
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      ${actionBadge}
+                      <strong style="color: #fff; font-size: 13px;">🪙 ${esc(act.symbol)}</strong>
+                    </div>
+                    <div style="margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                      <a href="https://solscan.io/token/${esc(act.mint)}" target="_blank" rel="noopener" class="mono" style="font-size: 11px; color: var(--muted); text-decoration: none;" title="${esc(act.mint)}">
+                        ${esc(act.mint.slice(0, 8))}...${esc(act.mint.slice(-6))} ↗
+                      </a>
+                      <a href="https://gmgn.ai/sol/token/${esc(act.mint)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #c084fc; text-decoration: none; font-weight: 600; background: rgba(192, 132, 252, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(192, 132, 252, 0.25);">GMGN Token ↗</a>
+                    </div>
+                  </div>
+                ` : w.tokenMint ? `
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 600; font-size: 11px;">🎯 TARGET</span>
+                      <strong style="color: #fff; font-size: 13px;">🪙 ${esc(w.tokenName || 'Token')}</strong>
+                      ${w.totalSyndicateWallets ? `<span style="font-size: 11px; color: var(--muted);">(${w.totalSyndicateWallets} wallet sindikat)</span>` : ''}
+                    </div>
+                    <div style="margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                      <a href="https://solscan.io/token/${esc(w.tokenMint)}" target="_blank" rel="noopener" class="mono" style="font-size: 11px; color: var(--muted); text-decoration: none;" title="${esc(w.tokenMint)}">
+                        ${esc(w.tokenMint.slice(0, 8))}...${esc(w.tokenMint.slice(-6))} ↗
+                      </a>
+                      <a href="https://gmgn.ai/sol/token/${esc(w.tokenMint)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #c084fc; text-decoration: none; font-weight: 600; background: rgba(192, 132, 252, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(192, 132, 252, 0.25);">GMGN Token ↗</a>
+                    </div>
+                  </div>
+                ` : `
+                  <div style="color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                    <span style="opacity: 0.5;">⏳</span> Standby (belum ada transfer di sesi ini)
+                  </div>
+                `}
+              </td>
+
+              <!-- Kolom 3: Waktu Transaksi (WIB) -->
+              <td style="padding: 12px 10px; font-size: 12px;">
+                ${act ? `
+                  <div style="color: #fff; font-weight: 600;">
+                    ${time(act.timestamp)}
+                  </div>
+                  <div style="font-size: 11px; color: #9ca3af; margin-top: 2px;">
+                    ${timeAgo(act.timestamp)}
+                  </div>
+                ` : w.latestTransferWib ? `
+                  <div style="color: #e2e8f0; font-size: 11px; font-weight: 600;">
+                    ${esc(w.latestTransferWib)}
+                  </div>
+                  <div style="font-size: 10px; color: var(--muted); margin-top: 2px;">
+                    Transfer On-Chain
+                  </div>
+                ` : `
+                  <span style="color: var(--muted);">—</span>
+                `}
+              </td>
+
+              <!-- Kolom 4: Volume / Detail & On-Chain -->
+              <td style="padding: 12px 10px; text-align: right; font-size: 12px;">
+                ${act ? `
+                  <div>
+                    ${act.amount ? `<div style="color: #93c5fd; font-weight: 600;">${Number(act.amount).toLocaleString(undefined, {maximumFractionDigits: 2})} token</div>` : ''}
+                    ${act.costUsd > 0 ? `<div style="font-size: 11px; color: #10b981; font-weight: 600;">~$${act.costUsd.toFixed(2)} USD ${act.solSpent ? `(${act.solSpent.toFixed(3)} SOL)` : ''}</div>` : ''}
+                    ${act.tx ? `<a href="https://solscan.io/tx/${esc(act.tx)}" target="_blank" rel="noopener" class="mono" style="font-size: 11px; color: #60a5fa; text-decoration: underline; margin-top: 2px; display: inline-block;">Tx On-Chain ↗</a>` : ''}
+                  </div>
+                ` : `
+                  <span style="color: var(--muted);">—</span>
+                `}
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+        const secSynTokens = $("section-syndicate-tokens");
+        if (secSynTokens) {
+          secSynTokens.style.display = isSyndicate ? "block" : "none";
+          if (isSyndicate) {
+            renderSyndicateTokensTable();
+          }
+        }
+      }
+
+      let currentSyndicateTokenFilter = 'all';
+
+      function filterSyndicateTokens(f) {
+        currentSyndicateTokenFilter = f || 'all';
+        document.querySelectorAll("#syndicate-tokens-filter-buttons button").forEach(b => {
+          const active = b.dataset.tokenFilter === currentSyndicateTokenFilter;
+          b.classList.toggle("active", active);
+          b.style.borderColor = active ? "#3b82f6" : "var(--edge)";
+          b.style.background = active ? "#1e3a8a" : "var(--panel)";
+          b.style.color = active ? "#ffffff" : "var(--muted)";
+        });
+        renderSyndicateTokensTable();
+      }
+      window.filterSyndicateTokens = filterSyndicateTokens;
+
+      function renderSyndicateTokensTable() {
+        const body = $("syndicate-tokens-table-body");
+        if (!body) return;
+
+        const rawTokens = state?.trackedWallets?.syndicate?.tokens || [];
+        const tokens = [...rawTokens].sort((a, b) => (b.latestTransferAt || 0) - (a.latestTransferAt || 0));
+        tokens.forEach((t, idx) => { t.rank = idx + 1; });
+
+        const countSpan = $("syndicate-tokens-count");
+        if (countSpan) countSpan.textContent = String(tokens.length);
+
+        const watchedCount = tokens.filter(t => t.isWatched).length;
+        const activeBadge = $("syndicate-tokens-active-badge");
+        if (activeBadge) activeBadge.textContent = `${watchedCount} Token Terpantau`;
+
+        const query = ($("syndicate-tokens-search-input")?.value || "").toLowerCase().trim();
+
+        const filtered = tokens.filter(t => {
+          if (currentSyndicateTokenFilter === 'watched' && !t.isWatched) return false;
+          if (currentSyndicateTokenFilter === 'min50' && (t.walletsCount || 0) < 50) return false;
+          if (currentSyndicateTokenFilter === 'min100' && (t.walletsCount || 0) < 100) return false;
+
+          if (query) {
+            const mintMatch = (t.mint || "").toLowerCase().includes(query);
+            const nameMatch = (t.name || "").toLowerCase().includes(query);
+            const symMatch = (t.symbol || "").toLowerCase().includes(query);
+            const clMatch = (t.clusterName || "").toLowerCase().includes(query);
+            return mintMatch || nameMatch || symMatch || clMatch;
+          }
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          body.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 24px; color: var(--muted);">Tidak ada group token sindikat yang sesuai filter atau pencarian.</td></tr>`;
+          return;
+        }
+
+        body.innerHTML = filtered.map((t, idx) => {
+          const statusBadge = t.isWatched
+            ? `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.4);">🎯 TOP 5 WATCHING</span>`
+            : `<span class="badge" style="background: rgba(255, 255, 255, 0.06); color: var(--muted); font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--edge);">📦 SINDIKAT</span>`;
+
+          const otherMintsText = (t.mintsCount && t.mintsCount > 1)
+            ? `<span style="font-size: 11px; color: #a78bfa; margin-left: 4px; font-weight: 600;">(+${t.mintsCount - 1} mint lain)</span>`
+            : '';
+
+          return `
+            <tr style="border-bottom: 1px solid var(--edge); background: ${t.isWatched ? 'rgba(16, 185, 129, 0.04)' : 'transparent'};">
+              <!-- Kolom 1: Rank -->
+              <td style="padding: 10px 8px; font-weight: 700; color: ${t.isWatched ? '#34d399' : 'var(--muted)'};">
+                #${t.rank || (idx + 1)}
+              </td>
+
+              <!-- Kolom 2: Token, Simbol, Sub-mints & Link GMGN Token -->
+              <td style="padding: 10px 8px;">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                  <strong style="color: #fff; font-size: 14px;">🪙 ${esc(t.name || t.symbol)}</strong>
+                  ${otherMintsText}
+                </div>
+                <div style="margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                  <a href="https://solscan.io/token/${esc(t.mint)}" target="_blank" rel="noopener" class="mono" style="font-size: 11px; color: var(--muted); text-decoration: none;" title="${esc(t.mint)}">
+                    ${esc(t.mint.slice(0, 8))}...${esc(t.mint.slice(-6))} ↗
+                  </a>
+                  <button type="button" class="small-btn" onclick="navigator.clipboard.writeText('${esc(t.mint)}')" title="Salin Mint" style="padding: 1px 5px; font-size: 10px; border-radius: 4px; background: rgba(255,255,255,0.06); border: 1px solid var(--edge); color: var(--muted); cursor: pointer;">📋</button>
+                  <a href="https://gmgn.ai/sol/token/${esc(t.mint)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #c084fc; text-decoration: none; font-weight: 600; background: rgba(192, 132, 252, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(192, 132, 252, 0.25);">GMGN Token ↗</a>
+                </div>
+              </td>
+
+              <!-- Kolom 3: Status Target -->
+              <td style="padding: 10px 8px;">
+                ${statusBadge}
+              </td>
+
+              <!-- Kolom 4: Total Wallet Sindikat -->
+              <td style="padding: 10px 8px;">
+                <div style="color: #93c5fd; font-weight: 700; font-size: 13px;">
+                  ${Number(t.walletsCount || 0).toLocaleString()} Wallet
+                </div>
+                <div style="font-size: 10px; color: var(--muted); margin-top: 2px;">
+                  armada sindikat on-chain
+                </div>
+              </td>
+
+              <!-- Kolom 5: Waktu Transfer (WIB) -->
+              <td style="padding: 10px 8px; font-size: 12px;">
+                <div style="color: #e2e8f0; font-weight: 600; font-size: 11px;">
+                  ${esc(t.latestTransferWib)}
+                </div>
+                ${t.latestTransferAt ? `
+                  <div style="font-size: 10px; color: var(--muted); margin-top: 2px;">
+                    ${timeAgo(t.latestTransferAt * 1000)}
+                  </div>
+                ` : ''}
+              </td>
+
+              <!-- Kolom 6: Sample Wallet GMGN -->
+              <td style="padding: 10px 8px; text-align: right; font-size: 11px;">
+                ${t.sampleWallet ? `
+                  <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                      <span class="mono" style="color: #93c5fd; font-size: 11px;" title="${esc(t.sampleWallet)}">${esc(shortAddress(t.sampleWallet))}</span>
+                      <button type="button" class="small-btn" onclick="navigator.clipboard.writeText('${esc(t.sampleWallet)}')" title="Salin Address" style="padding: 1px 4px; font-size: 10px; border-radius: 4px; background: rgba(255,255,255,0.06); border: 1px solid var(--edge); color: var(--muted); cursor: pointer;">📋</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <a href="https://solscan.io/account/${esc(t.sampleWallet)}" target="_blank" rel="noopener" style="font-size: 11px; color: #60a5fa; text-decoration: none;">Solscan ↗</a>
+                      <a href="https://gmgn.ai/sol/address/${esc(t.sampleWallet)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #38bdf8; text-decoration: none; font-weight: 600; background: rgba(56, 189, 248, 0.12); padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">GMGN Wallet ↗</a>
+                    </div>
+                  </div>
+                ` : '<span style="color: var(--muted);">—</span>'}
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      function initGroupTabs() {
+        const container = $("group-tabs");
+        if (!container) return;
+        const updateBtns = () => {
+          container.querySelectorAll(".group-btn").forEach(b => {
+            const active = b.dataset.group === currentGroup;
+            b.classList.toggle("active", active);
+            b.style.borderColor = active ? "#3b82f6" : "#4b5563";
+            b.style.background = active ? "#1e3a8a" : "#1f2937";
+            b.style.color = active ? "#ffffff" : "#9ca3af";
+          });
+        };
+        updateBtns();
+        container.querySelectorAll(".group-btn").forEach(b => {
+          b.onclick = () => {
+            currentGroup = b.dataset.group;
+            try { localStorage.setItem("profit4_active_group", currentGroup); } catch {}
+            updateBtns();
+            state = null;
+            refresh();
+          };
+        });
       }
 
       function initViewToggles() {
@@ -3077,13 +4343,14 @@
           tradeToggle.querySelectorAll("button").forEach(b => b.onclick = () => applyTrade(b.dataset.view));
         }
 
-        // Subtab click handlers
-        document.querySelectorAll("[data-subtab]").forEach((btn) => {
-          btn.onclick = () => switchTradingSubtab(btn.dataset.subtab);
+        // Trading subtab click handlers (Dibeli / Posisi Aktif vs Dijual / Selesai)
+        document.querySelectorAll("[data-trade-tab]").forEach((btn) => {
+          btn.onclick = () => switchTradingSubtab(btn.dataset.tradeTab);
         });
       }
 
       function switchTab(tab, persist = true) {
+        if (!tab) return;
         const legacyMap = {
           overview: "rekap",
           positions: "trading",
@@ -3092,39 +4359,87 @@
           clusters: "rekap",
           genesis: "rekap",
         };
-        const targetTab = legacyMap[tab] || (["radar", "trading", "rekap"].includes(tab) ? tab : "radar");
-        if (tab === "positions") switchTradingSubtab("open");
-        else if (tab === "history") switchTradingSubtab("closed");
-
-        document
-          .querySelectorAll(".tab-pane")
-          .forEach((p) => p.classList.toggle("active", p.id === `pane-${targetTab}`));
-        document.querySelectorAll("[data-tab]").forEach((b) => {
-          const active = b.dataset.tab === targetTab;
-          b.classList.toggle("active", active);
-          b.setAttribute("aria-pressed", String(active));
-        });
-        if (persist) {
-          try {
-            localStorage.setItem("profit4_active_tab", targetTab);
-          } catch {}
-          history.replaceState(null, "", `#${targetTab}`);
+        const targetTab = legacyMap[tab] || (["radar", "trading", "rekap"].includes(tab) ? tab : null);
+        if (targetTab) {
+          if (tab === "positions") switchTradingSubtab("open");
+          else if (tab === "history") switchTradingSubtab("closed");
+          switchGroupSubTab(targetTab, persist);
         }
-        window.scrollTo({ top: 0, behavior: "smooth" });
       }
+      window.switchTab = switchTab;
+
       document
-        .querySelectorAll("[data-tab]")
-        .forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
-      window.addEventListener("hashchange", () =>
-        switchTab(location.hash.slice(1)),
-      );
-      let initialTab = location.hash.slice(1);
-      if (!initialTab) {
-        try {
-          initialTab = localStorage.getItem("profit4_active_tab");
-        } catch {}
+        .querySelectorAll(".bottom-nav [data-subtab]")
+        .forEach((b) => (b.onclick = () => switchGroupSubTab(b.dataset.subtab)));
+
+      function parseCurrentRoute() {
+        const p = location.pathname.replace(/^\/profit4/, "").replace(/^\//, "").split("/").filter(Boolean);
+        const main = (p[0] || "").toLowerCase();
+        const sub = (p[1] || "").toLowerCase();
+        const searchParams = new URLSearchParams(location.search);
+        const queryTab = searchParams.get("tab") || sub;
+
+        const aliases = {
+          "sindikat": "syndicate",
+          "smart-money": "smartmoney",
+          "dash": "overview",
+          "dashboard": "overview"
+        };
+        const resolvedMain = aliases[main] || main;
+
+        if (["overview", "momentum", "syndicate", "smartmoney"].includes(resolvedMain)) {
+          return {
+            main: resolvedMain,
+            sub: ["radar", "wallets", "trading", "rekap"].includes(queryTab) ? queryTab : null
+          };
+        }
+
+        const rawHash = location.hash.replace(/^#/, "");
+        if (rawHash) {
+          const hParts = rawHash.split("/");
+          const hMain = aliases[hParts[0]?.toLowerCase()] || hParts[0]?.toLowerCase();
+          const hSub = hParts[1]?.toLowerCase();
+          if (["overview", "momentum", "syndicate", "smartmoney"].includes(hMain)) {
+            return {
+              main: hMain,
+              sub: ["radar", "wallets", "trading", "rekap"].includes(hSub) ? hSub : null
+            };
+          }
+        }
+        return null;
       }
-      switchTab(initialTab || "radar");
+
+      window.addEventListener("popstate", () => {
+        const route = parseCurrentRoute();
+        const main = route?.main || "overview";
+        switchMainTab(main, false);
+        if (route?.sub) {
+          switchGroupSubTab(route.sub, false);
+        }
+      });
+
+      window.addEventListener("hashchange", () => {
+        const route = parseCurrentRoute();
+        const main = route?.main || "overview";
+        switchMainTab(main, false);
+        if (route?.sub) {
+          switchGroupSubTab(route.sub, false);
+        }
+      });
+
+      const initialRoute = parseCurrentRoute();
+      let initialMain = initialRoute?.main;
+      if (!initialMain) {
+        try {
+          initialMain = localStorage.getItem("profit4_main_tab") || "overview";
+        } catch {
+          initialMain = "overview";
+        }
+      }
+      switchMainTab(initialMain, false);
+      if (initialRoute?.sub) {
+        switchGroupSubTab(initialRoute.sub, false);
+      }
       initViewToggles();
       $("run").onchange = () => {
         session = $("run").value;

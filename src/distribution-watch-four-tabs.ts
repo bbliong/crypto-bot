@@ -32,6 +32,7 @@ import { HeadlessTradeStream } from "./headless-trade-stream.js";
 import { SolanaWalletStream } from "./solana-wallet-stream.js";
 import { attachCapture } from "./capture.js";
 import { GmgnTokenWebSocketManager } from "./gmgn-token-websocket.js";
+import { FeedHubServer } from "./feed-hub-server.js";
 
 type Transfer = {
   wallet: string;
@@ -39,7 +40,10 @@ type Transfer = {
   symbol?: string;
   timestamp?: number;
   priceUsd?: number;
-  amount?: string;
+  marketCapUsd?: number;
+  amount?: string | number;
+  costUsd?: number;
+  solSpent?: number;
   from?: string;
   tx?: string;
   source?: string;
@@ -66,7 +70,7 @@ const { values } = parseArgs({
     solanaWalletWs: { type: "string", default: "true" },
   },
 });
-if (!["target", "profit4", "bounce"].includes(values.paperLane!))
+if (!["target", "profit4", "bounce", "feed"].includes(values.paperLane!))
   throw new Error("paperLane tidak valid.");
 const isPaperRunner =
   values.paperLane === "profit4" || values.paperLane === "bounce";
@@ -121,6 +125,16 @@ const writeControl = (value: unknown) =>
     ? atomicProfit4Json(controlFile, value)
     : writeFileSync(controlFile, JSON.stringify(value, null, 2));
 mkdirSync(output, { recursive: true });
+if (values.paperLane === "feed") {
+  writeControl({
+    pid: process.pid,
+    run: output,
+    startedAt: Date.now(),
+    mode: "chrome-feed-hub",
+    status: "running",
+    feedHubPort: Number(process.env.FEED_HUB_PORT || 8765),
+  });
+}
 if (profit4 && existsSync(controlFile)) {
   const previous = JSON.parse(readFileSync(controlFile, "utf8"));
   if (previous.pid !== process.pid && Number.isInteger(previous.pid)) {
@@ -137,14 +151,29 @@ if (profit4 && existsSync(controlFile)) {
 }
 const logWriter = new RotatingJsonlWriter(output);
 const write = (name: string, value: unknown) => logWriter.write(name, value);
-const targetLane = isPaperRunner
-  ? new DistributionProfit4Runtime(
-      output,
-      write,
-      dataDirectory,
-      values.paperLane === "bounce" ? "bounce" : "profit4",
-    )
-  : new DistributionTargetRuntime(output, write);
+class NoopLane {
+  register(_t: any, _n: number) {}
+  trade(_m: string, _tr: any) {}
+  holderFrame(_m: string, _b: unknown, _at: number) {}
+  evaluate(_now: number) {}
+  end(_m: string, _now: number, _r?: string) {}
+  shutdown(_now: number) {}
+  setLiveSignalHandler(_h: any) {}
+  setSwapProbeHandlers(_h: any) {}
+  isMintActive(_m: string) { return false; }
+  onTrackedWalletSold(_m: string, _w: string, _now: number) {}
+}
+
+const targetLane: any = values.paperLane === "feed"
+  ? new NoopLane()
+  : (isPaperRunner
+      ? new DistributionProfit4Runtime(
+          output,
+          write,
+          dataDirectory,
+          values.paperLane === "bounce" ? "bounce" : "profit4",
+        )
+      : new DistributionTargetRuntime(output, write));
 process.once("exit", () => logWriter.close());
 const walk = (
   value: unknown,
@@ -215,10 +244,24 @@ const context = await chromium.launchPersistentContext(values.profileDir!, {
     `--profile-directory=${values.profileName}`,
     "--js-flags=--max-old-space-size=512",
     "--disable-dev-shm-usage",
+    "--remote-debugging-port=9223",
   ],
 });
 const controller = context.pages()[0] ?? (await context.newPage());
-const gmgnWsManager = new GmgnTokenWebSocketManager(controller, 20);
+const gmgnWsManager = new GmgnTokenWebSocketManager(controller, 10, 10);
+const feedHub = new FeedHubServer(Number(process.env.FEED_HUB_PORT || 8765));
+await feedHub.start().catch((err: Error) => console.warn(`[feed-hub] Start warning: ${err.message}`));
+
+feedHub.onCommand((cmd) => {
+  if (cmd.action === 'SUBSCRIBE_MINT') {
+    const pool = (cmd as any).pool || 'momentum';
+    const maxDur = (cmd as any).maxDurationSeconds || 7200;
+    gmgnWsManager.subscribeToken(cmd.mint, pool, maxDur).catch(() => {});
+  } else if (cmd.action === 'UNSUBSCRIBE_MINT') {
+    gmgnWsManager.unsubscribeToken(cmd.mint).catch(() => {});
+  }
+});
+process.once("exit", () => { void feedHub.close(); });
 const details = new Map<
   string,
   { page: Page; watch: Watch; openedAt: number }
@@ -334,6 +377,17 @@ interface ActiveDetailItem {
   tx?: string;
 }
 
+let minMarketCapUsd = 10000;
+let maxMarketCapUsd = 100000;
+const feedSettingsGlobalFile = join(process.cwd(), "config", "feed-settings.json");
+if (existsSync(feedSettingsGlobalFile)) {
+  try {
+    const cfg = JSON.parse(readFileSync(feedSettingsGlobalFile, "utf8"));
+    if (Number.isFinite(cfg.minMarketCapUsd)) minMarketCapUsd = Number(cfg.minMarketCapUsd);
+    if (Number.isFinite(cfg.maxMarketCapUsd)) maxMarketCapUsd = Number(cfg.maxMarketCapUsd);
+  } catch {}
+}
+
 const activeDetailsQueue: ActiveDetailItem[] = [];
 
 function pushActiveDetail(item: ActiveDetailItem) {
@@ -346,6 +400,48 @@ function pushActiveDetail(item: ActiveDetailItem) {
   }
 }
 
+const candidateMeta = new Map<string, { symbol: string; creator: string; originalSource?: string }>();
+const promotedTokens = new Set<string>();
+
+function promoteTokenIfQualified(mint: string, priceUsd: number, timestamp: number, wallet: string, source: string) {
+  if (promotedTokens.has(mint)) return;
+  const estimatedMcap = priceUsd * 1_000_000_000;
+  if (estimatedMcap < minMarketCapUsd || estimatedMcap > maxMarketCapUsd) {
+    return;
+  }
+  promotedTokens.add(mint);
+  const meta = candidateMeta.get(mint);
+  const symbol = meta?.symbol || "TOKEN";
+  const creator = meta?.creator || wallet;
+  const effectiveSource = meta?.originalSource || source;
+
+  pushActiveDetail({
+    mint,
+    symbol,
+    wallet: creator,
+    openedAt: Date.now(),
+    source: effectiveSource,
+    priceUsd,
+    status: "QUALIFIED_10K",
+  });
+  gmgnWsManager.subscribeToken(mint).catch(() => {});
+  feedHub.broadcast({
+    type: "CANDIDATE",
+    source: effectiveSource,
+    transfer: {
+      mint,
+      wallet: creator,
+      symbol,
+      timestamp: Math.floor(timestamp / 1000),
+      from: creator,
+      source: effectiveSource,
+      priceUsd,
+      marketCapUsd: estimatedMcap,
+    },
+    observedAt: Date.now(),
+  });
+}
+
 let tradeStream: HeadlessTradeStream | null = null;
 if (useHeadlessStream) {
   tradeStream = new HeadlessTradeStream();
@@ -355,10 +451,20 @@ if (useHeadlessStream) {
       observedAt: trade.at,
       ...trade,
     });
+    promoteTokenIfQualified(mint, trade.price, trade.at, trade.wallet, "pumpportal_ws");
+    feedHub.broadcast({
+      type: "TRADE_TICK",
+      mint,
+      trade,
+      observedAt: trade.at,
+    });
     targetLane.trade(mint, trade);
   });
   tradeStream.on("newToken", (token) => {
     recordHourlyEvent("newToken");
+    candidateMeta.set(token.mint, { symbol: token.symbol || "UNKNOWN", creator: token.traderPublicKey || "creator", originalSource: "pumpportal_ws" });
+    const solPriceUsd = 150; // Perkiraan SOL
+    const priceUsd = (token.initialBuy || 0) > 0 ? (token.marketCapSol * solPriceUsd) / 1_000_000_000 : 0.000005;
     write("watch-events.jsonl", {
       type: "RESEARCH_NEW_TOKEN_DISCOVERED",
       observedAt: Date.now(),
@@ -370,17 +476,37 @@ if (useHeadlessStream) {
       marketCapSol: token.marketCapSol,
       source: "pumpportal_ws",
     });
-    const priceUsd = token.marketCapSol ? (token.marketCapSol * 145) / 1000000000 : 0.000004;
-    pushActiveDetail({
-      mint: token.mint,
-      symbol: token.symbol || "UNKNOWN",
-      wallet: token.traderPublicKey,
-      openedAt: Date.now(),
-      source: "pumpportal_ws",
-      priceUsd,
-      status: "DISCOVERED_0S",
-    });
     tradeStream?.registerMint(token.mint, { symbol: token.symbol, priceUsd });
+    promoteTokenIfQualified(token.mint, priceUsd, Date.now(), token.traderPublicKey || "creator", "pumpportal_ws");
+    feedHub.broadcast({
+      type: "CANDIDATE",
+      source: "pumpportal_ws",
+      transfer: {
+        mint: token.mint,
+        wallet: token.traderPublicKey || "creator",
+        symbol: token.symbol || "UNKNOWN",
+        timestamp: Math.floor(Date.now() / 1000),
+        from: token.traderPublicKey || "creator",
+        source: "pumpportal_ws",
+        priceUsd,
+        marketCapUsd: priceUsd * 1_000_000_000,
+      },
+      observedAt: Date.now(),
+    });
+    feedHub.broadcast({
+      type: "TRADE_TICK",
+      mint: token.mint,
+      trade: {
+        at: Date.now(),
+        timestamp: Math.floor(Date.now() / 1000),
+        price: priceUsd,
+        side: "buy",
+        wallet: token.traderPublicKey || "creator",
+        usd: (Number(token.initialBuy) || 0.1) * 145,
+        signature: "genesis_creation",
+      },
+      observedAt: Date.now(),
+    });
     if (targetLane instanceof DistributionProfit4Runtime) {
       targetLane.register({
         mint: token.mint,
@@ -417,6 +543,20 @@ gmgnWsManager.on("trade", (trade) => {
     ...trade,
     source: "gmgn_browser_ws",
   });
+  feedHub.broadcast({
+    type: "TRADE_TICK",
+    mint: trade.mint,
+    trade: {
+      at: trade.at,
+      timestamp: trade.timestamp,
+      price: trade.price,
+      usd: trade.usd,
+      side: trade.side,
+      wallet: trade.wallet,
+      signature: trade.signature,
+    },
+    observedAt: trade.at,
+  });
   targetLane.trade(trade.mint, {
     at: trade.at,
     timestamp: trade.timestamp,
@@ -430,6 +570,20 @@ gmgnWsManager.on("trade", (trade) => {
 
 gmgnWsManager.on("stat", (stat) => {
   recordHourlyEvent("trade");
+  feedHub.broadcast({
+    type: "TRADE_TICK",
+    mint: stat.mint,
+    trade: {
+      at: stat.at,
+      timestamp: Math.floor(stat.at / 1000),
+      price: stat.price,
+      usd: 0,
+      side: "buy",
+      wallet: "gmgn_stat_feeder",
+      signature: "stat_update",
+    },
+    observedAt: stat.at,
+  });
   targetLane.trade(stat.mint, {
     at: stat.at,
     timestamp: Math.floor(stat.at / 1000),
@@ -446,6 +600,7 @@ gmgnWsManager.on("frame", (frame: any) => {
     for (const item of frame.data) {
       const mint = item.ta || item.token_address || item.a;
       if (mint) {
+        feedHub.broadcast({ type: "HOLDER_FRAME", mint, body: frame, observedAt: Date.now() });
         targetLane.holderFrame(mint, frame, Date.now());
       }
     }
@@ -466,21 +621,44 @@ attachCapture(
     for (const row of walk(payload)) {
       const f = fields(row);
       if (f.mint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(f.mint)) {
-        recordHourlyEvent("newToken");
         const symbol = String(f.token?.symbol || (row as any).symbol || "GMGN_NEW");
         const wallet = String(f.token?.creator || (row as any).creator || "gmgn_research");
-        const priceUsd = Number(f.token?.price_usd || (row as any).price_usd || 0.000004);
-        pushActiveDetail({
-          mint: f.mint,
-          symbol,
-          wallet,
-          openedAt: now,
+        const rawPrice = Number(f.token?.price_usd || (row as any).price_usd || 0);
+        const priceUsd = rawPrice > 0.000004 ? rawPrice : 0;
+        candidateMeta.set(f.mint, { symbol, creator: wallet, originalSource: "gmgn_research_ws" });
+        feedHub.broadcast({
+          type: "CANDIDATE",
           source: "gmgn_research_ws",
-          priceUsd,
-          status: "RESEARCH_DISCOVERED",
+          transfer: {
+            mint: f.mint,
+            wallet,
+            symbol,
+            timestamp: Math.floor(now / 1000),
+            from: wallet,
+            source: "gmgn_research_ws",
+            priceUsd: priceUsd > 0 ? priceUsd : undefined,
+            marketCapUsd: priceUsd > 0 ? priceUsd * 1_000_000_000 : undefined,
+          },
+          observedAt: now,
         });
-        tradeStream?.registerMint(f.mint, { symbol, priceUsd: priceUsd > 0 ? priceUsd : 0.000004 });
-        gmgnWsManager.subscribeToken(f.mint).catch(() => {});
+        if (priceUsd > 0) {
+          tradeStream?.registerMint(f.mint, { symbol, priceUsd });
+          promoteTokenIfQualified(f.mint, priceUsd, now, wallet, "gmgn_research_ws");
+          feedHub.broadcast({
+            type: 'TRADE_TICK',
+            mint: f.mint,
+            trade: {
+              at: now,
+              timestamp: Math.floor(now / 1000),
+              price: priceUsd,
+              side: 'buy',
+              wallet,
+              usd: 25,
+              signature: `gmgn_${now}`,
+            },
+            observedAt: now,
+          });
+        }
         if (targetLane instanceof DistributionProfit4Runtime) {
           targetLane.register({
             mint: f.mint,
@@ -721,6 +899,7 @@ function attachDetailSocket(page: Page, wallet: string) {
         body: body ?? { undecodable: true },
       });
       if (!state) return;
+      feedHub.broadcast({ type: 'HOLDER_FRAME', mint: state.watch.transfer.mint, body, observedAt });
       targetLane.holderFrame(state.watch.transfer.mint, body, observedAt);
       for (const row of walk(body)) {
         const f = fields(row),
@@ -745,7 +924,21 @@ function attachDetailSocket(page: Page, wallet: string) {
           trackedFrom: state.watch.transfer,
           ...trade,
         });
-        if (trade.timestamp)
+        if (trade.timestamp) {
+          feedHub.broadcast({
+            type: 'TRADE_TICK',
+            mint: trade.mint,
+            trade: {
+              at: observedAt,
+              timestamp: trade.timestamp,
+              price: trade.price,
+              side: trade.side,
+              wallet: trade.wallet,
+              usd: trade.usd ?? null,
+              signature: trade.signature,
+            },
+            observedAt,
+          });
           targetLane.trade(trade.mint, {
             at: observedAt,
             timestamp: trade.timestamp,
@@ -755,6 +948,7 @@ function attachDetailSocket(page: Page, wallet: string) {
             usd: trade.usd ?? null,
             signature: trade.signature,
           });
+        }
         if (
           profit4 &&
           trade.side === "sell" &&
@@ -792,8 +986,10 @@ function attachDetailSocket(page: Page, wallet: string) {
     if (details.get(wallet)?.page === page) {
       const mint = details.get(wallet)!.watch.transfer.mint;
       details.delete(wallet);
-      if (![...details.values()].some((d) => d.watch.transfer.mint === mint))
+      if (![...details.values()].some((d) => d.watch.transfer.mint === mint)) {
+        feedHub.broadcast({ type: 'DETAIL_CLOSED', mint, reason: 'DETAIL_CLOSED', observedAt: Date.now() });
         targetLane.end(mint, Date.now(), "DETAIL_CLOSED");
+      }
     }
   });
 }
@@ -925,9 +1121,196 @@ if (existsSync(feedSettingsFile)) {
 
 await gmgnWsManager.init();
 
+// Ensure controller tab preserves pure momentum filters on new_pair (prefix 9)
+await controller.addInitScript(() => {
+  try {
+    const raw = localStorage.getItem("filter_query_map");
+    let map = raw ? JSON.parse(raw) : {};
+    const target = map["/trend2_sol"] || {};
+    // Pure momentum filters: MC 10k to 100k
+    target["9mim"] = "10";
+    target["9mam"] = "100";
+    target["9im"] = "1";
+    // Strip any age, volume or liquidity overrides from prefix 9
+    delete target["9mac"];
+    delete target["9miv"];
+    delete target["9iv"];
+    delete target["9miqu"];
+    delete target["9iqu"];
+    delete target["9maqu"];
+    delete target["9mic"];
+    delete target["9minhhm"];
+    delete target["9mihc"];
+    delete target["9ihc"];
+    map["/trend2_sol"] = target;
+    map["trend2_sol"] = { ...target };
+    localStorage.setItem("filter_query_map", JSON.stringify(map));
+  } catch {}
+});
+
 await controller.goto(controllerTargetUrl, {
   waitUntil: "commit",
 });
+
+// Enforce again after load
+await controller.evaluate(() => {
+  try {
+    const raw = localStorage.getItem("filter_query_map");
+    let map = raw ? JSON.parse(raw) : {};
+    const target = map["/trend2_sol"] || {};
+    target["9mim"] = "10";
+    target["9mam"] = "100";
+    target["9im"] = "1";
+    delete target["9mac"];
+    delete target["9miv"];
+    delete target["9iv"];
+    delete target["9miqu"];
+    delete target["9iqu"];
+    delete target["9maqu"];
+    delete target["9mic"];
+    delete target["9minhhm"];
+    delete target["9mihc"];
+    delete target["9ihc"];
+    map["/trend2_sol"] = target;
+    map["trend2_sol"] = { ...target };
+    localStorage.setItem("filter_query_map", JSON.stringify(map));
+  } catch {}
+});
+
+// -------------------------------------------------------------
+// TAB 2: GMGN TREND 20M FILTER INJECTION TAB
+// -------------------------------------------------------------
+let trendTargetUrl = `https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=trending`;
+const trendConfigFile = join(process.cwd(), "config", "trend-filter-settings.json");
+let trendFilters: Record<string, string> = {
+  "0mic": "20",
+  "0mim": "10000",
+  "0mihc": "100",
+  "0ihc": "1",
+};
+
+if (existsSync(trendConfigFile)) {
+  try {
+    const tcfg = JSON.parse(readFileSync(trendConfigFile, "utf8"));
+    if (tcfg.feedUrl) trendTargetUrl = tcfg.feedUrl;
+    if (tcfg.filters) {
+      trendFilters = { ...trendFilters, ...tcfg.filters };
+    }
+  } catch {}
+}
+
+const trendTab = await context.newPage();
+
+// Inject localStorage filter_query_map before loading page:
+// Clean separation: prefix 9 for New Pair, prefix 0 for Trending
+const applyTrendStorage = (fObj: Record<string, string>) => {
+  try {
+    const raw = localStorage.getItem("filter_query_map");
+    let map = raw ? JSON.parse(raw) : {};
+
+    const target = map["/trend2_sol"] || {};
+
+    // 1. New Pair (Momentum): MC 10k-100k (prefix 9)
+    target["9mim"] = "10";
+    target["9mam"] = "100";
+    target["9im"] = "1";
+
+    // 2. Trending (Trend 20m): Age >= 20m, MC >= 10k, Holders >= 100 (prefix 0)
+    // No max MC, no ATH MC
+    target["0mic"] = fObj["0mic"] || "20";
+    target["0mim"] = fObj["0mim"] || "10000";
+    target["0mihc"] = fObj["0mihc"] || "100";
+    target["0ihc"] = "1";
+    delete target["0mam"];
+    delete target["0minhhm"];
+    delete target["0manhhm"];
+
+    map["/trend2_sol"] = target;
+    map["trend2_sol"] = { ...target };
+    map["/trend_sol"] = { ...target };
+    map["trend_sol"] = { ...target };
+
+    localStorage.setItem("filter_query_map", JSON.stringify(map));
+  } catch {}
+};
+
+await trendTab.addInitScript(applyTrendStorage, trendFilters);
+
+await trendTab.goto(trendTargetUrl, {
+  waitUntil: "commit",
+});
+
+// Re-verify and enforce localStorage in active tab
+await trendTab.evaluate(applyTrendStorage, trendFilters);
+
+// Bring controller (new_pair) to front so it is the active visible window
+try {
+  await controller.bringToFront();
+} catch {}
+
+attachCapture(
+  trendTab,
+  (ev) => {
+    if (ev.kind === "open") {
+      recordHourlyEvent("solanaWs");
+    }
+    if (ev.kind === "frame" && ev.direction === "received") {
+      recordHourlyEvent("trade");
+    }
+  },
+  (payload, now) => {
+    for (const row of walk(payload)) {
+      const f = fields(row);
+      if (f.mint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(f.mint)) {
+        const symbol = String(f.token?.symbol || (row as any).symbol || "GMGN_TREND");
+        const wallet = String(f.token?.creator || (row as any).creator || "gmgn_trend");
+        const rawPrice = Number(f.token?.price_usd || (row as any).price_usd || 0);
+        const priceUsd = rawPrice > 0.000004 ? rawPrice : 0;
+        candidateMeta.set(f.mint, { symbol, creator: wallet, originalSource: "gmgn_trend_ws" });
+        if (priceUsd > 0) {
+          tradeStream?.registerMint(f.mint, { symbol, priceUsd });
+        }
+
+        // Broadcast token candidate ke FeedHub untuk didistribusikan ke worker Trend20m
+        feedHub.broadcast({
+          type: "CANDIDATE",
+          source: "gmgn_trend_ws",
+          transfer: {
+            mint: f.mint,
+            wallet,
+            symbol,
+            timestamp: Math.floor(now / 1000),
+            from: wallet,
+            source: "gmgn_trend_ws",
+            priceUsd: priceUsd > 0 ? priceUsd : undefined,
+          },
+          observedAt: now,
+        });
+
+        // Langsung subscribe ke WebSocket pool 'trend20m' dengan limit 10 dan max duration 2 jam
+        gmgnWsManager.subscribeToken(f.mint, "trend20m", 7200).catch(() => {});
+
+        // Hanya kirim TRADE_TICK jika harga asli valid (> 0.000004), jangan kirim fallback 0.000004 sebagai trade tick
+        if (priceUsd > 0.000004) {
+          feedHub.broadcast({
+            type: "TRADE_TICK",
+            mint: f.mint,
+            trade: {
+              at: now,
+              timestamp: Math.floor(now / 1000),
+              price: priceUsd,
+              side: "buy",
+              wallet,
+              usd: 25,
+              signature: `gmgn_trend_${now}`,
+            },
+            observedAt: now,
+          });
+        }
+      }
+    }
+  }
+);
 write("watch-events.jsonl", {
   type: "READY",
   observedAt: Date.now(),
@@ -1191,10 +1574,23 @@ function getSyndicateAirdropMeta(mint: string): { walletCount: number; tier: str
       syndicateWalletsCount: synMeta.walletCount,
       syndicateTier: synMeta.tier,
     };
+    feedHub.broadcast({
+      type: "CANDIDATE",
+      source: "syndicate_inflow",
+      transfer: candidate,
+      observedAt: Date.now(),
+    });
     await openOrReplaceDetail(candidate);
   });
 
   walletStream.on("sell", (s) => {
+    feedHub.broadcast({
+      type: "TRACKED_WALLET_SOLD",
+      source: "syndicate",
+      mint: s.mint,
+      wallet: s.wallet,
+      observedAt: Date.now(),
+    });
     write("watch-events.jsonl", {
       type: "TRACKED_WALLET_SOLD",
       observedAt: Date.now(),
@@ -1222,7 +1618,8 @@ function getSyndicateAirdropMeta(mint: string): { walletCount: number; tier: str
 // DEDICATED TRACKER 117 SMART MONEY WALLETS
 // ========================================================
 const SMART_MONEY_BLACKLIST_SYMBOLS = new Set([
-  "CASH", "USDC", "USDT", "USDS", "SOL", "BSOL", "JITOSOL", "JUP", "KMNO", "EURC", "WBTC", "WETH"
+  "CASH", "USDC", "USDT", "USDS", "SOL", "WSOL", "BSOL", "JITOSOL", "JUP", "KMNO", "EURC", "WBTC", "WETH",
+  "RAY", "MSOL", "BONK", "WIF", "TRUMP", "JUPUSD", "USD1"
 ]);
 
 let smartMoneyStream: SolanaWalletStream | null = null;
@@ -1259,6 +1656,11 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
     if (isOezank && t.solSpent !== undefined && t.solSpent < 0.05) {
       return;
     }
+    // Anti-Dust Filter khusus Smart Money Inflow: Minimal $50 USD atau 0.35 SOL
+    if (!isOezank) {
+      if (t.solSpent !== undefined && t.solSpent < 0.35) return;
+      if (t.amount !== undefined && t.priceUsd !== undefined && (t.amount * t.priceUsd) < 50.0) return;
+    }
     const sourceTag = isOezank ? "oezank_inflow" : "smart_money_inflow";
     const statusTag = isOezank ? "EVALUATING_OZ1_LANE" : "EVALUATING_G2_LANES";
     const eventType = isOezank ? "OEZANK_TRADER_BUY_DETECTED" : "SMART_MONEY_WHALE_TRANSFER_IN";
@@ -1269,6 +1671,10 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
       console.log(`[smart-money-ws] 🐋 Whale ${t.wallet.slice(0, 6)}.. bought/transferred ${t.symbol || t.mint.slice(0, 6)}`);
     }
 
+    const calculatedCostUsd = (t.amount !== undefined && t.priceUsd !== undefined && t.amount > 0 && t.priceUsd > 0)
+      ? t.amount * t.priceUsd
+      : (t.solSpent ? t.solSpent * 150 : 50);
+
     const smartCandidate: Transfer = {
       wallet: t.wallet,
       mint: t.mint,
@@ -1276,6 +1682,8 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
       timestamp: t.timestamp || Math.floor(Date.now() / 1000),
       priceUsd: t.priceUsd,
       amount: t.amount,
+      costUsd: calculatedCostUsd,
+      solSpent: t.solSpent,
       from: t.from,
       tx: t.tx,
       source: sourceTag,
@@ -1296,9 +1704,32 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
       wallet: t.wallet,
       mint: t.mint,
       amount: t.amount,
+      costUsd: calculatedCostUsd,
       tx: t.tx,
       source: sourceTag,
     });
+    feedHub.broadcast({
+      type: "CANDIDATE",
+      source: sourceTag,
+      transfer: smartCandidate,
+      observedAt: Date.now(),
+    });
+    if (t.priceUsd && t.priceUsd > 0) {
+      feedHub.broadcast({
+        type: "TRADE_TICK",
+        mint: t.mint,
+        trade: {
+          at: Date.now(),
+          timestamp: Math.floor(Date.now() / 1000),
+          price: t.priceUsd,
+          side: "buy",
+          wallet: t.wallet,
+          usd: calculatedCostUsd,
+          signature: t.tx || `sm_${Date.now()}`,
+        },
+        observedAt: Date.now(),
+      });
+    }
     if (useHeadlessStream && tradeStream) {
       tradeStream.registerMint(t.mint, {
         symbol: t.symbol,
@@ -1315,7 +1746,7 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
           price: t.priceUsd,
           side: "buy",
           wallet: t.wallet,
-          usd: 25,
+          usd: calculatedCostUsd,
           signature: t.tx || `sm_${Date.now()}`,
         });
       }
@@ -1326,6 +1757,13 @@ if (useSolanaWalletWs && smartAddresses.length > 0) {
 
   smartMoneyStream.on("sell", (s) => {
     const isOezank = s.wallet === OEZANK_WALLET;
+    feedHub.broadcast({
+      type: "TRACKED_WALLET_SOLD",
+      source: isOezank ? "oezank" : "smart_money",
+      mint: s.mint,
+      wallet: s.wallet,
+      observedAt: Date.now(),
+    });
     write("watch-events.jsonl", {
       type: isOezank ? "OEZANK_TRADER_SOLD" : "SMART_MONEY_WHALE_SOLD",
       observedAt: Date.now(),
@@ -1520,6 +1958,8 @@ while (!controller.isClosed() && !stopping) {
               const costUsd = Number(act.cost_usd || (isOezank ? 0 : 50));
               // Anti-Dust Filter: Abaikan micro-swap Oezank < $5 USD
               if (isOezank && costUsd > 0 && costUsd < 5.0) continue;
+              // Anti-Dust Filter: Abaikan micro-swap Smart Money < $50 USD
+              if (!isOezank && costUsd > 0 && costUsd < 50.0) continue;
 
               const key = `${sw}:${mint}:${ts}`;
               if (mint && !seenSmartTrades.has(key)) {
@@ -1561,11 +2001,34 @@ while (!controller.isClosed() && !stopping) {
                   symbol,
                   timestamp: ts,
                   priceUsd,
-                  amount: String(amount),
+                  amount: Number(amount),
+                  costUsd,
                   tx: act.tx_hash,
                   source: sourceTag,
                 };
                 write("transfers.jsonl", swCandidate);
+                feedHub.broadcast({
+                  type: "CANDIDATE",
+                  source: sourceTag,
+                  transfer: swCandidate,
+                  observedAt: Date.now(),
+                });
+                if (priceUsd > 0) {
+                  feedHub.broadcast({
+                    type: "TRADE_TICK",
+                    mint,
+                    trade: {
+                      at: Date.now(),
+                      timestamp: ts,
+                      price: priceUsd,
+                      side: "buy",
+                      wallet: sw,
+                      usd: costUsd,
+                      signature: act.tx_hash || `sm_poll_${ts}`,
+                    },
+                    observedAt: Date.now(),
+                  });
+                }
                 if (targetLane instanceof DistributionProfit4Runtime) {
                   targetLane.register(swCandidate, Date.now());
                   if (priceUsd > 0) {
@@ -1591,6 +2054,13 @@ while (!controller.isClosed() && !stopping) {
                 if (isOezank) {
                   console.log(`[oezank-poller] 🚨 Oezank IDC sold token ${mint.slice(0, 6)}.. Triggering mirror exit!`);
                 }
+                feedHub.broadcast({
+                  type: "TRACKED_WALLET_SOLD",
+                  source: isOezank ? "oezank" : "smart_money",
+                  mint,
+                  wallet: sw,
+                  observedAt: Date.now(),
+                });
                 if (targetLane instanceof DistributionProfit4Runtime) {
                   targetLane.onTrackedWalletSold(mint, sw, Date.now());
                 }

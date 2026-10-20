@@ -67,6 +67,30 @@ import {
   R5_BAND_LANE_RULES,
   R5_BAND_LANE_RULES_V2,
 } from './distribution-research-lanes.js';
+import {
+  DistributionMomentumScalpLane,
+  DistributionMomentumTrendLane,
+  M_SCALP_RULES,
+  M_TREND_RULES,
+  DistributionMApex10kLane,
+  DistributionMSafe10kLane,
+  DistributionMRunner15kLane,
+  M_APEX10K_RULES,
+  M_SAFE10K_RULES,
+  M_RUNNER15K_RULES,
+} from './distribution-evolved-momentum-lanes.js';
+import {
+  DistributionTrendConsLane,
+  DistributionTrendBalLane,
+  DistributionTrendWideLane,
+  DistributionTrendRunLane,
+  DistributionTrend20mLane,
+  TREND_20M_CONS_RULES,
+  TREND_20M_BAL_RULES,
+  TREND_20M_WIDE_RULES,
+  TREND_20M_RUN_RULES,
+  TREND_20M_RULES,
+} from './distribution-trend-20m-lane.js';
 import { TargetObservation, type TargetEvent, type TargetFacts, type TargetTrade } from './distribution-target-lane.js';
 import type { SwapRouteResult, DualSellSwapResult } from './browser-swap-route.js';
 
@@ -78,6 +102,11 @@ export type Transfer = {
   from?: string;
   source?: string;
   priceUsd?: number;
+  marketCapUsd?: number;
+  amount?: string | number;
+  costUsd?: number;
+  solSpent?: number;
+  tx?: string;
   syndicateWalletsCount?: number;
   syndicateTier?: string;
 };
@@ -124,11 +153,17 @@ type RuntimeState = {
     | DistributionMomentumV2Lane
     | DistributionMomentumV3Lane
     | DistributionMomentumR5BandLane
-    | DistributionMomentumR5BandLaneV2;
+    | DistributionMomentumR5BandLaneV2
+    | DistributionMApex10kLane
+    | DistributionMSafe10kLane
+    | DistributionMRunner15kLane
+    | DistributionMomentumScalpLane
+    | DistributionMomentumTrendLane
+    | DistributionTrend20mLane;
   facts: TargetFacts | null;
   active: boolean;
   registeredAt?: number;
-  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'Trend20m';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -150,23 +185,33 @@ export class DistributionProfit4Runtime {
   private recentEvents: TargetEvent[] = [];
   private readonly boughtFile: string;
   private swapHandlers: SwapProbeHandlers | null = null;
-  readonly laneType: 'profit4' | 'bounce';
+  readonly laneType: 'profit4' | 'bounce' | 'momentum' | 'syndicate' | 'smartmoney' | 'trend20m';
   readonly targetPercent: number;
-  readonly laneRules: typeof PROFIT4_RULES | typeof BOUNCE_RULES;
+  readonly laneRules: typeof PROFIT4_RULES | typeof BOUNCE_RULES | typeof TREND_20M_RULES;
   readonly laneName: string;
 
   constructor(private readonly run: string, private readonly write: (name: string, value: unknown) => void,
-    private readonly dataDirectory: string, laneType: 'profit4' | 'bounce' = 'profit4') {
+    private readonly dataDirectory: string, laneType: 'profit4' | 'bounce' | 'momentum' | 'syndicate' | 'smartmoney' | 'trend20m' = 'profit4') {
     this.laneType = laneType;
-    this.targetPercent = laneType === 'bounce' ? BOUNCE_TARGET_PERCENT : PROFIT4_TARGET_PERCENT;
-    this.laneRules = laneType === 'bounce' ? BOUNCE_RULES : PROFIT4_RULES;
-    this.laneName = laneType === 'bounce' ? BOUNCE_DUMP_LANE : PROFIT4_LANE;
+    this.targetPercent = laneType === 'trend20m' ? 20.0 : (laneType === 'profit4' ? PROFIT4_TARGET_PERCENT : BOUNCE_TARGET_PERCENT);
+    this.laneRules = laneType === 'trend20m' ? TREND_20M_RULES : (laneType === 'profit4' ? PROFIT4_RULES : BOUNCE_RULES);
+    this.laneName = laneType === 'profit4' ? PROFIT4_LANE : (laneType === 'bounce' ? BOUNCE_DUMP_LANE : laneType);
     this.boughtFile = join(dataDirectory, 'bought-mints.json');
     const saved = existsSync(this.boughtFile) ? JSON.parse(readFileSync(this.boughtFile, 'utf8')) : { mints: [] };
     if (!Array.isArray(saved.mints) || saved.mints.some((s: unknown) => typeof s !== 'string')) throw new Error('Ledger bought-mints tidak valid.');
     this.bought = new Set(saved.mints);
+
+    const getDualLanes = (type: string) => {
+      if (type === 'momentum') return ['M-Scalp', 'M-Trend'];
+      if (type === 'syndicate') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5'];
+      if (type === 'smartmoney') return ['G2', 'G2.1', 'G2.2', 'OZ1'];
+      if (type === 'bounce') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1', 'M-Apex10k', 'M-Safe10k', 'M-Runner15k'];
+      if (type === 'trend20m') return ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run'];
+      return ['P4'];
+    };
+
     this.write('profit4-events.jsonl', { type: 'PAPER_LANE_READY', observedAt: Date.now(), paperLane: this.laneName,
-      rules: this.laneRules, targetPercent: this.targetPercent, execution: 'PAPER_QUOTE', rounds: 1, dualLanes: laneType === 'bounce' ? ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5'] : ['P4'] });
+      rules: this.laneRules, targetPercent: this.targetPercent, execution: 'PAPER_QUOTE', rounds: 1, dualLanes: getDualLanes(this.laneType) });
     this.persist(Date.now());
   }
 
@@ -257,7 +302,7 @@ export class DistributionProfit4Runtime {
         this.triggerSwapBuy(transfer.mint);
       }
       if (event.type === 'PAPER_BUY') {
-        this.bought.add(this.laneType === 'bounce' ? `${transfer.mint}:${laneLabel.toLowerCase()}` : transfer.mint);
+        this.bought.add(this.laneType !== 'profit4' ? `${transfer.mint}:${laneLabel.toLowerCase()}` : transfer.mint);
         atomicProfit4Json(this.boughtFile, { updatedAt: event.observedAt, mints: [...this.bought] });
         this.triggerSwapBuy(transfer.mint);
       }
@@ -277,7 +322,7 @@ export class DistributionProfit4Runtime {
       this.liveSignalHandler?.({ ...record, rules: state ? { ...state.lane.rules } : null });
     };
 
-    if (this.laneType === 'bounce') {
+    if (this.laneType !== 'profit4') {
       const source = transfer.source || (
         transfer.wallet === 'creator' || transfer.wallet === 'gmgn_research' ? 'gmgn_research_ws' : 'syndicate_inflow'
       );
@@ -286,7 +331,7 @@ export class DistributionProfit4Runtime {
       // ==========================================
       // PIPELINE 1: SYNDICAT WALLETS (Bounce & Staircase)
       // ==========================================
-      if (source === 'syndicate_inflow') {
+      if (source === 'syndicate_inflow' && (this.laneType === 'bounce' || this.laneType === 'syndicate')) {
         const keyV1 = `${transfer.mint}:v1`;
         if (this.states.has(keyV1)) {
           if (transfer.syndicateWalletsCount) {
@@ -381,70 +426,37 @@ export class DistributionProfit4Runtime {
       }
 
       // ==========================================
-      // PIPELINE 2: GMGN RESEARCH NEW PAIR (Momentum Lanes)
+      // PIPELINE 2: GMGN RESEARCH NEW PAIR / PUMPPORTAL (Momentum Lanes)
       // ==========================================
-      else if (source === 'gmgn_research_ws') {
-        const keySafe = `${transfer.mint}:safe`;
-        if (this.states.has(keySafe)) return;
+      else if ((source === 'gmgn_research_ws' || source === 'pumpportal_ws') && this.laneType === 'momentum') {
+        const keyScalp = `${transfer.mint}:mscalp`;
+        if (this.states.has(keyScalp)) return;
 
-        const keyOpt = `${transfer.mint}:opt`;
-        const keyWide = `${transfer.mint}:wide`;
-        const keySwing = `${transfer.mint}:swing`;
-        const keyWave = `${transfer.mint}:wave`;
-        const keyV2M = `${transfer.mint}:v2m`;
-        const keyV3M = `${transfer.mint}:v3m`;
-        const keyR5 = `${transfer.mint}:r5`;
-        const keyR5_1 = `${transfer.mint}:r5_1`;
+        const keyTrend = `${transfer.mint}:mtrend`;
 
-        const laneSafe = new DistributionMomentumSafeLane(transfer.mint, makeOnEvent(keySafe, 'Safe'));
-        const laneOpt = new DistributionMomentumOptimalLane(transfer.mint, makeOnEvent(keyOpt, 'Opt'));
-        const laneWide = new DistributionMomentumWideLane(transfer.mint, makeOnEvent(keyWide, 'Wide'));
-        const laneSwing = new DistributionMomentumSwing100kLane(transfer.mint, makeOnEvent(keySwing, 'Swing'));
-        const laneWave = new DistributionMomentumWaveLane(transfer.mint, makeOnEvent(keyWave, 'Wave'));
-        const laneV2M = new DistributionMomentumV2Lane(transfer.mint, makeOnEvent(keyV2M, 'V2M'));
-        const laneV3M = new DistributionMomentumV3Lane(transfer.mint, makeOnEvent(keyV3M, 'V3M'));
-        const laneR5 = new DistributionMomentumR5BandLane(transfer.mint, makeOnEvent(keyR5, 'R5'));
-        const laneR5_1 = new DistributionMomentumR5BandLaneV2(transfer.mint, makeOnEvent(keyR5_1, 'R5.1'));
+        const laneScalp = new DistributionMomentumScalpLane(transfer.mint, makeOnEvent(keyScalp, 'M-Scalp'));
+        const laneTrend = new DistributionMomentumTrendLane(transfer.mint, makeOnEvent(keyTrend, 'M-Trend'));
 
-        this.states.set(keySafe, { key: keySafe, transfer, observation, lane: laneSafe, facts: null, active: true, registeredAt: now, laneLabel: 'Safe', version: SAFE_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyOpt, { key: keyOpt, transfer, observation, lane: laneOpt, facts: null, active: true, registeredAt: now, laneLabel: 'Opt', version: OPTIMAL_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyWide, { key: keyWide, transfer, observation, lane: laneWide, facts: null, active: true, registeredAt: now, laneLabel: 'Wide', version: WIDE_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keySwing, { key: keySwing, transfer, observation, lane: laneSwing, facts: null, active: true, registeredAt: now, laneLabel: 'Swing', version: SWING_100K_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyWave, { key: keyWave, transfer, observation, lane: laneWave, facts: null, active: true, registeredAt: now, laneLabel: 'Wave', version: WAVE_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV2M, { key: keyV2M, transfer, observation, lane: laneV2M, facts: null, active: true, registeredAt: now, laneLabel: 'V2M', version: MOMENTUM_V2_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV3M, { key: keyV3M, transfer, observation, lane: laneV3M, facts: null, active: true, registeredAt: now, laneLabel: 'V3M', version: MOMENTUM_V3_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyR5, { key: keyR5, transfer, observation, lane: laneR5, facts: null, active: true, registeredAt: now, laneLabel: 'R5', version: R5_BAND_LANE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyR5_1, { key: keyR5_1, transfer, observation, lane: laneR5_1, facts: null, active: true, registeredAt: now, laneLabel: 'R5.1', version: R5_BAND_LANE_RULES_V2.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyScalp, { key: keyScalp, transfer, observation, lane: laneScalp, facts: null, active: true, registeredAt: now, laneLabel: 'M-Scalp', version: M_SCALP_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyTrend, { key: keyTrend, transfer, observation, lane: laneTrend, facts: null, active: true, registeredAt: now, laneLabel: 'M-Trend', version: M_TREND_RULES.version, lastDecision: null, lastEvent: null });
 
-        if (this.bought.has(`${transfer.mint}:safe`)) laneSafe.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneSafe.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:opt`)) laneOpt.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneOpt.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:wide`)) laneWide.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneWide.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:swing`)) laneSwing.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneSwing.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:wave`)) laneWave.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneWave.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v2m`)) laneV2M.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneV2M.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v3m`)) laneV3M.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneV3M.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:r5`)) laneR5.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneR5.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:r5_1`)) laneR5_1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneR5_1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        if (this.bought.has(`${transfer.mint}:mscalp`)) laneScalp.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneScalp.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        if (this.bought.has(`${transfer.mint}:mtrend`)) laneTrend.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneTrend.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
 
       // ==========================================
       // PIPELINE 3: SMART MONEY INFLOW (117 Wallets: G2.1 Single Whale & G2.2 Multi-Whale)
       // ==========================================
-      else if (source === 'smart_money_inflow') {
+      else if (source === 'smart_money_inflow' && (this.laneType === 'bounce' || this.laneType === 'smartmoney')) {
         const keyG2 = `${transfer.mint}:g2`;
+        const numAmount = typeof transfer.amount === 'string' ? parseFloat(transfer.amount) : (transfer.amount ?? 0);
+        const costUsd = transfer.costUsd ?? (numAmount > 0 && transfer.priceUsd ? numAmount * transfer.priceUsd : 50);
         if (this.states.has(keyG2)) {
-          (this.states.get(keyG2)?.lane as any)?.registerSmartWallet?.(transfer.wallet);
-          (this.states.get(`${transfer.mint}:g2_1`)?.lane as any)?.registerSmartWallet?.(transfer.wallet);
-          (this.states.get(`${transfer.mint}:g2_2`)?.lane as any)?.registerSmartWallet?.(transfer.wallet);
+          (this.states.get(keyG2)?.lane as any)?.registerSmartWallet?.(transfer.wallet, costUsd);
+          (this.states.get(`${transfer.mint}:g2_1`)?.lane as any)?.registerSmartWallet?.(transfer.wallet, costUsd);
+          (this.states.get(`${transfer.mint}:g2_2`)?.lane as any)?.registerSmartWallet?.(transfer.wallet, costUsd);
           return;
         }
 
@@ -455,9 +467,9 @@ export class DistributionProfit4Runtime {
         const laneG2_2 = new DistributionSmartMoneyConvergenceLaneG2_2(transfer.mint, makeOnEvent(keyG2_2, 'G2.2'));
         const laneG2 = new DistributionSmartMoneyConvergenceLaneG2(transfer.mint, makeOnEvent(keyG2, 'G2'));
 
-        laneG2_1.registerSmartWallet(transfer.wallet);
-        laneG2_2.registerSmartWallet(transfer.wallet);
-        laneG2.registerSmartWallet(transfer.wallet);
+        laneG2_1.registerSmartWallet(transfer.wallet, costUsd);
+        laneG2_2.registerSmartWallet(transfer.wallet, costUsd);
+        laneG2.registerSmartWallet(transfer.wallet, costUsd);
 
         const transferMs = (transfer.timestamp ? transfer.timestamp * 1000 : now);
         const recentTrades = observation.trades.filter((t) => (t.timestamp ? t.timestamp * 1000 : t.at) >= transferMs - 60000);
@@ -481,7 +493,7 @@ export class DistributionProfit4Runtime {
       // ==========================================
       // PIPELINE 4: OEZANK TRADER MIRROR INFLOW (Lane OZ1)
       // ==========================================
-      else if (source === 'oezank_inflow') {
+      else if (source === 'oezank_inflow' && (this.laneType === 'bounce' || this.laneType === 'smartmoney')) {
         const keyOZ1 = `${transfer.mint}:oz1`;
         if (this.states.has(keyOZ1)) return;
 
@@ -506,6 +518,91 @@ export class DistributionProfit4Runtime {
 
         if (this.bought.has(keyOZ1)) laneOZ1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneOZ1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+      }
+
+      // ==========================================
+      // PIPELINE 5: GMGN TREND 20M (4 Lanes: T-Cons, T-Bal, T-Wide, T-Run)
+      // ==========================================
+      else if (source === 'gmgn_trend_ws' || this.laneType === 'trend20m') {
+        const keyCons = `${transfer.mint}:t_cons`;
+        if (this.states.has(keyCons)) return;
+
+        const keyBal = `${transfer.mint}:t_bal`;
+        const keyWide = `${transfer.mint}:t_wide`;
+        const keyRun = `${transfer.mint}:t_run`;
+
+        const laneCons = new DistributionTrendConsLane(transfer.mint, makeOnEvent(keyCons, 'T-Cons'));
+        const laneBal = new DistributionTrendBalLane(transfer.mint, makeOnEvent(keyBal, 'T-Bal'));
+        const laneWide = new DistributionTrendWideLane(transfer.mint, makeOnEvent(keyWide, 'T-Wide'));
+        const laneRun = new DistributionTrendRunLane(transfer.mint, makeOnEvent(keyRun, 'T-Run'));
+
+        this.states.set(keyCons, {
+          key: keyCons,
+          transfer,
+          observation,
+          lane: laneCons,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Cons',
+          version: TREND_20M_CONS_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
+        this.states.set(keyBal, {
+          key: keyBal,
+          transfer,
+          observation,
+          lane: laneBal,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Bal',
+          version: TREND_20M_BAL_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
+        this.states.set(keyWide, {
+          key: keyWide,
+          transfer,
+          observation,
+          lane: laneWide,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Wide',
+          version: TREND_20M_WIDE_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
+        this.states.set(keyRun, {
+          key: keyRun,
+          transfer,
+          observation,
+          lane: laneRun,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Run',
+          version: TREND_20M_RUN_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
+        if (this.bought.has(keyCons)) laneCons.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneCons.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyBal)) laneBal.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneBal.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyWide)) laneWide.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneWide.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyRun)) laneRun.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneRun.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
     } else {
       const key = transfer.mint;

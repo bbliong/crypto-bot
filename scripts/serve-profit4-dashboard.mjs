@@ -35,34 +35,72 @@ async function body(req) {
 }
 const runCache = new Map();
 
-export function profit4Snapshot(root, worker) {
-  const base = join(root, 'data', 'profit4-watch');
+export function profit4Snapshot(root, worker, group = 'all') {
+  let baseDirs = [];
+  if (group === 'momentum') {
+    baseDirs = [join(root, 'data', 'momentum-watch')];
+  } else if (group === 'syndicate') {
+    baseDirs = [join(root, 'data', 'syndicate-watch')];
+  } else if (group === 'smartmoney') {
+    baseDirs = [join(root, 'data', 'smartmoney-watch')];
+  } else if (group === 'trend20m') {
+    baseDirs = [join(root, 'data', 'trend20m-watch')];
+  } else {
+    baseDirs = [
+      join(root, 'data', 'profit4-watch'),
+      join(root, 'data', 'momentum-watch'),
+      join(root, 'data', 'syndicate-watch'),
+      join(root, 'data', 'smartmoney-watch'),
+      join(root, 'data', 'trend20m-watch'),
+    ];
+  }
   const positions = [], runs = [], recentEvents = [], recentEventsByRun = {};
-  for (const dir of readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-    const stateFile = join(base, dir.name, 'profit4-state.json');
-    if (!existsSync(stateFile)) continue;
-    let stat;
-    try { stat = statSync(stateFile); } catch { continue; }
-    const runPath = join(base, dir.name), current = worker.run && resolve(root, worker.run) === resolve(runPath);
-    const live = Boolean(current && worker.active);
-    let state, manifest;
-    const cached = runCache.get(dir.name);
-    if (cached && (Date.now() - (cached.readAt || 0) < 2000 || (!live && cached.mtimeMs === stat.mtimeMs))) {
-      state = cached.state;
-      manifest = cached.manifest;
-    } else {
-      state = read(stateFile);
-      if (!state?.positions) continue;
-      manifest = read(join(runPath, 'manifest.json'), {});
-      runCache.set(dir.name, { mtimeMs: stat.mtimeMs, readAt: Date.now(), state, manifest });
+  for (const base of baseDirs) {
+    if (!existsSync(base)) continue;
+    let dirs = [];
+    try {
+      dirs = readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+    } catch { continue; }
+    const workerControlFile = join(base, 'worker-control.json');
+    let localWorker = worker;
+    if (existsSync(workerControlFile)) {
+      try {
+        const c = JSON.parse(readFileSync(workerControlFile, 'utf8'));
+        if (c?.pid && alive(c.pid)) localWorker = { ...c, active: true };
+      } catch {}
     }
-    runs.push({ id: dir.name, observedAt: state.observedAt, current: Boolean(current), live: Boolean(live),
-      startedAt: manifest.startedAt ?? null, execution: state.execution ?? null,
-      rules: state.rules ?? null, targetPercent: state.targetPercent ?? null, paperLane: state.paperLane ?? null });
-    for (const p of state.positions) {
-      if (p.entryAt === null && !p.captureActive && p.phase !== 'OPEN' && p.phase !== 'ENTRY_PENDING') {
-        continue;
+    for (const dir of dirs) {
+      const stateFile = join(base, dir.name, 'profit4-state.json');
+      if (!existsSync(stateFile)) continue;
+      let stat;
+      try { stat = statSync(stateFile); } catch { continue; }
+      const runPath = join(base, dir.name), current = localWorker.run && resolve(root, localWorker.run) === resolve(runPath);
+      const live = Boolean(current && localWorker.active);
+      let state, manifest;
+      const cached = runCache.get(dir.name);
+      if (cached && (Date.now() - (cached.readAt || 0) < 2000 || (!live && cached.mtimeMs === stat.mtimeMs))) {
+        state = cached.state;
+        manifest = cached.manifest;
+      } else {
+        state = read(stateFile);
+        if (!state?.positions) continue;
+        manifest = read(join(runPath, 'manifest.json'), {});
+        runCache.set(dir.name, { mtimeMs: stat.mtimeMs, readAt: Date.now(), state, manifest });
       }
+      runs.push({ id: dir.name, observedAt: state.observedAt, current: Boolean(current), live: Boolean(live),
+        startedAt: manifest.startedAt ?? null, execution: state.execution ?? null,
+        rules: state.rules ?? null, targetPercent: state.targetPercent ?? null, paperLane: state.paperLane ?? null });
+      const enteredOrOpen = [];
+      const watchingPool = [];
+      for (const p of state.positions) {
+        if (p.entryAt !== null || p.phase === 'OPEN' || p.phase === 'ENTRY_PENDING') {
+          enteredOrOpen.push(p);
+        } else if (p.phase === 'WATCHING' || p.captureActive) {
+          watchingPool.push(p);
+        }
+      }
+      const candidatesToProcess = [...enteredOrOpen, ...watchingPool.slice(-50)];
+      for (const p of candidatesToProcess) {
       const interrupted = !live && ['OPEN', 'EXIT_PENDING'].includes(p.phase);
       const cleanFacts = p.facts ? {
         price: p.facts.price ?? null,
@@ -81,6 +119,7 @@ export function profit4Snapshot(root, worker) {
     recentEventsByRun[dir.name] = runEvents;
     recentEvents.push(...runEvents);
   }
+}
   const surgeDir = join(root, 'data', 'genesis-surge');
   const surgeStateFile = join(surgeDir, 'genesis-surge-state.json');
   if (existsSync(surgeStateFile)) {
@@ -229,10 +268,294 @@ export function profit4Snapshot(root, worker) {
         total: summarize(items),
       };
     });
+let cachedGlobalOverview = null, lastGlobalOverviewTime = 0;
+
+function classifyGroup(p) {
+  const l = p.laneLabel || '';
+  const v = p.version || '';
+  const src = p.source || '';
+  if (['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'Trend20m', 'W2-Scalp', 'W2-Trend'].includes(l) || src.includes('gmgn_trend') || v.includes('trend-20m') || v.includes('wave2')) return 'trend20m';
+  if (l.startsWith('M-') || ['Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1'].includes(l) || src.includes('gmgn_research') || src.includes('pumpportal') || v.includes('momentum')) return 'momentum';
+  if (['V1','V2','V3','V4','V5','V6','V7','S1','S2','S3','S4','S1_2','S5'].includes(l) || src.includes('syndicate') || v.includes('bounce') || v.includes('staircase')) return 'syndicate';
+  if (['G1','G1_2','G2','G2.1','G2.2','OZ1'].includes(l) || src.includes('smart_money') || src.includes('oezank') || v.includes('smart-money') || v.includes('oezank') || v.includes('genesis-surge')) return 'smartmoney';
+  return 'momentum';
+}
+
+function computeGlobalGroupsOverview(root) {
+  const now = Date.now();
+  if (cachedGlobalOverview && (now - lastGlobalOverviewTime) < 3000) {
+    return cachedGlobalOverview;
+  }
+
+  const groupsOverview = {
+    momentum: { key: 'momentum', label: 'Group Momentum', desc: 'M-Scalp & M-Trend (Quality-Gated New Pair Momentum)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+    syndicate: { key: 'syndicate', label: 'Group Sindikat', desc: 'Bounce Dip V1-V7 & Staircase Akumulasi S1-S5', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+    smartmoney: { key: 'smartmoney', label: 'Group Smart Money', desc: '117 Whale GMGN Inflow, Convergence & Mirror Oezank', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+    trend20m: { key: 'trend20m', label: 'Group Trend 20m', desc: 'GMGN Trend 20m (T-Cons, T-Bal, T-Wide, T-Run)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+  };
+
+  const allDirs = [
+    join(root, 'data', 'momentum-watch'),
+    join(root, 'data', 'syndicate-watch'),
+    join(root, 'data', 'smartmoney-watch'),
+    join(root, 'data', 'trend20m-watch'),
+  ];
+
+  for (const base of allDirs) {
+    if (!existsSync(base)) continue;
+    const dirs = readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory() && d.name.startsWith('202'));
+    for (const d of dirs) {
+      const stateFile = join(base, d.name, 'profit4-state.json');
+      if (!existsSync(stateFile)) continue;
+      try {
+        const s = JSON.parse(readFileSync(stateFile, 'utf8'));
+        if (!Array.isArray(s.positions)) continue;
+        for (const p of s.positions) {
+          const gKey = classifyGroup(p);
+          const grp = groupsOverview[gKey] || groupsOverview.momentum;
+          grp.watched++;
+          const lane = p.laneLabel || 'Other';
+          if (!grp.lanes[lane]) {
+            grp.lanes[lane] = { lane, group: gKey, watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, targetPercent: p.targetPercent || 35 };
+          }
+          grp.lanes[lane].watched++;
+          if (p.phase === 'OPEN') {
+            grp.open++;
+            grp.lanes[lane].open++;
+          } else if (p.phase === 'CLOSED') {
+            grp.closed++;
+            grp.lanes[lane].closed++;
+            const pnl = Number(p.pnlUsd) || 0;
+            grp.pnlUsd += pnl;
+            grp.lanes[lane].pnlUsd += pnl;
+            if (pnl > 0) {
+              grp.win++;
+              grp.lanes[lane].win++;
+            } else {
+              grp.loss++;
+              grp.lanes[lane].loss++;
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  const allLanes = [];
+  for (const g of Object.values(groupsOverview)) {
+    g.winRate = g.closed > 0 ? Number(((g.win / g.closed) * 100).toFixed(1)) : 0;
+    g.pnlUsd = Number(g.pnlUsd.toFixed(2));
+    for (const l of Object.values(g.lanes)) {
+      l.winRate = l.closed > 0 ? Number(((l.win / l.closed) * 100).toFixed(1)) : 0;
+      l.pnlUsd = Number(l.pnlUsd.toFixed(2));
+      allLanes.push(l);
+    }
+  }
+  allLanes.sort((a, b) => b.pnlUsd - a.pnlUsd);
+  cachedGlobalOverview = { groups: groupsOverview, allLanes };
+  lastGlobalOverviewTime = now;
+  return cachedGlobalOverview;
+}
+
+let cachedWalletsData = null, lastWalletsDataTime = 0;
+
+function getTrackedWalletsData(root) {
+  const now = Date.now();
+  if (cachedWalletsData && (now - lastWalletsDataTime) < 3000) {
+    return cachedWalletsData;
+  }
+
+  const latestTransfersPerWallet = {};
+  const baseProfit4 = join(root, 'data', 'profit4-watch');
+  if (existsSync(baseProfit4)) {
+    const runs = readdirSync(baseProfit4).filter(d => d.startsWith('202')).sort().reverse();
+    if (runs.length > 0) {
+      const chunkDir = join(baseProfit4, runs[0], 'chunks');
+      if (existsSync(chunkDir)) {
+        const chunks = readdirSync(chunkDir).sort().reverse().slice(0, 6);
+        for (const c of chunks) {
+          const tFile = join(chunkDir, c, 'transfers.jsonl');
+          if (existsSync(tFile)) {
+            try {
+              const lines = readFileSync(tFile, 'utf8').split('\n').filter(Boolean);
+              for (const l of lines) {
+                const t = JSON.parse(l);
+                const w = t.wallet;
+                if (w && !latestTransfersPerWallet[w]) {
+                  latestTransfersPerWallet[w] = {
+                    mint: t.mint,
+                    symbol: t.symbol || 'TOKEN',
+                    timestamp: (t.timestamp ? t.timestamp * 1000 : t.observedAt) || Date.now(),
+                    action: 'TRANSFER_IN',
+                    amount: t.amount,
+                    costUsd: t.costUsd || (t.solSpent ? t.solSpent * 150 : 0),
+                    solSpent: t.solSpent,
+                    tx: t.tx,
+                    source: t.source
+                  };
+                }
+              }
+            } catch {}
+          }
+          const wFile = join(chunkDir, c, 'watch-events.jsonl');
+          if (existsSync(wFile)) {
+            try {
+              const lines = readFileSync(wFile, 'utf8').split('\n').filter(Boolean);
+              for (const l of lines) {
+                const ev = JSON.parse(l);
+                const w = ev.wallet || ev.trackedWallet;
+                if (w && (ev.type === 'TRACKED_WALLET_SOLD' || ev.type === 'SOLANA_WALLET_TRANSFER_IN')) {
+                  const action = ev.type === 'TRACKED_WALLET_SOLD' ? 'SELL' : 'TRANSFER_IN';
+                  if (!latestTransfersPerWallet[w] || ev.observedAt > latestTransfersPerWallet[w].timestamp) {
+                    latestTransfersPerWallet[w] = {
+                      mint: ev.mint,
+                      symbol: ev.symbol || 'TOKEN',
+                      timestamp: ev.observedAt || Date.now(),
+                      action,
+                      amount: ev.amount,
+                      costUsd: ev.costUsd || 0,
+                      tx: ev.tx,
+                      source: ev.source
+                    };
+                  }
+                }
+              }
+            } catch {}
+          }
+        }
+      }
+    }
+  }
+
+  // Syndicate Wallets List (Maksimal 5 wallet representatif/target aktif)
+  let synTargets = [];
+  try {
+    const gmgnMon = JSON.parse(readFileSync(join(root, 'data', 'syndicate-watch', 'gmgn-monitored-wallets.json'), 'utf8'));
+    if (Array.isArray(gmgnMon.targets) && gmgnMon.targets.length) {
+      synTargets = gmgnMon.targets.slice(0, 5);
+    }
+  } catch {}
+
+  let synAddresses = synTargets.map(t => t.monitoredWallet).filter(Boolean);
+
+  if (!synAddresses.length) {
+    try {
+      const ctrl = JSON.parse(readFileSync(join(root, 'data', 'profit4-watch', 'worker-control.json'), 'utf8'));
+      synAddresses = (ctrl.addresses || []).slice(0, 5);
+    } catch {}
+  }
+  if (!synAddresses.length) {
+    try {
+      synAddresses = (JSON.parse(readFileSync(join(root, 'config', 'holder149-wallets.json'), 'utf8')).addresses || []).slice(0, 5);
+    } catch {}
+  }
+
+  synAddresses = synAddresses.slice(0, 5);
+  const targetMap = new Map(synTargets.map(t => [t.monitoredWallet, t]));
+
+  const syndicateWallets = synAddresses.map((addr, idx) => {
+    const meta = targetMap.get(addr);
+    const label = meta ? `Sindikat #${idx + 1} (${meta.tokenName || meta.symbol || 'Target'})` : `Sindikat #${idx + 1}`;
+    return {
+      index: idx + 1,
+      address: addr,
+      label,
+      tokenMint: meta?.tokenMint || null,
+      tokenName: meta?.tokenName || null,
+      totalSyndicateWallets: meta?.totalSyndicateWallets || null,
+      latestTransferWib: meta?.latestTransferWib || null,
+      deployerAddress: meta?.deployerAddress || null,
+      latestActivity: latestTransfersPerWallet[addr] || null
+    };
+  }).sort((a, b) => a.index - b.index);
+
+  // Smart Money Wallets List (117 + Oezank)
+  let smWalletsRaw = [];
+  try {
+    const smData = JSON.parse(readFileSync(join(root, 'data', 'smart-wallets-watchlist.json'), 'utf8'));
+    smWalletsRaw = smData.wallets || [];
+  } catch {}
+
+  const OEZANK_ADDR = 'D24y1SsG8dkjUxbgdFK62FKEerviuq6iQsXXuG8TiXcy';
+  const smartMoneyWallets = [
+    {
+      address: OEZANK_ADDR,
+      label: 'Trader Oezank IDC',
+      strategyTag: 'Mirror 100% · Exit by Oezank',
+      tags: ['top_trader', 'oezank_mirror', 'conviction'],
+      trades30d: 84,
+      totalProfitUsd: 145000,
+      realizedProfit30dUsd: 38200,
+      latestActivity: latestTransfersPerWallet[OEZANK_ADDR] || null
+    },
+    ...smWalletsRaw.map(w => ({
+      address: w.address,
+      label: `Whale GMGN (${(w.tags || []).slice(0, 2).join(', ') || 'Whale'})`,
+      strategyTag: 'G2 Whale Convergence',
+      tags: w.tags || [],
+      trades30d: w.trades30d || 0,
+      totalProfitUsd: w.totalProfitUsd || 0,
+      realizedProfit30dUsd: w.realizedProfit30dUsd || 0,
+      winrate: w.winrate || 'N/A',
+      latestActivity: latestTransfersPerWallet[w.address] || null
+    }))
+  ].sort((a, b) => {
+    if (a.address === OEZANK_ADDR) return -1;
+    if (b.address === OEZANK_ADDR) return 1;
+    const timeA = a.latestActivity ? a.latestActivity.timestamp : 0;
+    const timeB = b.latestActivity ? b.latestActivity.timestamp : 0;
+    if (timeA !== timeB) return timeB - timeA;
+    return (b.totalProfitUsd || 0) - (a.totalProfitUsd || 0);
+  });
+
+  // 46 Canonical Group Token Sindikat Kronologis (Urutan Terkini)
+  let syndicateTokens = [];
+  try {
+    const canonFile = join(root, 'data', 'syndicate-watch', 'canonical-syndicate-tokens.json');
+    if (existsSync(canonFile)) {
+      const canonData = JSON.parse(readFileSync(canonFile, 'utf8'));
+      syndicateTokens = (canonData.groups || []).map((g, idx) => ({
+        rank: idx + 1,
+        mint: g.latestMint,
+        name: g.displayName,
+        symbol: g.displayName.split(' ')[0] || 'MEME',
+        walletsCount: g.totalWallets,
+        mintsCount: g.mintsCount || 1,
+        latestTransferAt: g.latestTransferAt || 0,
+        latestTransferWib: g.latestTransferWib || '—',
+        sampleWallet: g.sampleWallet || null,
+        isWatched: Boolean(g.isWatched),
+        clusterName: g.displayName,
+        mintDetails: g.mintDetails || []
+      }));
+      syndicateTokens.sort((a, b) => (b.latestTransferAt || 0) - (a.latestTransferAt || 0));
+      syndicateTokens.forEach((t, idx) => { t.rank = idx + 1; });
+    }
+  } catch {}
+
+  cachedWalletsData = {
+    syndicate: {
+      total: syndicateWallets.length,
+      activeWithActivity: syndicateWallets.filter(w => w.latestActivity).length,
+      wallets: syndicateWallets,
+      tokens: syndicateTokens
+    },
+    smartmoney: {
+      total: smartMoneyWallets.length,
+      activeWithActivity: smartMoneyWallets.filter(w => w.latestActivity).length,
+      wallets: smartMoneyWallets
+    }
+  };
+  lastWalletsDataTime = now;
+  return cachedWalletsData;
+}
+
   const enteredTrades = positions.filter(p => p.entryAt != null || p.phase === 'OPEN');
   const watchingSample = positions.filter(p => p.entryAt == null && p.phase !== 'OPEN' && (p.phase === 'WATCHING' || p.captureActive)).slice(-50);
   const clientPositions = [...enteredTrades, ...watchingSample];
   return { positions: clientPositions, runs, recentEventsByRun, recentEvents: recentEvents.sort((a, b) => b.observedAt - a.observedAt).slice(0, 60),
+    groupsOverview: computeGlobalGroupsOverview(root),
+    trackedWallets: getTrackedWalletsData(root),
     summary: summarize(positions),
     summaryV1: summarize(v1Positions),
     summaryV2: summarize(v2Positions),
@@ -286,7 +609,7 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
       ? await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${state.pid}').CommandLine`], { windowsHide: true })
       : await exec('ps', ['-p', String(state.pid), '-o', 'args=']);
     const args = stdout.replaceAll('\\', '/').toLowerCase();
-    if (!args.includes(runner) && !args.includes(join(root, 'scripts', 'run-bounce-watch.mjs').replaceAll('\\', '/').toLowerCase())) throw new Error('PID tidak cocok dengan worker project ini.');
+    if (!args.includes(runner) && !args.includes(join(root, 'scripts', 'run-bounce-watch.mjs').replaceAll('\\', '/').toLowerCase()) && !args.includes(join(root, 'scripts', 'run-bounce-worker.mjs').replaceAll('\\', '/').toLowerCase())) throw new Error('PID tidak cocok dengan worker project ini.');
   }
   async function stop() {
     requireNoPositions();
@@ -393,12 +716,42 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
           return json(res,202,{queued:true,commandId:id});
         } catch(e) { return json(res,400,{error:e.message}); }
       }
-      if (['GET', 'HEAD'].includes(req.method) && (path === '/' || path === '/dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (
+        path === '/' || path === '/dashboard' ||
+        path === '/profit4' || path.startsWith('/profit4') ||
+        path.startsWith('/overview') ||
+        path.startsWith('/momentum') ||
+        path.startsWith('/syndicate') ||
+        path.startsWith('/sindikat') ||
+        path.startsWith('/smart-money') ||
+        path.startsWith('/smartmoney') ||
+        path.startsWith('/trend20m') ||
+        path.startsWith('/trend')
+      )) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/chart.umd.js' || path === '/profit4/chart.umd.js')) return res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'public, max-age=86400' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'chart.umd.js')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/comparison' || path === '/v1-vs-v4' || rawPath === '/comparison')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-v1-vs-v4.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/comparison-v6-v7' || path === '/v6-vs-v7' || rawPath === '/v6-vs-v7' || rawPath === '/comparison-v6-v7')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-v6-vs-v7.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/staircase' || path === '/staircase-85wr' || path === '/staircase-runner' || rawPath === '/staircase' || rawPath === '/staircase-85wr' || rawPath === '/profit4/staircase')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-staircase-85wr.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/audit' || rawPath === '/audit' || path === '/audit-dashboard')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'profit4-audit-dashboard.html')));
       if (['GET', 'HEAD'].includes(req.method) && (path === '/smart-money' || path === '/smart-money.html' || rawPath === '/smart-money')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'smart-money-wallets.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/simulasi/19oktmomentum' || rawPath === '/simulasi/19oktmomentum' || path === '/simulasi/19oktmomentum/' || rawPath === '/simulasi/19oktmomentum/')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'simulasi-19okt-momentum.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/simulasi-19okt-momentum' || path === '/simulasi-19okt-momentum-data.json')) {
+        const simPath = join(root, 'dist', 'simulasi-19okt-momentum-data.json');
+        if (existsSync(simPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(simPath));
+        return json(res, 200, {});
+      }
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/simulasi/19oktsindikat' || rawPath === '/simulasi/19oktsindikat' || path === '/simulasi/19oktsindikat/' || rawPath === '/simulasi/19oktsindikat/')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'simulasi-19okt-sindikat.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/simulasi-19okt-sindikat' || path === '/simulasi-19okt-sindikat-data.json')) {
+        const simPath = join(root, 'dist', 'simulasi-19okt-sindikat-data.json');
+        if (existsSync(simPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(simPath));
+        return json(res, 200, {});
+      }
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/syndicate-eval' || path === '/syndicate-eval.html' || path === '/syndicate-audit' || rawPath === '/syndicate-eval')) return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(join(root, 'dist', 'syndicate-eval-dashboard.html')));
+      if (['GET', 'HEAD'].includes(req.method) && (path === '/api/syndicate-audit' || path === '/syndicate-audit-data.json')) {
+        const auditPath = join(root, 'dist', 'syndicate-audit-data.json');
+        if (existsSync(auditPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(auditPath));
+        return json(res, 200, {});
+      }
       if (['GET', 'HEAD'].includes(req.method) && (path === '/api/comparison-v1-v4' || path === '/comparison-v1-v4.json')) {
         const compPath = join(data, 'comparison-v1-v4.json');
         if (existsSync(compPath)) return res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? '' : readFileSync(compPath));
@@ -461,8 +814,10 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
         }
       }
       if (['GET', 'HEAD'].includes(req.method) && path === '/api/state') {
+        const urlObj = new URL(req.url, 'http://localhost');
+        const group = urlObj.searchParams.get('group') || 'all';
         const current = read(controlFile), worker = current ? { ...current, active: alive(current.pid) } : { active: false, status: 'stopped' };
-        const history = profit4Snapshot(root, worker);
+        const history = profit4Snapshot(root, worker, group);
         const historical = read(join(root, 'reports', 'distribution-profit-search', 'analysis.json'))?.bestKnownPnlDescriptive?.all ?? null;
         const live = liveStatus();
         if (live.readiness.wallet) {
@@ -484,7 +839,7 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
             };
           }
         } catch {}
-        return json(res, 200, { mode: 'PROFIT4_PAPER', admin: { authenticated: admin.authenticated(req) }, autoBuy: { ...live, positions: undefined }, config: config(), worker, rules: { ...PROFIT4_RULES, targetPercent: PROFIT4_TARGET_PERCENT, trailingEnabled: false, flowExitEnabled: false, rounds: 1 },
+        return json(res, 200, { mode: 'PROFIT4_PAPER', activeGroup: group, admin: { authenticated: admin.authenticated(req) }, autoBuy: { ...live, positions: undefined }, config: config(), worker, rules: { ...PROFIT4_RULES, targetPercent: PROFIT4_TARGET_PERCENT, trailingEnabled: false, flowExitEnabled: false, rounds: 1 },
           historical, ...history, airdropClusters, logs, paths: { data, workerLog: join(data, 'worker.log') } }, req);
       }
       if (req.method === 'POST' && ['/api/worker/start', '/api/worker/stop', '/api/wallets'].includes(path)) {
@@ -505,7 +860,9 @@ export function createProfit4Dashboard({ root = defaultRoot, adminPassword } = {
         } finally { transition = false; }
       }
       return json(res, 404, { error: 'Not found' });
-    } catch (error) { return json(res, 500, { error: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) {
+      if (!res.headersSent) return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    }
   });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,0 +1,102 @@
+{
+  "generatedAt": "2026-10-19 08:05:06 WIB",
+  "iso": "2026-10-19T08:05:06.008377+07:00",
+  "lanes": [
+    {
+      "id": "apex",
+      "label": "M-Apex10k",
+      "title": "Momentum Apex (Optimal Tradeoff)",
+      "rules": {
+        "minMcap": 20000,
+        "minMomentum": 2.5,
+        "maxMomentum": 35.0,
+        "minBuyShare": 60.0,
+        "maxTopBuyer": 65.0,
+        "minBuyers": 3,
+        "targetPercent": 35.0,
+        "stopLossPercent": 4.5,
+        "trailingStartPercent": 10.0,
+        "trailingDrawdownPercent": 4.0
+      },
+      "metrics": {
+        "totalTrades": 203,
+        "wins": 147,
+        "losses": 56,
+        "winRate": 72.4,
+        "netPnlUsd": 197.43,
+        "profitFactor": 14.32,
+        "avgWinPct": 28.9,
+        "avgLossPct": -5.3
+      },
+      "validation": {
+        "trainWinRate": 64.6,
+        "valWinRate": 86.3,
+        "valPnlUsd": 94.85
+      }
+    },
+    {
+      "id": "safe",
+      "label": "M-Safe10k",
+      "title": "Momentum Safe Scalper (High WR)",
+      "rules": {
+        "minMcap": 20000,
+        "minMomentum": 2.5,
+        "maxMomentum": 35.0,
+        "minBuyShare": 60.0,
+        "maxTopBuyer": 65.0,
+        "minBuyers": 3,
+        "targetPercent": 35.0,
+        "stopLossPercent": 4.5,
+        "trailingStartPercent": 10.0,
+        "trailingDrawdownPercent": 4.0
+      },
+      "metrics": {
+        "totalTrades": 203,
+        "wins": 147,
+        "losses": 56,
+        "winRate": 72.4,
+        "netPnlUsd": 197.43,
+        "profitFactor": 14.32,
+        "avgWinPct": 28.9,
+        "avgLossPct": -5.3
+      },
+      "validation": {
+        "trainWinRate": 64.6,
+        "valWinRate": 86.3,
+        "valPnlUsd": 94.85
+      }
+    },
+    {
+      "id": "runner",
+      "label": "M-Runner15k",
+      "title": "Momentum Trend Runner (High R:R)",
+      "rules": {
+        "minMcap": 10000,
+        "minMomentum": 2.5,
+        "maxMomentum": 35.0,
+        "minBuyShare": 60.0,
+        "maxTopBuyer": 75.0,
+        "minBuyers": 2,
+        "targetPercent": 35.0,
+        "stopLossPercent": 4.5,
+        "trailingStartPercent": 10.0,
+        "trailingDrawdownPercent": 4.0
+      },
+      "metrics": {
+        "totalTrades": 304,
+        "wins": 213,
+        "losses": 91,
+        "winRate": 70.1,
+        "netPnlUsd": 280.29,
+        "profitFactor": 12.38,
+        "avgWinPct": 28.6,
+        "avgLossPct": -5.4
+      },
+      "validation": {
+        "trainWinRate": 64.4,
+        "valWinRate": 84.7,
+        "valPnlUsd": 107.79
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "feedUrl": "https://gmgn.ai/trend?chain=sol&ref=bFC8902n&tab=trending",
+  "tab": "trending",
+  "filterQueryMapKey": "/trend2_sol",
+  "filters": {
+    "0mic": "20",
+    "0mim": "10000",
+    "0mihc": "100",
+    "0ihc": "1"
+  },
+  "maxTokensWatching": 10,
+  "maxWatchingSeconds": 2400,
+  "maxEntryMarketCapUsd": 25000,
+  "updatedAt": "2026-10-20T15:10:00.000Z"
+}

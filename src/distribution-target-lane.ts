@@ -75,7 +75,7 @@ export class TargetObservation {
   constructor(readonly transferAt: number) {}
   trade(t: TargetTrade) {
     const lag = t.at - t.timestamp * 1000;
-    if (!(t.price > 0) || !Number.isFinite(t.at) || !['buy', 'sell'].includes(t.side) || lag < -2000 || lag > 10000 || t.timestamp * 1000 < this.transferAt) return;
+    if (!(t.price > 0) || !Number.isFinite(t.at) || !['buy', 'sell'].includes(t.side) || lag < -5000 || lag > 30000 || t.timestamp * 1000 < this.transferAt - 60000) return;
     const id = [t.signature || t.timestamp, t.wallet, t.side, t.price].join(':');
     if (this.ids.has(id)) return;
     this.ids.set(id, t.at); this.trades.push(t);
@@ -112,9 +112,9 @@ export class TargetObservation {
     const recent = rows.filter(t => t.at > now - 30000); // Window 30 detik untuk volume beli & deteksi dump
     const immediate = rows.filter(t => t.at > now - 5000); // 5 detik untuk momentum instan
     const before = rows.filter(t => t.at > now - 60000 && t.at <= now - 30000);
-    const quotes = rows.filter(t => t.at > now - 1000 && now - t.timestamp * 1000 <= 5000);
+    const quotes = rows.filter(t => t.at > now - 2000 && now - t.timestamp * 1000 <= 10000);
     const last = rows.at(-1);
-    const price = median(quotes.map(t => t.price)) ?? (last && now - last.at <= 2000 && now - last.timestamp * 1000 <= 5000 ? last.price : null);
+    const price = median(quotes.map(t => t.price)) ?? (last && now - last.at <= 8000 && now - last.timestamp * 1000 <= 15000 ? last.price : null);
     if (price !== null) {
       if (price > this.peak) {
         this.peak = price;
@@ -125,7 +125,8 @@ export class TargetObservation {
         this.troughAt = now;
       }
     }
-    const a = median(immediate.map(t => t.price)), b = median(before.map(t => t.price));
+    const a = median(immediate.map(t => t.price)) ?? price;
+    const b = median(before.map(t => t.price)) ?? this.firstPrice;
     const currentCount = this.counts.filter(t => t.at <= now && now - t.at <= 15000).at(-1);
     const priorCount = this.counts.filter(t => t.at <= now - 15000 && now - 15000 - t.at <= 15000).at(-1);
     const holderGrowth15s = currentCount && priorCount ? currentCount.count - priorCount.count : null;
@@ -191,7 +192,7 @@ export function assessTargetEntry(f: TargetFacts, r: TargetRules): string[] {
   if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
   if (f.firstAt !== null && f.firstAt - f.transferAt > r.maxTransferLagSeconds * 1000) reasons.push('MONITOR_STARTED_TOO_LATE');
   if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
-  if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
+  if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 5000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
   if (f.holderCount === null || f.holderGrowth15s === null) reasons.push('HOLDER_HISTORY_MISSING_OR_STALE');
   else if (f.holderGrowth15s < 0) reasons.push('HOLDERS_DECLINING');
   if (f.buyShareUsdPercent === null || f.buyShareUsdPercent < r.minBuySharePercent || f.meaningfulBuyUsd < r.minMeaningfulBuyUsd || f.meaningfulBuyers < r.minMeaningfulBuyers) reasons.push('MEANINGFUL_BUY_FLOW_WEAK');
@@ -228,6 +229,7 @@ export class DistributionTargetLane {
   private lastConfirmAt: number | null = null;
   private pendingAt: number | null = null;
   private peakNet = -Infinity;
+  protected peakPrice = 0;
   private lastReasons = '';
   private exitReason = '';
   private lastStepAt = -Infinity;
@@ -327,12 +329,13 @@ export class DistributionTargetLane {
         }
         return;
       }
-      if (now < deadline || f.price === null || f.priceAt === null || f.priceAt < deadline || now - f.priceAt > 2000) return;
+      if (now < deadline || f.price === null || f.priceAt === null || f.priceAt < deadline || now - f.priceAt > 5000) return;
       if (this.phase === 'ENTRY_PENDING') {
         const reasons = this.entryReasons(f);
         if (reasons.length) { this.phase = 'WATCHING'; this.confirmedAt = null; this.event('PAPER_ENTRY_CANCELLED', now, { reasons }); return; }
         this.entryAt = now; this.entryPrice = f.price; this.phase = 'OPEN';
         this.peakNet = this.net(f.price)!;
+        this.peakPrice = f.price;
         this.event('PAPER_BUY', now, { priceUsd: f.price, stakeUsd: r.stakeUsd, rules: r, facts: f });
         return;
       }
@@ -356,9 +359,9 @@ export class DistributionTargetLane {
 
     // 1. Timeout exit check: jika hold telah melebihi maxHoldSeconds, tutup posisi (mengikuti pola OBSERVATION_END)
     if (this.phase === 'OPEN' && this.entryAt !== null && now - this.entryAt >= r.maxHoldSeconds * 1000) {
-      const isPriceFresh = f.price !== null && f.priceAt !== null && now - f.priceAt <= 2000;
+      const isPriceFresh = f.price !== null && f.priceAt !== null && now - f.priceAt <= 10000;
       const exitPrice = isPriceFresh ? f.price! : (this.lastKnownPrice ?? f.price ?? this.entryPrice!);
-      const reason = isPriceFresh ? 'MAX_HOLD' : 'OBSERVATION_END';
+      const reason = (isPriceFresh || (this.lastKnownPrice !== null && this.lastKnownPrice !== this.entryPrice)) ? 'MAX_HOLD' : 'OBSERVATION_END';
       const net = this.net(exitPrice)!;
       this.phase = 'EXIT_PENDING';
       this.pendingAt = now;
@@ -367,19 +370,36 @@ export class DistributionTargetLane {
       return;
     }
 
-    // 2. Evaluasi kondisi pasar live (Stop-loss, target, trailing, flow exit) memerlukan harga fresh (< 2000ms)
-    if (f.price === null || f.priceAt === null || now - f.priceAt > 2000) return;
+    // 2. Evaluasi kondisi pasar live (Stop-loss, target, trailing, flow exit) memerlukan harga fresh (< 5000ms)
+    if (f.price === null || f.priceAt === null || now - f.priceAt > 5000) return;
     const net = this.net(f.price)!;
     this.peakNet = Math.max(this.peakNet, net);
+    if (this.entryPrice !== null && this.entryPrice > 0) {
+      if (this.peakPrice === 0 || f.price > this.peakPrice) {
+        this.peakPrice = f.price;
+      }
+    }
+    const grossPriceRetPercent = this.entryPrice && this.entryPrice > 0
+      ? ((f.price - this.entryPrice) / this.entryPrice) * 100
+      : 0;
+    const peakGrossRetPercent = this.entryPrice && this.entryPrice > 0 && this.peakPrice > 0
+      ? ((this.peakPrice - this.entryPrice) / this.entryPrice) * 100
+      : 0;
+    const drawdownFromPeakPercent = peakGrossRetPercent - grossPriceRetPercent;
+
     let reason = '';
     if (this.policy.prioritizeCustomExit && this.policy.exitMode !== 'target-stop-time' && this.policy.exitReason) {
       reason = this.policy.exitReason(f, net) ?? '';
     }
-    if (!reason && net <= -r.stopLossPercent) reason = 'STOP_LOSS';
-    else if (!reason && net >= r.targetPercent) reason = 'TARGET_NET';
-    else if (!reason && this.policy.exitMode !== 'target-stop-time' && this.policy.trailingEnabled !== false && this.peakNet >= r.trailingStartPercent && this.peakNet - net >= r.trailingDrawdownPercent) reason = 'TRAILING_PROFIT';
+    // Stop Loss dievaluasi dari penurunan harga kotor (Gross Price Drop) agar selaras dengan simulasi offline
+    if (!reason && grossPriceRetPercent <= -r.stopLossPercent) reason = 'STOP_LOSS';
+    // Target Take Profit jika harga kotor menyentuh targetPercent atau net menyentuh targetPercent
+    else if (!reason && (grossPriceRetPercent >= r.targetPercent || net >= r.targetPercent)) reason = 'TARGET_NET';
+    // Trailing Stop dinamis dari gross peak return
+    else if (!reason && this.policy.exitMode !== 'target-stop-time' && this.policy.trailingEnabled !== false && peakGrossRetPercent >= r.trailingStartPercent && drawdownFromPeakPercent >= r.trailingDrawdownPercent) reason = 'TRAILING_PROFIT';
     else if (!reason && this.policy.exitMode !== 'target-stop-time' && this.policy.exitReason) reason = this.policy.exitReason(f, net) ?? '';
-    if (this.policy.exitMode !== 'target-stop-time' && this.policy.flowExitEnabled !== false && !reason && (f.largestSellUsd >= 250 || f.sellUsd >= 100 && (f.buyShareUsdPercent ?? 100) <= 15 && (f.momentumPercent ?? 0) < 0)) reason = 'FLOW_OR_LARGE_SELL';
+    // Panic exit flow sell hanya jika diaktifkan secara eksplisit dan terjadi dump masif (bukan sekadar 1 retail sell $250)
+    if (this.policy.exitMode !== 'target-stop-time' && this.policy.flowExitEnabled === true && !reason && (f.sellUsd >= 500 && (f.buyShareUsdPercent ?? 100) <= 15 && (f.momentumPercent ?? 0) < -3)) reason = 'FLOW_OR_LARGE_SELL';
     if (!reason && now - this.entryAt! >= r.maxHoldSeconds * 1000) reason = 'MAX_HOLD';
     if (!reason) return;
     this.phase = 'EXIT_PENDING'; this.pendingAt = now; this.exitReason = reason;

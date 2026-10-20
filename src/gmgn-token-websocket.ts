@@ -22,20 +22,44 @@ export interface GmgnTokenStatTick {
   at: number;
 }
 
+export type TokenPoolType = "momentum" | "smartmoney" | "trend20m";
+
+export interface TokenSubscriptionMeta {
+  mint: string;
+  pool: TokenPoolType;
+  subscribedAt: number;
+  maxDurationSeconds: number;
+}
+
 export class GmgnTokenWebSocketManager extends EventEmitter {
   private page: Page;
-  private maxVipTokens: number;
-  private maxRegularTokens: number;
-  private vipMints: string[] = [];
-  private regularMints: string[] = [];
+  private poolCapacities: Record<TokenPoolType, number> = {
+    momentum: 10,
+    smartmoney: 10,
+    trend20m: 10,
+  };
+  private pools: Record<TokenPoolType, string[]> = {
+    momentum: [],
+    smartmoney: [],
+    trend20m: [],
+  };
+  private tokenMeta = new Map<string, TokenSubscriptionMeta>();
   private cdpSession: CDPSession | null = null;
   private isInitialized = false;
 
-  constructor(page: Page, maxRegularTokens: number = 18, maxVipTokens: number = 12) {
+  constructor(
+    page: Page,
+    maxPerPool: number = 10,
+    maxVipTokens: number = 10
+  ) {
     super();
     this.page = page;
-    this.maxRegularTokens = Math.max(5, Math.min(25, maxRegularTokens));
-    this.maxVipTokens = Math.max(5, Math.min(15, maxVipTokens));
+    const clamped = Math.max(3, Math.min(25, maxPerPool));
+    this.poolCapacities = {
+      momentum: clamped,
+      smartmoney: Math.max(3, Math.min(20, maxVipTokens)),
+      trend20m: clamped,
+    };
   }
 
   public async init(): Promise<void> {
@@ -113,89 +137,157 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
     }
   }
 
-  public async subscribeToken(mint: string, isVip = false): Promise<boolean> {
+  private resolvePool(poolOrVip: string | boolean): TokenPoolType {
+    if (typeof poolOrVip === "boolean") {
+      return poolOrVip ? "smartmoney" : "momentum";
+    }
+    const lower = String(poolOrVip).toLowerCase();
+    if (lower === "trend20m" || lower === "trend" || lower.includes("trend")) {
+      return "trend20m";
+    }
+    if (lower === "smartmoney" || lower === "smart_money" || lower === "vip") {
+      return "smartmoney";
+    }
+    return "momentum";
+  }
+
+  public async sweepExpired(now = Date.now()): Promise<string[]> {
+    const expiredMints: string[] = [];
+    for (const [mint, meta] of this.tokenMeta.entries()) {
+      const ageSec = (now - meta.subscribedAt) / 1000;
+      if (ageSec >= meta.maxDurationSeconds) {
+        expiredMints.push(mint);
+      }
+    }
+    for (const mint of expiredMints) {
+      await this.unsubscribeToken(mint);
+    }
+    return expiredMints;
+  }
+
+  public async subscribeToken(
+    mint: string,
+    poolOrVip: string | boolean = "momentum",
+    maxDurationSeconds = 7200
+  ): Promise<boolean> {
     if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) return false;
 
-    if (isVip) {
-      // Remove from regular if it was previously registered there
-      const regIdx = this.regularMints.indexOf(mint);
-      if (regIdx !== -1) {
-        this.regularMints.splice(regIdx, 1);
+    // Bersihkan token yang sudah lewat batas durasi (misal > 2 jam)
+    await this.sweepExpired();
+
+    const targetPool = this.resolvePool(poolOrVip);
+    const capacity = this.poolCapacities[targetPool] || 10;
+    const poolList = this.pools[targetPool];
+
+    // Jika token sudah terdaftar di pool ini, refresh metadata dan pindah ke posisi ekor (most recently active)
+    const existingIdx = poolList.indexOf(mint);
+    if (existingIdx !== -1) {
+      poolList.splice(existingIdx, 1);
+      poolList.push(mint);
+      const meta = this.tokenMeta.get(mint);
+      if (meta) {
+        meta.subscribedAt = Date.now();
+        meta.maxDurationSeconds = maxDurationSeconds;
       }
-
-      // If already in VIP, move to tail (most recent)
-      const vipIdx = this.vipMints.indexOf(mint);
-      if (vipIdx !== -1) {
-        this.vipMints.splice(vipIdx, 1);
-        this.vipMints.push(mint);
-        return true;
-      }
-
-      // Enforce VIP slots constraint (FIFO within VIP only)
-      while (this.vipMints.length >= this.maxVipTokens) {
-        const oldest = this.vipMints.shift();
-        if (oldest) {
-          await this.sendFrame("unsubscribe", oldest).catch(() => {});
-        }
-      }
-
-      this.vipMints.push(mint);
-      return await this.sendFrame("subscribe", mint);
-    } else {
-      // Regular token: if already in VIP, do NOT downgrade
-      if (this.vipMints.includes(mint)) return true;
-
-      // If already in regular, move to tail
-      const regIdx = this.regularMints.indexOf(mint);
-      if (regIdx !== -1) {
-        this.regularMints.splice(regIdx, 1);
-        this.regularMints.push(mint);
-        return true;
-      }
-
-      // Enforce Regular slots constraint (never evicts VIP tokens!)
-      while (this.regularMints.length >= this.maxRegularTokens) {
-        const oldest = this.regularMints.shift();
-        if (oldest) {
-          await this.sendFrame("unsubscribe", oldest).catch(() => {});
-        }
-      }
-
-      this.regularMints.push(mint);
-      return await this.sendFrame("subscribe", mint);
+      return true;
     }
+
+    // Jika token sebelumnya ada di pool lain, cabut dari pool lama
+    for (const otherPool of (["momentum", "smartmoney", "trend20m"] as TokenPoolType[])) {
+      if (otherPool !== targetPool) {
+        const idx = this.pools[otherPool].indexOf(mint);
+        if (idx !== -1) {
+          this.pools[otherPool].splice(idx, 1);
+        }
+      }
+    }
+
+    // Enforce Pool quota (Strict 10 per pool, FIFO eviction hanya di dalam pool terkait)
+    while (poolList.length >= capacity) {
+      const oldest = poolList.shift();
+      if (oldest) {
+        this.tokenMeta.delete(oldest);
+        await this.sendFrame("unsubscribe", oldest).catch(() => {});
+      }
+    }
+
+    poolList.push(mint);
+    this.tokenMeta.set(mint, {
+      mint,
+      pool: targetPool,
+      subscribedAt: Date.now(),
+      maxDurationSeconds,
+    });
+
+    return await this.sendFrame("subscribe", mint);
   }
 
   public async unsubscribeToken(mint: string): Promise<boolean> {
-    const vipIdx = this.vipMints.indexOf(mint);
-    if (vipIdx !== -1) {
-      this.vipMints.splice(vipIdx, 1);
-    }
-    const regIdx = this.regularMints.indexOf(mint);
-    if (regIdx !== -1) {
-      this.regularMints.splice(regIdx, 1);
+    this.tokenMeta.delete(mint);
+    for (const p of (["momentum", "smartmoney", "trend20m"] as TokenPoolType[])) {
+      const idx = this.pools[p].indexOf(mint);
+      if (idx !== -1) {
+        this.pools[p].splice(idx, 1);
+      }
     }
     return await this.sendFrame("unsubscribe", mint);
   }
 
   public getSubscribedMints(): string[] {
-    return [...this.vipMints, ...this.regularMints];
+    return [
+      ...this.pools.momentum,
+      ...this.pools.smartmoney,
+      ...this.pools.trend20m,
+    ];
   }
 
   public getSubscribedCount(): number {
-    return this.vipMints.length + this.regularMints.length;
+    return (
+      this.pools.momentum.length +
+      this.pools.smartmoney.length +
+      this.pools.trend20m.length
+    );
   }
 
+  public getPoolCounts(): {
+    momentum: number;
+    smartmoney: number;
+    trend20m: number;
+    total: number;
+    capacities: Record<TokenPoolType, number>;
+  } {
+    return {
+      momentum: this.pools.momentum.length,
+      smartmoney: this.pools.smartmoney.length,
+      trend20m: this.pools.trend20m.length,
+      total: this.getSubscribedCount(),
+      capacities: { ...this.poolCapacities },
+    };
+  }
+
+  // Backward compatibility getters
   public getVipCount(): number {
-    return this.vipMints.length;
+    return this.pools.smartmoney.length;
   }
 
   public getRegularCount(): number {
-    return this.regularMints.length;
+    return this.pools.momentum.length + this.pools.trend20m.length;
   }
 
   public isVip(mint: string): boolean {
-    return this.vipMints.includes(mint);
+    return this.pools.smartmoney.includes(mint);
+  }
+
+  public get vipMints(): string[] {
+    return this.pools.smartmoney;
+  }
+
+  public get regularMints(): string[] {
+    return [...this.pools.momentum, ...this.pools.trend20m];
+  }
+
+  public getTokenMeta(mint: string): TokenSubscriptionMeta | undefined {
+    return this.tokenMeta.get(mint);
   }
 
   private async sendFrame(action: "subscribe" | "unsubscribe", mint: string): Promise<boolean> {

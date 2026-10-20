@@ -12,3 +12,5 @@ dist/*.zip
 filter_analysis_results.json
 __pycache__/
 *.pyc
+.hermes/
+*.bak*

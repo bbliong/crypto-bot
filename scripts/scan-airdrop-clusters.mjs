@@ -202,9 +202,10 @@ export async function runClusterScan(options = {}) {
   }
 
   // Group into clusters
+  // Satukan transaksi yang membagikan Token Mint yang sama menjadi 1 kluster kampanye
   const clustersMap = new Map();
   for (const tx of txDetails) {
-    const root = find(tx.recipients[0] || tx.wallet);
+    const root = (tx.mint && typeof tx.mint === 'string' && tx.mint.trim()) ? tx.mint.trim() : find(tx.recipients[0] || tx.wallet);
     if (!clustersMap.has(root)) {
       clustersMap.set(root, {
         root,
@@ -267,6 +268,127 @@ export async function runClusterScan(options = {}) {
     })
     .sort((a, b) => b.tokensCount - a.tokensCount || b.lastActivityAt - a.lastActivityAt);
 
+  // Tier-2: Group Token Clusters into Syndicate Entities (Macro-Syndicates)
+  // Kluster yang berbagi >= 3 dompet boneka atau berbagi deployer yang sama disatukan ke sindikat master
+  const synParent = new Map();
+  function findSyn(i) {
+    if (synParent.get(i) === i) return i;
+    synParent.set(i, findSyn(synParent.get(i)));
+    return synParent.get(i);
+  }
+  function unionSyn(i, j) {
+    const ri = findSyn(i);
+    const rj = findSyn(j);
+    if (ri !== rj) synParent.set(ri, rj);
+  }
+
+  const clusterWalletSets = new Map();
+  const clusterSenderSets = new Map();
+  for (const c of formattedClusters) {
+    synParent.set(c.id, c.id);
+    clusterWalletSets.set(c.id, new Set(c.wallets.map(w => w.address)));
+    clusterSenderSets.set(c.id, new Set(c.senders));
+  }
+
+  for (let i = 0; i < formattedClusters.length; i++) {
+    for (let j = i + 1; j < formattedClusters.length; j++) {
+      const c1 = formattedClusters[i];
+      const c2 = formattedClusters[j];
+      const wset1 = clusterWalletSets.get(c1.id);
+      const wset2 = clusterWalletSets.get(c2.id);
+      let sharedW = 0;
+      for (const w of wset1) {
+        if (wset2.has(w)) {
+          sharedW++;
+          if (sharedW >= 3) break;
+        }
+      }
+      const sset1 = clusterSenderSets.get(c1.id);
+      const sset2 = clusterSenderSets.get(c2.id);
+      let sharedS = false;
+      for (const s of sset1) {
+        if (sset2.has(s)) {
+          sharedS = true;
+          break;
+        }
+      }
+      if (sharedW >= 3 || sharedS) {
+        unionSyn(c1.id, c2.id);
+      }
+    }
+  }
+
+  // Aggregate syndicates
+  const syndicatesMap = new Map();
+  for (const c of formattedClusters) {
+    const rootId = findSyn(c.id);
+    if (!syndicatesMap.has(rootId)) {
+      syndicatesMap.set(rootId, []);
+    }
+    syndicatesMap.get(rootId).push(c);
+  }
+
+  let synIdx = 1;
+  const syndicatesList = Array.from(syndicatesMap.entries())
+    .map(([rootId, clList]) => {
+      const allWallets = new Set();
+      const allSenders = new Set();
+      const tokensSet = [];
+      let totalTx = 0;
+      let lastAct = 0;
+
+      for (const cl of clList) {
+        for (const w of cl.wallets) allWallets.add(w.address);
+        for (const s of cl.senders) allSenders.add(s);
+        for (const t of cl.tokens) {
+          if (t.symbol && !tokensSet.includes(t.symbol) && !t.symbol.startsWith('Airdrop-') && t.symbol !== 'UNKNOWN') {
+            tokensSet.push(t.symbol);
+          }
+        }
+        totalTx += cl.txCount || 0;
+        if ((cl.lastActivityAt || 0) > lastAct) lastAct = cl.lastActivityAt;
+      }
+      if (tokensSet.length === 0) {
+        for (const cl of clList) {
+          for (const t of cl.tokens) {
+            if (t.symbol && !tokensSet.includes(t.symbol)) tokensSet.push(t.symbol);
+          }
+        }
+      }
+
+      const id = `syn-${synIdx++}`;
+      const name = tokensSet.length > 0 ? tokensSet.slice(0, 3).join(' / ') : `Sindikat ${id}`;
+      return {
+        id,
+        name: `Sindikat ${name}`,
+        rootClusterId: rootId,
+        campaignsCount: clList.length,
+        walletsCount: allWallets.size,
+        sendersCount: allSenders.size,
+        txCount: totalTx,
+        lastActivityAt: lastAct,
+        tokens: tokensSet.slice(0, 10),
+        clusters: clList.map(cl => cl.id)
+      };
+    })
+    .sort((a, b) => b.walletsCount - a.walletsCount);
+
+  // Map syndicate metadata back to each cluster
+  const clusterToSyn = new Map();
+  for (const syn of syndicatesList) {
+    for (const cid of syn.clusters) {
+      clusterToSyn.set(cid, syn);
+    }
+  }
+
+  for (const c of formattedClusters) {
+    const syn = clusterToSyn.get(c.id);
+    if (syn) {
+      c.syndicateId = syn.id;
+      c.syndicateName = syn.name;
+    }
+  }
+
   const totalWallets = new Set();
   const totalTokens = new Set();
   for (const c of formattedClusters) {
@@ -276,9 +398,11 @@ export async function runClusterScan(options = {}) {
 
   const result = {
     updatedAt: Date.now(),
+    totalSyndicates: syndicatesList.length,
     totalClusters: formattedClusters.length,
     totalWallets: totalWallets.size,
     totalTokens: totalTokens.size,
+    syndicates: syndicatesList,
     clusters: formattedClusters
   };
 
