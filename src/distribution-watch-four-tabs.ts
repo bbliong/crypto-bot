@@ -77,10 +77,34 @@ const isPaperRunner =
 const profit4 = isPaperRunner;
 const useHeadlessStream = values.headlessStream === "true";
 const useSolanaWalletWs = values.solanaWalletWs !== "false";
-const savedAddresses = readJson<{ addresses?: string[] }>(
+const savedAddressesRaw = readJson<{ addresses?: string[] }>(
   join(values.dataDir!, "dashboard-config.json"),
   {},
 ).addresses;
+
+let savedAddresses = savedAddressesRaw;
+if (!Array.isArray(savedAddresses) || !savedAddresses.length) {
+  try {
+    const mon = readJson<{ targets?: Array<{ monitoredWallet?: string }> }>(
+      join(process.cwd(), "data", "syndicate-watch", "gmgn-monitored-wallets.json"),
+      {},
+    );
+    if (Array.isArray(mon.targets) && mon.targets.length) {
+      savedAddresses = mon.targets.map((t) => t.monitoredWallet).filter(Boolean) as string[];
+    }
+  } catch {}
+}
+if (!Array.isArray(savedAddresses) || !savedAddresses.length) {
+  try {
+    const p4 = readJson<{ addresses?: string[] }>(
+      join(process.cwd(), "data", "profit4-watch", "dashboard-config.json"),
+      {},
+    );
+    if (Array.isArray(p4.addresses) && p4.addresses.length) {
+      savedAddresses = p4.addresses;
+    }
+  } catch {}
+}
 const addressInput =
   !process.argv.some(
     (a) => a === "--addresses" || a.startsWith("--addresses="),
@@ -1973,13 +1997,36 @@ let loopCounter = 0;
 let lastConfigReloadAt = Date.now();
 while (!controller.isClosed() && !stopping) {
   const pollStartedAt = Date.now();
-  if (profit4 && pollStartedAt - lastConfigReloadAt > 15000) {
+  if (pollStartedAt - lastConfigReloadAt > 15000) {
     lastConfigReloadAt = pollStartedAt;
     try {
-      const freshCfg = readJson<{ addresses?: string[] }>(
+      let freshCfg = readJson<{ addresses?: string[] }>(
         join(values.dataDir!, "dashboard-config.json"),
         {},
       );
+      if (!Array.isArray(freshCfg.addresses) || !freshCfg.addresses.length) {
+        try {
+          const mon = readJson<{ targets?: Array<{ monitoredWallet?: string }> }>(
+            join(process.cwd(), "data", "syndicate-watch", "gmgn-monitored-wallets.json"),
+            {},
+          );
+          if (Array.isArray(mon.targets) && mon.targets.length) {
+            freshCfg = { addresses: mon.targets.map((t) => t.monitoredWallet).filter(Boolean) as string[] };
+          }
+        } catch {}
+      }
+      if (!Array.isArray(freshCfg.addresses) || !freshCfg.addresses.length) {
+        try {
+          const p4 = readJson<{ addresses?: string[] }>(
+            join(process.cwd(), "data", "profit4-watch", "dashboard-config.json"),
+            {},
+          );
+          if (Array.isArray(p4.addresses) && p4.addresses.length) {
+            freshCfg = p4;
+          }
+        } catch {}
+      }
+
       if (Array.isArray(freshCfg.addresses) && freshCfg.addresses.length > 0) {
         const freshAddresses = [
           ...new Set(freshCfg.addresses.map((x) => x.trim()).filter(Boolean)),

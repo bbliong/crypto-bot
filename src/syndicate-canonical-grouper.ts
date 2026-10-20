@@ -306,8 +306,13 @@ export function syncCanonicalSyndicateOutputs(rootDir = '/home/bbliong/project/c
 
   // 3. Sync to dashboard config and worker control
   const dashboardConfigFile = path.join(profit4WatchDir, 'dashboard-config.json');
+  const feedHubConfigFile = path.join(rootDir, 'data', 'feed-hub', 'dashboard-config.json');
   const addresses = targets.map(t => t.monitoredWallet);
   fs.writeFileSync(dashboardConfigFile, JSON.stringify({ addresses }, null, 2), 'utf8');
+  try {
+    fs.mkdirSync(path.join(rootDir, 'data', 'feed-hub'), { recursive: true });
+    fs.writeFileSync(feedHubConfigFile, JSON.stringify({ addresses }, null, 2), 'utf8');
+  } catch {}
 
   const workerControlFile = path.join(profit4WatchDir, 'worker-control.json');
   if (fs.existsSync(workerControlFile)) {
