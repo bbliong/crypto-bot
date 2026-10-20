@@ -7,6 +7,7 @@ export class FeedHubClient extends EventEmitter {
   private shouldReconnect: boolean = true;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnecting: boolean = false;
+  private activeSubscriptions = new Map<string, { pool?: string; maxDurationSeconds?: number }>();
 
   constructor(
     public readonly url: string = 'ws://127.0.0.1:8765',
@@ -26,6 +27,9 @@ export class FeedHubClient extends EventEmitter {
       this.ws.on('open', () => {
         this.isConnecting = false;
         console.log(`[${this.name}] 🚀 Connected to Feed Hub at ${this.url}`);
+        for (const [mint, opts] of this.activeSubscriptions) {
+          this.sendCommand({ action: 'SUBSCRIBE_MINT', mint, pool: opts.pool, maxDurationSeconds: opts.maxDurationSeconds });
+        }
         this.emit('connected');
       });
 
@@ -92,10 +96,12 @@ export class FeedHubClient extends EventEmitter {
   }
 
   subscribeMint(mint: string, pool?: string, maxDurationSeconds?: number) {
+    this.activeSubscriptions.set(mint, { pool, maxDurationSeconds });
     this.sendCommand({ action: 'SUBSCRIBE_MINT', mint, pool, maxDurationSeconds });
   }
 
   unsubscribeMint(mint: string) {
+    this.activeSubscriptions.delete(mint);
     this.sendCommand({ action: 'UNSUBSCRIBE_MINT', mint });
   }
 

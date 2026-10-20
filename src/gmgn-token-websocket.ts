@@ -74,6 +74,10 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
         (window as any).__allSockets.push(ws);
         if (args[0] && String(args[0]).includes("ws.gmgn.ai")) {
           (window as any).__gmgnWs = ws;
+          ws.addEventListener("open", () => {
+            (window as any).__gmgnWs = ws;
+            (window as any).__gmgnWsReconnected = Date.now();
+          });
         }
         return ws;
       } as any;
@@ -189,7 +193,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
         meta.subscribedAt = Date.now();
         meta.maxDurationSeconds = maxDurationSeconds;
       }
-      return true;
+      return await this.sendFrame("subscribe", mint);
     }
 
     // Jika token sebelumnya ada di pool lain, cabut dari pool lama
@@ -239,6 +243,34 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
       ...this.pools.smartmoney,
       ...this.pools.trend20m,
     ];
+  }
+
+  public async resubscribeAll(): Promise<void> {
+    const mints = this.getSubscribedMints();
+    if (!mints.length) return;
+    for (const m of mints) {
+      await this.sendFrame("subscribe", m).catch(() => {});
+    }
+  }
+
+  public async checkAndResubscribe(): Promise<void> {
+    if (!this.page || this.page.isClosed()) return;
+    try {
+      const needsResub = await this.page.evaluate(() => {
+        const win = window as any;
+        const ws = win.__gmgnWs;
+        if (!ws || ws.readyState !== 1) return false;
+        if (win.__lastSubscribedWs !== ws) {
+          win.__lastSubscribedWs = ws;
+          return true;
+        }
+        return false;
+      });
+      if (needsResub) {
+        console.log(`[gmgn-ws] 🔄 Native WebSocket reconnected! Resubscribing all ${this.getSubscribedCount()} active tokens across pools...`);
+        await this.resubscribeAll();
+      }
+    } catch {}
   }
 
   public getSubscribedCount(): number {

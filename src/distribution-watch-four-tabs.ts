@@ -1206,6 +1206,11 @@ if (existsSync(feedSettingsFile)) {
 
 await gmgnWsManager.init();
 
+// Heartbeat & reconnection check: resubscribe active pools if native WebSocket reconnects
+setInterval(() => {
+  gmgnWsManager.checkAndResubscribe().catch(() => {});
+}, 5000);
+
 // Ensure controller tab preserves pure momentum filters on new_pair (prefix 9)
 await controller.addInitScript(() => {
   try {
@@ -2186,8 +2191,9 @@ while (!controller.isClosed() && !stopping) {
 
           for (const act of swRes.body.data.activities as any[]) {
             const ev = String(act.event_type || act.event || "").toLowerCase();
+            const actTs = Number(act.timestamp) || nowSec;
             if (ev === "buy" || ev === "swap_buy") {
-              const ts = Number(act.timestamp) || nowSec;
+              const ts = actTs;
               // Hanya proses transaksi baru (< 5 menit / 300 detik)
               if (nowSec - ts > 300) continue;
 
@@ -2290,7 +2296,9 @@ while (!controller.isClosed() && !stopping) {
               }
             } else if (ev === "sell" || ev === "swap_sell") {
               const mint = String(act.token?.address || act.token_address || "");
-              if (mint) {
+              const sellKey = `sell:${sw}:${mint}:${act.tx_hash || actTs}`;
+              if (mint && !seenSmartTrades.has(sellKey)) {
+                seenSmartTrades.add(sellKey);
                 if (isCopyTrader) {
                   console.log(`[copy-trader-poller] 🚨 Copy Trader (${sw.slice(0, 6)}..) sold token ${mint.slice(0, 6)}.. Triggering mirror exit!`);
                 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DistributionTrend20mLane,
+  DistributionTrendBaseLane,
   DistributionTrendConsLane,
   DistributionTrendBalLane,
   DistributionTrendWideLane,
@@ -84,9 +85,10 @@ test('Trend20mLane rejects token with holders less than 100', () => {
   assert.ok(reasons.includes('HOLDERS_LESS_THAN_100'));
 });
 
-test('Trend20mLane rejects token with Entry Market Cap > $25k', () => {
+test('Trend20mLane rejects token with Entry Market Cap > $25k when configured with MC cap', () => {
   const events: TargetEvent[] = [];
-  const lane = new DistributionTrend20mLane('MintMcapHigh1111111111111111111111111111111', (e) => events.push(e));
+  const customRules = { ...TREND_20M_RULES, maxMarketCapUsd: 25000 };
+  const lane = new DistributionTrendBaseLane('MintMcapHigh1111111111111111111111111111111', customRules, 'Trend20m', 20.0, (e) => events.push(e));
 
   const now = 1_700_000_000_000;
   const f = baseFacts({
@@ -230,20 +232,15 @@ test('4 Dedicated Trend 20m Lanes apply distinct risk & market cap rules', () =>
   const now = 1_700_000_000_000;
 
   // Case 1: Token dengan Market Cap $18k (0.000018)
-  // T-Cons: Rejects (> $15k)
-  // T-Bal, T-Wide, T-Run: Lolos kriteria MC
+  // Seluruh lane (T-Cons, T-Bal, T-Wide, T-Run) lolos kriteria MC (tanpa batas MC atas)
   const f18k = baseFacts({ now, price: 0.000018, priceAt: now });
   laneCons.step(f18k);
   laneBal.step(f18k);
   laneWide.step(f18k);
   laneRun.step(f18k);
 
-  assert.equal(eventsCons[0]?.type, 'PAPER_ENTRY_DECISION');
-  assert.equal(eventsCons[0]?.allowed, false);
-  assert.ok(((eventsCons[0] as any)?.reasons || []).includes('ENTRY_MCAP_TOO_HIGH'));
-  assert.equal(eventsCons[0]?.laneLabel, 'T-Cons');
-
-  // Bal, Wide, Run belum reject (tidak ada event rejeksi)
+  // Tidak ada rejection MC pada f18k
+  assert.equal(eventsCons.length, 0);
   assert.equal(eventsBal.length, 0);
   assert.equal(eventsWide.length, 0);
   assert.equal(eventsRun.length, 0);
@@ -251,24 +248,22 @@ test('4 Dedicated Trend 20m Lanes apply distinct risk & market cap rules', () =>
   // Stepping 3 detik untuk konfirmasi sinyal entry
   for (let i = 1; i <= 3; i++) {
     const stepF = baseFacts({ now: now + i * 1000, price: 0.000018, priceAt: now + i * 1000 });
+    laneCons.step(stepF);
     laneBal.step(stepF);
     laneWide.step(stepF);
     laneRun.step(stepF);
   }
 
   // Verifikasi sinyal entry & buy ter-emit dengan label masing-masing
+  assert.ok(eventsCons.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Cons'));
   assert.ok(eventsBal.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Bal'));
   assert.ok(eventsWide.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Wide'));
   assert.ok(eventsRun.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Run'));
 
   // Case 2: Token dengan Market Cap $30k (0.000030)
-  // T-Bal: Rejects (> $25k)
-  // T-Wide & T-Run: Tetap lolos
+  // T-Bal & lanes lain tetap lolos tanpa rejection MC
   const eventsBal2: TargetEvent[] = [];
   const laneBal2 = new DistributionTrendBalLane('MintMcap30k', (e) => eventsBal2.push(e));
   laneBal2.step(baseFacts({ now, price: 0.000030, priceAt: now }));
-  assert.equal(eventsBal2[0]?.type, 'PAPER_ENTRY_DECISION');
-  assert.equal(eventsBal2[0]?.allowed, false);
-  assert.ok(((eventsBal2[0] as any)?.reasons || []).includes('ENTRY_MCAP_TOO_HIGH'));
-  assert.equal(eventsBal2[0]?.laneLabel, 'T-Bal');
+  assert.equal(eventsBal2.length, 0);
 });
