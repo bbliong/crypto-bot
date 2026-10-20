@@ -22,12 +22,19 @@ atomicProfit4Json(controlFile, {
 });
 
 const cleanup = () => {
-  try { unlinkSync(controlFile); } catch {}
+  try {
+    atomicProfit4Json(controlFile, {
+      pid: process.pid,
+      run: `data/smartmoney-watch/${runId}`,
+      status: 'stopped',
+      stoppedAt: Date.now(),
+    });
+  } catch {}
   process.exit(0);
 };
 process.once('SIGINT', cleanup);
 process.once('SIGTERM', cleanup);
-process.once('exit', () => { try { unlinkSync(controlFile); } catch {} });
+process.once('exit', cleanup);
 
 const logWriter = new RotatingJsonlWriter(runDir);
 const write = (name, val) => logWriter.write(name, val);
@@ -59,6 +66,9 @@ client.on('walletSold', (ev) => {
 });
 
 client.on('detailClosed', (ev) => {
+  if (ev.mint) {
+    client.unsubscribeMint(ev.mint);
+  }
   runtime.end(ev.mint, ev.observedAt || Date.now(), ev.reason || 'DETAIL_CLOSED');
 });
 
