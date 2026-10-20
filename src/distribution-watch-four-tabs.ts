@@ -1461,36 +1461,34 @@ const pollTrendDomTokens = async () => {
       const priceUsd = t.mcap > 0 ? t.mcap / 1_000_000_000 : 0;
       const timestamp = Math.floor(now / 1000) - (t.ageSeconds || 1200);
 
-      if (!candidateMeta.has(t.mint)) {
-        candidateMeta.set(t.mint, { symbol: t.symbol, creator: "gmgn_trend", originalSource: "gmgn_trend_ws" });
-        pushActiveDetail({
+      candidateMeta.set(t.mint, { symbol: t.symbol, creator: "gmgn_trend", originalSource: "gmgn_trend_ws" });
+      pushActiveDetail({
+        mint: t.mint,
+        symbol: t.symbol,
+        wallet: "gmgn_trend",
+        openedAt: now,
+        source: "gmgn_trend_ws",
+        priceUsd,
+        status: "QUALIFIED_10K",
+      });
+
+      feedHub.broadcast({
+        type: "CANDIDATE",
+        source: "gmgn_trend_ws",
+        transfer: {
           mint: t.mint,
-          symbol: t.symbol,
           wallet: "gmgn_trend",
-          openedAt: now,
+          symbol: t.symbol,
+          timestamp,
+          from: "gmgn_trend",
           source: "gmgn_trend_ws",
-          priceUsd,
-          status: "QUALIFIED_10K",
-        });
+          priceUsd: priceUsd > 0 ? priceUsd : undefined,
+          marketCapUsd: t.mcap,
+        },
+        observedAt: now,
+      });
 
-        feedHub.broadcast({
-          type: "CANDIDATE",
-          source: "gmgn_trend_ws",
-          transfer: {
-            mint: t.mint,
-            wallet: "gmgn_trend",
-            symbol: t.symbol,
-            timestamp,
-            from: "gmgn_trend",
-            source: "gmgn_trend_ws",
-            priceUsd: priceUsd > 0 ? priceUsd : undefined,
-            marketCapUsd: t.mcap,
-          },
-          observedAt: now,
-        });
-
-        gmgnWsManager.subscribeToken(t.mint, "trend20m", 7200).catch(() => {});
-      }
+      gmgnWsManager.subscribeToken(t.mint, "trend20m", 7200).catch(() => {});
     }
   } catch (err: any) {
     console.warn("[trendTab-dom-poll-error]", err?.message);

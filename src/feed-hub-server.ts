@@ -18,6 +18,7 @@ export class FeedHubServer {
   private wss: any = null;
   private clients = new Set<any>();
   private commandHandlers = new Set<(cmd: FeedHubCommand, client: any) => void>();
+  private recentCandidates = new Map<string, FeedHubEvent>();
 
   constructor(public readonly port: number = 8765, public readonly host: string = '127.0.0.1') {}
 
@@ -37,6 +38,17 @@ export class FeedHubServer {
           const clientIp = req.socket.remoteAddress;
           this.clients.add(ws);
           console.log(`[feed-hub-server] 🔌 Client connected (${this.clients.size} total) from ${clientIp}`);
+
+          // Replay recent candidates so newly connected/restarted workers immediately catch up
+          if (this.recentCandidates.size > 0) {
+            for (const cand of this.recentCandidates.values()) {
+              try {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify(cand));
+                }
+              } catch {}
+            }
+          }
 
           ws.on('message', (data: Buffer | string) => {
             try {
@@ -71,6 +83,13 @@ export class FeedHubServer {
   }
 
   broadcast(event: FeedHubEvent) {
+    if (event.type === 'CANDIDATE' && (event as any).transfer?.mint) {
+      this.recentCandidates.set((event as any).transfer.mint, event);
+      if (this.recentCandidates.size > 200) {
+        const oldest = this.recentCandidates.keys().next().value;
+        if (oldest) this.recentCandidates.delete(oldest);
+      }
+    }
     if (!this.clients.size) return;
     const payload = JSON.stringify(event);
     for (const ws of this.clients) {
