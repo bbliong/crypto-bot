@@ -1377,11 +1377,11 @@ attachCapture(
 const pollTrendDomTokens = async () => {
   try {
     if (trendTab.isClosed()) return;
-    const tokens = await trendTab.evaluate(() => {
+    const tokens = await trendTab.evaluate(`(() => {
       const rows = Array.from(document.querySelectorAll("table tbody tr, tr"));
-      const parseDollar = (str: string) => {
+      const parseDollar = (str) => {
         if (!str) return 0;
-        const match = str.match(/\$([0-9.]+)\s*([KMBkmb]?)/);
+        const match = str.match(/\\$([0-9.]+)\\s*([KMBkmb]?)/);
         if (!match) return 0;
         const base = parseFloat(match[1]);
         const unit = match[2].toUpperCase();
@@ -1391,9 +1391,9 @@ const pollTrendDomTokens = async () => {
         return base;
       };
 
-      const parseCount = (str: string) => {
+      const parseCount = (str) => {
         if (!str) return 0;
-        const match = str.replace(/,/g, "").match(/([0-9.]+)\s*([KMBkmb]?)/);
+        const match = str.replace(/,/g, "").match(/([0-9.]+)\\s*([KMBkmb]?)/);
         if (!match) return 0;
         const base = parseFloat(match[1]);
         const unit = match[2].toUpperCase();
@@ -1403,9 +1403,9 @@ const pollTrendDomTokens = async () => {
         return base;
       };
 
-      const parseAgeSeconds = (str: string) => {
+      const parseAgeSeconds = (str) => {
         if (!str) return 1200;
-        const m = str.match(/([0-9.]+)\s*([smhd])/i);
+        const m = str.match(/([0-9.]+)\\s*([smhd])/i);
         if (!m) return 1200;
         const val = parseFloat(m[1]);
         const unit = m[2].toLowerCase();
@@ -1416,11 +1416,11 @@ const pollTrendDomTokens = async () => {
         return 1200;
       };
 
-      const res: Array<{ mint: string; symbol: string; mcap: number; holders: number; ageSeconds: number }> = [];
+      const res = [];
       for (const tr of rows) {
-        const a = tr.querySelector("a[href*='/sol/token/']") as HTMLAnchorElement | null;
+        const a = tr.querySelector("a[href*=\x27/sol/token/\x27]");
         if (!a) continue;
-        const match = a.href.match(/\/sol\/token\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
+        const match = a.href.match(/\\/sol\\/token\\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
         if (!match) continue;
         const mint = match[1];
 
@@ -1429,7 +1429,7 @@ const pollTrendDomTokens = async () => {
 
         const mcap = parseDollar(cells[1]?.innerText || "");
         const holders = parseCount(cells[6]?.innerText || "");
-        const textLines = (cells[0]?.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
+        const textLines = (cells[0]?.innerText || "").split("\\n").map((s) => s.trim()).filter(Boolean);
         let symbol = "";
         for (const line of textLines) {
           if (
@@ -1451,7 +1451,7 @@ const pollTrendDomTokens = async () => {
         res.push({ mint, symbol, mcap, holders, ageSeconds });
       }
       return res;
-    });
+    })()`) as Array<{ mint: string; symbol: string; mcap: number; holders: number; ageSeconds: number }>;
 
     const now = Date.now();
     for (const t of tokens) {
