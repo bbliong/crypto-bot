@@ -527,6 +527,9 @@ export class DistributionProfit4Runtime {
       // PIPELINE 5: GMGN TREND 20M (4 Lanes: T-Cons, T-Bal, T-Wide, T-Run)
       // ==========================================
       else if (source === 'gmgn_trend_ws' || this.laneType === 'trend20m') {
+        const mcap = transfer.marketCapUsd ?? (transfer.priceUsd ? transfer.priceUsd * 1_000_000_000 : null);
+        if (!mcap || mcap < 10000) return;
+
         const keyCons = `${transfer.mint}:t_cons`;
         if (this.states.has(keyCons)) return;
 

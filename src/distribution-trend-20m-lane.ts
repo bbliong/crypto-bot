@@ -323,7 +323,7 @@ export class DistributionTrendBaseLane extends DistributionTargetLane {
           }
 
           // 6. Batas waktu window observasi (maksimal 120 menit)
-          const waitStart = f.firstAt ?? (f.transferAt > 0 ? f.transferAt : f.now);
+          const waitStart = f.firstAt ?? f.now;
           if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) {
             reasons.push('ENTRY_WINDOW_EXPIRED');
           }

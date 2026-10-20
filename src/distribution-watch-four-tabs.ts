@@ -1372,6 +1372,133 @@ attachCapture(
     }
   }
 );
+
+// Polling DOM berkala Tab 2 Trending untuk menangkap token terfilter yang tampil di browser VNC
+const pollTrendDomTokens = async () => {
+  try {
+    if (trendTab.isClosed()) return;
+    const tokens = await trendTab.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll("table tbody tr, tr"));
+      const parseDollar = (str: string) => {
+        if (!str) return 0;
+        const match = str.match(/\$([0-9.]+)\s*([KMBkmb]?)/);
+        if (!match) return 0;
+        const base = parseFloat(match[1]);
+        const unit = match[2].toUpperCase();
+        if (unit === "K") return base * 1000;
+        if (unit === "M") return base * 1000000;
+        if (unit === "B") return base * 1000000000;
+        return base;
+      };
+
+      const parseCount = (str: string) => {
+        if (!str) return 0;
+        const match = str.replace(/,/g, "").match(/([0-9.]+)\s*([KMBkmb]?)/);
+        if (!match) return 0;
+        const base = parseFloat(match[1]);
+        const unit = match[2].toUpperCase();
+        if (unit === "K") return base * 1000;
+        if (unit === "M") return base * 1000000;
+        if (unit === "B") return base * 1000000000;
+        return base;
+      };
+
+      const parseAgeSeconds = (str: string) => {
+        if (!str) return 1200;
+        const m = str.match(/([0-9.]+)\s*([smhd])/i);
+        if (!m) return 1200;
+        const val = parseFloat(m[1]);
+        const unit = m[2].toLowerCase();
+        if (unit === "s") return Math.round(val);
+        if (unit === "m") return Math.round(val * 60);
+        if (unit === "h") return Math.round(val * 3600);
+        if (unit === "d") return Math.round(val * 86400);
+        return 1200;
+      };
+
+      const res: Array<{ mint: string; symbol: string; mcap: number; holders: number; ageSeconds: number }> = [];
+      for (const tr of rows) {
+        const a = tr.querySelector("a[href*='/sol/token/']") as HTMLAnchorElement | null;
+        if (!a) continue;
+        const match = a.href.match(/\/sol\/token\/([1-9A-HJ-NP-Za-km-z]{32,44})/);
+        if (!match) continue;
+        const mint = match[1];
+
+        const cells = Array.from(tr.querySelectorAll("td"));
+        if (!cells || cells.length < 3) continue;
+
+        const mcap = parseDollar(cells[1]?.innerText || "");
+        const holders = parseCount(cells[6]?.innerText || "");
+        const textLines = (cells[0]?.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
+        let symbol = "";
+        for (const line of textLines) {
+          if (
+            line.length >= 2 &&
+            !line.includes("...") &&
+            !/^[0-9]+[hdms]$/i.test(line) &&
+            !/^[0-9]+$/.test(line) &&
+            !/^[^\x00-\x7F]+$/.test(line)
+          ) {
+            symbol = line;
+            break;
+          }
+        }
+        if (!symbol && textLines.length > 0) symbol = textLines[0];
+
+        const ageStr = textLines.find((l) => /^[0-9]+[hdms]$/i.test(l)) || "";
+        const ageSeconds = parseAgeSeconds(ageStr);
+
+        res.push({ mint, symbol, mcap, holders, ageSeconds });
+      }
+      return res;
+    });
+
+    const now = Date.now();
+    for (const t of tokens) {
+      if (!t.mcap || t.mcap < 10000) continue; // MC Min $10k
+      if (t.holders > 0 && t.holders < 100) continue; // Min 100 holders
+
+      const priceUsd = t.mcap > 0 ? t.mcap / 1_000_000_000 : 0;
+      const timestamp = Math.floor(now / 1000) - (t.ageSeconds || 1200);
+
+      if (!candidateMeta.has(t.mint)) {
+        candidateMeta.set(t.mint, { symbol: t.symbol, creator: "gmgn_trend", originalSource: "gmgn_trend_ws" });
+        pushActiveDetail({
+          mint: t.mint,
+          symbol: t.symbol,
+          wallet: "gmgn_trend",
+          openedAt: now,
+          source: "gmgn_trend_ws",
+          priceUsd,
+          status: "QUALIFIED_10K",
+        });
+
+        feedHub.broadcast({
+          type: "CANDIDATE",
+          source: "gmgn_trend_ws",
+          transfer: {
+            mint: t.mint,
+            wallet: "gmgn_trend",
+            symbol: t.symbol,
+            timestamp,
+            from: "gmgn_trend",
+            source: "gmgn_trend_ws",
+            priceUsd: priceUsd > 0 ? priceUsd : undefined,
+            marketCapUsd: t.mcap,
+          },
+          observedAt: now,
+        });
+
+        gmgnWsManager.subscribeToken(t.mint, "trend20m", 7200).catch(() => {});
+      }
+    }
+  } catch (err: any) {
+    console.warn("[trendTab-dom-poll-error]", err?.message);
+  }
+};
+
+setInterval(pollTrendDomTokens, 5000);
+setTimeout(pollTrendDomTokens, 2000);
 write("watch-events.jsonl", {
   type: "READY",
   observedAt: Date.now(),
