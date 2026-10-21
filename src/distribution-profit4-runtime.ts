@@ -88,11 +88,13 @@ import {
   DistributionTrendBalLane,
   DistributionTrendWideLane,
   DistributionTrendRunLane,
+  DistributionTrendGoldenLane,
   DistributionTrend20mLane,
   TREND_20M_CONS_RULES,
   TREND_20M_BAL_RULES,
   TREND_20M_WIDE_RULES,
   TREND_20M_RUN_RULES,
+  TREND_20M_GOLDEN_RULES,
   TREND_20M_RULES,
 } from './distribution-trend-20m-lane.js';
 import { TargetObservation, type TargetEvent, type TargetFacts, type TargetTrade } from './distribution-target-lane.js';
@@ -164,11 +166,12 @@ type RuntimeState = {
     | DistributionMomentumScalpLane
     | DistributionMomentumTrendLane
     | DistributionMomentumGoldenLane
+    | DistributionTrendGoldenLane
     | DistributionTrend20mLane;
   facts: TargetFacts | null;
   active: boolean;
   registeredAt?: number;
-  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'M-Golden' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'M-Golden' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run' | 'T-Golden';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -273,7 +276,7 @@ export class DistributionProfit4Runtime {
       if (type === 'syndicate') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5'];
       if (type === 'smartmoney') return ['G2', 'G2.1', 'G2.2', 'OZ1'];
       if (type === 'bounce') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1', 'M-Apex10k', 'M-Safe10k', 'M-Runner15k'];
-      if (type === 'trend20m') return ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run'];
+      if (type === 'trend20m') return ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden'];
       return ['P4'];
     };
 
@@ -614,11 +617,13 @@ export class DistributionProfit4Runtime {
         const keyBal = `${transfer.mint}:t_bal`;
         const keyWide = `${transfer.mint}:t_wide`;
         const keyRun = `${transfer.mint}:t_run`;
+        const keyGolden = `${transfer.mint}:t_golden`;
 
         const laneCons = new DistributionTrendConsLane(transfer.mint, makeOnEvent(keyCons, 'T-Cons'));
         const laneBal = new DistributionTrendBalLane(transfer.mint, makeOnEvent(keyBal, 'T-Bal'));
         const laneWide = new DistributionTrendWideLane(transfer.mint, makeOnEvent(keyWide, 'T-Wide'));
         const laneRun = new DistributionTrendRunLane(transfer.mint, makeOnEvent(keyRun, 'T-Run'));
+        const laneGolden = new DistributionTrendGoldenLane(transfer.mint, makeOnEvent(keyGolden, 'T-Golden'));
 
         this.states.set(keyCons, {
           key: keyCons,
@@ -676,6 +681,20 @@ export class DistributionProfit4Runtime {
           lastEvent: null,
         });
 
+        this.states.set(keyGolden, {
+          key: keyGolden,
+          transfer,
+          observation,
+          lane: laneGolden,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Golden',
+          version: TREND_20M_GOLDEN_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
         if (this.bought.has(keyCons)) laneCons.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneCons.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
 
@@ -687,6 +706,9 @@ export class DistributionProfit4Runtime {
 
         if (this.bought.has(keyRun)) laneRun.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneRun.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyGolden)) laneGolden.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneGolden.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
     } else {
       const key = transfer.mint;

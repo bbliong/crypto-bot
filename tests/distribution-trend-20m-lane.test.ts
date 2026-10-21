@@ -7,6 +7,8 @@ import {
   DistributionTrendBalLane,
   DistributionTrendWideLane,
   DistributionTrendRunLane,
+  DistributionTrendGoldenLane,
+  TREND_20M_GOLDEN_RULES,
   TREND_20M_RULES,
 } from '../src/distribution-trend-20m-lane.js';
 import type { TargetFacts, TargetEvent } from '../src/distribution-target-lane.js';
@@ -266,4 +268,53 @@ test('4 Dedicated Trend 20m Lanes apply distinct risk & market cap rules', () =>
   const laneBal2 = new DistributionTrendBalLane('MintMcap30k', (e) => eventsBal2.push(e));
   laneBal2.step(baseFacts({ now, price: 0.000030, priceAt: now }));
   assert.equal(eventsBal2.length, 0);
+});
+
+test('T-Golden applies loop-engineered gates: Mcap $50k-$500k, buyers >= 5, buyShare >= 40% and trailing profit', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendGoldenLane('MintGolden1111111111111111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+
+  // 1. Rejects if Mcap < $50k ($20k = 0.000020)
+  lane.step(baseFacts({ now, price: 0.000020, priceAt: now, meaningfulBuyers: 6, buyShareUsdPercent: 50.0 }));
+  assert.ok(events.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('ENTRY_MCAP_TOO_LOW')));
+
+  // Reset lane
+  const events2: TargetEvent[] = [];
+  const lane2 = new DistributionTrendGoldenLane('MintGolden2222222222222222222222222222222', (e) => events2.push(e));
+
+  // 2. Rejects if Buyers < 5 (e.g. 3 buyers)
+  lane2.step(baseFacts({ now, price: 0.000100, priceAt: now, meaningfulBuyers: 3, buyShareUsdPercent: 50.0 }));
+  assert.ok(events2.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('NOT_ENOUGH_BUYERS')));
+
+  // 3. Enters when Mcap $100k, buyers 6, buyShare 50%
+  const events3: TargetEvent[] = [];
+  const lane3 = new DistributionTrendGoldenLane('MintGolden3333333333333333333333333333333', (e) => events3.push(e));
+  let curTime = now;
+  for (let i = 0; i < 5; i++) {
+    lane3.step(baseFacts({
+      now: curTime,
+      price: 0.000100,
+      priceAt: curTime,
+      meaningfulBuyers: 6,
+      buyShareUsdPercent: 50.0,
+      meaningfulBuyUsd: 100
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events3.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Golden'));
+
+  // 4. Test trailing exit on +20% pump followed by 5% pullback
+  const buyEvent = events3.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000100;
+
+  // Pump to +20%
+  curTime += 2000;
+  lane3.step(baseFacts({ now: curTime, price: entryPrice * 1.20, priceAt: curTime, meaningfulBuyers: 6 }));
+  // Pullback to +15% (5% drop from peak > 4% trailing pullback)
+  curTime += 2000;
+  lane3.step(baseFacts({ now: curTime, price: entryPrice * 1.15, priceAt: curTime, meaningfulBuyers: 6 }));
+
+  assert.ok(events3.some((e) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && (e as any).reason?.startsWith('TRAILING_PROFIT')));
 });

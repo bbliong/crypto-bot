@@ -194,6 +194,51 @@ export const TREND_20M_RUN_RULES: Readonly<Trend20mRules> = Object.freeze({
   nominalTargetPercent: 60.0,
 });
 
+// -------------------------------------------------------------
+// 5. Opsi E: Evolved Golden Runner (T-Golden)
+// Hasil Loop Engineering 340.200 Kombinasi terhadap 36 Token Live
+// Mcap $50k-$500k, Buyers >= 5, BuyShare >= 40%, TP +35%, Trailing +18% (DD 4%), SL -10%, Hold 45m
+// -------------------------------------------------------------
+export const TREND_20M_GOLDEN_RULES: Readonly<Trend20mRules> = Object.freeze({
+  ...validateTargetRules({
+    ...DEFAULT_TARGET_RULES,
+    version: 'distribution-trend-20m-golden-v1',
+    paperOnly: true,
+    enabled: true,
+    targetPercent: 1000.0,
+    stopLossPercent: 10.0,
+    trailingStartPercent: 18.0,
+    trailingDrawdownPercent: 4.0,
+    maxHoldSeconds: 2700, // 45 menit
+    observationSeconds: 30,
+    minTransferAgeSeconds: 1200,
+    maxTransferLagSeconds: 60,
+    maxEntryWaitSeconds: 7200,
+    confirmSeconds: 3,
+    minBuySharePercent: 40.0,
+    minMeaningfulBuyUsd: 15,
+    minMeaningfulBuyers: 5,
+    maxBuyerSharePercent: 80.0,
+    minMomentumPercent: 0.1,
+    maxMomentumPercent: 50.0,
+    maxEntryReturnPercent: 100000,
+    maxDrawdownPercent: 15.0,
+    executionDelayMs: 1000,
+    maxFillWaitMs: 15000,
+    feePercentPerSide: 1.0,
+    slippagePercentPerSide: 0.5,
+    fixedFeeUsdPerSide: 0.005,
+    stakeUsd: 5.0,
+    blockKnownDumpSellers: true,
+  }),
+  minMarketCapUsd: 50000,
+  maxMarketCapUsd: 500000,
+  minHolderCount: 100,
+  minTokenAgeSeconds: 1200,
+  profitFloorPercent: 15.0,
+  nominalTargetPercent: 35.0,
+});
+
 // Legacy singleton baseline v2 (dipakai untuk backward compatibility)
 export const TREND_20M_RULES: Readonly<Trend20mRules> = Object.freeze({
   ...validateTargetRules({
@@ -297,7 +342,14 @@ export class DistributionTrendBaseLane extends DistributionTargetLane {
             reasons.push('HOLDERS_LESS_THAN_100');
           }
 
-          // 3. Batasi Entry Market Cap jika dikonfigurasi (> 0)
+          // 3. Batasi Entry Market Cap jika dikonfigurasi
+          if (
+            rules.minMarketCapUsd > 0 &&
+            f.price !== null &&
+            f.price * 1_000_000_000 < rules.minMarketCapUsd
+          ) {
+            reasons.push('ENTRY_MCAP_TOO_LOW');
+          }
           if (
             rules.maxMarketCapUsd > 0 &&
             f.price !== null &&
@@ -431,6 +483,12 @@ export class DistributionTrendWideLane extends DistributionTrendBaseLane {
 export class DistributionTrendRunLane extends DistributionTrendBaseLane {
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
     super(mint, TREND_20M_RUN_RULES, 'T-Run', 60.0, emit);
+  }
+}
+
+export class DistributionTrendGoldenLane extends DistributionTrendBaseLane {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, TREND_20M_GOLDEN_RULES, 'T-Golden', 35.0, emit);
   }
 }
 
