@@ -8,7 +8,11 @@ import {
   DistributionTrendWideLane,
   DistributionTrendRunLane,
   DistributionTrendGoldenLane,
+  DistributionTrendSniperLane,
+  DistributionTrendPhoenixLane,
   TREND_20M_GOLDEN_RULES,
+  TREND_20M_SNIPER_RULES,
+  TREND_20M_PHOENIX_RULES,
   TREND_20M_RULES,
 } from '../src/distribution-trend-20m-lane.js';
 import type { TargetFacts, TargetEvent } from '../src/distribution-target-lane.js';
@@ -317,4 +321,83 @@ test('T-Golden applies loop-engineered gates: Mcap $50k-$500k, buyers >= 5, buyS
   lane3.step(baseFacts({ now: curTime, price: entryPrice * 1.15, priceAt: curTime, meaningfulBuyers: 6 }));
 
   assert.ok(events3.some((e) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && (e as any).reason?.startsWith('TRAILING_PROFIT')));
+});
+
+test('T-Sniper applies loop-engineered gates: buyers >= 7, buyShare >= 50%, SL 12%, Trailing 20/4', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendSniperLane('MintSniper1111111111111111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+
+  // 1. Rejects if Buyers < 7 (e.g. 6 buyers)
+  lane.step(baseFacts({ now, price: 0.000100, priceAt: now, meaningfulBuyers: 6, buyShareUsdPercent: 55.0 }));
+  assert.ok(events.some((e: any) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('NOT_ENOUGH_BUYERS')));
+
+  // 2. Enters when buyers >= 7 and buyShare >= 50%
+  const events2: TargetEvent[] = [];
+  const lane2 = new DistributionTrendSniperLane('MintSniper2222222222222222222222222222222', (e) => events2.push(e));
+  let curTime = now;
+  for (let i = 0; i < 5; i++) {
+    lane2.step(baseFacts({
+      now: curTime,
+      price: 0.000100,
+      priceAt: curTime,
+      meaningfulBuyers: 7,
+      buyShareUsdPercent: 55.0,
+      meaningfulBuyUsd: 150
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events2.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Sniper'));
+
+  // 3. Stop loss triggers at -12%
+  const buyEvent = events2.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000100;
+  curTime += 2000;
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 0.87, priceAt: curTime })); // -13% drop
+  assert.ok(events2.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('STOP_LOSS')));
+});
+
+test('T-Phoenix applies loop-engineered gates: buyers >= 6, buyShare >= 40%, SL 15%, Trailing 25/6, TP 60%', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendPhoenixLane('MintPhoenix1111111111111111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+
+  // 1. Rejects if Mcap < $30k ($20k = 0.000020)
+  lane.step(baseFacts({ now, price: 0.000020, priceAt: now, meaningfulBuyers: 6, buyShareUsdPercent: 50.0 }));
+  assert.ok(events.some((e: any) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('ENTRY_MCAP_TOO_LOW')));
+
+  // 2. Enters when buyers >= 6, buyShare >= 40%, Mcap >= $30k
+  const events2: TargetEvent[] = [];
+  const lane2 = new DistributionTrendPhoenixLane('MintPhoenix2222222222222222222222222222222', (e) => events2.push(e));
+  let curTime = now;
+  for (let i = 0; i < 5; i++) {
+    lane2.step(baseFacts({
+      now: curTime,
+      price: 0.000100,
+      priceAt: curTime,
+      meaningfulBuyers: 6,
+      buyShareUsdPercent: 45.0,
+      meaningfulBuyUsd: 120
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events2.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Phoenix'));
+
+  // 3. Survives -13% dip (unlike T-Golden which dies at -10%), then pumps to +60%
+  const buyEvent = events2.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000100;
+
+  curTime += 2000;
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 0.88, priceAt: curTime })); // -12% dip
+  assert.equal(lane2.phase, 'OPEN', 'T-Phoenix must survive -12% dip because SL is -15%');
+
+  // Then pump to +60%
+  curTime += 2000;
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 1.65, priceAt: curTime }));
+  // Pullback from peak (+65% to +55%, >6% pullback)
+  curTime += 2000;
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 1.55, priceAt: curTime }));
+  assert.ok(events2.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('TRAILING_PROFIT')));
 });
