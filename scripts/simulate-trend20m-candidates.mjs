@@ -157,63 +157,57 @@ function simulateRule(episodes, config, frictionPct = BASE_FRICTION_PCT) {
   };
 }
 
+function getLiveLaneActuals(laneLabel, desc) {
+  const statePath = 'data/trend20m-watch/2026-10-20T22-06-10-886Z/profit4-state.json';
+  if (!fs.existsSync(statePath)) return null;
+  const raw = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  const pos = (raw.positions || []).filter(p => p.laneLabel === laneLabel && p.exitAt);
+  const wins = pos.filter(p => (p.pnlUsd || 0) > 0);
+  const losses = pos.filter(p => (p.pnlUsd || 0) <= 0);
+  const grossWinUsd = wins.reduce((sum, p) => sum + (p.pnlUsd || 0), 0);
+  const grossLossUsd = losses.reduce((sum, p) => sum + Math.abs(p.pnlUsd || 0), 0);
+  const totalPnl = pos.reduce((sum, p) => sum + (p.pnlUsd || 0), 0);
+  const winRate = pos.length > 0 ? (wins.length / pos.length) * 100 : 0;
+  const pf = grossLossUsd > 0 ? (grossWinUsd / grossLossUsd) : 0;
+  const ev = pos.length > 0 ? totalPnl / pos.length : 0;
+
+  return {
+    label: `Live ${laneLabel} (Rekaman Riil)`,
+    desc,
+    trades: pos.length,
+    wins: wins.length,
+    losses: losses.length,
+    winRate,
+    totalPnl,
+    grossWinUsd,
+    grossLossUsd,
+    profitFactor: pf,
+    expectedValue: ev,
+    tradeDetails: pos.map(p => ({
+      symbol: p.symbol || p.mint.slice(0, 8),
+      mint: p.mint,
+      mcap: p.marketCapUsd || (p.entryPrice * 1e9),
+      entryPrice: p.entryPrice,
+      peakGainPct: p.facts?.peakPrice ? ((p.facts.peakPrice - p.entryPrice) / p.entryPrice) * 100 : 0,
+      maxDropPct: p.facts?.troughPrice ? ((p.entryPrice - p.facts.troughPrice) / p.entryPrice) * 100 : 0,
+      grossReturnPct: p.grossReturnPercent || 0,
+      netReturnPct: p.netReturnPercent || 0,
+      pnlUsd: p.pnlUsd || 0,
+      reason: p.lastEvent?.reason || p.exitReason || 'UNKNOWN'
+    }))
+  };
+}
+
 export function runTrend20mSimulation() {
   const episodes = loadTrend20mEpisodes();
   console.log(`Loaded ${episodes.length} unique trend20m episodes.`);
 
-  const strategies = [
-    {
-      label: 'Live T-Cons (Current)',
-      desc: 'Baseline Konservatif: SL -6%, TP +20%, Trailing +15%/-4%, Tanpa Gating',
-      minBuyShare: 0,
-      minBuyers: 1,
-      minMcap: 10000,
-      maxMcap: 0,
-      sl: 6.0,
-      tp: 20.0,
-      trailStart: 15.0,
-      trailPullback: 4.0,
-      maxHoldSec: 1800
-    },
-    {
-      label: 'Live T-Bal (Current)',
-      desc: 'Baseline Balanced: SL -8%, TP +25%, Trailing +18%/-4%, Tanpa Gating',
-      minBuyShare: 0,
-      minBuyers: 1,
-      minMcap: 10000,
-      maxMcap: 0,
-      sl: 8.0,
-      tp: 25.0,
-      trailStart: 18.0,
-      trailPullback: 4.0,
-      maxHoldSec: 2700
-    },
-    {
-      label: 'Live T-Wide (Current)',
-      desc: 'Baseline Aggressive: SL -8%, TP +35%, Trailing +20%/-5%, Tanpa Gating',
-      minBuyShare: 0,
-      minBuyers: 1,
-      minMcap: 10000,
-      maxMcap: 0,
-      sl: 8.0,
-      tp: 35.0,
-      trailStart: 20.0,
-      trailPullback: 5.0,
-      maxHoldSec: 2700
-    },
-    {
-      label: 'Live T-Run (Current)',
-      desc: 'Baseline Moonbag: SL -10%, TP +60%, Trailing +60%/-6%, Tanpa Gating',
-      minBuyShare: 0,
-      minBuyers: 1,
-      minMcap: 10000,
-      maxMcap: 0,
-      sl: 10.0,
-      tp: 60.0,
-      trailStart: 60.0,
-      trailPullback: 6.0,
-      maxHoldSec: 7200
-    },
+  const liveCons = getLiveLaneActuals('T-Cons', 'Hasil Riil Live Engine: SL -6%, TP +20%, Trailing +15%/-4%, Tanpa Gating (26 kena SL -6%)');
+  const liveBal = getLiveLaneActuals('T-Bal', 'Hasil Riil Live Engine: SL -8%, TP +25%, Trailing +18%/-4%, Tanpa Gating (16 posisi expired)');
+  const liveWide = getLiveLaneActuals('T-Wide', 'Hasil Riil Live Engine: SL -8%, TP +35%, Trailing +20%/-5%, Tanpa Gating (rugi pada koin dump)');
+  const liveRun = getLiveLaneActuals('T-Run', 'Hasil Riil Live Engine: SL -10%, TP +60%, Trailing +60%/-6%, Tanpa Gating (WR 11.1%)');
+
+  const evolvedStrategies = [
     {
       label: 'Evolved T-Trail (Dynamic Runner)',
       desc: 'Filter BuyShare >= 40%, Buyers >= 5, Mcap $50k-$500k, SL -10%, Trailing +18%/-4%, TP +35%',
@@ -228,24 +222,25 @@ export function runTrend20mSimulation() {
       maxHoldSec: 2700
     },
     {
-      label: 'Evolved T-Champion (Golden Sweet-Spot)',
-      desc: 'Juara Loop Engineering: BuyShare >= 40%, Buyers >= 5, Mcap $50k-$500k, SL -12%, TP +35%',
+      label: 'Evolved T-Golden (Champion Sweet-Spot)',
+      desc: 'Juara Loop Engineering: Filter Mcap $50k-$500k, Buyers >= 5, BuyShare >= 40%, TP +35%, Trail +18%/-4%, SL -10%',
       minBuyShare: 40.0,
       minBuyers: 5,
       minMcap: 50000,
       maxMcap: 500000,
-      sl: 12.0,
+      sl: 10.0,
       tp: 35.0,
-      trailStart: 999.0, // Pure target with SL room
-      trailPullback: 3.0,
+      trailStart: 18.0,
+      trailPullback: 4.0,
       maxHoldSec: 2700
     }
   ];
 
-  const results = strategies.map(s => simulateRule(episodes, s, BASE_FRICTION_PCT));
+  const evolvedResults = evolvedStrategies.map(s => simulateRule(episodes, s, BASE_FRICTION_PCT));
+  const results = [liveCons, liveBal, liveWide, liveRun, ...evolvedResults].filter(Boolean);
 
   // Friction sensitivity testing for Champion
-  const championConfig = strategies[5];
+  const championConfig = evolvedStrategies[1];
   const frictionLevels = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
   const sensitivityMatrix = frictionLevels.map(f => {
     const sim = simulateRule(episodes, championConfig, f);
