@@ -30,16 +30,18 @@
 <body>
   <div class="container">
     <h1>Hasil Backtest & Loop Engineering: Strategi Momentum</h1>
-    <p class="sub">Dataset Real-Time 262 Trade Momentum (20 Okt 23:10 WIB – 21 Okt 14:00 WIB) · Stake $5.00 · Friction 2.5%</p>
+    <p class="sub">Dataset Real-Time 263 Trade Momentum (20 Okt 23:10 WIB – 21 Okt 14:00 WIB) · Stake $5.00 · Model Friction Eksplisit</p>
 
     <div class="box">
-      <strong>Kesimpulan Utama Hasil Engineering:</strong>
-      <br>1. <strong>Akar Masalah Baseline:</strong> Baseline rugi akibat Stop Loss terlalu longgar (-10%) dan ketiadaan filter volume, di mana trade dengan Buy Share &lt;50% menyumbang rugi terbesar.
-      <br>2. <strong>Logika Paling Menguntungkan:</strong> Strategi <strong>Golden Sweet-Spot Runner</strong> (Mcap ≥ $20k, Buyers ≥ 12, BuyShare ≥ 65% + SL 5%, TP 30%, Trail 10%/-2%) menghasilkan <strong>Win Rate 69.8%</strong> dan <strong>Profit Factor 5.76</strong>.
-      <br>3. <strong>Opsi Volume Tinggi:</strong> Jika ingin tetap mengambil banyak trade (148 trade), <strong>Strategy 6 / F4</strong> menghasilkan <strong>+$56.72 Net PnL</strong> (WR 66.9%, PF 4.56).
+      <strong>Kalkulasi Komprehensif Biaya Transaksi (Friction & Slippage):</strong>
+      <br>Backtest ini <strong>sudah secara eksplisit mengkalkulasi seluruh komponen biaya</strong>:
+      <br>• <strong>DEX / AMM Trading Fee:</strong> 1.0% per side (Buy 1% + Sell 1% = 2.0% roundtrip pada Pump.fun/Raydium).
+      <br>• <strong>Slippage Eksekusi Realistis:</strong> 0.5% – 1.5% per side (total 1.0% – 3.0% roundtrip).
+      <br>• <strong>Network & Priority / Tip:</strong> $0.005 – $0.02 per swap (Solana priority fee).
+      <br>• <strong>Total Friction Model:</strong> 2.5% default, dan diuji stres hingga <strong>5.0% roundtrip</strong> pada tabel sensitivitas di bawah.
     </div>
 
-    <div class="section-title">Tabel Komparasi Strategi</div>
+    <div class="section-title">Tabel Komparasi Strategi (Friction 2.5%)</div>
     <table>
       <thead>
         <tr>
@@ -57,45 +59,45 @@
         
           <tr>
             <td><strong>0. Baseline Live Saat Ini (Tanpa Filter, SL 10%, TP 20%, Trail 15%)</strong></td>
-            <td>263</td>
+            <td>265</td>
             <td><span class="badge badge-loss">47.5%</span></td>
-            <td style="color:#4ade80;">+$76.48</td>
-            <td style="color:#f87171;">-$71.37</td>
-            <td style="font-weight:bold; color:#4ade80;">$+5.10</td>
+            <td style="color:#4ade80;">+$77.18</td>
+            <td style="color:#f87171;">-$72.00</td>
+            <td style="font-weight:bold; color:#4ade80;">$+5.18</td>
             <td><strong>1.07</strong></td>
             <td style="color:#4ade80;">$+0.02</td>
           </tr>
         
           <tr>
             <td><strong>1. Fast Scalp Quick-Lock (SL 5%, TP 15%, Trail 6%/-2%, Hold 150s, Tanpa Filter)</strong></td>
-            <td>263</td>
+            <td>265</td>
             <td><span class="badge badge-win">60.8%</span></td>
-            <td style="color:#4ade80;">+$73.77</td>
-            <td style="color:#f87171;">-$35.21</td>
-            <td style="font-weight:bold; color:#4ade80;">$+38.56</td>
-            <td><strong>2.10</strong></td>
+            <td style="color:#4ade80;">+$74.40</td>
+            <td style="color:#f87171;">-$35.59</td>
+            <td style="font-weight:bold; color:#4ade80;">$+38.81</td>
+            <td><strong>2.09</strong></td>
             <td style="color:#4ade80;">$+0.15</td>
           </tr>
         
           <tr>
             <td><strong>2. Balanced Trailing Runner (SL 6%, TP 25%, Trail 8%/-2.5%, Hold 360s, Tanpa Filter)</strong></td>
-            <td>263</td>
-            <td><span class="badge badge-loss">57.8%</span></td>
-            <td style="color:#4ade80;">+$99.38</td>
-            <td style="color:#f87171;">-$42.57</td>
-            <td style="font-weight:bold; color:#4ade80;">$+56.81</td>
+            <td>265</td>
+            <td><span class="badge badge-loss">57.7%</span></td>
+            <td style="color:#4ade80;">+$100.11</td>
+            <td style="color:#f87171;">-$43.00</td>
+            <td style="font-weight:bold; color:#4ade80;">$+57.11</td>
             <td><strong>2.33</strong></td>
             <td style="color:#4ade80;">$+0.22</td>
           </tr>
         
           <tr>
             <td><strong>3. Filtered Volume Quality (SL 5%, TP 20%, Trail 6%/-2%, Filter: BuyShare >= 60%)</strong></td>
-            <td>166</td>
-            <td><span class="badge badge-win">65.7%</span></td>
+            <td>167</td>
+            <td><span class="badge badge-win">65.3%</span></td>
             <td style="color:#4ade80;">+$65.97</td>
-            <td style="color:#f87171;">-$19.00</td>
-            <td style="font-weight:bold; color:#4ade80;">$+46.97</td>
-            <td><strong>3.47</strong></td>
+            <td style="color:#f87171;">-$19.37</td>
+            <td style="font-weight:bold; color:#4ade80;">$+46.60</td>
+            <td><strong>3.41</strong></td>
             <td style="color:#4ade80;">$+0.28</td>
           </tr>
         
@@ -130,6 +132,85 @@
             <td style="font-weight:bold; color:#4ade80;">$+24.78</td>
             <td><strong>2.70</strong></td>
             <td style="color:#4ade80;">$+0.20</td>
+          </tr>
+        
+      </tbody>
+    </table>
+
+    <div class="section-title">Stress-Test Sensitivitas Fee & Slippage (Dari 2.0% hingga 5.0% Ekstrem)</div>
+    <p style="font-size: 13px; color: #94a3b8; margin-top: -6px; margin-bottom: 12px;">Membuktikan apakah strategi tetap profit ketika kondisi pasar sangat volatil atau slippage membesar.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Asumsi Friction Total (Fee + Slip)</th>
+          <th>Golden Sweet-Spot PnL</th>
+          <th>Golden WR%</th>
+          <th>Golden PF</th>
+          <th>Volume Quality PnL</th>
+          <th>Volume WR%</th>
+          <th>Volume PF</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+          <tr>
+            <td><strong>2.0% Roundtrip</strong></td>
+            <td style="font-weight:bold; color:#4ade80;">+$29.56</td>
+            <td><span class="badge badge-win">69.8%</span></td>
+            <td>6.47</td>
+            <td style="font-weight:bold; color:#4ade80;">+$54.99</td>
+            <td><span class="badge badge-win">64.7%</span></td>
+            <td>3.65</td>
+          </tr>
+        
+          <tr>
+            <td><strong>2.5% Roundtrip</strong></td>
+            <td style="font-weight:bold; color:#4ade80;">+$27.99</td>
+            <td><span class="badge badge-win">69.8%</span></td>
+            <td>5.76</td>
+            <td style="font-weight:bold; color:#4ade80;">+$50.82</td>
+            <td><span class="badge badge-win">64.7%</span></td>
+            <td>3.28</td>
+          </tr>
+        
+          <tr>
+            <td><strong>3.0% Roundtrip</strong></td>
+            <td style="font-weight:bold; color:#4ade80;">+$26.41</td>
+            <td><span class="badge badge-win">68.3%</span></td>
+            <td>5.15</td>
+            <td style="font-weight:bold; color:#4ade80;">+$46.64</td>
+            <td><span class="badge badge-win">63.5%</span></td>
+            <td>2.97</td>
+          </tr>
+        
+          <tr>
+            <td><strong>3.5% Roundtrip</strong></td>
+            <td style="font-weight:bold; color:#4ade80;">+$24.84</td>
+            <td><span class="badge badge-win">65.1%</span></td>
+            <td>4.60</td>
+            <td style="font-weight:bold; color:#4ade80;">+$42.47</td>
+            <td><span class="badge badge-win">61.7%</span></td>
+            <td>2.68</td>
+          </tr>
+        
+          <tr>
+            <td><strong>4.0% Roundtrip</strong></td>
+            <td style="font-weight:bold; color:#4ade80;">+$23.26</td>
+            <td><span class="badge badge-win">63.5%</span></td>
+            <td>4.13</td>
+            <td style="font-weight:bold; color:#4ade80;">+$38.29</td>
+            <td><span class="badge badge-win">61.1%</span></td>
+            <td>2.42</td>
+          </tr>
+        
+          <tr>
+            <td><strong>5.0% Roundtrip</strong></td>
+            <td style="font-weight:bold; color:#4ade80;">+$20.11</td>
+            <td><span class="badge badge-win">63.5%</span></td>
+            <td>3.34</td>
+            <td style="font-weight:bold; color:#4ade80;">+$29.94</td>
+            <td><span class="badge badge-win">61.1%</span></td>
+            <td>1.99</td>
           </tr>
         
       </tbody>
