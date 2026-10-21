@@ -22,7 +22,7 @@ export interface GmgnTokenStatTick {
   at: number;
 }
 
-export type TokenPoolType = "momentum" | "smartmoney" | "trend20m";
+export type TokenPoolType = "momentum" | "smartmoney" | "trend20m" | "syndicate";
 
 export interface TokenSubscriptionMeta {
   mint: string;
@@ -37,11 +37,13 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
     momentum: 10,
     smartmoney: 10,
     trend20m: 10,
+    syndicate: 10,
   };
   private pools: Record<TokenPoolType, string[]> = {
     momentum: [],
     smartmoney: [],
     trend20m: [],
+    syndicate: [],
   };
   private tokenMeta = new Map<string, TokenSubscriptionMeta>();
   private cdpSession: CDPSession | null = null;
@@ -59,6 +61,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
       momentum: clamped,
       smartmoney: Math.max(10, Math.min(100, maxVipTokens)),
       trend20m: clamped,
+      syndicate: clamped,
     };
   }
 
@@ -146,6 +149,9 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
       return poolOrVip ? "smartmoney" : "momentum";
     }
     const lower = String(poolOrVip).toLowerCase();
+    if (lower === "syndicate" || lower === "syn" || lower.includes("syndicate")) {
+      return "syndicate";
+    }
     if (lower === "trend20m" || lower === "trend" || lower.includes("trend")) {
       return "trend20m";
     }
@@ -197,7 +203,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
     }
 
     // Jika token sebelumnya ada di pool lain, cabut dari pool lama
-    for (const otherPool of (["momentum", "smartmoney", "trend20m"] as TokenPoolType[])) {
+    for (const otherPool of (["momentum", "smartmoney", "trend20m", "syndicate"] as TokenPoolType[])) {
       if (otherPool !== targetPool) {
         const idx = this.pools[otherPool].indexOf(mint);
         if (idx !== -1) {
@@ -228,7 +234,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
 
   public async unsubscribeToken(mint: string): Promise<boolean> {
     this.tokenMeta.delete(mint);
-    for (const p of (["momentum", "smartmoney", "trend20m"] as TokenPoolType[])) {
+    for (const p of (["momentum", "smartmoney", "trend20m", "syndicate"] as TokenPoolType[])) {
       const idx = this.pools[p].indexOf(mint);
       if (idx !== -1) {
         this.pools[p].splice(idx, 1);
@@ -242,6 +248,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
       ...this.pools.momentum,
       ...this.pools.smartmoney,
       ...this.pools.trend20m,
+      ...this.pools.syndicate,
     ];
   }
 
@@ -277,7 +284,8 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
     return (
       this.pools.momentum.length +
       this.pools.smartmoney.length +
-      this.pools.trend20m.length
+      this.pools.trend20m.length +
+      this.pools.syndicate.length
     );
   }
 
@@ -285,6 +293,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
     momentum: number;
     smartmoney: number;
     trend20m: number;
+    syndicate: number;
     total: number;
     capacities: Record<TokenPoolType, number>;
   } {
@@ -292,6 +301,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
       momentum: this.pools.momentum.length,
       smartmoney: this.pools.smartmoney.length,
       trend20m: this.pools.trend20m.length,
+      syndicate: this.pools.syndicate.length,
       total: this.getSubscribedCount(),
       capacities: { ...this.poolCapacities },
     };
@@ -303,7 +313,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
   }
 
   public getRegularCount(): number {
-    return this.pools.momentum.length + this.pools.trend20m.length;
+    return this.pools.momentum.length + this.pools.trend20m.length + this.pools.syndicate.length;
   }
 
   public isVip(mint: string): boolean {
@@ -315,7 +325,7 @@ export class GmgnTokenWebSocketManager extends EventEmitter {
   }
 
   public get regularMints(): string[] {
-    return [...this.pools.momentum, ...this.pools.trend20m];
+    return [...this.pools.momentum, ...this.pools.trend20m, ...this.pools.syndicate];
   }
 
   public getTokenMeta(mint: string): TokenSubscriptionMeta | undefined {

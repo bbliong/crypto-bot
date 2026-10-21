@@ -69,11 +69,23 @@ test("GmgnTokenWebSocketManager: partitions quota strictly 10-10-10 across 3 poo
   assert.equal(counts3.trend20m, 10, "Trend20m pool tepat 10 slot");
   assert.equal(counts3.total, 30, "Total tepat 30 slot (10-10-10)");
 
-  // TrndMnt 1 dan TrndMnt 2 harus sudah di-evict karena FIFO kapasitas 10
-  assert.equal(manager.getSubscribedMints().includes(makeBase58("TrndMnt", 1)), false);
-  assert.equal(manager.getSubscribedMints().includes(makeBase58("TrndMnt", 2)), false);
-  // TrndMnt 12 harus ada
-  assert.equal(manager.getSubscribedMints().includes(makeBase58("TrndMnt", 12)), true);
+  // 4. Isi pool 'syndicate' dengan 11 token
+  for (let i = 1; i <= 11; i++) {
+    const mint = makeBase58("SyndMnt", i);
+    const ok = await manager.subscribeToken(mint, "syndicate");
+    assert.equal(ok, true, `Mint ${mint} harus valid`);
+  }
+
+  const counts4 = manager.getPoolCounts();
+  assert.equal(counts4.momentum, 10, "Momentum pool tidak terganggu");
+  assert.equal(counts4.smartmoney, 10, "SmartMoney pool tidak terganggu");
+  assert.equal(counts4.trend20m, 10, "Trend20m pool tidak terganggu");
+  assert.equal(counts4.syndicate, 10, "Syndicate pool tepat 10 slot");
+  assert.equal(counts4.total, 40, "Total tepat 40 slot (10-10-10-10)");
+
+  // SyndMnt 1 harus sudah di-evict karena FIFO kapasitas 10
+  assert.equal(manager.getSubscribedMints().includes(makeBase58("SyndMnt", 1)), false);
+  assert.equal(manager.getSubscribedMints().includes(makeBase58("SyndMnt", 11)), true);
 });
 
 test("GmgnTokenWebSocketManager: auto-sweeps tokens older than maxDurationSeconds (2 jam)", async () => {

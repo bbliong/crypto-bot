@@ -80,8 +80,10 @@ const interval = setInterval(() => {
   }
 }, 250);
 
+let canonicalSyncInterval = null;
 process.once('exit', () => {
   clearInterval(interval);
+  if (canonicalSyncInterval) clearInterval(canonicalSyncInterval);
   client.close();
   logWriter.close();
 });
@@ -91,11 +93,13 @@ console.log(`[worker-syndicate] 👥 Syndicate Worker started (PID ${process.pid
 
 // Auto-register canonical syndicate targets so they are immediately watched
 const targetsFile = join(dataDir, 'gmgn-monitored-wallets.json');
-if (existsSync(targetsFile)) {
+const seenCanonicalMints = new Set();
+
+function syncCanonicalTargets() {
+  if (!existsSync(targetsFile)) return;
   try {
     const raw = JSON.parse(readFileSync(targetsFile, 'utf8'));
     if (Array.isArray(raw.targets)) {
-      console.log(`[worker-syndicate] 🎯 Registering ${raw.targets.length} initial canonical syndicate targets...`);
       for (const t of raw.targets) {
         if (!t.tokenMint) continue;
         const candidate = {
@@ -112,9 +116,16 @@ if (existsSync(targetsFile)) {
         };
         runtime.register(candidate, Date.now());
         client.subscribeMint(t.tokenMint, 'syndicate', 7200);
+        if (!seenCanonicalMints.has(t.tokenMint)) {
+          seenCanonicalMints.add(t.tokenMint);
+          console.log(`[worker-syndicate] 🎯 Registered canonical target: ${candidate.symbol} (${t.tokenMint.slice(0, 8)}...)`);
+        }
       }
     }
   } catch (err) {
-    console.warn('[worker-syndicate] Error loading initial targets:', err.message);
+    console.warn('[worker-syndicate] Error loading canonical targets:', err.message);
   }
 }
+
+syncCanonicalTargets();
+canonicalSyncInterval = setInterval(syncCanonicalTargets, 15000);

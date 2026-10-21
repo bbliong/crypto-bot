@@ -28,7 +28,7 @@ export const STAIRCASE_RULES_S1: Readonly<TargetRules> = Object.freeze(validateT
   trailingDrawdownPercent: 4,
   maxHoldSeconds: 300, // 5 menit runway
   executionDelayMs: 1000,
-  maxFillWaitMs: 5000,
+  maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
@@ -68,7 +68,7 @@ export const STAIRCASE_RULES_S2: Readonly<TargetRules> = Object.freeze(validateT
   trailingDrawdownPercent: 5,
   maxHoldSeconds: 600, // 10 menit runway
   executionDelayMs: 1000,
-  maxFillWaitMs: 5000,
+  maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
@@ -104,7 +104,7 @@ export const STAIRCASE_RULES_S3: Readonly<TargetRules> = Object.freeze(validateT
   trailingDrawdownPercent: 4, // Trail 4% dari peak
   maxHoldSeconds: 600, // 10 menit
   executionDelayMs: 1000,
-  maxFillWaitMs: 5000,
+  maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
@@ -140,7 +140,7 @@ export const STAIRCASE_RULES_S4: Readonly<TargetRules> = Object.freeze(validateT
   trailingDrawdownPercent: 6,
   maxHoldSeconds: 900, // 15 menit runway
   executionDelayMs: 1000,
-  maxFillWaitMs: 5000,
+  maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
@@ -320,7 +320,7 @@ export const STAIRCASE_RULES_S1_V2: Readonly<TargetRules> = Object.freeze(valida
   trailingDrawdownPercent: 4,
   maxHoldSeconds: 420, // 7 menit
   executionDelayMs: 1000,
-  maxFillWaitMs: 5000,
+  maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
@@ -368,7 +368,7 @@ export const STAIRCASE_RULES_S5: Readonly<TargetRules> = Object.freeze(validateT
   trailingDrawdownPercent: 4,
   maxHoldSeconds: 420, // HARD TIME LIMIT 7 MENIT (Keluar sebelum jendela dump menit ke-15)
   executionDelayMs: 1000,
-  maxFillWaitMs: 5000,
+  maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
