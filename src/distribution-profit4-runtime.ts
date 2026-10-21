@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DistributionProfit4Lane, PROFIT4_LANE, PROFIT4_RULES, PROFIT4_TARGET_PERCENT } from './distribution-profit4-lane.js';
 import { DistributionBounceLane, DistributionBounceLaneV2, DistributionBounceLaneV3, DistributionBounceLaneV4, DistributionBounceLaneV5, DistributionBounceLaneV6, DistributionBounceLaneV7, BOUNCE_DUMP_LANE, BOUNCE_DUMP_LANE_V2, BOUNCE_DUMP_LANE_V3, BOUNCE_DUMP_LANE_V4, BOUNCE_DUMP_LANE_V5, BOUNCE_DUMP_LANE_V6, BOUNCE_DUMP_LANE_V7, BOUNCE_RULES, BOUNCE_RULES_V2, BOUNCE_RULES_V3, BOUNCE_RULES_V4, BOUNCE_RULES_V5, BOUNCE_RULES_V6, BOUNCE_RULES_V7, BOUNCE_TARGET_PERCENT, BOUNCE_TARGET_PERCENT_V3, BOUNCE_TARGET_PERCENT_V4, BOUNCE_TARGET_PERCENT_V5, BOUNCE_TARGET_PERCENT_V6, BOUNCE_TARGET_PERCENT_V7 } from './distribution-bounce-lane.js';
@@ -179,6 +179,7 @@ type RuntimeState = {
 
 export class DistributionProfit4Runtime {
   private states = new Map<string, RuntimeState>();
+  private readonly closedPositions = new Map<string, any>();
   private observations = new Map<string, TargetObservation>();
   private liveSignalHandler?: (signal: any) => void;
   setLiveSignalHandler(handler: (signal: any) => void) { this.liveSignalHandler = handler; }
@@ -202,6 +203,67 @@ export class DistributionProfit4Runtime {
     const saved = existsSync(this.boughtFile) ? JSON.parse(readFileSync(this.boughtFile, 'utf8')) : { mints: [] };
     if (!Array.isArray(saved.mints) || saved.mints.some((s: unknown) => typeof s !== 'string')) throw new Error('Ledger bought-mints tidak valid.');
     this.bought = new Set(saved.mints);
+
+    // Preload closed/entered positions from existing state or chunks if present
+    const stateFile = join(this.run, 'profit4-state.json');
+    if (existsSync(stateFile)) {
+      try {
+        const existing = JSON.parse(readFileSync(stateFile, 'utf8'));
+        if (Array.isArray(existing?.positions)) {
+          for (const p of existing.positions) {
+            if (p.entryAt !== null) {
+              const k = `${p.mint}:${(p.laneLabel || p.lane || 'v1').toLowerCase()}`;
+              this.closedPositions.set(k, p);
+            }
+          }
+        }
+      } catch {}
+    }
+    const chunksDir = join(this.run, 'chunks');
+    if (existsSync(chunksDir)) {
+      try {
+        const chunkEntries = readdirSync(chunksDir);
+        const buys = new Map<string, any>();
+        const sells = new Map<string, any>();
+        for (const c of chunkEntries) {
+          const evFile = join(chunksDir, c, 'profit4-events.jsonl');
+          if (!existsSync(evFile)) continue;
+          const lines = readFileSync(evFile, 'utf8').split('\n').filter(l => l.trim());
+          for (const l of lines) {
+            try {
+              const ev = JSON.parse(l);
+              const k = `${ev.mint}:${(ev.laneLabel || 'v1').toLowerCase()}`;
+              if (ev.type === 'PAPER_BUY') buys.set(k, ev);
+              else if (ev.type === 'PAPER_SELL') sells.set(k, ev);
+            } catch {}
+          }
+        }
+        for (const [k, buy] of buys.entries()) {
+          const sell = sells.get(k);
+          if (!this.closedPositions.has(k)) {
+            this.closedPositions.set(k, {
+              ...(buy.transfer || {}),
+              mint: buy.mint,
+              captureActive: !sell,
+              laneLabel: buy.laneLabel,
+              phase: sell ? 'CLOSED' : 'OPEN',
+              version: buy.version,
+              targetPercent: buy.targetPercent,
+              entryAt: buy.observedAt,
+              entryPrice: buy.priceUsd,
+              exitAt: sell?.observedAt || null,
+              exitPrice: sell?.priceUsd || null,
+              netReturnPercent: sell?.netReturnPercent ?? null,
+              pnlUsd: sell?.pnlUsd ?? null,
+              estimatedOpenNetPercent: null,
+              lastDecision: null,
+              lastEvent: sell ? { type: 'PAPER_SELL', observedAt: sell.observedAt, reason: sell.reason } : { type: 'PAPER_BUY', observedAt: buy.observedAt },
+              facts: null,
+            });
+          }
+        }
+      } catch {}
+    }
 
     const getDualLanes = (type: string) => {
       if (type === 'momentum') return ['M-Scalp', 'M-Trend'];
@@ -334,8 +396,9 @@ export class DistributionProfit4Runtime {
       // PIPELINE 1: SYNDICAT WALLETS (Bounce & Staircase)
       // ==========================================
       if (source === 'syndicate_inflow' && (this.laneType === 'bounce' || this.laneType === 'syndicate')) {
-        const keyV1 = `${transfer.mint}:v1`;
-        if (this.states.has(keyV1)) {
+        const isAlreadyTracked = Array.from(this.states.keys()).some(k => k.startsWith(`${transfer.mint}:`)) ||
+          Array.from(this.closedPositions.keys()).some(k => k.startsWith(`${transfer.mint}:`));
+        if (isAlreadyTracked) {
           if (transfer.syndicateWalletsCount) {
             const s5State = this.states.get(`${transfer.mint}:s5`);
             if (s5State) {
@@ -345,6 +408,7 @@ export class DistributionProfit4Runtime {
           return;
         }
 
+        const keyV1 = `${transfer.mint}:v1`;
         const keyV2 = `${transfer.mint}:v2`;
         const keyV3 = `${transfer.mint}:v3`;
         const keyV4 = `${transfer.mint}:v4`;
@@ -385,45 +449,52 @@ export class DistributionProfit4Runtime {
         laneS1_2.setInitialTrades(recentTrades);
         laneS5.setInitialTrades(recentTrades);
 
-        this.states.set(keyV1, { key: keyV1, transfer, observation, lane: laneV1, facts: null, active: true, registeredAt: now, laneLabel: 'V1', version: BOUNCE_RULES.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV2, { key: keyV2, transfer, observation, lane: laneV2, facts: null, active: true, registeredAt: now, laneLabel: 'V2', version: BOUNCE_RULES_V2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV3, { key: keyV3, transfer, observation, lane: laneV3, facts: null, active: true, registeredAt: now, laneLabel: 'V3', version: BOUNCE_RULES_V3.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV4, { key: keyV4, transfer, observation, lane: laneV4, facts: null, active: true, registeredAt: now, laneLabel: 'V4', version: BOUNCE_RULES_V4.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV5, { key: keyV5, transfer, observation, lane: laneV5, facts: null, active: true, registeredAt: now, laneLabel: 'V5', version: BOUNCE_RULES_V5.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV6, { key: keyV6, transfer, observation, lane: laneV6, facts: null, active: true, registeredAt: now, laneLabel: 'V6', version: BOUNCE_RULES_V6.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyV7, { key: keyV7, transfer, observation, lane: laneV7, facts: null, active: true, registeredAt: now, laneLabel: 'V7', version: BOUNCE_RULES_V7.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS1, { key: keyS1, transfer, observation, lane: laneS1, facts: null, active: true, registeredAt: now, laneLabel: 'S1', version: STAIRCASE_RULES_S1.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS2, { key: keyS2, transfer, observation, lane: laneS2, facts: null, active: true, registeredAt: now, laneLabel: 'S2', version: STAIRCASE_RULES_S2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS3, { key: keyS3, transfer, observation, lane: laneS3, facts: null, active: true, registeredAt: now, laneLabel: 'S3', version: STAIRCASE_RULES_S3.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS4, { key: keyS4, transfer, observation, lane: laneS4, facts: null, active: true, registeredAt: now, laneLabel: 'S4', version: STAIRCASE_RULES_S4.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS1_2, { key: keyS1_2, transfer, observation, lane: laneS1_2, facts: null, active: true, registeredAt: now, laneLabel: 'S1.2', version: STAIRCASE_RULES_S1_V2.version, lastDecision: null, lastEvent: null });
-        this.states.set(keyS5, { key: keyS5, transfer, observation, lane: laneS5, facts: null, active: true, registeredAt: now, laneLabel: 'S5', version: STAIRCASE_RULES_S5.version, lastDecision: null, lastEvent: null });
+        const setLaneState = (key: string, label: string, version: string, lane: any) => {
+          if (this.closedPositions.has(key)) return;
+          const existing = this.states.get(key);
+          if (existing && existing.lane.entryAt !== null) return;
+          this.states.set(key, { key, transfer, observation, lane, facts: null, active: true, registeredAt: now, laneLabel: label, version, lastDecision: null, lastEvent: null });
+        };
 
-        if (this.bought.has(`${transfer.mint}:v1`)) laneV1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        setLaneState(keyV1, 'V1', BOUNCE_RULES.version, laneV1);
+        setLaneState(keyV2, 'V2', BOUNCE_RULES_V2.version, laneV2);
+        setLaneState(keyV3, 'V3', BOUNCE_RULES_V3.version, laneV3);
+        setLaneState(keyV4, 'V4', BOUNCE_RULES_V4.version, laneV4);
+        setLaneState(keyV5, 'V5', BOUNCE_RULES_V5.version, laneV5);
+        setLaneState(keyV6, 'V6', BOUNCE_RULES_V6.version, laneV6);
+        setLaneState(keyV7, 'V7', BOUNCE_RULES_V7.version, laneV7);
+        setLaneState(keyS1, 'S1', STAIRCASE_RULES_S1.version, laneS1);
+        setLaneState(keyS2, 'S2', STAIRCASE_RULES_S2.version, laneS2);
+        setLaneState(keyS3, 'S3', STAIRCASE_RULES_S3.version, laneS3);
+        setLaneState(keyS4, 'S4', STAIRCASE_RULES_S4.version, laneS4);
+        setLaneState(keyS1_2, 'S1.2', STAIRCASE_RULES_S1_V2.version, laneS1_2);
+        setLaneState(keyS5, 'S5', STAIRCASE_RULES_S5.version, laneS5);
+
+        if (this.bought.has(`${transfer.mint}:v1`)) { if (!this.closedPositions.has(keyV1)) laneV1.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v2`)) laneV2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:v2`)) { if (!this.closedPositions.has(keyV2)) laneV2.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v3`)) laneV3.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:v3`)) { if (!this.closedPositions.has(keyV3)) laneV3.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV3.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v4`)) laneV4.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:v4`)) { if (!this.closedPositions.has(keyV4)) laneV4.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV4.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v5`)) laneV5.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:v5`)) { if (!this.closedPositions.has(keyV5)) laneV5.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV5.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v6`)) laneV6.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:v6`)) { if (!this.closedPositions.has(keyV6)) laneV6.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV6.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:v7`)) laneV7.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:v7`)) { if (!this.closedPositions.has(keyV7)) laneV7.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV7.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:s1`)) laneS1.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:s1`)) { if (!this.closedPositions.has(keyS1)) laneS1.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneS1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:s2`)) laneS2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:s2`)) { if (!this.closedPositions.has(keyS2)) laneS2.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneS2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:s3`)) laneS3.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:s3`)) { if (!this.closedPositions.has(keyS3)) laneS3.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneS3.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:s4`)) laneS4.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:s4`)) { if (!this.closedPositions.has(keyS4)) laneS4.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneS4.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:s1_2`)) laneS1_2.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:s1_2`)) { if (!this.closedPositions.has(keyS1_2)) laneS1_2.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneS1_2.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:s5`)) laneS5.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        if (this.bought.has(`${transfer.mint}:s5`)) { if (!this.closedPositions.has(keyS5)) laneS5.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneS5.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
 
@@ -657,7 +728,9 @@ export class DistributionProfit4Runtime {
         state.lane.step(facts);
         if (state.lane.phase === 'CLOSED' || state.lane.phase === 'CENSORED') {
           state.active = false;
-          if (state.lane.entryAt === null) {
+          if (state.lane.entryAt !== null) {
+            this.closedPositions.set(state.key, this.serializeState(state, now));
+          } else {
             this.states.delete(state.key);
           }
         } else if (state.lane.phase === 'ENTRY_PENDING') {
@@ -735,35 +808,71 @@ export class DistributionProfit4Runtime {
     this.persist(now);
   }
 
-  private persist(now: number) {
-    const relevantStates = [...this.states.values()].filter(s => s.lane.entryAt !== null || s.active);
-    atomicProfit4Json(join(this.run, 'profit4-state.json'), { observedAt: now, paperLane: this.laneName, rounds: 1,
-      execution: 'PAPER_QUOTE', status: 'EXPERIMENTAL', targetPercent: this.targetPercent, rules: this.laneRules,
-      recentEvents: this.recentEvents,
-      positions: relevantStates.map(s => ({ ...s.transfer, captureActive: s.active,
-        laneLabel: s.laneLabel, phase: s.lane.phase, version: s.lane.rules.version, targetPercent: this.targetPercent,
-        entryAt: s.lane.entryAt, entryPrice: s.lane.entryPrice, exitAt: s.lane.exitAt, exitPrice: s.lane.exitPrice,
-        netReturnPercent: s.lane.netReturnPercent, pnlUsd: s.lane.netReturnPercent === null ? null : s.lane.netReturnPercent / 100 * s.lane.rules.stakeUsd,
-        estimatedOpenNetPercent: s.lane.entryAt !== null && s.lane.exitAt === null && s.active && s.facts?.price !== null && s.facts?.price !== undefined
-          ? s.lane.net(s.facts.price) : null, lastDecision: s.lastDecision,
-        lastEvent: s.lastEvent ? { type: s.lastEvent.type, observedAt: s.lastEvent.observedAt, reason: s.lastEvent.reason, reasons: s.lastEvent.reasons } : null,
-        facts: s.facts,
-        swapBuyPrice: s.swapBuy?.impliedPriceUsd ?? null,
-        swapBuyOk: s.swapBuy?.ok ?? null,
-        swapBuyError: s.swapBuy?.error ?? null,
-        swapBuySpreadPct: (s.swapBuy?.impliedPriceUsd && s.lane.entryPrice)
+  private serializeState(s: RuntimeState, now: number): any {
+    return {
+      ...s.transfer,
+      captureActive: s.active,
+      laneLabel: s.laneLabel,
+      phase: s.lane.phase,
+      version: s.lane.rules.version,
+      targetPercent: this.targetPercent,
+      entryAt: s.lane.entryAt,
+      entryPrice: s.lane.entryPrice,
+      exitAt: s.lane.exitAt,
+      exitPrice: s.lane.exitPrice,
+      netReturnPercent: s.lane.netReturnPercent,
+      pnlUsd: s.lane.netReturnPercent === null ? null : (s.lane.netReturnPercent / 100) * s.lane.rules.stakeUsd,
+      estimatedOpenNetPercent:
+        s.lane.entryAt !== null && s.lane.exitAt === null && s.active && s.facts?.price !== null && s.facts?.price !== undefined
+          ? s.lane.net(s.facts.price)
+          : null,
+      lastDecision: s.lastDecision,
+      lastEvent: s.lastEvent
+        ? { type: s.lastEvent.type, observedAt: s.lastEvent.observedAt, reason: s.lastEvent.reason, reasons: s.lastEvent.reasons }
+        : null,
+      facts: s.facts,
+      swapBuyPrice: s.swapBuy?.impliedPriceUsd ?? null,
+      swapBuyOk: s.swapBuy?.ok ?? null,
+      swapBuyError: s.swapBuy?.error ?? null,
+      swapBuySpreadPct:
+        s.swapBuy?.impliedPriceUsd && s.lane.entryPrice
           ? ((s.swapBuy.impliedPriceUsd - s.lane.entryPrice) / s.lane.entryPrice) * 100
           : null,
-        swapBuyLatencyMs: s.swapBuy?.latencyMs ?? null,
-        swapSellPrice1: s.swapSell1?.impliedPriceUsd ?? null,
-        swapSellPrice2: s.swapSell2?.impliedPriceUsd ?? null,
-        swapSellOk1: s.swapSell1?.ok ?? null,
-        swapSellOk2: s.swapSell2?.ok ?? null,
-        swapSellDeltaPct: s.swapSellDeltaPct ?? null,
-        swapSellSpreadPct: (s.swapSell2?.impliedPriceUsd && s.lane.exitPrice)
+      swapBuyLatencyMs: s.swapBuy?.latencyMs ?? null,
+      swapSellPrice1: s.swapSell1?.impliedPriceUsd ?? null,
+      swapSellPrice2: s.swapSell2?.impliedPriceUsd ?? null,
+      swapSellOk1: s.swapSell1?.ok ?? null,
+      swapSellOk2: s.swapSell2?.ok ?? null,
+      swapSellDeltaPct: s.swapSellDeltaPct ?? null,
+      swapSellSpreadPct:
+        s.swapSell2?.impliedPriceUsd && s.lane.exitPrice
           ? ((s.swapSell2.impliedPriceUsd - s.lane.exitPrice) / s.lane.exitPrice) * 100
           : null,
-        swapSellLatencyMs: (s.swapSell1?.latencyMs ?? 0) + (s.swapSell2?.latencyMs ?? 0),
-      })) });
+      swapSellLatencyMs: (s.swapSell1?.latencyMs ?? 0) + (s.swapSell2?.latencyMs ?? 0),
+    };
+  }
+
+  private persist(now: number) {
+    const relevantStates = [...this.states.values()].filter(s => s.lane.entryAt !== null || s.active);
+    const combinedPositions = new Map<string, any>();
+    for (const [k, p] of this.closedPositions.entries()) {
+      combinedPositions.set(k, p);
+    }
+    for (const s of relevantStates) {
+      combinedPositions.set(s.key, this.serializeState(s, now));
+    }
+    const positions = Array.from(combinedPositions.values());
+
+    atomicProfit4Json(join(this.run, 'profit4-state.json'), {
+      observedAt: now,
+      paperLane: this.laneName,
+      rounds: 1,
+      execution: 'PAPER_QUOTE',
+      status: 'EXPERIMENTAL',
+      targetPercent: this.targetPercent,
+      rules: this.laneRules,
+      recentEvents: this.recentEvents,
+      positions,
+    });
   }
 }

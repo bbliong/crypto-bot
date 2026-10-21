@@ -8,11 +8,26 @@ import { RotatingJsonlWriter } from '../src/rotating-jsonl.js';
 const dataDir = join(process.cwd(), 'data', 'syndicate-watch');
 mkdirSync(dataDir, { recursive: true });
 
-const runId = new Date().toISOString().replace(/[:.]/g, '-');
+let runId = process.env.RUN_ID;
+const controlFile = join(dataDir, 'worker-control.json');
+if (!runId && existsSync(controlFile)) {
+  try {
+    const prev = JSON.parse(readFileSync(controlFile, 'utf8'));
+    if (prev?.run && typeof prev.run === 'string') {
+      const parts = prev.run.split('/');
+      const candidateRunId = parts[parts.length - 1];
+      if (candidateRunId && existsSync(join(dataDir, candidateRunId))) {
+        runId = candidateRunId;
+      }
+    }
+  } catch {}
+}
+if (!runId) {
+  runId = new Date().toISOString().replace(/[:.]/g, '-');
+}
 const runDir = join(dataDir, runId);
 mkdirSync(runDir, { recursive: true });
 
-const controlFile = join(dataDir, 'worker-control.json');
 atomicProfit4Json(controlFile, {
   pid: process.pid,
   run: `data/syndicate-watch/${runId}`,
