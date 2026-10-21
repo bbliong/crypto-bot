@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   DistributionMomentumScalpLane,
   DistributionMomentumTrendLane,
+  DistributionMomentumGoldenLane,
   M_SCALP_RULES,
   M_TREND_RULES,
+  M_GOLDEN_RULES,
 } from '../src/distribution-evolved-momentum-lanes.js';
 import type { TargetFacts, TargetPaperEvent, TargetEvent } from '../src/distribution-target-lane.js';
 
@@ -123,4 +125,61 @@ test('M-Trend rejects mcap < $20k and buyers < 5', () => {
   const weakBuyersFacts = baseFacts(now, 0.000025, 25000, 3, 150);
   lane.step(weakBuyersFacts);
   assert.equal(events.filter(e => e.type === 'PAPER_ENTRY_SIGNAL').length, 0);
+});
+
+test('M-Golden requires Mcap >= $20k, buyers >= 12, buyShare >= 65% and triggers trailing exit', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionMomentumGoldenLane('MintGolden1', e => events.push(e));
+
+  let now = 100000;
+  // 1. Buyers = 8 (< 12) -> reject
+  const weakBuyersFacts = baseFacts(now, 0.000025, 25000, 8, 200);
+  lane.step(weakBuyersFacts);
+  assert.equal(events.filter(e => e.type === 'PAPER_ENTRY_SIGNAL').length, 0);
+
+  // 2. Buyers = 15, BuyShare = 75%, Mcap = $25k -> PASS
+  const goldenFacts = baseFacts(now, 0.000025, 25000, 15, 200);
+  lane.step({ ...goldenFacts, now, priceAt: now });
+  now += 1000;
+  lane.step({ ...goldenFacts, now, priceAt: now });
+  now += 1100;
+  lane.step({ ...goldenFacts, now, priceAt: now }); // ENTRY_PENDING
+  now += 1200; // > executionDelayMs
+  lane.step({ ...goldenFacts, now, priceAt: now }); // FILLS into OPEN
+
+  assert.equal(lane.phase, 'OPEN');
+  assert.equal(lane.entryPrice, 0.000025);
+
+  const buySignal = events.find(e => e.type === 'PAPER_ENTRY_SIGNAL');
+  assert.ok(buySignal, 'M-Golden harus memicu PAPER_ENTRY_SIGNAL');
+  assert.equal((buySignal as any).laneLabel, 'M-Golden');
+
+  // 3. Rally +12% (memicu trailing start +10%)
+  now += 10000;
+  const rallyFacts: TargetFacts = {
+    ...goldenFacts,
+    now,
+    price: 0.000028,
+    priceAt: now,
+    peakPrice: 0.000028,
+  };
+  lane.step(rallyFacts);
+
+  // 4. Retrace -2.5% dari peak (memicu trailing exit 2.0%)
+  now += 1000;
+  const dropFacts: TargetFacts = {
+    ...rallyFacts,
+    now,
+    price: 0.0000272,
+    priceAt: now,
+  };
+  lane.step(dropFacts); // Triggers EXIT_PENDING
+
+  const exitSignal = events.find(e => e.type === 'PAPER_EXIT_SIGNAL');
+  assert.ok(exitSignal, 'Harus memicu trailing profit exit');
+
+  // Fill exit
+  now += 1200;
+  lane.step({ ...dropFacts, now, priceAt: now });
+  assert.equal(lane.phase, 'CLOSED');
 });

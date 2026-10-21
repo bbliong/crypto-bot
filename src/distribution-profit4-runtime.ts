@@ -72,8 +72,10 @@ import {
 import {
   DistributionMomentumScalpLane,
   DistributionMomentumTrendLane,
+  DistributionMomentumGoldenLane,
   M_SCALP_RULES,
   M_TREND_RULES,
+  M_GOLDEN_RULES,
   DistributionMApex10kLane,
   DistributionMSafe10kLane,
   DistributionMRunner15kLane,
@@ -161,11 +163,12 @@ type RuntimeState = {
     | DistributionMRunner15kLane
     | DistributionMomentumScalpLane
     | DistributionMomentumTrendLane
+    | DistributionMomentumGoldenLane
     | DistributionTrend20mLane;
   facts: TargetFacts | null;
   active: boolean;
   registeredAt?: number;
-  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'M-Golden' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -266,7 +269,7 @@ export class DistributionProfit4Runtime {
     }
 
     const getDualLanes = (type: string) => {
-      if (type === 'momentum') return ['M-Scalp', 'M-Trend'];
+      if (type === 'momentum') return ['M-Scalp', 'M-Trend', 'M-Golden'];
       if (type === 'syndicate') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5'];
       if (type === 'smartmoney') return ['G2', 'G2.1', 'G2.2', 'OZ1'];
       if (type === 'bounce') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1', 'M-Apex10k', 'M-Safe10k', 'M-Runner15k'];
@@ -509,17 +512,22 @@ export class DistributionProfit4Runtime {
         if (this.states.has(keyScalp)) return;
 
         const keyTrend = `${transfer.mint}:mtrend`;
+        const keyGolden = `${transfer.mint}:mgolden`;
 
         const laneScalp = new DistributionMomentumScalpLane(transfer.mint, makeOnEvent(keyScalp, 'M-Scalp'));
         const laneTrend = new DistributionMomentumTrendLane(transfer.mint, makeOnEvent(keyTrend, 'M-Trend'));
+        const laneGolden = new DistributionMomentumGoldenLane(transfer.mint, makeOnEvent(keyGolden, 'M-Golden'));
 
         this.states.set(keyScalp, { key: keyScalp, transfer, observation, lane: laneScalp, facts: null, active: true, registeredAt: now, laneLabel: 'M-Scalp', version: M_SCALP_RULES.version, lastDecision: null, lastEvent: null });
         this.states.set(keyTrend, { key: keyTrend, transfer, observation, lane: laneTrend, facts: null, active: true, registeredAt: now, laneLabel: 'M-Trend', version: M_TREND_RULES.version, lastDecision: null, lastEvent: null });
+        this.states.set(keyGolden, { key: keyGolden, transfer, observation, lane: laneGolden, facts: null, active: true, registeredAt: now, laneLabel: 'M-Golden', version: M_GOLDEN_RULES.version, lastDecision: null, lastEvent: null });
 
         if (this.bought.has(`${transfer.mint}:mscalp`)) laneScalp.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneScalp.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
         if (this.bought.has(`${transfer.mint}:mtrend`)) laneTrend.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneTrend.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        if (this.bought.has(`${transfer.mint}:mgolden`)) laneGolden.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneGolden.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
 
       // ==========================================

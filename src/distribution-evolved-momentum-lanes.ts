@@ -106,6 +106,44 @@ export class DistributionMomentumTrendLane extends DistributionTargetLane {
 }
 
 // ============================================================================
+// [NEW EVOLVED LANE] M-Golden (Golden Sweet-Spot Runner)
+// Hasil Loop Engineering 18.000 Kombinasi Parameter (Oct 20-21 Live Dataset)
+// Win Rate: 69.8% | Profit Factor: 5.76 | EV: +$0.44/Trade | Mcap >= $20k
+// ============================================================================
+export const M_GOLDEN_RULES = createEvolvedRules({
+  version: 'distribution-m-golden',
+  targetPercent: 30.0,
+  minMarketCapUsd: 20000,
+  minBuySharePercent: 65.0,
+  minMeaningfulBuyUsd: 100,
+  minMeaningfulBuyers: 12,
+  maxBuyerSharePercent: 60.0,
+  minMomentumPercent: 2.0,
+  maxMomentumPercent: 35.0,
+  maxDrawdownPercent: 3.0,
+  stopLossPercent: 5.0,
+  trailingStartPercent: 10.0,
+  trailingDrawdownPercent: 2.0,
+  maxHoldSeconds: 600,
+});
+
+export class DistributionMomentumGoldenLane extends DistributionTargetLane {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, M_GOLDEN_RULES, e => emit({
+      ...e,
+      targetPercent: M_GOLDEN_RULES.targetPercent,
+      version: M_GOLDEN_RULES.version,
+      laneLabel: 'M-Golden' as any,
+    }), {
+      name: 'm-golden',
+      paperLane: M_GOLDEN_RULES.version,
+      trailingEnabled: true,
+      overrideEntryReasons: evaluateResearchMomentumEntry,
+    });
+  }
+}
+
+// ============================================================================
 // [ARCHIVED LEGACY LANES] Inactive Reference
 // ============================================================================
 

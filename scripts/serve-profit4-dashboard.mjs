@@ -288,7 +288,7 @@ function computeGlobalGroupsOverview(root) {
   }
 
   const groupsOverview = {
-    momentum: { key: 'momentum', label: 'Group Momentum', desc: 'M-Scalp & M-Trend (Quality-Gated New Pair Momentum)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+    momentum: { key: 'momentum', label: 'Group Momentum', desc: 'M-Scalp, M-Trend & M-Golden (Quality-Gated New Pair Momentum)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     syndicate: { key: 'syndicate', label: 'Group Sindikat', desc: 'Bounce Dip V1-V7 & Staircase Akumulasi S1-S5', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     smartmoney: { key: 'smartmoney', label: 'Group Smart Money', desc: '117 Whale GMGN Inflow, Convergence & Mirror Oezank', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     trend20m: { key: 'trend20m', label: 'Group Trend 20m', desc: 'GMGN Trend 20m (T-Cons, T-Bal, T-Wide, T-Run)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
