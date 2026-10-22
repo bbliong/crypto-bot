@@ -105,14 +105,14 @@ async function runDutyCycle() {
     if (shouldStop()) break;
 
     // ==============================================================
-    // FASE 2: SELEKSI TOP 5 TOKEN TERBARU (>10 WALLET) -> 1 WALLET/TOKEN
+    // FASE 2: SELEKSI TOP 5 TOKEN TERBARU (>=4 WALLET) -> 1 WALLET/TOKEN
     // ==============================================================
-    console.log(`\n[FASE 2/3] 🎯 Evaluasi Seleksi: Top 5 Token Sindikat Terbaru (>10 Wallet)...`);
+    console.log(`\n[FASE 2/3] 🎯 Evaluasi Seleksi: Top 5 Token Sindikat Terbaru (>=4 Wallet)...`);
     updateControlState({ phase: 'TARGET_SELECTION' });
 
     const selector = new SyndicateWalletSelector({
       storage,
-      minWallets: 10,
+      minWallets: 4,
       topLimit: 5
     });
 

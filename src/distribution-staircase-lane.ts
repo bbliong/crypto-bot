@@ -179,7 +179,7 @@ export abstract class BaseDistributionStaircaseLane extends DistributionTargetLa
     const reasons: string[] = [];
     if (!r.enabled) reasons.push('LANE_DISABLED');
 
-    const t0 = f.transferAt > 0 ? f.transferAt : (this.firstTradeAt ?? f.firstAt);
+    const t0 = (this.firstTradeAt ?? (f.firstAt && f.firstAt > 0 ? f.firstAt : null) ?? (f.transferAt > 0 ? f.transferAt : null));
     if (t0 === null) { reasons.push('AWAITING_FIRST_TRADE'); return reasons; }
 
     const elapsedMs = f.now - t0;

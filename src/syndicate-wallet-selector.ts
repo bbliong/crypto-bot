@@ -21,7 +21,7 @@ export class SyndicateWalletSelector {
   constructor(options: SelectorOptions = {}) {
     this.storage = options.storage || new SyndicateSqliteStorage();
     this.outputPath = options.outputPath || '/home/bbliong/project/crypto-bot/data/syndicate-watch/gmgn-monitored-wallets.json';
-    this.minWallets = options.minWallets ?? 10;
+    this.minWallets = options.minWallets ?? 4;
     this.topLimit = options.topLimit ?? 5;
   }
 

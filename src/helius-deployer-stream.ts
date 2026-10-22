@@ -277,7 +277,7 @@ export class HeliusDeployerStream extends EventEmitter {
           this.storage = new SyndicateSqliteStorage(dbPath);
         }
 
-        const inserted = this.storage.insertTransfers(transfers);
+        const inserted = this.storage.insertTransfers(transfers, 'helius-stream');
         console.log(`💾 [HELIUS-STREAM] Inserted ${inserted} records to SQLite database.`);
 
         if (this.autoSyncDashboard) {

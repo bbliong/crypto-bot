@@ -88,10 +88,11 @@ export class SyndicateSqliteStorage {
     `);
   }
 
-  public insertTransfers(transfers: TransferRecord[], cycleId: string): void {
-    if (!transfers || transfers.length === 0) return;
+  public insertTransfers(transfers: TransferRecord[], cycleId: string = 'stream'): number {
+    if (!transfers || transfers.length === 0) return 0;
 
     const now = Date.now();
+    const effectiveCycleId = cycleId || 'stream';
     const insertStmt = this.db.prepare(`
       INSERT INTO syndicate_transfers (
         tx_signature, mint, token_name, symbol,
@@ -118,10 +119,11 @@ export class SyndicateSqliteStorage {
         t.timeWib,
         t.syndicateId || null,
         t.syndicateName || null,
-        cycleId,
+        effectiveCycleId,
         now
       );
     }
+    return transfers.length;
   }
 
   public recomputeCandidates(cycleId: string): CandidateRecord[] {

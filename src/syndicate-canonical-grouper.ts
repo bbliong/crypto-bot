@@ -179,11 +179,75 @@ export function buildCanonicalSyndicateGroups(rootDir = '/home/bbliong/project/c
     }
   }
 
+  // Ingest latest candidates directly from SQLite database if available
+  const dbPath = path.join(rootDir, 'data', 'crypto-bot.sqlite');
+  if (fs.existsSync(dbPath)) {
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(dbPath);
+      const rows = db.prepare(`
+        SELECT 
+          mint, name, symbol, wallets_count, 
+          latest_transfer_at, latest_transfer_wib,
+          sample_wallet, deployer_address
+        FROM syndicate_candidates 
+        WHERE latest_transfer_at IS NOT NULL
+        ORDER BY latest_transfer_at DESC
+        LIMIT 100
+      `).all();
+
+      for (const row of rows) {
+        if (!row.mint) continue;
+        const dname = getCanonicalName(row.name, row.symbol);
+        if (!groupsMap.has(dname)) {
+          groupsMap.set(dname, {
+            displayName: dname,
+            totalWallets: 0,
+            mints: new Set(),
+            latestTs: 0,
+            latestMint: row.mint,
+            latestTimeWib: row.latest_transfer_wib || '',
+            latestSampleWallet: row.sample_wallet || null,
+            latestDeployer: row.deployer_address || null,
+            mintDetails: []
+          });
+        }
+
+        const g = groupsMap.get(dname)!;
+        if (!g.mints.has(row.mint)) {
+          g.mints.add(row.mint);
+          g.totalWallets += (row.wallets_count || 1);
+          const ts = row.latest_transfer_at || parseWibTimestamp(row.latest_transfer_wib || '');
+          g.mintDetails.push({
+            mint: row.mint,
+            name: row.name,
+            symbol: row.symbol,
+            wallets: row.wallets_count,
+            ts,
+            timeWib: row.latest_transfer_wib,
+            sampleWallet: row.sample_wallet,
+            deployer: row.deployer_address,
+          });
+
+          if (ts > g.latestTs) {
+            g.latestTs = ts;
+            g.latestMint = row.mint;
+            g.latestTimeWib = row.latest_transfer_wib;
+            if (row.sample_wallet) g.latestSampleWallet = row.sample_wallet;
+            if (row.deployer_address) g.latestDeployer = row.deployer_address;
+          }
+        }
+      }
+    } catch {}
+  }
+
   // Sort descending by recency
   const sorted = Array.from(groupsMap.values()).sort((a, b) => b.latestTs - a.latestTs);
 
-  // Top 5 with totalWallets >= 10 are watching targets
-  const eligibleWatched = sorted.filter(g => g.totalWallets >= 10).slice(0, 5);
+  // Top groups with totalWallets >= 4 are watching targets (fallback to >= 1 if none)
+  const eligibleWatched = (sorted.filter(g => g.totalWallets >= 4).length >= 5
+    ? sorted.filter(g => g.totalWallets >= 4)
+    : sorted).slice(0, 5);
   const watchedNames = new Set(eligibleWatched.map(g => g.displayName));
 
   return sorted.map((g, idx) => ({
@@ -201,21 +265,30 @@ export function buildCanonicalSyndicateGroups(rootDir = '/home/bbliong/project/c
   }));
 }
 
-export function selectTopSyndicateWatchingTargets(rootDir = '/home/bbliong/project/crypto-bot', minWallets = 10, limit = 5): MonitoredTarget[] {
-  // If verified targets already exist with explicit GMGN validation, preserve them
+export function selectTopSyndicateWatchingTargets(rootDir = '/home/bbliong/project/crypto-bot', minWallets = 4, limit = 5): MonitoredTarget[] {
+  const groups = buildCanonicalSyndicateGroups(rootDir);
+  const eligible = groups.filter(g => g.totalWallets >= minWallets);
+  const topGroups = (eligible.length >= limit ? eligible : groups).slice(0, limit);
+
+  // If verified targets already exist with explicit GMGN validation, check recency
   const monitoredWalletsFile = path.join(rootDir, 'data', 'syndicate-watch', 'gmgn-monitored-wallets.json');
   if (fs.existsSync(monitoredWalletsFile)) {
     try {
       const existing = JSON.parse(fs.readFileSync(monitoredWalletsFile, 'utf8'));
       if (Array.isArray(existing.targets) && existing.targets.length >= limit && existing.targets.some((t: any) => t.gmgnLatestActivity)) {
-        return existing.targets.slice(0, limit);
+        const topExisting = existing.targets[0];
+        const existingTs = parseWibTimestamp(topExisting.latestTransferWib || '');
+        const nowSec = Math.floor(Date.now() / 1000);
+        const isRecent = existingTs > 0 && (nowSec - existingTs < 4 * 3600);
+        const hasDumpedAll = existing.targets.every((t: any) => typeof t.gmgnLatestActivity === 'string' && t.gmgnLatestActivity.toLowerCase().includes('sell'));
+        const newestGroupTs = topGroups[0]?.latestTransferAt || 0;
+        // Keep existing only if recent (< 4h), not fully dumped, and no much newer candidates exist
+        if (isRecent && !hasDumpedAll && newestGroupTs <= existingTs + 3600) {
+          return existing.targets.slice(0, limit);
+        }
       }
     } catch {}
   }
-
-  const groups = buildCanonicalSyndicateGroups(rootDir);
-  const eligible = groups.filter(g => g.totalWallets >= minWallets);
-  const topGroups = eligible.slice(0, limit);
 
   // Attempt to select exclusive recipient wallets from SQLite where token is strictly latest
   const usedWallets = new Set<string>();
@@ -259,6 +332,21 @@ export function selectTopSyndicateWatchingTargets(rootDir = '/home/bbliong/proje
             break;
           }
         }
+
+        if (!chosenWallet) {
+          const directRows = db.prepare(`
+            SELECT to_address FROM syndicate_transfers 
+            WHERE mint = ? AND to_address IS NOT NULL 
+            LIMIT 10
+          `).all(g.latestMint);
+          for (const r of directRows) {
+            if (!usedWallets.has(r.to_address)) {
+              chosenWallet = r.to_address;
+              usedWallets.add(r.to_address);
+              break;
+            }
+          }
+        }
       } catch {}
     }
 
@@ -280,7 +368,7 @@ export function selectTopSyndicateWatchingTargets(rootDir = '/home/bbliong/proje
 
 export function syncCanonicalSyndicateOutputs(rootDir = '/home/bbliong/project/crypto-bot') {
   const groups = buildCanonicalSyndicateGroups(rootDir);
-  const targets = selectTopSyndicateWatchingTargets(rootDir, 10, 5);
+  const targets = selectTopSyndicateWatchingTargets(rootDir, 4, 5);
 
   const syndicateWatchDir = path.join(rootDir, 'data', 'syndicate-watch');
   const profit4WatchDir = path.join(rootDir, 'data', 'profit4-watch');
@@ -299,7 +387,7 @@ export function syncCanonicalSyndicateOutputs(rootDir = '/home/bbliong/project/c
   const monitoredWalletsFile = path.join(syndicateWatchDir, 'gmgn-monitored-wallets.json');
   fs.writeFileSync(monitoredWalletsFile, JSON.stringify({
     updatedAt: new Date().toISOString(),
-    selectionRule: 'Top 5 newest unique canonical syndicate groups with >=10 wallets, 1 wallet per syndicate',
+    selectionRule: 'Top 5 newest unique canonical syndicate groups with >=4 wallets, 1 wallet per syndicate',
     watchingTargetsCount: targets.length,
     targets
   }, null, 2), 'utf8');

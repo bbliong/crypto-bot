@@ -55,7 +55,7 @@ export class DistributionBounceLane extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
@@ -188,7 +188,7 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
@@ -352,7 +352,7 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
@@ -523,7 +523,7 @@ export class DistributionBounceLaneV4 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
         if (f.holderGrowth15s !== null && f.holderGrowth15s < -5) reasons.push('HOLDERS_DECLINING_RAPIDLY');
@@ -730,7 +730,7 @@ export class DistributionBounceLaneV5 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
@@ -972,7 +972,7 @@ export class DistributionBounceLaneV6 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
@@ -1209,7 +1209,7 @@ export class DistributionBounceLaneV7 extends DistributionTargetLane {
         const reasons: string[] = [];
         if (!r.enabled) reasons.push('LANE_DISABLED');
         if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000 || f.now - f.transferAt < r.minTransferAgeSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
-        const waitStart = f.transferAt > 0 ? f.transferAt : (f.firstAt ?? f.now);
+        const waitStart = (f.firstAt && f.firstAt > 0) ? f.firstAt : (f.transferAt > 0 ? f.transferAt : f.now);
         if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
         if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 2000 || f.price < 0.000001 || f.price > 10.0 || !Number.isFinite(f.price)) reasons.push('PRICE_MISSING_OR_STALE');
 
