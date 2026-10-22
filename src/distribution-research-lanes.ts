@@ -15,6 +15,12 @@ export function evaluateResearchMomentumEntry(f: TargetFacts, r: TargetRules): s
   if (f.firstAt === null || f.now - f.firstAt < r.observationSeconds * 1000) reasons.push('OBSERVATION_NOT_COMPLETE');
   if (f.firstAt !== null && f.now - f.firstAt > r.maxEntryWaitSeconds * 1000) reasons.push('ENTRY_WINDOW_EXPIRED');
   if (f.price === null || f.priceAt === null || f.priceAt > f.now || f.now - f.priceAt > 5000) reasons.push('PRICE_MISSING_OR_STALE');
+
+  // Anti-Genesis Trap: Token minimal harus berusia r.minTransferAgeSeconds (default 30s) sejak pertama kali muncul
+  if (f.transferAt > 0 && f.now - f.transferAt < (r.minTransferAgeSeconds ?? 30) * 1000) {
+    reasons.push('TOKEN_TOO_FRESH_GENESIS_RISK');
+  }
+
   // Hard Filter: Market Cap minimal untuk momentum (default $10k, menolak dev-dump genesis micro-cap)
   const estimatedMcapUsd = (f.price ?? 0) * 1_000_000_000;
   const requiredMcap = (r as any).minMarketCapUsd ?? 10000;
@@ -25,10 +31,15 @@ export function evaluateResearchMomentumEntry(f: TargetFacts, r: TargetRules): s
   // Proteksi drawdown: harga tidak boleh sedang anjlok dari peak lokal (maksimal r.maxDrawdownPercent)
   if (f.drawdownPercent === null || f.drawdownPercent > r.maxDrawdownPercent) reasons.push('PRICE_DRAWDOWN_EXCEEDED');
   
-  // Proteksi Whale Sell Dump: tolak jika sell terbesar melebihi batas (default r.maxLargestSellUsd atau $250)
-  const maxSell = typeof (r as any).maxLargestSellUsd === 'number' ? (r as any).maxLargestSellUsd : 250;
+  // Proteksi Whale Sell Dump: tolak jika sell terbesar melebihi batas (default r.maxLargestSellUsd atau $60)
+  const maxSell = typeof (r as any).maxLargestSellUsd === 'number' ? (r as any).maxLargestSellUsd : 60;
   if (f.largestSellUsd >= maxSell) {
     reasons.push(maxSell <= 100 ? 'LARGEST_SELL_TOO_HIGH_WHALE_DUMP' : 'LARGE_SELL_ALREADY_PRESENT');
+  }
+
+  // Sell Volume Overwhelming Guard: tolak jika tekanan jual melebihi 2.5x volume beli
+  if (f.sellUsd > (f.meaningfulBuyUsd * 2.5) && f.sellUsd >= 100) {
+    reasons.push('SELL_VOLUME_OVERWHELMING');
   }
 
   // Anti-FOMO Guard: tolak token yang return observasi sebelum masuk sudah melonjak terlalu tinggi
@@ -38,7 +49,13 @@ export function evaluateResearchMomentumEntry(f: TargetFacts, r: TargetRules): s
     }
   }
 
-  if (typeof f.devHoldingSharePercent === 'number' && f.devHoldingSharePercent > 20) reasons.push('DEV_HOLDING_TOO_HIGH');
+  // Anti-Rug Guard: Dev Supply Dump Check (diperketat dari 20% menjadi max 3%)
+  if (typeof f.devHoldingSharePercent === 'number' && f.devHoldingSharePercent > 3.0) {
+    reasons.push('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK');
+  } else if (typeof f.devBalance === 'number' && f.devBalance > 25_000_000) {
+    reasons.push('DEV_BALANCE_TOO_LARGE');
+  }
+
   return reasons;
 }
 

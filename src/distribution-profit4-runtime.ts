@@ -385,11 +385,37 @@ export class DistributionProfit4Runtime {
       }
       if (event.type === 'PAPER_ENTRY_SIGNAL') {
         this.triggerSwapBuy(transfer.mint);
+
+        // Anti-Triple Loss: Jika satu momentum lane memicu sinyal buy, batalkan sibling momentum lane lainnya untuk token ini
+        if (this.laneType === 'momentum') {
+          for (const siblingKey of [`${transfer.mint}:mscalp`, `${transfer.mint}:mtrend`, `${transfer.mint}:mgolden`]) {
+            if (siblingKey !== laneKey) {
+              const sibling = this.states.get(siblingKey);
+              if (sibling && sibling.lane.entryAt === null) {
+                sibling.lane.end(event.observedAt || Date.now(), 'SIBLING_MOMENTUM_LANE_ENTERED');
+                sibling.active = false;
+              }
+            }
+          }
+        }
       }
       if (event.type === 'PAPER_BUY') {
         this.bought.add(this.laneType !== 'profit4' ? `${transfer.mint}:${laneLabel.toLowerCase()}` : transfer.mint);
         atomicProfit4Json(this.boughtFile, { updatedAt: event.observedAt, mints: [...this.bought] });
         this.triggerSwapBuy(transfer.mint);
+
+        // Pastikan sibling lane dihentikan seketika saat posisi terbuka
+        if (this.laneType === 'momentum') {
+          for (const siblingKey of [`${transfer.mint}:mscalp`, `${transfer.mint}:mtrend`, `${transfer.mint}:mgolden`]) {
+            if (siblingKey !== laneKey) {
+              const sibling = this.states.get(siblingKey);
+              if (sibling && sibling.lane.entryAt === null) {
+                sibling.lane.end(event.observedAt || Date.now(), 'SIBLING_MOMENTUM_LANE_ENTERED');
+                sibling.active = false;
+              }
+            }
+          }
+        }
       }
       if (event.type === 'PAPER_EXIT_SIGNAL' || event.type === 'PAPER_SELL') {
         this.triggerSwapSell(laneKey);
@@ -544,12 +570,19 @@ export class DistributionProfit4Runtime {
         this.states.set(keyTrend, { key: keyTrend, transfer, observation, lane: laneTrend, facts: null, active: true, registeredAt: now, laneLabel: 'M-Trend', version: M_TREND_RULES.version, lastDecision: null, lastEvent: null });
         this.states.set(keyGolden, { key: keyGolden, transfer, observation, lane: laneGolden, facts: null, active: true, registeredAt: now, laneLabel: 'M-Golden', version: M_GOLDEN_RULES.version, lastDecision: null, lastEvent: null });
 
-        if (this.bought.has(`${transfer.mint}:mscalp`)) laneScalp.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneScalp.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:mtrend`)) laneTrend.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneTrend.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-        if (this.bought.has(`${transfer.mint}:mgolden`)) laneGolden.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneGolden.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        const anyMomentumBought = this.bought.has(`${transfer.mint}:mscalp`) ||
+          this.bought.has(`${transfer.mint}:mtrend`) ||
+          this.bought.has(`${transfer.mint}:mgolden`);
+
+        if (anyMomentumBought) {
+          laneScalp.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          laneTrend.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          laneGolden.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        } else if (invalidTime) {
+          laneScalp.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          laneTrend.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          laneGolden.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        }
       }
 
       // ==========================================

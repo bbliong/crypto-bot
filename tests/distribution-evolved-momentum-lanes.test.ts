@@ -14,8 +14,8 @@ function baseFacts(overrides: Partial<TargetFacts> = {}): TargetFacts {
   const now = 1_700_000_000_000;
   return {
     now,
-    firstAt: now - 20_000,
-    transferAt: now - 35_000,
+    firstAt: now - 25_000,
+    transferAt: now - 45_000,
     price: 0.000025, // $25k Market Cap
     priceAt: now,
     momentumPercent: 5.0,
@@ -23,12 +23,13 @@ function baseFacts(overrides: Partial<TargetFacts> = {}): TargetFacts {
     entryReturnPercent: 10.0,
     holderCount: 120,
     holderGrowth15s: 3,
-    buyShareUsdPercent: 70,
-    meaningfulBuyUsd: 150,
-    meaningfulBuyers: 7,
+    buyShareUsdPercent: 72,
+    meaningfulBuyUsd: 250,
+    meaningfulBuyers: 8,
     topBuyerSharePercent: 30,
     sellUsd: 10,
     largestSellUsd: 15, // Aman (< $60)
+    devHoldingSharePercent: 0.5,
     riskWalletsPresent: [],
     holderDeclineEverSeen: false,
     ...overrides,
@@ -142,4 +143,50 @@ test('Momentum Golden Lane triggers Hard Stop Loss @ -7%', () => {
   const exitSignal = events.find((e) => e.type === 'PAPER_EXIT_SIGNAL');
   assert.ok(exitSignal);
   assert.equal(exitSignal.reason, 'STOP_LOSS_7PCT');
+});
+
+test('Momentum Scalp Lane rejects entry when token is too fresh genesis (< 30s)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionMomentumScalpLane('MintTooFresh11111111111111111111111111', (e) => events.push(e));
+
+  const now = 1_700_000_000_000;
+  const f = baseFacts({ now, transferAt: now - 10_000 }); // Hanya 10s sejak transfer/mint
+  lane.step(f);
+
+  assert.equal(lane.phase, 'WATCHING');
+  const decision = events.find((e) => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok(decision);
+  assert.equal(decision.allowed, false);
+  assert.ok((decision.reasons as string[]).includes('TOKEN_TOO_FRESH_GENESIS_RISK'));
+});
+
+test('Momentum Trend Lane rejects entry when dev still holds large supply (> 3%)', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionMomentumTrendLane('MintDevHolding1111111111111111111111111', (e) => events.push(e));
+
+  const now = 1_700_000_000_000;
+  const f = baseFacts({ now, devHoldingSharePercent: 5.5 }); // Dev masih pegang 5.5%
+  lane.step(f);
+
+  assert.equal(lane.phase, 'WATCHING');
+  const decision = events.find((e) => e.type === 'PAPER_ENTRY_DECISION');
+  assert.ok(decision);
+  assert.equal(decision.allowed, false);
+  assert.ok((decision.reasons as string[]).includes('DEV_STILL_HOLDING_SUPPLY_DUMP_RISK'));
+});
+
+test('Momentum Scalp Lane triggers Emergency Whale Sell Exit on whale dump >= $60 during negative/breakeven return', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionMomentumScalpLane('MintWhaleEmerg111111111111111111111111', (e) => events.push(e));
+
+  let now = establishOpenPosition(lane);
+
+  // Koin drop sedikit (-1.5%) dan terdeteksi sell whale $85
+  now += 1000;
+  lane.step(baseFacts({ now, price: 0.000025 * 0.985, largestSellUsd: 85 }));
+
+  assert.equal(lane.phase, 'EXIT_PENDING');
+  const exitSignal = events.find((e) => e.type === 'PAPER_EXIT_SIGNAL');
+  assert.ok(exitSignal);
+  assert.equal(exitSignal.reason, 'EMERGENCY_WHALE_SELL_EXIT');
 });

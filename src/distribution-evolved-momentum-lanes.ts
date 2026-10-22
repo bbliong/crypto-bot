@@ -99,6 +99,11 @@ export class DistributionMomentumBaseLane extends DistributionTargetLane {
             return `STOP_LOSS_${Math.round(rules.stopLossPercent)}PCT`;
           }
 
+          // 1.1 EMERGENCY WHALE SELL EXIT: Jika terdeteksi sell whale >= $60 saat floating return negatif/impas
+          if (f.largestSellUsd >= rules.maxLargestSellUsd && grossRet < 0) {
+            return 'EMERGENCY_WHALE_SELL_EXIT';
+          }
+
           // 2. NET PROFIT BREAKEVEN LOCK (Kunci profit saat sentuh trigger)
           if (
             rules.breakevenTriggerPercent !== undefined &&
@@ -153,10 +158,12 @@ export const M_SCALP_RULES = createEvolvedRules({
   takeProfitCeilingPercent: 18.0,
   minMarketCapUsd: 15000,
   maxMarketCapUsd: 100000,
-  minBuySharePercent: 65.0,
-  minMeaningfulBuyUsd: 50,
-  minMeaningfulBuyers: 4,
-  maxBuyerSharePercent: 65.0,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  minBuySharePercent: 68.0,
+  minMeaningfulBuyUsd: 150,
+  minMeaningfulBuyers: 7,
+  maxBuyerSharePercent: 60.0,
   minMomentumPercent: 2.0,
   maxMomentumPercent: 30.0,
   maxEntryReturnPercent: 45.0,
@@ -182,10 +189,12 @@ export const M_TREND_RULES = createEvolvedRules({
   takeProfitCeilingPercent: 20.0,
   minMarketCapUsd: 20000,
   maxMarketCapUsd: 100000,
-  minBuySharePercent: 65.0,
-  minMeaningfulBuyUsd: 100,
-  minMeaningfulBuyers: 5,
-  maxBuyerSharePercent: 60.0,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  minBuySharePercent: 70.0,
+  minMeaningfulBuyUsd: 200,
+  minMeaningfulBuyers: 8,
+  maxBuyerSharePercent: 55.0,
   minMomentumPercent: 3.0,
   maxMomentumPercent: 40.0,
   maxEntryReturnPercent: 45.0,
@@ -211,10 +220,12 @@ export const M_GOLDEN_RULES = createEvolvedRules({
   takeProfitCeilingPercent: 18.0,
   minMarketCapUsd: 20000,
   maxMarketCapUsd: 100000,
-  minBuySharePercent: 65.0,
-  minMeaningfulBuyUsd: 100,
-  minMeaningfulBuyers: 6,
-  maxBuyerSharePercent: 60.0,
+  observationSeconds: 20,
+  minTransferAgeSeconds: 30,
+  minBuySharePercent: 70.0,
+  minMeaningfulBuyUsd: 200,
+  minMeaningfulBuyers: 8,
+  maxBuyerSharePercent: 55.0,
   minMomentumPercent: 2.0,
   maxMomentumPercent: 35.0,
   maxEntryReturnPercent: 45.0,
