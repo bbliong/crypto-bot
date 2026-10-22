@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import {
   DistributionTargetLane,
   type TargetFacts,
@@ -26,13 +26,28 @@ export interface SmartWalletMeta {
   isSniper: boolean;     // trades30d >= 500 || tags.includes('sniper')
 }
 
-// Load Watchlist Smart Money (117 Wallets) & Metadata
+// Load Watchlist Smart Money & Metadata with auto-refresh on mtime change
 let cachedSmartWallets: Set<string> | null = null;
 let cachedWalletMeta: Map<string, SmartWalletMeta> | null = null;
+let lastMtimeMs = 0;
+
+function checkInvalidateCache(path: string) {
+  try {
+    if (existsSync(path)) {
+      const mtime = statSync(path).mtimeMs;
+      if (mtime !== lastMtimeMs) {
+        lastMtimeMs = mtime;
+        cachedSmartWallets = null;
+        cachedWalletMeta = null;
+      }
+    }
+  } catch {}
+}
 
 export function getSmartWalletsWatchlist(): Set<string> {
-  if (cachedSmartWallets) return cachedSmartWallets;
   const path = '/home/bbliong/project/crypto-bot/data/smart-wallets-watchlist.json';
+  checkInvalidateCache(path);
+  if (cachedSmartWallets) return cachedSmartWallets;
   if (existsSync(path)) {
     try {
       const data = JSON.parse(readFileSync(path, 'utf8'));
@@ -49,8 +64,9 @@ export function getSmartWalletsWatchlist(): Set<string> {
 }
 
 export function getSmartWalletMetaMap(): Map<string, SmartWalletMeta> {
-  if (cachedWalletMeta) return cachedWalletMeta;
   const path = '/home/bbliong/project/crypto-bot/data/smart-wallets-watchlist.json';
+  checkInvalidateCache(path);
+  if (cachedWalletMeta) return cachedWalletMeta;
   cachedWalletMeta = new Map();
   if (existsSync(path)) {
     try {

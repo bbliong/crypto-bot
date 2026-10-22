@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { execSync } from 'child_process';
 
 const SEED_TOKENS = [
   { name: 'WIF', mint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm' },
@@ -13,7 +14,6 @@ const SEED_TOKENS = [
   { name: 'GIGA', mint: '63LfDmNb3MQ8mw9MtZ2To9bEA2M71kZUUGq5tiJxcqj9' },
   { name: 'SLERF', mint: '7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3' },
   { name: 'MEW', mint: 'MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5' },
-  { name: 'LUCE', mint: 'CBdCxKo9QavR9hfPyJxR9vvRE8KAkQQJ2r24GZGOpump' },
   { name: 'BAN', mint: '9PR7nCP9DpcUotnDPVLUBUZKu5WAYkwrCUx9wDnSpump' },
   { name: 'CHILLGUY', mint: 'Df6yfrKC8kZE3KNkrHERKzAetSxbrWeniQfyJY4Jpump' },
   { name: 'ZEREBRO', mint: '8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn' },
@@ -32,9 +32,12 @@ const BOT_TAGS = new Set([
 async function main() {
   console.log(`[HARVEST] Menghubungkan ke Chrome CDP port 9223...`);
   const browser = await chromium.connectOverCDP('http://127.0.0.1:9223');
-  const page = browser.contexts()[0].pages().find(p => p.url().includes('gmgn.ai'));
+  const context = browser.contexts()[0];
+  let page = context?.pages().find(p => p.url().includes('gmgn.ai'));
   if (!page) {
-    throw new Error('Tab GMGN tidak ditemukan pada Chrome CDP port 9223');
+    page = context?.pages()[0] || await context?.newPage();
+    console.log('[HARVEST] Membuka tab GMGN...');
+    await page.goto('https://gmgn.ai/?chain=sol', { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
   console.log(`[HARVEST] Terhubung ke tab GMGN: ${page.url()}`);
 
@@ -52,11 +55,34 @@ async function main() {
     worker: '0'
   };
 
-  // Step 1: Kumpulkan semua early buyers dari seed tokens
-  console.log(`[HARVEST] Mengambil early buyers dari ${SEED_TOKENS.length} seed token legendaris...`);
+  // Step 1: Dapatkan juga koin terpanas 24h terakhir secara dinamis
+  console.log(`[HARVEST] Mengambil 10 token paling ramai 24 jam terakhir dari GMGN...`);
+  const dynamicTokens = await page.evaluate(async (qParams) => {
+    try {
+      const q = new URLSearchParams(qParams);
+      const r = await fetch(`https://gmgn.ai/defi/quotation/v1/rank/sol/swaps/24h?limit=10&orderby=swaps&direction=desc&${q.toString()}`);
+      const j = await r.json().catch(() => null);
+      return (j?.data?.rank || []).map(t => ({ name: t.symbol || 'TREND', mint: t.address })).filter(t => t.mint);
+    } catch {
+      return [];
+    }
+  }, qParams);
+
+  const allTokens = [...SEED_TOKENS];
+  const seenMints = new Set(SEED_TOKENS.map(t => t.mint));
+  for (const dt of dynamicTokens) {
+    if (!seenMints.has(dt.mint)) {
+      seenMints.add(dt.mint);
+      allTokens.push(dt);
+      console.log(`  🔥 Menambahkan trending 24h: ${dt.name} (${dt.mint.slice(0, 8)}...)`);
+    }
+  }
+
+  // Step 2: Kumpulkan semua top/early buyers dari seed & trending tokens
+  console.log(`[HARVEST] Mengambil buyers dari ${allTokens.length} token (seed + trending 24h)...`);
   const earlyBuyersMap = new Map(); // address -> { address, tokens: [], tags: [] }
 
-  for (const token of SEED_TOKENS) {
+  for (const token of allTokens) {
     try {
       const res = await page.evaluate(async ({ mint, qParams }) => {
         const q = new URLSearchParams(qParams);
@@ -82,7 +108,7 @@ async function main() {
         }
       }
       console.log(`  ✓ ${token.name}: ${res.length} buyers ditemukan, ${added} kandidat wallet non-bot unik baru.`);
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 120));
     } catch (err) {
       console.error(`  ✗ ${token.name} gagal:`, err.message);
     }
@@ -91,7 +117,7 @@ async function main() {
   const candidateList = Array.from(earlyBuyersMap.values());
   console.log(`[HARVEST] Total kandidat wallet unik non-bot: ${candidateList.length}`);
 
-  // Step 2: Audit aktivitas 30 hari & PnL via parallel workers (concurrency 10)
+  // Step 3: Audit aktivitas 30 hari & PnL via parallel workers (concurrency 10)
   console.log(`[HARVEST] Memulai verifikasi aktivitas 30 hari & performa (concurrency: 10)...`);
   const nowSec = Math.floor(Date.now() / 1000);
   const thirtyDaysAgoSec = nowSec - 30 * 24 * 3600;
@@ -123,21 +149,24 @@ async function main() {
           const trades30d = (d.buy_30d || 0) + (d.sell_30d || 0);
           const pnl30d = d.realized_profit_30d || d.pnl_30d || 0;
           const allPnl = d.total_profit || d.all_pnl || 0;
+          const solBalance = Number(d.sol_balance) || 0;
 
           // Syarat lolos manusia pintar (Whale / Insider / Smart Trader):
           // 1. Masih aktif trading dalam 30 hari terakhir
-          // 2. Transaksi wajar manusia: antara 1 s/d 3.000 trade per bulan (bukan HFT MEV bot jutaan transaksi)
-          // 3. Profitabilitas nyata: total profit > $1,000 atau profit 30d > $0
+          // 2. Transaksi wajar manusia: antara 1 s/d 1.500 trade per bulan (bukan HFT MEV bot)
+          // 3. Profitabilitas nyata: All-time profit >= $5,000 USD ATAU profit 30 hari >= $500 USD
+          // 4. Saldo SOL aktif minimal 0.05 SOL (~$9 USD) agar bukan wallet kosong
           const isActive30d = lastActive >= thirtyDaysAgoSec;
-          const isHumanTradeVolume = trades30d >= 1 && trades30d <= 3000;
-          const isRealProfitable = allPnl >= 1000 || pnl30d > 0;
+          const isHumanTradeVolume = trades30d >= 1 && trades30d <= 1500;
+          const isRealProfitable = (allPnl >= 5000 && pnl30d >= -1000) || pnl30d >= 500;
+          const hasActiveBalance = solBalance >= 0.05;
 
-          if (isActive30d && isHumanTradeVolume && isRealProfitable) {
+          if (isActive30d && isHumanTradeVolume && isRealProfitable && hasActiveBalance) {
             results.push({
               address: item.address,
               seedTokens: item.tokens,
               tags: item.tags,
-              solBalance: Number(d.sol_balance) || 0,
+              solBalance,
               totalProfitUsd: allPnl,
               realizedProfit30dUsd: pnl30d,
               winrate: d.winrate ? (d.winrate * 100).toFixed(1) + '%' : 'N/A',
@@ -149,7 +178,7 @@ async function main() {
             results.push({
               ...item,
               pass: false,
-              reason: !isActive30d ? 'INACTIVE_30D' : (!isHumanTradeVolume ? 'BOT_HIGH_FREQUENCY' : 'LOW_PROFIT')
+              reason: !isActive30d ? 'INACTIVE_30D' : (!isHumanTradeVolume ? 'BOT_HIGH_FREQUENCY' : (!hasActiveBalance ? 'ZERO_BALANCE' : 'LOW_PROFIT'))
             });
           }
         } catch (e) {
@@ -162,7 +191,7 @@ async function main() {
     for (const res of audited) {
       if (res.pass) {
         validSmartWallets.push(res);
-        console.log(`  🌟 [SMART HUMAN WHALE] ${res.address.slice(0, 8)}... | Tokens: ${res.seedTokens.join(',')} | 30d Trades: ${res.trades30d} | Total Profit: +$${Math.round(res.totalProfitUsd).toLocaleString()}`);
+        console.log(`  🌟 [SMART HUMAN WHALE] ${res.address.slice(0, 8)}... | SOL: ${res.solBalance.toFixed(1)} | Tokens: ${res.seedTokens.join(',')} | 30d: +$${Math.round(res.realizedProfit30dUsd).toLocaleString()} | All-Time: +$${Math.round(res.totalProfitUsd).toLocaleString()}`);
       }
     }
 
@@ -179,7 +208,7 @@ async function main() {
 
   const payload = {
     updatedAt: new Date().toISOString(),
-    seedTokensCount: SEED_TOKENS.length,
+    seedTokensCount: allTokens.length,
     totalAudited: candidateList.length,
     activeSmartWalletsCount: validSmartWallets.length,
     wallets: validSmartWallets.sort((a, b) => b.totalProfitUsd - a.totalProfitUsd)
@@ -187,6 +216,15 @@ async function main() {
 
   writeFileSync(outputPath, JSON.stringify(payload, null, 2), 'utf8');
   console.log(`\n✅ [SELESAI] ${validSmartWallets.length} Smart Money Wallets berhasil disimpan ke: ${outputPath}`);
+
+  // Auto-reload worker & feed jika ada pembaruan
+  try {
+    console.log('[HARVEST] Menerapkan watchlist baru ke worker...');
+    execSync('systemctl --user restart crypto-bot-smartmoney-worker.service', { stdio: 'inherit' });
+    console.log('[HARVEST] Smart money worker berhasil dimuat ulang!');
+  } catch (err) {
+    console.warn('[HARVEST] Gagal restart worker:', err.message);
+  }
 
   await browser.close();
 }
