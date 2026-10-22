@@ -1,9 +1,9 @@
 import { DistributionTargetLane, validateTargetRules, type TargetEvent, type TargetFacts, type TargetRules } from './distribution-target-lane.js';
 
 export const BOUNCE_DUMP_LANE = 'distribution-bounce-dump-35';
-export const BOUNCE_TARGET_PERCENT = 35; // Target keuntungan 30% - 40% (default 35% net)
-export const BOUNCE_MIN_TARGET_PERCENT = 30;
-export const BOUNCE_MAX_TARGET_PERCENT = 40;
+export const BOUNCE_TARGET_PERCENT = 16; // Target keuntungan 14% - 18% (default 16% net)
+export const BOUNCE_MIN_TARGET_PERCENT = 14;
+export const BOUNCE_MAX_TARGET_PERCENT = 18;
 
 export const BOUNCE_RULES: Readonly<TargetRules> = Object.freeze(validateTargetRules({
   version: 'distribution-bounce-dump-v1',
@@ -23,17 +23,17 @@ export const BOUNCE_RULES: Readonly<TargetRules> = Object.freeze(validateTargetR
   maxMomentumPercent: 50,
   maxEntryReturnPercent: 100,
   maxDrawdownPercent: 99, // Diizinkan drawdown tinggi karena memang mengincar token yang dump parah
-  stopLossPercent: 12, // Stop loss terukur jika bounce gagal dan breakdown lagi
-  trailingStartPercent: 25,
-  trailingDrawdownPercent: 5,
+  stopLossPercent: 8, // Stop loss terukur diperketat menjadi -8%
+  trailingStartPercent: 6, // Trailing lock mulai dari +6%
+  trailingDrawdownPercent: 2.5, // Mengunci minimal +2.5% net saat terjadi pullback
   maxHoldSeconds: 300, // 5 menit batas maksimal
   executionDelayMs: 1000,
   maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
-  stakeUsd: 5,
-  blockKnownDumpSellers: false,
+  stakeUsd: 15, // Dinaikkan ke $15 agar nominal keuntungan bertumbuh nyata
+  blockKnownDumpSellers: true,
 }));
 
 export class DistributionBounceLane extends DistributionTargetLane {
@@ -41,6 +41,7 @@ export class DistributionBounceLane extends DistributionTargetLane {
   private maxDrawdownSeen = 0;
   private entryTime: number | null = null;
   private entryBuyPrice: number | null = null;
+  private peakNetSeen = -Infinity;
   private lastPriceMoveTime: number | null = null;
   private lastPriceMove: number | null = null;
   private lastWhaleSellSeenAt: number | null = null;
@@ -103,21 +104,40 @@ export class DistributionBounceLane extends DistributionTargetLane {
           reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
         }
 
-        // Whale Sell Cooldown 45s
-        if (f.largestSellUsd >= 150) {
+        // Whale Sell Cooldown 45s (Batas Whale Sell diperketat ke $60)
+        if (f.largestSellUsd >= 60) {
           this.lastWhaleSellSeenAt = f.now;
           reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
         }
         if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
           reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
         }
+        if (f.largestSellUsd >= 80) {
+          reasons.push('WHALE_SELL_PRESENT_BEFORE_ENTRY');
+        }
 
         return reasons;
       },
       exitReason: (f: TargetFacts, net: number) => {
-        // Target Take Profit: 30% - 40%
+        // Target Take Profit: +16% s/d +18%
         if (net >= BOUNCE_MIN_TARGET_PERCENT) {
-          return 'TARGET_BOUNCE_30_40';
+          return 'TARGET_BOUNCE_16';
+        }
+
+        // Breakeven Profit Lock: jika sudah naik >= +5.5%, kunci minimal +2.5% net
+        if (net > this.peakNetSeen) this.peakNetSeen = net;
+        if (this.peakNetSeen >= 5.5 && (this.peakNetSeen - net >= 2.5 || net <= 2.5)) {
+          return 'BREAKEVEN_PROFIT_LOCK';
+        }
+
+        // Emergency Whale Sell Exit: jika whale dump >= $75 saat posisi terbuka
+        if (f.largestSellUsd >= 75 && net > -6) {
+          return 'EMERGENCY_WHALE_SELL_EXIT';
+        }
+
+        // Hard Stop Loss terukur -8%
+        if (net <= -8.0) {
+          return 'TIGHT_STOP_LOSS_GUARD';
         }
 
         // Exit jika Stagnan / Tidak ada pergerakan setelah dump
@@ -163,8 +183,11 @@ export const BOUNCE_DUMP_LANE_V2 = 'distribution-bounce-dump-v2';
 export const BOUNCE_RULES_V2: Readonly<TargetRules> = Object.freeze(validateTargetRules({
   ...BOUNCE_RULES,
   version: 'distribution-bounce-dump-v2',
-  trailingStartPercent: 20,
-  trailingDrawdownPercent: 4,
+  targetPercent: 16,
+  stopLossPercent: 8,
+  trailingStartPercent: 6,
+  trailingDrawdownPercent: 2.5,
+  stakeUsd: 15,
   blockKnownDumpSellers: true,
 }));
 
@@ -232,15 +255,15 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
           reasons.push('INSUFFICIENT_BUYERS_NEED_MULTI_WALLET');
         }
 
-        // V2 KHUSUS: Filter Anti-Whale Dump Sebelum Entry
-        if (f.largestSellUsd >= 150) {
+        // V2 KHUSUS: Filter Anti-Whale Dump Sebelum Entry (Batas Whale Sell diperketat ke $60)
+        if (f.largestSellUsd >= 60) {
           this.lastWhaleSellSeenAt = f.now;
           reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
         }
         if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
           reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
         }
-        if (f.largestSellUsd >= 300) {
+        if (f.largestSellUsd >= 80) {
           reasons.push('WHALE_SELL_PRESENT_BEFORE_ENTRY');
         }
         if (f.sellUsd > (f.meaningfulBuyUsd * 3.5) && f.sellUsd >= 500) {
@@ -250,20 +273,25 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
         return reasons;
       },
       exitReason: (f: TargetFacts, net: number) => {
-        // Target Take Profit: 30% - 40%
-        if (net >= BOUNCE_MIN_TARGET_PERCENT) {
-          return 'TARGET_BOUNCE_30_40';
+        // Target Take Profit: +16%
+        if (net >= 16) {
+          return 'TARGET_BOUNCE_16';
         }
 
-        // V2 KHUSUS: Trailing Lock di +20% (kunci profit agar tidak berbalik rugi)
+        // V2 KHUSUS: Breakeven Profit Lock: jika sudah naik >= +5.5%, kunci minimal +2.5% net
         if (net > this.peakNetSeen) this.peakNetSeen = net;
-        if (this.peakNetSeen >= 20 && (this.peakNetSeen - net >= 4 || net <= 12)) {
-          return 'PROFIT_LOCK_20_EXIT';
+        if (this.peakNetSeen >= 5.5 && (this.peakNetSeen - net >= 2.5 || net <= 2.5)) {
+          return 'BREAKEVEN_PROFIT_LOCK';
         }
 
-        // V2 KHUSUS: Emergency Exit saat terdeteksi order sell whale besar saat posisi terbuka
-        if (f.largestSellUsd >= 250 && net > -10) {
-          return 'LARGE_SELL_WHALE_DUMP_EXIT';
+        // V2 KHUSUS: Emergency Exit saat terdeteksi order sell whale >= $75 saat posisi terbuka
+        if (f.largestSellUsd >= 75 && net > -6) {
+          return 'EMERGENCY_WHALE_SELL_EXIT';
+        }
+
+        // Hard Stop Loss terukur -8%
+        if (net <= -8.0) {
+          return 'TIGHT_STOP_LOSS_GUARD';
         }
 
         // Exit jika Stagnan setelah dump
@@ -299,7 +327,7 @@ export class DistributionBounceLaneV2 extends DistributionTargetLane {
 }
 
 export const BOUNCE_DUMP_LANE_V3 = 'distribution-bounce-dump-v3';
-export const BOUNCE_TARGET_PERCENT_V3 = 20; // Target keuntungan +18% s/d +20% net
+export const BOUNCE_TARGET_PERCENT_V3 = 15; // Target keuntungan +14% s/d +15% net
 
 export const BOUNCE_RULES_V3: Readonly<TargetRules> = Object.freeze(validateTargetRules({
   version: 'distribution-bounce-dump-v3',
@@ -319,17 +347,17 @@ export const BOUNCE_RULES_V3: Readonly<TargetRules> = Object.freeze(validateTarg
   maxMomentumPercent: 50,
   maxEntryReturnPercent: 100,
   maxDrawdownPercent: 99,
-  stopLossPercent: 10, // Stop loss terukur -10%
-  trailingStartPercent: 14,
-  trailingDrawdownPercent: 4,
+  stopLossPercent: 8, // Stop loss terukur -8%
+  trailingStartPercent: 6,
+  trailingDrawdownPercent: 2.5,
   maxHoldSeconds: 240, // 4 menit batas hold
   executionDelayMs: 1000,
   maxFillWaitMs: 15000,
   feePercentPerSide: 1,
   slippagePercentPerSide: 0.5,
   fixedFeeUsdPerSide: 0.005,
-  stakeUsd: 5,
-  blockKnownDumpSellers: false,
+  stakeUsd: 15, // Dinaikkan ke $15 agar nominal keuntungan bertumbuh nyata
+  blockKnownDumpSellers: true,
 }));
 
 export class DistributionBounceLaneV3 extends DistributionTargetLane {
@@ -390,13 +418,16 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
           reasons.push('DEV_BALANCE_TOO_LARGE');
         }
 
-        // Whale Sell Cooldown 45s
-        if (f.largestSellUsd >= 150) {
+        // Whale Sell Cooldown 45s (Batas Whale Sell diperketat ke $60)
+        if (f.largestSellUsd >= 60) {
           this.lastWhaleSellSeenAt = f.now;
           reasons.push('WHALE_SELL_ACTIVE_IN_WINDOW');
         }
         if (this.lastWhaleSellSeenAt !== null && (f.now - this.lastWhaleSellSeenAt) < 45_000) {
           reasons.push('WHALE_SELL_COOLDOWN_ACTIVE');
+        }
+        if (f.largestSellUsd >= 80) {
+          reasons.push('WHALE_SELL_PRESENT_BEFORE_ENTRY');
         }
 
         // V3 Guard 4: RECOVERY FLOW & SELL PRESSURE
@@ -415,20 +446,25 @@ export class DistributionBounceLaneV3 extends DistributionTargetLane {
         return reasons;
       },
       exitReason: (f: TargetFacts, net: number) => {
-        // V3 Target Take Profit: +18% s/d +20% (eksekusi cepat sebelum tersenggol dump)
-        if (net >= 18) {
-          return 'TARGET_BOUNCE_20';
+        // V3 Target Take Profit: +14% s/d +15% (eksekusi cepat sebelum tersenggol dump)
+        if (net >= 14) {
+          return 'TARGET_BOUNCE_15';
         }
 
-        // V3 Early Profit Lock: Kunci keuntungan jika floating sudah >= +14%
+        // V3 Early Profit Lock: Kunci keuntungan jika floating sudah >= +5.5%
         if (net > this.peakNetSeen) this.peakNetSeen = net;
-        if (this.peakNetSeen >= 14 && (this.peakNetSeen - net >= 3.5 || net <= 8)) {
-          return 'PROFIT_LOCK_14_EXIT';
+        if (this.peakNetSeen >= 5.5 && (this.peakNetSeen - net >= 2.5 || net <= 2.5)) {
+          return 'BREAKEVEN_PROFIT_LOCK';
         }
 
-        // V3 Emergency Exit: Order sell tunggal besar >= $200 saat posisi terbuka
-        if (f.largestSellUsd >= 200 && net > -8) {
+        // V3 Emergency Exit: Order sell tunggal besar >= $75 saat posisi terbuka
+        if (f.largestSellUsd >= 75 && net > -6) {
           return 'EMERGENCY_WHALE_SELL_EXIT';
+        }
+
+        // Hard Stop Loss terukur -8%
+        if (net <= -8.0) {
+          return 'TIGHT_STOP_LOSS_GUARD';
         }
 
         // V3 Stagnation Cut: Jika sudah hold >= 60s dan tidak bergerak dalam 45s terakhir

@@ -288,7 +288,7 @@ export class DistributionProfit4Runtime {
 
     const getDualLanes = (type: string) => {
       if (type === 'momentum') return ['M-Scalp', 'M-Trend', 'M-Golden'];
-      if (type === 'syndicate') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5'];
+      if (type === 'syndicate') return ['V1', 'V2', 'V3'];
       if (type === 'smartmoney') return ['G2', 'G2.1', 'G2.2', 'OZ1'];
       if (type === 'bounce') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1', 'M-Apex10k', 'M-Safe10k', 'M-Runner15k'];
       if (type === 'trend20m') return ['T-Titan', 'T-Apex', 'T-AntiDump'];
@@ -477,19 +477,23 @@ export class DistributionProfit4Runtime {
           this.states.set(key, { key, transfer, observation, lane, facts: null, active: true, registeredAt: now, laneLabel: label, version, lastDecision: null, lastEvent: null });
         };
 
-        setLaneState(keyV1, 'V1', BOUNCE_RULES.version, laneV1);
-        setLaneState(keyV2, 'V2', BOUNCE_RULES_V2.version, laneV2);
-        setLaneState(keyV3, 'V3', BOUNCE_RULES_V3.version, laneV3);
-        setLaneState(keyV4, 'V4', BOUNCE_RULES_V4.version, laneV4);
-        setLaneState(keyV5, 'V5', BOUNCE_RULES_V5.version, laneV5);
-        setLaneState(keyV6, 'V6', BOUNCE_RULES_V6.version, laneV6);
-        setLaneState(keyV7, 'V7', BOUNCE_RULES_V7.version, laneV7);
-        setLaneState(keyS1, 'S1', STAIRCASE_RULES_S1.version, laneS1);
-        setLaneState(keyS2, 'S2', STAIRCASE_RULES_S2.version, laneS2);
-        setLaneState(keyS3, 'S3', STAIRCASE_RULES_S3.version, laneS3);
-        setLaneState(keyS4, 'S4', STAIRCASE_RULES_S4.version, laneS4);
-        setLaneState(keyS1_2, 'S1.2', STAIRCASE_RULES_S1_V2.version, laneS1_2);
-        setLaneState(keyS5, 'S5', STAIRCASE_RULES_S5.version, laneS5);
+        const syndicateLanes = process.env.SYNDICATE_LANES
+          ? process.env.SYNDICATE_LANES.split(',').map(s => s.trim().toUpperCase())
+          : ['V1', 'V2', 'V3'];
+
+        if (syndicateLanes.includes('V1')) setLaneState(keyV1, 'V1', BOUNCE_RULES.version, laneV1);
+        if (syndicateLanes.includes('V2')) setLaneState(keyV2, 'V2', BOUNCE_RULES_V2.version, laneV2);
+        if (syndicateLanes.includes('V3')) setLaneState(keyV3, 'V3', BOUNCE_RULES_V3.version, laneV3);
+        if (syndicateLanes.includes('V4')) setLaneState(keyV4, 'V4', BOUNCE_RULES_V4.version, laneV4);
+        if (syndicateLanes.includes('V5')) setLaneState(keyV5, 'V5', BOUNCE_RULES_V5.version, laneV5);
+        if (syndicateLanes.includes('V6')) setLaneState(keyV6, 'V6', BOUNCE_RULES_V6.version, laneV6);
+        if (syndicateLanes.includes('V7')) setLaneState(keyV7, 'V7', BOUNCE_RULES_V7.version, laneV7);
+        if (syndicateLanes.includes('S1')) setLaneState(keyS1, 'S1', STAIRCASE_RULES_S1.version, laneS1);
+        if (syndicateLanes.includes('S2')) setLaneState(keyS2, 'S2', STAIRCASE_RULES_S2.version, laneS2);
+        if (syndicateLanes.includes('S3')) setLaneState(keyS3, 'S3', STAIRCASE_RULES_S3.version, laneS3);
+        if (syndicateLanes.includes('S4')) setLaneState(keyS4, 'S4', STAIRCASE_RULES_S4.version, laneS4);
+        if (syndicateLanes.includes('S1.2') || syndicateLanes.includes('S1_2')) setLaneState(keyS1_2, 'S1.2', STAIRCASE_RULES_S1_V2.version, laneS1_2);
+        if (syndicateLanes.includes('S5')) setLaneState(keyS5, 'S5', STAIRCASE_RULES_S5.version, laneS5);
 
         if (this.bought.has(`${transfer.mint}:v1`)) { if (!this.closedPositions.has(keyV1)) laneV1.end(now, 'ONE_ROUND_ALREADY_ENTERED'); }
         else if (invalidTime) laneV1.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');

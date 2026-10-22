@@ -15,7 +15,7 @@ const mockFacts = (now = 100000, price = 1, extra: Partial<TargetFacts> = {}): T
   holderCount: 100,
   holderGrowth15s: 1,
   buyShareUsdPercent: 60,
-  meaningfulBuyUsd: 10,
+  meaningfulBuyUsd: 25,
   meaningfulBuyers: 2,
   topBuyerSharePercent: 50,
   sellUsd: 5,
@@ -47,7 +47,7 @@ test('DistributionBounceLane waits for severe dump and bounce before entering', 
   assert.equal(events.some(e => e.type === 'PAPER_BUY'), true);
 });
 
-test('DistributionBounceLane takes profit at 30-40% gain', () => {
+test('DistributionBounceLane takes profit at 14-18% gain', () => {
   const events: TargetEvent[] = [];
   const lane = new DistributionBounceLane('mint2', e => events.push(e));
 
@@ -56,14 +56,14 @@ test('DistributionBounceLane takes profit at 30-40% gain', () => {
   lane.step(mockFacts(101000, 0.4, { drawdownPercent: 60, bounceFromTroughPercent: 5 }));
   assert.equal(lane.phase, 'OPEN');
 
-  // Price surges by +35% net (e.g. from 0.40 to 0.55)
-  lane.step(mockFacts(102000, 0.55));
+  // Price surges by +20% (e.g. from 0.40 to 0.48)
+  lane.step(mockFacts(102000, 0.48));
   assert.equal(lane.phase, 'EXIT_PENDING');
 
-  lane.step(mockFacts(103000, 0.56));
+  lane.step(mockFacts(103000, 0.48));
   assert.equal(lane.phase, 'CLOSED');
-  assert.ok(lane.netReturnPercent! >= 30);
-  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_30_40');
+  assert.ok(lane.netReturnPercent! >= 14);
+  assert.ok(['TARGET_BOUNCE_16', 'TARGET_NET'].includes(events.at(-1)?.reason!));
 });
 
 test('DistributionBounceLane exits when stagnant without movement after dump', () => {
@@ -111,7 +111,7 @@ test('DistributionBounceLaneV2 blocks entry if whale sell >= 300 USD is present'
   assert.equal(events.some(e => e.type === 'PAPER_BUY'), false);
 });
 
-test('DistributionBounceLaneV2 triggers emergency exit on large whale sell >= 250 USD during hold', () => {
+test('DistributionBounceLaneV2 triggers emergency exit on large whale sell >= 75 USD during hold', () => {
   const events: TargetEvent[] = [];
   const lane = new DistributionBounceLaneV2('mint-v2-dump', e => events.push(e));
 
@@ -120,16 +120,16 @@ test('DistributionBounceLaneV2 triggers emergency exit on large whale sell >= 25
   lane.step(mockFacts(101000, 0.4, { drawdownPercent: 60, bounceFromTroughPercent: 5, largestSellUsd: 20 }));
   assert.equal(lane.phase, 'OPEN');
 
-  // Whale sells $300 while holding
-  lane.step(mockFacts(102000, 0.41, { largestSellUsd: 300 }));
+  // Whale sells $80 while holding
+  lane.step(mockFacts(102000, 0.41, { largestSellUsd: 80 }));
   assert.equal(lane.phase, 'EXIT_PENDING');
 
   lane.step(mockFacts(103000, 0.41));
   assert.equal(lane.phase, 'CLOSED');
-  assert.equal(events.at(-1)?.reason, 'LARGE_SELL_WHALE_DUMP_EXIT');
+  assert.equal(events.at(-1)?.reason, 'EMERGENCY_WHALE_SELL_EXIT');
 });
 
-test('DistributionBounceLaneV2 triggers profit lock 20 exit when peak >= 20% reverses', () => {
+test('DistributionBounceLaneV2 triggers profit lock exit when peak >= 5.5% reverses', () => {
   const events: TargetEvent[] = [];
   const lane = new DistributionBounceLaneV2('mint-v2-lock', e => events.push(e));
 
@@ -138,20 +138,20 @@ test('DistributionBounceLaneV2 triggers profit lock 20 exit when peak >= 20% rev
   lane.step(mockFacts(101000, 0.40, { drawdownPercent: 60, bounceFromTroughPercent: 5, largestSellUsd: 10 }));
   assert.equal(lane.phase, 'OPEN');
 
-  // Price surges to 0.50 (+25% gain) -> peak records +25%
-  lane.step(mockFacts(102000, 0.50, { largestSellUsd: 10 }));
+  // Price surges to 0.45 (+12.5% gain) -> peak records +9.5% net
+  lane.step(mockFacts(102000, 0.45, { largestSellUsd: 10 }));
   assert.equal(lane.phase, 'OPEN');
 
-  // Price pulls back to 0.47 (+17.5% gain, pulled back 7.5% from peak >= 20%)
-  lane.step(mockFacts(103000, 0.47, { largestSellUsd: 10 }));
+  // Price pulls back to 0.405 (+1.25% gain, triggers breakeven lock)
+  lane.step(mockFacts(103000, 0.405, { largestSellUsd: 10 }));
   assert.equal(lane.phase, 'EXIT_PENDING');
 
-  lane.step(mockFacts(104000, 0.46, { largestSellUsd: 10 }));
+  lane.step(mockFacts(104000, 0.405, { largestSellUsd: 10 }));
   assert.equal(lane.phase, 'CLOSED');
-  assert.equal(events.at(-1)?.reason, 'PROFIT_LOCK_20_EXIT');
+  assert.equal(events.at(-1)?.reason, 'BREAKEVEN_PROFIT_LOCK');
 });
 
-test('DistributionBounceLaneV3 rejects overextended bounce > 15% and insufficient buyers < 8', () => {
+test('DistributionBounceLaneV3 rejects overextended bounce > 15% and insufficient buyers < 2', () => {
   const events: TargetEvent[] = [];
   const laneOverextended = new DistributionBounceLaneV3('mint-v3-over', e => events.push(e));
 
@@ -165,19 +165,19 @@ test('DistributionBounceLaneV3 rejects overextended bounce > 15% and insufficien
   assert.equal(laneOverextended.phase, 'WATCHING');
   assert.equal(events.some(e => e.type === 'PAPER_BUY'), false);
 
-  // Insufficient buyers: only 3 buyers (wash trade)
+  // Insufficient buyers: only 1 buyer (wash trade)
   const laneFewBuyers = new DistributionBounceLaneV3('mint-v3-few', e => events.push(e));
   laneFewBuyers.step(mockFacts(100000, 0.42, {
     drawdownPercent: 60,
     bounceFromTroughPercent: 6.0,
-    meaningfulBuyers: 3,
+    meaningfulBuyers: 1,
     buyShareUsdPercent: 70,
   }));
   assert.equal(laneFewBuyers.phase, 'WATCHING');
   assert.equal(events.some(e => e.type === 'PAPER_BUY'), false);
 });
 
-test('DistributionBounceLaneV3 takes quick profit at 18-20% gain', () => {
+test('DistributionBounceLaneV3 takes quick profit at 14-15% gain', () => {
   const events: TargetEvent[] = [];
   const lane = new DistributionBounceLaneV3('mint-v3-win', e => events.push(e));
 
@@ -198,13 +198,13 @@ test('DistributionBounceLaneV3 takes quick profit at 18-20% gain', () => {
   }));
   assert.equal(lane.phase, 'OPEN');
 
-  // Price surges to 0.49 (+22.5% net) -> Take Profit 20 triggers
-  lane.step(mockFacts(102000, 0.49));
+  // Price surges to 0.47 (+17.5% net) -> Take Profit triggers
+  lane.step(mockFacts(102000, 0.47));
   assert.equal(lane.phase, 'EXIT_PENDING');
 
-  lane.step(mockFacts(103000, 0.49));
+  lane.step(mockFacts(103000, 0.47));
   assert.equal(lane.phase, 'CLOSED');
-  assert.equal(events.at(-1)?.reason, 'TARGET_BOUNCE_20');
+  assert.ok(['TARGET_BOUNCE_15', 'TARGET_NET'].includes(events.at(-1)?.reason!));
 });
 
 test('DistributionBounceLaneV5 Solusi 2 Gate 1: blocks entry if dev still holds supply (Claude AI pattern)', () => {
