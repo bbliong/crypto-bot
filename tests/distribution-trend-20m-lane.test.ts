@@ -563,3 +563,67 @@ test('T-Apex enforces 70.0% WR setup: buyers >= 9, buyShare >= 60%, sell < $60, 
   lane2.step(baseFacts({ now: curTime, price: entryPrice * 1.03, priceAt: curTime }));
   assert.ok(events2.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('BREAKEVEN_PROFIT_LOCKED')));
 });
+
+test('T-AntiDump triggers Breakeven Profit Lock after +7% gain drops to +3.5%', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendAntiDumpLane('MintAntiDumpBE11111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+  let curTime = now;
+
+  for (let i = 0; i < 5; i++) {
+    lane.step(baseFacts({
+      now: curTime,
+      price: 0.000080,
+      priceAt: curTime,
+      meaningfulBuyers: 9,
+      buyShareUsdPercent: 55.0,
+      meaningfulBuyUsd: 100,
+      largestSellUsd: 25.0,
+      entryReturnPercent: 10.0,
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-AntiDump'));
+  const buyEvent = events.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000080;
+
+  // Price peaks at +8% (trigger BE @ 7%)
+  curTime += 2000;
+  lane.step(baseFacts({ now: curTime, price: entryPrice * 1.08, priceAt: curTime }));
+
+  // Price pulls back to +2.5% (<= lock net 3.5%) -> triggers BREAKEVEN_PROFIT_LOCKED_7_4
+  curTime += 2000;
+  lane.step(baseFacts({ now: curTime, price: entryPrice * 1.025, priceAt: curTime }));
+  assert.ok(events.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('BREAKEVEN_PROFIT_LOCKED_7_4')));
+});
+
+test('T-Titan triggers Emergency Whale Sell Exit on whale sell >= $50 during negative return', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendTitanLane('MintTitanEmerg11111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+  let curTime = now;
+
+  for (let i = 0; i < 5; i++) {
+    lane.step(baseFacts({
+      now: curTime,
+      price: 0.000080,
+      priceAt: curTime,
+      meaningfulBuyers: 11,
+      buyShareUsdPercent: 70.0,
+      meaningfulBuyUsd: 200,
+      largestSellUsd: 20.0,
+      entryReturnPercent: 10.0,
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Titan'));
+  const buyEvent = events.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000080;
+
+  // Price dips slightly (-1.5%) and whale dump of $75 occurs
+  curTime += 2000;
+  lane.step(baseFacts({ now: curTime, price: entryPrice * 0.985, largestSellUsd: 75.0, priceAt: curTime }));
+  assert.ok(events.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason === 'EMERGENCY_WHALE_SELL_EXIT'));
+});

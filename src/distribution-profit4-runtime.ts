@@ -398,6 +398,18 @@ export class DistributionProfit4Runtime {
             }
           }
         }
+        // Anti-Triple Loss Trend 20m: Jika satu lane trend20m memicu sinyal buy, batalkan sibling lane lainnya
+        if (this.laneType === 'trend20m') {
+          for (const siblingKey of [`${transfer.mint}:t_titan`, `${transfer.mint}:t_apex`, `${transfer.mint}:t_antidump`]) {
+            if (siblingKey !== laneKey) {
+              const sibling = this.states.get(siblingKey);
+              if (sibling && sibling.lane.entryAt === null) {
+                sibling.lane.end(event.observedAt || Date.now(), 'SIBLING_TREND20M_LANE_ENTERED');
+                sibling.active = false;
+              }
+            }
+          }
+        }
       }
       if (event.type === 'PAPER_BUY') {
         this.bought.add(this.laneType !== 'profit4' ? `${transfer.mint}:${laneLabel.toLowerCase()}` : transfer.mint);
@@ -411,6 +423,17 @@ export class DistributionProfit4Runtime {
               const sibling = this.states.get(siblingKey);
               if (sibling && sibling.lane.entryAt === null) {
                 sibling.lane.end(event.observedAt || Date.now(), 'SIBLING_MOMENTUM_LANE_ENTERED');
+                sibling.active = false;
+              }
+            }
+          }
+        }
+        if (this.laneType === 'trend20m') {
+          for (const siblingKey of [`${transfer.mint}:t_titan`, `${transfer.mint}:t_apex`, `${transfer.mint}:t_antidump`]) {
+            if (siblingKey !== laneKey) {
+              const sibling = this.states.get(siblingKey);
+              if (sibling && sibling.lane.entryAt === null) {
+                sibling.lane.end(event.observedAt || Date.now(), 'SIBLING_TREND20M_LANE_ENTERED');
                 sibling.active = false;
               }
             }
@@ -715,14 +738,19 @@ export class DistributionProfit4Runtime {
           lastEvent: null,
         });
 
-        if (this.bought.has(keyTitan)) laneTitan.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneTitan.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        const anyTrendBought = this.bought.has(keyTitan) ||
+          this.bought.has(keyApex) ||
+          this.bought.has(keyAntiDump);
 
-        if (this.bought.has(keyApex)) laneApex.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneApex.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyAntiDump)) laneAntiDump.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneAntiDump.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        if (anyTrendBought) {
+          laneTitan.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          laneApex.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+          laneAntiDump.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        } else if (invalidTime) {
+          laneTitan.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          laneApex.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+          laneAntiDump.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        }
       }
     } else {
       const key = transfer.mint;

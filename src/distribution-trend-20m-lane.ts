@@ -346,23 +346,23 @@ export const TREND_20M_ANTIDUMP_RULES: Readonly<Trend20mRules> = Object.freeze({
     paperOnly: true,
     enabled: true,
     targetPercent: 1000.0,
-    stopLossPercent: 15.0,
-    trailingStartPercent: 25.0,
-    trailingDrawdownPercent: 6.0,
+    stopLossPercent: 9.0, // Diperketat dari 15.0 ke 9.0 agar sejalan dengan Titan
+    trailingStartPercent: 20.0,
+    trailingDrawdownPercent: 4.0,
     maxHoldSeconds: 3600, // 60 menit
     observationSeconds: 30,
     minTransferAgeSeconds: 1200,
     maxTransferLagSeconds: 60,
     maxEntryWaitSeconds: 7200,
     confirmSeconds: 3,
-    minBuySharePercent: 40.0,
+    minBuySharePercent: 50.0,
     minMeaningfulBuyUsd: 15,
-    minMeaningfulBuyers: 6,
+    minMeaningfulBuyers: 8, // Minimal 8 pembeli
     maxBuyerSharePercent: 80.0,
     minMomentumPercent: 0.1,
     maxMomentumPercent: 50.0,
-    maxEntryReturnPercent: 100000,
-    maxDrawdownPercent: 15.0,
+    maxEntryReturnPercent: 25.0, // Anti-FOMO
+    maxDrawdownPercent: 8.0,
     executionDelayMs: 1000,
     maxFillWaitMs: 15000,
     feePercentPerSide: 1.0,
@@ -375,9 +375,12 @@ export const TREND_20M_ANTIDUMP_RULES: Readonly<Trend20mRules> = Object.freeze({
   maxMarketCapUsd: 600000,
   minHolderCount: 100,
   minTokenAgeSeconds: 1200,
-  profitFloorPercent: 20.0,
-  nominalTargetPercent: 60.0,
-  maxLargestSellUsd: 100,
+  profitFloorPercent: 15.0,
+  nominalTargetPercent: 25.0,
+  takeProfitCeilingPercent: 25.0, // Amankan profit di +25%
+  maxLargestSellUsd: 60, // Batasi whale sell < $60
+  breakevenTriggerPercent: 7.0, // Kunci BE jika naik >= +7%
+  breakevenLockNetPercent: 3.5, // Kunci minimal +3.5%
 });
 
 // -------------------------------------------------------------
@@ -656,6 +659,12 @@ export class DistributionTrendBaseLane extends DistributionTargetLane {
           // 1. HARD STOP LOSS
           if (grossRet <= -rules.stopLossPercent) {
             return `STOP_LOSS_${Math.round(rules.stopLossPercent)}PCT`;
+          }
+
+          // 1.1 EMERGENCY WHALE SELL EXIT: Jika terdeteksi sell whale >= maxLargestSellUsd saat return negatif/impas
+          const whaleSellLimit = rules.maxLargestSellUsd ?? 60;
+          if (f.largestSellUsd >= whaleSellLimit && grossRet < 0) {
+            return 'EMERGENCY_WHALE_SELL_EXIT';
           }
 
           // 2. NET PROFIT BREAKEVEN LOCK (Kunci Juara Win Rate)
