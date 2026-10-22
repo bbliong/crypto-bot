@@ -24,7 +24,20 @@ export function evaluateResearchMomentumEntry(f: TargetFacts, r: TargetRules): s
   if (f.momentumPercent === null || f.momentumPercent < r.minMomentumPercent || f.momentumPercent > r.maxMomentumPercent) reasons.push('MOMENTUM_OUTSIDE_RANGE');
   // Proteksi drawdown: harga tidak boleh sedang anjlok dari peak lokal (maksimal r.maxDrawdownPercent)
   if (f.drawdownPercent === null || f.drawdownPercent > r.maxDrawdownPercent) reasons.push('PRICE_DRAWDOWN_EXCEEDED');
-  if (f.largestSellUsd >= 250) reasons.push('LARGE_SELL_ALREADY_PRESENT');
+  
+  // Proteksi Whale Sell Dump: tolak jika sell terbesar melebihi batas (default r.maxLargestSellUsd atau $250)
+  const maxSell = typeof (r as any).maxLargestSellUsd === 'number' ? (r as any).maxLargestSellUsd : 250;
+  if (f.largestSellUsd >= maxSell) {
+    reasons.push(maxSell <= 100 ? 'LARGEST_SELL_TOO_HIGH_WHALE_DUMP' : 'LARGE_SELL_ALREADY_PRESENT');
+  }
+
+  // Anti-FOMO Guard: tolak token yang return observasi sebelum masuk sudah melonjak terlalu tinggi
+  if (typeof r.maxEntryReturnPercent === 'number' && r.maxEntryReturnPercent < 1000) {
+    if (f.entryReturnPercent !== null && f.entryReturnPercent > r.maxEntryReturnPercent) {
+      reasons.push('FOMO_GAIN_TOO_HIGH_TOP_BUY');
+    }
+  }
+
   if (typeof f.devHoldingSharePercent === 'number' && f.devHoldingSharePercent > 20) reasons.push('DEV_HOLDING_TOO_HIGH');
   return reasons;
 }

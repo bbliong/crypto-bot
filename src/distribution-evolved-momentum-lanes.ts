@@ -15,131 +15,222 @@ import {
 } from './distribution-target-lane.js';
 import { evaluateResearchMomentumEntry } from './distribution-research-lanes.js';
 
-function createEvolvedRules(overrides: Partial<TargetRules> & { version: string; targetPercent: number; minMarketCapUsd?: number }): Readonly<TargetRules & { minMarketCapUsd?: number }> {
-  return Object.freeze(validateTargetRules({
-    ...DEFAULT_TARGET_RULES,
-    paperOnly: true,
-    enabled: true,
-    observationSeconds: 15,
-    minTransferAgeSeconds: 30,
-    maxTransferLagSeconds: 60,
-    maxEntryWaitSeconds: 1800,
-    confirmSeconds: 2,
-    feePercentPerSide: 1,
-    slippagePercentPerSide: 0.5,
-    fixedFeeUsdPerSide: 0.005,
-    stakeUsd: 5.0,
-    maxEntryReturnPercent: 100000,
-    ...overrides,
-  }) as any);
+export interface EvolvedMomentumRules extends TargetRules {
+  readonly minMarketCapUsd?: number;
+  readonly maxMarketCapUsd?: number;
+  readonly maxLargestSellUsd?: number;
+  readonly takeProfitCeilingPercent?: number;
+  readonly breakevenTriggerPercent?: number;
+  readonly breakevenLockNetPercent?: number;
+}
+
+function createEvolvedRules(overrides: Partial<TargetRules> & {
+  version: string;
+  targetPercent: number;
+  minMarketCapUsd?: number;
+  maxMarketCapUsd?: number;
+  maxLargestSellUsd?: number;
+  takeProfitCeilingPercent?: number;
+  breakevenTriggerPercent?: number;
+  breakevenLockNetPercent?: number;
+}): Readonly<EvolvedMomentumRules> {
+  return Object.freeze({
+    ...validateTargetRules({
+      ...DEFAULT_TARGET_RULES,
+      paperOnly: true,
+      enabled: true,
+      observationSeconds: 15,
+      minTransferAgeSeconds: 30,
+      maxTransferLagSeconds: 60,
+      maxEntryWaitSeconds: 1800,
+      confirmSeconds: 2,
+      feePercentPerSide: 1,
+      slippagePercentPerSide: 0.5,
+      fixedFeeUsdPerSide: 0.005,
+      stakeUsd: 5.0,
+      maxEntryReturnPercent: 45.0,
+      ...overrides,
+    }),
+    minMarketCapUsd: overrides.minMarketCapUsd,
+    maxMarketCapUsd: overrides.maxMarketCapUsd,
+    maxLargestSellUsd: overrides.maxLargestSellUsd,
+    takeProfitCeilingPercent: overrides.takeProfitCeilingPercent,
+    breakevenTriggerPercent: overrides.breakevenTriggerPercent,
+    breakevenLockNetPercent: overrides.breakevenLockNetPercent,
+  } as any);
+}
+
+export class DistributionMomentumBaseLane extends DistributionTargetLane {
+  readonly momentumRules: EvolvedMomentumRules;
+  private peakGrossSeen = -Infinity;
+
+  constructor(
+    mint: string,
+    rules: EvolvedMomentumRules,
+    laneLabel: string,
+    emit: (event: TargetEvent) => void = () => {}
+  ) {
+    super(
+      mint,
+      rules,
+      (e) =>
+        emit({
+          ...e,
+          targetPercent: rules.targetPercent,
+          version: rules.version,
+          laneLabel: laneLabel as any,
+        }),
+      {
+        name: laneLabel.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+        paperLane: rules.version,
+        trailingEnabled: true,
+        prioritizeCustomExit: true,
+        overrideEntryReasons: evaluateResearchMomentumEntry,
+        exitReason: (f: TargetFacts, net: number) => {
+          if (this.entryPrice === null || this.entryPrice <= 0 || f.price === null) return null;
+
+          const grossRet = ((f.price - this.entryPrice) / this.entryPrice) * 100;
+          if (grossRet > this.peakGrossSeen) {
+            this.peakGrossSeen = grossRet;
+          }
+
+          // 1. HARD STOP LOSS
+          if (grossRet <= -rules.stopLossPercent) {
+            return `STOP_LOSS_${Math.round(rules.stopLossPercent)}PCT`;
+          }
+
+          // 2. NET PROFIT BREAKEVEN LOCK (Kunci profit saat sentuh trigger)
+          if (
+            rules.breakevenTriggerPercent !== undefined &&
+            rules.breakevenLockNetPercent !== undefined
+          ) {
+            if (this.peakGrossSeen >= rules.breakevenTriggerPercent) {
+              if (grossRet <= rules.breakevenLockNetPercent) {
+                return `BREAKEVEN_PROFIT_LOCKED_${Math.round(rules.breakevenTriggerPercent)}_${Math.round(rules.breakevenLockNetPercent)}`;
+              }
+            }
+          }
+
+          // 3. HARD TAKE PROFIT CEILING (Amankan profit sebelum dev dump mikro)
+          if (
+            rules.takeProfitCeilingPercent !== undefined &&
+            grossRet >= rules.takeProfitCeilingPercent
+          ) {
+            return `TAKE_PROFIT_CEILING_${Math.round(rules.takeProfitCeilingPercent)}`;
+          }
+
+          // 4. TIMEOUT MAXIMUM HOLDING
+          const holdSec = this.entryAt !== null ? (f.now - this.entryAt) / 1000 : 0;
+          if (holdSec >= rules.maxHoldSeconds) {
+            return `MAX_HOLD_TIMEOUT_${Math.round(rules.maxHoldSeconds / 60)}M`;
+          }
+
+          // 5. DYNAMIC TRAILING PROFIT
+          if (this.peakGrossSeen >= rules.trailingStartPercent) {
+            const ddFromPeak = this.peakGrossSeen - grossRet;
+            if (ddFromPeak >= rules.trailingDrawdownPercent) {
+              return `TRAILING_PROFIT_ABOVE_${Math.round(rules.trailingStartPercent)}_DD${Math.round(rules.trailingDrawdownPercent)}`;
+            }
+          }
+
+          return null;
+        },
+      }
+    );
+    this.momentumRules = rules;
+  }
 }
 
 // ============================================================================
-// [ACTIVE STREAMLINED LANES] M-Scalp & M-Trend
-// Evolved & Tuned via Loop Engineering across 672 Historical Momentum Candidates
+// [ACTIVE STREAMLINED LANES] M-Scalp, M-Trend, M-Golden (Evolved High Win Rate)
+// Evolved via Tick Replay Loop Engineering across 686k granular ticks
+// Guard Whale Sell < $60, Anti-FOMO < 45%, Breakeven Lock @ +6%, TP Ceiling
 // ============================================================================
 
 export const M_SCALP_RULES = createEvolvedRules({
-  version: 'distribution-m-scalp',
-  targetPercent: 20.0,
+  version: 'distribution-m-scalp-v2',
+  targetPercent: 18.0,
+  takeProfitCeilingPercent: 18.0,
   minMarketCapUsd: 15000,
+  maxMarketCapUsd: 100000,
   minBuySharePercent: 65.0,
   minMeaningfulBuyUsd: 50,
   minMeaningfulBuyers: 4,
   maxBuyerSharePercent: 65.0,
   minMomentumPercent: 2.0,
   maxMomentumPercent: 30.0,
+  maxEntryReturnPercent: 45.0,
   maxDrawdownPercent: 3.0,
-  stopLossPercent: 5.0,
+  maxLargestSellUsd: 60,
+  breakevenTriggerPercent: 6.0,
+  breakevenLockNetPercent: 3.0,
+  stopLossPercent: 7.0,
   trailingStartPercent: 8.0,
-  trailingDrawdownPercent: 2.5,
+  trailingDrawdownPercent: 2.0,
   maxHoldSeconds: 180,
 });
 
-export class DistributionMomentumScalpLane extends DistributionTargetLane {
+export class DistributionMomentumScalpLane extends DistributionMomentumBaseLane {
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
-    super(mint, M_SCALP_RULES, e => emit({
-      ...e,
-      targetPercent: M_SCALP_RULES.targetPercent,
-      version: M_SCALP_RULES.version,
-      laneLabel: 'M-Scalp' as any,
-    }), {
-      name: 'm-scalp',
-      paperLane: M_SCALP_RULES.version,
-      trailingEnabled: true,
-      overrideEntryReasons: evaluateResearchMomentumEntry,
-    });
+    super(mint, M_SCALP_RULES, 'M-Scalp', emit);
   }
 }
 
 export const M_TREND_RULES = createEvolvedRules({
-  version: 'distribution-m-trend',
-  targetPercent: 35.0,
+  version: 'distribution-m-trend-v2',
+  targetPercent: 20.0,
+  takeProfitCeilingPercent: 20.0,
   minMarketCapUsd: 20000,
-  minBuySharePercent: 70.0,
+  maxMarketCapUsd: 100000,
+  minBuySharePercent: 65.0,
   minMeaningfulBuyUsd: 100,
   minMeaningfulBuyers: 5,
   maxBuyerSharePercent: 60.0,
   minMomentumPercent: 3.0,
   maxMomentumPercent: 40.0,
+  maxEntryReturnPercent: 45.0,
   maxDrawdownPercent: 3.5,
-  stopLossPercent: 6.0,
-  trailingStartPercent: 12.0,
-  trailingDrawdownPercent: 3.5,
+  maxLargestSellUsd: 60,
+  breakevenTriggerPercent: 6.0,
+  breakevenLockNetPercent: 3.0,
+  stopLossPercent: 7.0,
+  trailingStartPercent: 8.0,
+  trailingDrawdownPercent: 2.0,
   maxHoldSeconds: 300,
 });
 
-export class DistributionMomentumTrendLane extends DistributionTargetLane {
+export class DistributionMomentumTrendLane extends DistributionMomentumBaseLane {
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
-    super(mint, M_TREND_RULES, e => emit({
-      ...e,
-      targetPercent: M_TREND_RULES.targetPercent,
-      version: M_TREND_RULES.version,
-      laneLabel: 'M-Trend' as any,
-    }), {
-      name: 'm-trend',
-      paperLane: M_TREND_RULES.version,
-      trailingEnabled: true,
-      overrideEntryReasons: evaluateResearchMomentumEntry,
-    });
+    super(mint, M_TREND_RULES, 'M-Trend', emit);
   }
 }
 
-// ============================================================================
-// [NEW EVOLVED LANE] M-Golden (Golden Sweet-Spot Runner)
-// Hasil Loop Engineering 18.000 Kombinasi Parameter (Oct 20-21 Live Dataset)
-// Win Rate: 69.8% | Profit Factor: 5.76 | EV: +$0.44/Trade | Mcap >= $20k
-// ============================================================================
 export const M_GOLDEN_RULES = createEvolvedRules({
-  version: 'distribution-m-golden',
-  targetPercent: 30.0,
+  version: 'distribution-m-golden-v2',
+  targetPercent: 18.0,
+  takeProfitCeilingPercent: 18.0,
   minMarketCapUsd: 20000,
+  maxMarketCapUsd: 100000,
   minBuySharePercent: 65.0,
   minMeaningfulBuyUsd: 100,
-  minMeaningfulBuyers: 12,
+  minMeaningfulBuyers: 6,
   maxBuyerSharePercent: 60.0,
   minMomentumPercent: 2.0,
   maxMomentumPercent: 35.0,
+  maxEntryReturnPercent: 45.0,
   maxDrawdownPercent: 3.0,
-  stopLossPercent: 5.0,
-  trailingStartPercent: 10.0,
+  maxLargestSellUsd: 60,
+  breakevenTriggerPercent: 6.0,
+  breakevenLockNetPercent: 3.0,
+  stopLossPercent: 7.0,
+  trailingStartPercent: 8.0,
   trailingDrawdownPercent: 2.0,
-  maxHoldSeconds: 600,
+  maxHoldSeconds: 450,
 });
 
-export class DistributionMomentumGoldenLane extends DistributionTargetLane {
+export class DistributionMomentumGoldenLane extends DistributionMomentumBaseLane {
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
-    super(mint, M_GOLDEN_RULES, e => emit({
-      ...e,
-      targetPercent: M_GOLDEN_RULES.targetPercent,
-      version: M_GOLDEN_RULES.version,
-      laneLabel: 'M-Golden' as any,
-    }), {
-      name: 'm-golden',
-      paperLane: M_GOLDEN_RULES.version,
-      trailingEnabled: true,
-      overrideEntryReasons: evaluateResearchMomentumEntry,
-    });
+    super(mint, M_GOLDEN_RULES, 'M-Golden', emit);
   }
 }
 
