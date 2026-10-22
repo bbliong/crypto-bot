@@ -32,12 +32,12 @@ test('DistributionProfit4Runtime integrates Trend20m lane pipeline correctly', (
     priceUsd: 0.000015,
   }, now);
 
-  // Check state registered
+  // Check state registered (Top 3 High Win Rate lanes)
   assert.equal(runtime.isMintActive(mint), true);
-  assert.ok(runtime.states.has(`${mint}:t_cons`));
-  assert.ok(runtime.states.has(`${mint}:t_bal`));
-  assert.ok(runtime.states.has(`${mint}:t_wide`));
-  assert.ok(runtime.states.has(`${mint}:t_run`));
+  assert.ok(runtime.states.has(`${mint}:t_titan`));
+  assert.ok(runtime.states.has(`${mint}:t_apex`));
+  assert.ok(runtime.states.has(`${mint}:t_antidump`));
+  assert.equal(runtime.states.has(`${mint}:t_cons`), false);
 
   // Trade ticks
   runtime.trade(mint, {

@@ -291,7 +291,7 @@ function computeGlobalGroupsOverview(root) {
     momentum: { key: 'momentum', label: 'Group Momentum', desc: 'M-Scalp, M-Trend & M-Golden (Quality-Gated New Pair Momentum)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     syndicate: { key: 'syndicate', label: 'Group Sindikat', desc: 'Bounce Dip V1-V7 & Staircase Akumulasi S1-S5', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     smartmoney: { key: 'smartmoney', label: 'Group Smart Money', desc: '117 Whale GMGN Inflow, Convergence & Mirror Oezank', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
-    trend20m: { key: 'trend20m', label: 'Group Trend 20m', desc: 'GMGN Trend 20m (T-Cons, T-Bal, T-Wide, T-Run, T-Golden, T-Sniper, T-Phoenix, T-AntiDump, T-Titan, T-Apex)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+    trend20m: { key: 'trend20m', label: 'Group Trend 20m', desc: 'GMGN Trend 20m Top 3 High WR (T-Titan 83.3%, T-Apex 70.0%, T-AntiDump 51.2%)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
   };
 
   const allDirs = [

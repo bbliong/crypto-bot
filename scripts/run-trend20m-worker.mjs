@@ -22,7 +22,7 @@ atomicProfit4Json(controlFile, {
   maxWatchingTokens: 10,
   maxWatchingHours: 2,
   rules: {
-    lanes: ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden', 'T-Sniper', 'T-Phoenix', 'T-AntiDump', 'T-Titan', 'T-Apex'],
+    lanes: ['T-Titan', 'T-Apex', 'T-AntiDump'],
     targetProfitPercent: 20.0,
     trailingStartPercent: 60.0,
     trailingDrawdownPercent: 6.0,

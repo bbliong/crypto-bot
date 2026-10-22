@@ -291,7 +291,7 @@ export class DistributionProfit4Runtime {
       if (type === 'syndicate') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5'];
       if (type === 'smartmoney') return ['G2', 'G2.1', 'G2.2', 'OZ1'];
       if (type === 'bounce') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1', 'M-Apex10k', 'M-Safe10k', 'M-Runner15k'];
-      if (type === 'trend20m') return ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden', 'T-Sniper', 'T-Phoenix', 'T-AntiDump', 'T-Titan', 'T-Apex'];
+      if (type === 'trend20m') return ['T-Titan', 'T-Apex', 'T-AntiDump'];
       return ['P4'];
     };
 
@@ -626,141 +626,15 @@ export class DistributionProfit4Runtime {
         const mcap = transfer.marketCapUsd ?? (transfer.priceUsd ? transfer.priceUsd * 1_000_000_000 : null);
         if (!mcap || mcap < 10000) return;
 
-        const keyCons = `${transfer.mint}:t_cons`;
-        if (this.states.has(keyCons)) return;
-
-        const keyBal = `${transfer.mint}:t_bal`;
-        const keyWide = `${transfer.mint}:t_wide`;
-        const keyRun = `${transfer.mint}:t_run`;
-        const keyGolden = `${transfer.mint}:t_golden`;
-        const keySniper = `${transfer.mint}:t_sniper`;
-        const keyPhoenix = `${transfer.mint}:t_phoenix`;
-        const keyAntiDump = `${transfer.mint}:t_antidump`;
         const keyTitan = `${transfer.mint}:t_titan`;
-        const keyApex = `${transfer.mint}:t_apex`;
+        if (this.states.has(keyTitan)) return;
 
-        const laneCons = new DistributionTrendConsLane(transfer.mint, makeOnEvent(keyCons, 'T-Cons'));
-        const laneBal = new DistributionTrendBalLane(transfer.mint, makeOnEvent(keyBal, 'T-Bal'));
-        const laneWide = new DistributionTrendWideLane(transfer.mint, makeOnEvent(keyWide, 'T-Wide'));
-        const laneRun = new DistributionTrendRunLane(transfer.mint, makeOnEvent(keyRun, 'T-Run'));
-        const laneGolden = new DistributionTrendGoldenLane(transfer.mint, makeOnEvent(keyGolden, 'T-Golden'));
-        const laneSniper = new DistributionTrendSniperLane(transfer.mint, makeOnEvent(keySniper, 'T-Sniper'));
-        const lanePhoenix = new DistributionTrendPhoenixLane(transfer.mint, makeOnEvent(keyPhoenix, 'T-Phoenix'));
-        const laneAntiDump = new DistributionTrendAntiDumpLane(transfer.mint, makeOnEvent(keyAntiDump, 'T-AntiDump'));
+        const keyApex = `${transfer.mint}:t_apex`;
+        const keyAntiDump = `${transfer.mint}:t_antidump`;
+
         const laneTitan = new DistributionTrendTitanLane(transfer.mint, makeOnEvent(keyTitan, 'T-Titan'));
         const laneApex = new DistributionTrendApexLane(transfer.mint, makeOnEvent(keyApex, 'T-Apex'));
-
-        this.states.set(keyCons, {
-          key: keyCons,
-          transfer,
-          observation,
-          lane: laneCons,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Cons',
-          version: TREND_20M_CONS_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keyBal, {
-          key: keyBal,
-          transfer,
-          observation,
-          lane: laneBal,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Bal',
-          version: TREND_20M_BAL_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keyWide, {
-          key: keyWide,
-          transfer,
-          observation,
-          lane: laneWide,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Wide',
-          version: TREND_20M_WIDE_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keyRun, {
-          key: keyRun,
-          transfer,
-          observation,
-          lane: laneRun,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Run',
-          version: TREND_20M_RUN_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keyGolden, {
-          key: keyGolden,
-          transfer,
-          observation,
-          lane: laneGolden,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Golden',
-          version: TREND_20M_GOLDEN_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keySniper, {
-          key: keySniper,
-          transfer,
-          observation,
-          lane: laneSniper,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Sniper',
-          version: TREND_20M_SNIPER_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keyPhoenix, {
-          key: keyPhoenix,
-          transfer,
-          observation,
-          lane: lanePhoenix,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-Phoenix',
-          version: TREND_20M_PHOENIX_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
-
-        this.states.set(keyAntiDump, {
-          key: keyAntiDump,
-          transfer,
-          observation,
-          lane: laneAntiDump,
-          facts: null,
-          active: true,
-          registeredAt: now,
-          laneLabel: 'T-AntiDump',
-          version: TREND_20M_ANTIDUMP_RULES.version,
-          lastDecision: null,
-          lastEvent: null,
-        });
+        const laneAntiDump = new DistributionTrendAntiDumpLane(transfer.mint, makeOnEvent(keyAntiDump, 'T-AntiDump'));
 
         this.states.set(keyTitan, {
           key: keyTitan,
@@ -790,35 +664,28 @@ export class DistributionProfit4Runtime {
           lastEvent: null,
         });
 
-        if (this.bought.has(keyCons)) laneCons.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneCons.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyBal)) laneBal.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneBal.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyWide)) laneWide.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneWide.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyRun)) laneRun.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneRun.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyGolden)) laneGolden.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneGolden.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keySniper)) laneSniper.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneSniper.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyPhoenix)) lanePhoenix.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) lanePhoenix.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
-
-        if (this.bought.has(keyAntiDump)) laneAntiDump.end(now, 'ONE_ROUND_ALREADY_ENTERED');
-        else if (invalidTime) laneAntiDump.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+        this.states.set(keyAntiDump, {
+          key: keyAntiDump,
+          transfer,
+          observation,
+          lane: laneAntiDump,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-AntiDump',
+          version: TREND_20M_ANTIDUMP_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
 
         if (this.bought.has(keyTitan)) laneTitan.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneTitan.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
 
         if (this.bought.has(keyApex)) laneApex.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneApex.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyAntiDump)) laneAntiDump.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneAntiDump.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
     } else {
       const key = transfer.mint;
