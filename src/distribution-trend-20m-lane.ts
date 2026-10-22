@@ -16,7 +16,10 @@ export interface Trend20mRules extends TargetRules {
   minTokenAgeSeconds: number;
   profitFloorPercent: number;
   nominalTargetPercent?: number;
+  takeProfitCeilingPercent?: number;
   maxLargestSellUsd?: number;
+  breakevenTriggerPercent?: number;
+  breakevenLockNetPercent?: number;
 }
 
 // -------------------------------------------------------------
@@ -377,6 +380,106 @@ export const TREND_20M_ANTIDUMP_RULES: Readonly<Trend20mRules> = Object.freeze({
   maxLargestSellUsd: 100,
 });
 
+// -------------------------------------------------------------
+// 9. Opsi I: Titan Crowd Dominance (T-Titan)
+// Juara Tertinggi Win Rate Loop Engineering (83.3% WR, PF 32.4x)
+// Buyers >= 10, BuyShare >= 65%, Sell < $50, FOMO < 25%, DD < 6%
+// TP +20%, SL -9%, Trailing +12% (DD 2.5%), BE Lock @ +7% (Lock +3.5% Gross)
+// -------------------------------------------------------------
+export const TREND_20M_TITAN_RULES: Readonly<Trend20mRules> = Object.freeze({
+  ...validateTargetRules({
+    ...DEFAULT_TARGET_RULES,
+    version: 'distribution-trend-20m-titan-v1',
+    paperOnly: true,
+    enabled: true,
+    targetPercent: 1000.0,
+    stopLossPercent: 9.0,
+    trailingStartPercent: 12.0,
+    trailingDrawdownPercent: 2.5,
+    maxHoldSeconds: 2700,
+    observationSeconds: 30,
+    minTransferAgeSeconds: 1200,
+    maxTransferLagSeconds: 60,
+    maxEntryWaitSeconds: 7200,
+    confirmSeconds: 3,
+    minBuySharePercent: 65.0,
+    minMeaningfulBuyUsd: 15,
+    minMeaningfulBuyers: 10,
+    maxBuyerSharePercent: 80.0,
+    minMomentumPercent: 0.1,
+    maxMomentumPercent: 50.0,
+    maxEntryReturnPercent: 25.0,
+    maxDrawdownPercent: 6.0,
+    executionDelayMs: 1000,
+    maxFillWaitMs: 15000,
+    feePercentPerSide: 1.0,
+    slippagePercentPerSide: 0.5,
+    fixedFeeUsdPerSide: 0.005,
+    stakeUsd: 5.0,
+    blockKnownDumpSellers: true,
+  }),
+  minMarketCapUsd: 30000,
+  maxMarketCapUsd: 600000,
+  minHolderCount: 100,
+  minTokenAgeSeconds: 1200,
+  profitFloorPercent: 15.0,
+  nominalTargetPercent: 20.0,
+  takeProfitCeilingPercent: 20.0,
+  maxLargestSellUsd: 50,
+  breakevenTriggerPercent: 7.0,
+  breakevenLockNetPercent: 3.5,
+});
+
+// -------------------------------------------------------------
+// 10. Opsi J: Apex Ultra Quality (T-Apex)
+// Runner Up Win Rate Loop Engineering (70.0% WR, Net PnL +$7.10, PF 8.21x)
+// Buyers >= 9, BuyShare >= 60%, Sell < $60, FOMO < 25%, DD < 8%
+// TP +30%, SL -12%, Trailing +16% (DD 3.5%), BE Lock @ +8% (Lock +3.5% Gross)
+// -------------------------------------------------------------
+export const TREND_20M_APEX_RULES: Readonly<Trend20mRules> = Object.freeze({
+  ...validateTargetRules({
+    ...DEFAULT_TARGET_RULES,
+    version: 'distribution-trend-20m-apex-v1',
+    paperOnly: true,
+    enabled: true,
+    targetPercent: 1000.0,
+    stopLossPercent: 12.0,
+    trailingStartPercent: 16.0,
+    trailingDrawdownPercent: 3.5,
+    maxHoldSeconds: 2700,
+    observationSeconds: 30,
+    minTransferAgeSeconds: 1200,
+    maxTransferLagSeconds: 60,
+    maxEntryWaitSeconds: 7200,
+    confirmSeconds: 3,
+    minBuySharePercent: 60.0,
+    minMeaningfulBuyUsd: 15,
+    minMeaningfulBuyers: 9,
+    maxBuyerSharePercent: 80.0,
+    minMomentumPercent: 0.1,
+    maxMomentumPercent: 50.0,
+    maxEntryReturnPercent: 25.0,
+    maxDrawdownPercent: 8.0,
+    executionDelayMs: 1000,
+    maxFillWaitMs: 15000,
+    feePercentPerSide: 1.0,
+    slippagePercentPerSide: 0.5,
+    fixedFeeUsdPerSide: 0.005,
+    stakeUsd: 5.0,
+    blockKnownDumpSellers: true,
+  }),
+  minMarketCapUsd: 30000,
+  maxMarketCapUsd: 600000,
+  minHolderCount: 100,
+  minTokenAgeSeconds: 1200,
+  profitFloorPercent: 18.0,
+  nominalTargetPercent: 30.0,
+  takeProfitCeilingPercent: 30.0,
+  maxLargestSellUsd: 60,
+  breakevenTriggerPercent: 8.0,
+  breakevenLockNetPercent: 3.5,
+});
+
 // Legacy singleton baseline v2 (dipakai untuk backward compatibility)
 export const TREND_20M_RULES: Readonly<Trend20mRules> = Object.freeze({
   ...validateTargetRules({
@@ -521,7 +624,17 @@ export class DistributionTrendBaseLane extends DistributionTargetLane {
             reasons.push('LARGEST_SELL_TOO_HIGH_WHALE_DUMP');
           }
 
-          // 7. Batas waktu window observasi (maksimal 120 menit)
+          // 7. Anti-FOMO / Anti-Pucuk: Observation Gain Cap
+          if (
+            r.maxEntryReturnPercent !== undefined &&
+            r.maxEntryReturnPercent < 1000 &&
+            f.entryReturnPercent !== null &&
+            f.entryReturnPercent > r.maxEntryReturnPercent
+          ) {
+            reasons.push('FOMO_GAIN_TOO_HIGH_TOP_BUY');
+          }
+
+          // 8. Batas waktu window observasi (maksimal 120 menit)
           const waitStart = f.firstAt ?? f.now;
           if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) {
             reasons.push('ENTRY_WINDOW_EXPIRED');
@@ -545,13 +658,28 @@ export class DistributionTrendBaseLane extends DistributionTargetLane {
             return `STOP_LOSS_${Math.round(rules.stopLossPercent)}PCT`;
           }
 
-          // 2. TIMEOUT MAXIMUM HOLDING
+          // 2. NET PROFIT BREAKEVEN LOCK (Kunci Juara Win Rate)
+          if (rules.breakevenTriggerPercent !== undefined) {
+            const lockGross = rules.breakevenLockNetPercent ?? 3.5;
+            if (this.peakGrossSeen >= rules.breakevenTriggerPercent) {
+              if (grossRet <= lockGross) {
+                return `BREAKEVEN_PROFIT_LOCKED_${Math.round(rules.breakevenTriggerPercent)}_${Math.round(lockGross)}`;
+              }
+            }
+          }
+
+          // 3. HARD TAKE PROFIT CEILING (jika disetel eksplisit, misal T-Titan @ +20%, T-Apex @ +30%)
+          if (rules.takeProfitCeilingPercent !== undefined && grossRet >= rules.takeProfitCeilingPercent) {
+            return `TAKE_PROFIT_CEILING_${Math.round(rules.takeProfitCeilingPercent)}`;
+          }
+
+          // 4. TIMEOUT MAXIMUM HOLDING
           const holdSeconds = this.entryAt !== null ? (f.now - this.entryAt) / 1000 : 0;
           if (holdSeconds >= rules.maxHoldSeconds) {
             return `MAX_HOLD_TIMEOUT_${Math.round(rules.maxHoldSeconds / 60)}M`;
           }
 
-          // 3. FASE DYNAMIC TRAILING PROFIT
+          // 5. FASE DYNAMIC TRAILING PROFIT
           if (this.peakGrossSeen >= rules.trailingStartPercent) {
             const drawdownFromPeak = this.peakGrossSeen - grossRet;
             if (drawdownFromPeak >= rules.trailingDrawdownPercent) {
@@ -654,6 +782,18 @@ export class DistributionTrendPhoenixLane extends DistributionTrendBaseLane {
 export class DistributionTrendAntiDumpLane extends DistributionTrendBaseLane {
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
     super(mint, TREND_20M_ANTIDUMP_RULES, 'T-AntiDump', 60.0, emit);
+  }
+}
+
+export class DistributionTrendTitanLane extends DistributionTrendBaseLane {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, TREND_20M_TITAN_RULES, 'T-Titan', 20.0, emit);
+  }
+}
+
+export class DistributionTrendApexLane extends DistributionTrendBaseLane {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, TREND_20M_APEX_RULES, 'T-Apex', 30.0, emit);
   }
 }
 

@@ -11,10 +11,14 @@ import {
   DistributionTrendSniperLane,
   DistributionTrendPhoenixLane,
   DistributionTrendAntiDumpLane,
+  DistributionTrendTitanLane,
+  DistributionTrendApexLane,
   TREND_20M_GOLDEN_RULES,
   TREND_20M_SNIPER_RULES,
   TREND_20M_PHOENIX_RULES,
   TREND_20M_ANTIDUMP_RULES,
+  TREND_20M_TITAN_RULES,
+  TREND_20M_APEX_RULES,
   TREND_20M_RULES,
 } from '../src/distribution-trend-20m-lane.js';
 import type { TargetFacts, TargetEvent } from '../src/distribution-target-lane.js';
@@ -437,4 +441,125 @@ test('T-AntiDump rejects tokens where whale/dev dumped >= $100 before entry and 
     curTime += 1100;
   }
   assert.ok(eventsClean.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-AntiDump'));
+});
+
+test('T-Titan enforces 83.3% WR setup: buyers >= 10, buyShare >= 65%, sell < $50 and locks profit at +20% ceiling', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendTitanLane('MintTitan1111111111111111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+
+  // 1. Rejects if buyers < 10 (e.g. 8 buyers)
+  lane.step(baseFacts({
+    now,
+    price: 0.000080,
+    priceAt: now,
+    meaningfulBuyers: 8,
+    buyShareUsdPercent: 70.0,
+    largestSellUsd: 20.0,
+  }));
+  assert.ok(events.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('NOT_ENOUGH_BUYERS')));
+
+  // 2. Rejects if largestSellUsd >= $50 (e.g. $60 dump)
+  const events2: TargetEvent[] = [];
+  const lane2 = new DistributionTrendTitanLane('MintTitan2222222222222222222222222222222', (e) => events2.push(e));
+  lane2.step(baseFacts({
+    now,
+    price: 0.000080,
+    priceAt: now,
+    meaningfulBuyers: 12,
+    buyShareUsdPercent: 70.0,
+    largestSellUsd: 60.0,
+  }));
+  assert.ok(events2.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('LARGEST_SELL_TOO_HIGH_WHALE_DUMP')));
+
+  // 3. Rejects if FOMO gain too high (> 25%)
+  const events3: TargetEvent[] = [];
+  const lane3 = new DistributionTrendTitanLane('MintTitan3333333333333333333333333333333', (e) => events3.push(e));
+  lane3.step(baseFacts({
+    now,
+    price: 0.000080,
+    priceAt: now,
+    meaningfulBuyers: 12,
+    buyShareUsdPercent: 70.0,
+    largestSellUsd: 20.0,
+    entryReturnPercent: 30.0, // > 25% FOMO
+  }));
+  assert.ok(events3.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('FOMO_GAIN_TOO_HIGH_TOP_BUY')));
+
+  // 4. Enters when all criteria pass and exits at TAKE_PROFIT_CEILING_20
+  const events4: TargetEvent[] = [];
+  const lane4 = new DistributionTrendTitanLane('MintTitan4444444444444444444444444444444', (e) => events4.push(e));
+  let curTime = now;
+  for (let i = 0; i < 5; i++) {
+    lane4.step(baseFacts({
+      now: curTime,
+      price: 0.000080,
+      priceAt: curTime,
+      meaningfulBuyers: 11,
+      buyShareUsdPercent: 68.0,
+      meaningfulBuyUsd: 150,
+      largestSellUsd: 20.0,
+      entryReturnPercent: 10.0,
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events4.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Titan'));
+
+  const buyEvent = events4.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000080;
+
+  // Pump to +21% (hits ceiling 20%)
+  curTime += 2000;
+  lane4.step(baseFacts({ now: curTime, price: entryPrice * 1.21, priceAt: curTime }));
+  assert.ok(events4.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason === 'TAKE_PROFIT_CEILING_20'));
+});
+
+test('T-Apex enforces 70.0% WR setup: buyers >= 9, buyShare >= 60%, sell < $60, TP +30%', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendApexLane('MintApex1111111111111111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+
+  // 1. Rejects if buyers < 9 (e.g. 7 buyers)
+  lane.step(baseFacts({
+    now,
+    price: 0.000080,
+    priceAt: now,
+    meaningfulBuyers: 7,
+    buyShareUsdPercent: 65.0,
+    largestSellUsd: 30.0,
+  }));
+  assert.ok(events.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('NOT_ENOUGH_BUYERS')));
+
+  // 2. Enters and tests breakeven profit lock (peak +9% -> pullback to +3% triggers breakeven lock)
+  const events2: TargetEvent[] = [];
+  const lane2 = new DistributionTrendApexLane('MintApex2222222222222222222222222222222', (e) => events2.push(e));
+  let curTime = now;
+  for (let i = 0; i < 5; i++) {
+    lane2.step(baseFacts({
+      now: curTime,
+      price: 0.000080,
+      priceAt: curTime,
+      meaningfulBuyers: 10,
+      buyShareUsdPercent: 65.0,
+      meaningfulBuyUsd: 150,
+      largestSellUsd: 30.0,
+      entryReturnPercent: 12.0,
+    }));
+    curTime += 1100;
+  }
+  assert.ok(events2.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Apex'));
+
+  const buyEvent = events2.find((e) => e.type === 'PAPER_BUY');
+  assert.ok(buyEvent);
+  const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000080;
+
+  // Price peaks at +9% (trigger BE @ 8%)
+  curTime += 2000;
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 1.09, priceAt: curTime }));
+
+  // Price pulls back to +3.0% (<= lock net 3.5%) -> triggers BREAKEVEN_PROFIT_LOCKED_8_4
+  curTime += 2000;
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 1.03, priceAt: curTime }));
+  assert.ok(events2.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('BREAKEVEN_PROFIT_LOCKED')));
 });

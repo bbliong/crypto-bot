@@ -274,7 +274,7 @@ function classifyGroup(p) {
   const l = p.laneLabel || '';
   const v = p.version || '';
   const src = p.source || '';
-  if (['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden', 'T-Sniper', 'T-Phoenix', 'T-AntiDump', 'Trend20m', 'W2-Scalp', 'W2-Trend'].includes(l) || src.includes('gmgn_trend') || v.includes('trend-20m') || v.includes('wave2')) return 'trend20m';
+  if (['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden', 'T-Sniper', 'T-Phoenix', 'T-AntiDump', 'T-Titan', 'T-Apex', 'Trend20m', 'W2-Scalp', 'W2-Trend'].includes(l) || src.includes('gmgn_trend') || v.includes('trend-20m') || v.includes('wave2')) return 'trend20m';
   if (l.startsWith('M-') || ['Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1'].includes(l) || src.includes('gmgn_research') || src.includes('pumpportal') || v.includes('momentum')) return 'momentum';
   if (['V1','V2','V3','V4','V5','V6','V7','S1','S2','S3','S4','S1_2','S5'].includes(l) || src.includes('syndicate') || v.includes('bounce') || v.includes('staircase')) return 'syndicate';
   if (['G1','G1_2','G2','G2.1','G2.2','OZ1'].includes(l) || src.includes('smart_money') || src.includes('oezank') || v.includes('smart-money') || v.includes('oezank') || v.includes('genesis-surge')) return 'smartmoney';
@@ -291,7 +291,7 @@ function computeGlobalGroupsOverview(root) {
     momentum: { key: 'momentum', label: 'Group Momentum', desc: 'M-Scalp, M-Trend & M-Golden (Quality-Gated New Pair Momentum)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     syndicate: { key: 'syndicate', label: 'Group Sindikat', desc: 'Bounce Dip V1-V7 & Staircase Akumulasi S1-S5', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
     smartmoney: { key: 'smartmoney', label: 'Group Smart Money', desc: '117 Whale GMGN Inflow, Convergence & Mirror Oezank', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
-    trend20m: { key: 'trend20m', label: 'Group Trend 20m', desc: 'GMGN Trend 20m (T-Cons, T-Bal, T-Wide, T-Run, T-Golden, T-Sniper, T-Phoenix, T-AntiDump)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
+    trend20m: { key: 'trend20m', label: 'Group Trend 20m', desc: 'GMGN Trend 20m (T-Cons, T-Bal, T-Wide, T-Run, T-Golden, T-Sniper, T-Phoenix, T-AntiDump, T-Titan, T-Apex)', watched: 0, open: 0, closed: 0, win: 0, loss: 0, winRate: 0, pnlUsd: 0, lanes: {} },
   };
 
   const allDirs = [

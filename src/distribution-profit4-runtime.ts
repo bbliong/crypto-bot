@@ -92,6 +92,8 @@ import {
   DistributionTrendSniperLane,
   DistributionTrendPhoenixLane,
   DistributionTrendAntiDumpLane,
+  DistributionTrendTitanLane,
+  DistributionTrendApexLane,
   DistributionTrend20mLane,
   TREND_20M_CONS_RULES,
   TREND_20M_BAL_RULES,
@@ -101,6 +103,8 @@ import {
   TREND_20M_SNIPER_RULES,
   TREND_20M_PHOENIX_RULES,
   TREND_20M_ANTIDUMP_RULES,
+  TREND_20M_TITAN_RULES,
+  TREND_20M_APEX_RULES,
   TREND_20M_RULES,
 } from './distribution-trend-20m-lane.js';
 import { TargetObservation, type TargetEvent, type TargetFacts, type TargetTrade } from './distribution-target-lane.js';
@@ -175,11 +179,14 @@ type RuntimeState = {
     | DistributionTrendGoldenLane
     | DistributionTrendSniperLane
     | DistributionTrendPhoenixLane
+    | DistributionTrendAntiDumpLane
+    | DistributionTrendTitanLane
+    | DistributionTrendApexLane
     | DistributionTrend20mLane;
   facts: TargetFacts | null;
   active: boolean;
   registeredAt?: number;
-  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'M-Golden' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run' | 'T-Golden' | 'T-Sniper' | 'T-Phoenix' | 'T-AntiDump';
+  laneLabel: 'V1' | 'V2' | 'V3' | 'V4' | 'V5' | 'V6' | 'V7' | 'S1' | 'S2' | 'S3' | 'S4' | 'S1.2' | 'S5' | 'OZ1' | 'G1' | 'G1.2' | 'G2' | 'G2.1' | 'G2.2' | 'P4' | 'Safe' | 'Opt' | 'Wide' | 'Swing' | 'Wave' | 'V2M' | 'V3M' | 'R5' | 'R5.1' | 'M-Apex10k' | 'M-Safe10k' | 'M-Runner15k' | 'M-Scalp' | 'M-Trend' | 'M-Golden' | 'Trend20m' | 'T-Cons' | 'T-Bal' | 'T-Wide' | 'T-Run' | 'T-Golden' | 'T-Sniper' | 'T-Phoenix' | 'T-AntiDump' | 'T-Titan' | 'T-Apex';
   version: string;
   lastDecision: unknown;
   lastEvent: TargetEvent | null;
@@ -284,7 +291,7 @@ export class DistributionProfit4Runtime {
       if (type === 'syndicate') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'S1.2', 'S5'];
       if (type === 'smartmoney') return ['G2', 'G2.1', 'G2.2', 'OZ1'];
       if (type === 'bounce') return ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'S1', 'S2', 'S3', 'S4', 'G1', 'Safe', 'Opt', 'Wide', 'Swing', 'Wave', 'V2M', 'V3M', 'R5', 'R5.1', 'M-Apex10k', 'M-Safe10k', 'M-Runner15k'];
-      if (type === 'trend20m') return ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden', 'T-Sniper', 'T-Phoenix', 'T-AntiDump'];
+      if (type === 'trend20m') return ['T-Cons', 'T-Bal', 'T-Wide', 'T-Run', 'T-Golden', 'T-Sniper', 'T-Phoenix', 'T-AntiDump', 'T-Titan', 'T-Apex'];
       return ['P4'];
     };
 
@@ -629,6 +636,8 @@ export class DistributionProfit4Runtime {
         const keySniper = `${transfer.mint}:t_sniper`;
         const keyPhoenix = `${transfer.mint}:t_phoenix`;
         const keyAntiDump = `${transfer.mint}:t_antidump`;
+        const keyTitan = `${transfer.mint}:t_titan`;
+        const keyApex = `${transfer.mint}:t_apex`;
 
         const laneCons = new DistributionTrendConsLane(transfer.mint, makeOnEvent(keyCons, 'T-Cons'));
         const laneBal = new DistributionTrendBalLane(transfer.mint, makeOnEvent(keyBal, 'T-Bal'));
@@ -638,6 +647,8 @@ export class DistributionProfit4Runtime {
         const laneSniper = new DistributionTrendSniperLane(transfer.mint, makeOnEvent(keySniper, 'T-Sniper'));
         const lanePhoenix = new DistributionTrendPhoenixLane(transfer.mint, makeOnEvent(keyPhoenix, 'T-Phoenix'));
         const laneAntiDump = new DistributionTrendAntiDumpLane(transfer.mint, makeOnEvent(keyAntiDump, 'T-AntiDump'));
+        const laneTitan = new DistributionTrendTitanLane(transfer.mint, makeOnEvent(keyTitan, 'T-Titan'));
+        const laneApex = new DistributionTrendApexLane(transfer.mint, makeOnEvent(keyApex, 'T-Apex'));
 
         this.states.set(keyCons, {
           key: keyCons,
@@ -751,6 +762,34 @@ export class DistributionProfit4Runtime {
           lastEvent: null,
         });
 
+        this.states.set(keyTitan, {
+          key: keyTitan,
+          transfer,
+          observation,
+          lane: laneTitan,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Titan',
+          version: TREND_20M_TITAN_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
+        this.states.set(keyApex, {
+          key: keyApex,
+          transfer,
+          observation,
+          lane: laneApex,
+          facts: null,
+          active: true,
+          registeredAt: now,
+          laneLabel: 'T-Apex',
+          version: TREND_20M_APEX_RULES.version,
+          lastDecision: null,
+          lastEvent: null,
+        });
+
         if (this.bought.has(keyCons)) laneCons.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneCons.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
 
@@ -774,6 +813,12 @@ export class DistributionProfit4Runtime {
 
         if (this.bought.has(keyAntiDump)) laneAntiDump.end(now, 'ONE_ROUND_ALREADY_ENTERED');
         else if (invalidTime) laneAntiDump.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyTitan)) laneTitan.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneTitan.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
+
+        if (this.bought.has(keyApex)) laneApex.end(now, 'ONE_ROUND_ALREADY_ENTERED');
+        else if (invalidTime) laneApex.end(now, 'TRANSFER_TIME_MISSING_OR_FUTURE');
       }
     } else {
       const key = transfer.mint;
