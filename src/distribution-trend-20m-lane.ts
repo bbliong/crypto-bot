@@ -16,6 +16,7 @@ export interface Trend20mRules extends TargetRules {
   minTokenAgeSeconds: number;
   profitFloorPercent: number;
   nominalTargetPercent?: number;
+  maxLargestSellUsd?: number;
 }
 
 // -------------------------------------------------------------
@@ -241,8 +242,8 @@ export const TREND_20M_GOLDEN_RULES: Readonly<Trend20mRules> = Object.freeze({
 
 // -------------------------------------------------------------
 // 6. Opsi F: Sniper Scalper (T-Sniper)
-// Juara Win Rate Loop Engineering Replay 1.09M Ticks (52.6% WR, PnL +$7.83)
-// Mcap $30k-$500k, Buyers >= 7, BuyShare >= 50%, TP +40%, Trailing +20% (DD 4%), SL -12%, Hold 45m
+// Juara Win Rate Loop Engineering Replay (50.0% WR, PnL +$7.35)
+// Mcap $30k-$500k, Buyers >= 7, BuyShare >= 50%, TP +40%, Trailing +20% (DD 4%), SL -14%, Hold 45m
 // -------------------------------------------------------------
 export const TREND_20M_SNIPER_RULES: Readonly<Trend20mRules> = Object.freeze({
   ...validateTargetRules({
@@ -251,7 +252,7 @@ export const TREND_20M_SNIPER_RULES: Readonly<Trend20mRules> = Object.freeze({
     paperOnly: true,
     enabled: true,
     targetPercent: 1000.0,
-    stopLossPercent: 12.0,
+    stopLossPercent: 14.0,
     trailingStartPercent: 20.0,
     trailingDrawdownPercent: 4.0,
     maxHoldSeconds: 2700, // 45 menit
@@ -286,7 +287,7 @@ export const TREND_20M_SNIPER_RULES: Readonly<Trend20mRules> = Object.freeze({
 
 // -------------------------------------------------------------
 // 7. Opsi G: Phoenix Runner (T-Phoenix)
-// Juara Net PnL Tertinggi Loop Engineering Replay 1.09M Ticks (PnL +$12.32, PF 1.86x)
+// Juara Net PnL Tertinggi Loop Engineering Replay 2.28M Ticks (PnL +$19.43, PF 1.65x)
 // Mcap $30k-$600k, Buyers >= 6, BuyShare >= 40%, TP +60%, Trailing +25% (DD 6%), SL -15%, Hold 60m
 // -------------------------------------------------------------
 export const TREND_20M_PHOENIX_RULES: Readonly<Trend20mRules> = Object.freeze({
@@ -327,6 +328,53 @@ export const TREND_20M_PHOENIX_RULES: Readonly<Trend20mRules> = Object.freeze({
   minTokenAgeSeconds: 1200,
   profitFloorPercent: 20.0,
   nominalTargetPercent: 60.0,
+});
+
+// -------------------------------------------------------------
+// 8. Opsi H: Anti-Dump Defender (T-AntiDump)
+// Juara Win Rate Tertinggi Loop Engineering Replay 2.28M Ticks (51.2% WR, PnL +$8.61)
+// Menolak token jika ada dump seller >= $100 sebelum entry
+// Mcap $30k-$600k, Buyers >= 6, BuyShare >= 40%, Sell < $100, TP +60%, Trailing +25% (DD 6%), SL -15%, Hold 60m
+// -------------------------------------------------------------
+export const TREND_20M_ANTIDUMP_RULES: Readonly<Trend20mRules> = Object.freeze({
+  ...validateTargetRules({
+    ...DEFAULT_TARGET_RULES,
+    version: 'distribution-trend-20m-antidump-v1',
+    paperOnly: true,
+    enabled: true,
+    targetPercent: 1000.0,
+    stopLossPercent: 15.0,
+    trailingStartPercent: 25.0,
+    trailingDrawdownPercent: 6.0,
+    maxHoldSeconds: 3600, // 60 menit
+    observationSeconds: 30,
+    minTransferAgeSeconds: 1200,
+    maxTransferLagSeconds: 60,
+    maxEntryWaitSeconds: 7200,
+    confirmSeconds: 3,
+    minBuySharePercent: 40.0,
+    minMeaningfulBuyUsd: 15,
+    minMeaningfulBuyers: 6,
+    maxBuyerSharePercent: 80.0,
+    minMomentumPercent: 0.1,
+    maxMomentumPercent: 50.0,
+    maxEntryReturnPercent: 100000,
+    maxDrawdownPercent: 15.0,
+    executionDelayMs: 1000,
+    maxFillWaitMs: 15000,
+    feePercentPerSide: 1.0,
+    slippagePercentPerSide: 0.5,
+    fixedFeeUsdPerSide: 0.005,
+    stakeUsd: 5.0,
+    blockKnownDumpSellers: true,
+  }),
+  minMarketCapUsd: 30000,
+  maxMarketCapUsd: 600000,
+  minHolderCount: 100,
+  minTokenAgeSeconds: 1200,
+  profitFloorPercent: 20.0,
+  nominalTargetPercent: 60.0,
+  maxLargestSellUsd: 100,
 });
 
 // Legacy singleton baseline v2 (dipakai untuk backward compatibility)
@@ -464,7 +512,16 @@ export class DistributionTrendBaseLane extends DistributionTargetLane {
             reasons.push('SINGLE_BUYER_DOMINATES');
           }
 
-          // 6. Batas waktu window observasi (maksimal 120 menit)
+          // 6. FITUR ANTI-DUMP: Deteksi Largest Sell Whale/Dev Sebelum Entry
+          if (
+            rules.maxLargestSellUsd !== undefined &&
+            rules.maxLargestSellUsd > 0 &&
+            f.largestSellUsd >= rules.maxLargestSellUsd
+          ) {
+            reasons.push('LARGEST_SELL_TOO_HIGH_WHALE_DUMP');
+          }
+
+          // 7. Batas waktu window observasi (maksimal 120 menit)
           const waitStart = f.firstAt ?? f.now;
           if (f.now - waitStart > r.maxEntryWaitSeconds * 1000) {
             reasons.push('ENTRY_WINDOW_EXPIRED');
@@ -591,6 +648,12 @@ export class DistributionTrendSniperLane extends DistributionTrendBaseLane {
 export class DistributionTrendPhoenixLane extends DistributionTrendBaseLane {
   constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
     super(mint, TREND_20M_PHOENIX_RULES, 'T-Phoenix', 60.0, emit);
+  }
+}
+
+export class DistributionTrendAntiDumpLane extends DistributionTrendBaseLane {
+  constructor(mint: string, emit: (event: TargetEvent) => void = () => {}) {
+    super(mint, TREND_20M_ANTIDUMP_RULES, 'T-AntiDump', 60.0, emit);
   }
 }
 

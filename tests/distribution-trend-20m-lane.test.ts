@@ -10,9 +10,11 @@ import {
   DistributionTrendGoldenLane,
   DistributionTrendSniperLane,
   DistributionTrendPhoenixLane,
+  DistributionTrendAntiDumpLane,
   TREND_20M_GOLDEN_RULES,
   TREND_20M_SNIPER_RULES,
   TREND_20M_PHOENIX_RULES,
+  TREND_20M_ANTIDUMP_RULES,
   TREND_20M_RULES,
 } from '../src/distribution-trend-20m-lane.js';
 import type { TargetFacts, TargetEvent } from '../src/distribution-target-lane.js';
@@ -323,7 +325,7 @@ test('T-Golden applies loop-engineered gates: Mcap $50k-$500k, buyers >= 5, buyS
   assert.ok(events3.some((e) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && (e as any).reason?.startsWith('TRAILING_PROFIT')));
 });
 
-test('T-Sniper applies loop-engineered gates: buyers >= 7, buyShare >= 50%, SL 12%, Trailing 20/4', () => {
+test('T-Sniper applies loop-engineered gates: buyers >= 7, buyShare >= 50%, SL 14%, Trailing 20/4', () => {
   const events: TargetEvent[] = [];
   const lane = new DistributionTrendSniperLane('MintSniper1111111111111111111111111111111', (e) => events.push(e));
   const now = 1_700_000_000_000;
@@ -349,12 +351,12 @@ test('T-Sniper applies loop-engineered gates: buyers >= 7, buyShare >= 50%, SL 1
   }
   assert.ok(events2.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-Sniper'));
 
-  // 3. Stop loss triggers at -12%
+  // 3. Stop loss triggers at -14%
   const buyEvent = events2.find((e) => e.type === 'PAPER_BUY');
   assert.ok(buyEvent);
   const entryPrice = (buyEvent as any).priceUsd || (buyEvent as any).price || 0.000100;
   curTime += 2000;
-  lane2.step(baseFacts({ now: curTime, price: entryPrice * 0.87, priceAt: curTime })); // -13% drop
+  lane2.step(baseFacts({ now: curTime, price: entryPrice * 0.85, priceAt: curTime })); // -15% drop (>14% SL)
   assert.ok(events2.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('STOP_LOSS')));
 });
 
@@ -400,4 +402,39 @@ test('T-Phoenix applies loop-engineered gates: buyers >= 6, buyShare >= 40%, SL 
   curTime += 2000;
   lane2.step(baseFacts({ now: curTime, price: entryPrice * 1.55, priceAt: curTime }));
   assert.ok(events2.some((e: any) => (e.type === 'PAPER_EXIT_SIGNAL' || e.type === 'PAPER_SELL') && e.reason?.includes('TRAILING_PROFIT')));
+});
+
+test('T-AntiDump rejects tokens where whale/dev dumped >= $100 before entry and passes clean tokens', () => {
+  const events: TargetEvent[] = [];
+  const lane = new DistributionTrendAntiDumpLane('MintDump1111111111111111111111111111111', (e) => events.push(e));
+  const now = 1_700_000_000_000;
+
+  // 1. Rejects if largestSellUsd >= $100 (e.g. $150 whale sell)
+  lane.step(baseFacts({
+    now,
+    price: 0.000080,
+    priceAt: now,
+    meaningfulBuyers: 8,
+    buyShareUsdPercent: 50.0,
+    largestSellUsd: 150.0,
+  }));
+  assert.ok(events.some((e) => e.type === 'PAPER_ENTRY_DECISION' && !e.allowed && e.reasons.includes('LARGEST_SELL_TOO_HIGH_WHALE_DUMP')));
+
+  // 2. Enters when largestSellUsd < $100 (e.g. $25)
+  const eventsClean: TargetEvent[] = [];
+  const laneClean = new DistributionTrendAntiDumpLane('MintClean2222222222222222222222222222222', (e) => eventsClean.push(e));
+  let curTime = now;
+  for (let i = 0; i < 5; i++) {
+    laneClean.step(baseFacts({
+      now: curTime,
+      price: 0.000080,
+      priceAt: curTime,
+      meaningfulBuyers: 8,
+      buyShareUsdPercent: 50.0,
+      meaningfulBuyUsd: 100,
+      largestSellUsd: 25.0,
+    }));
+    curTime += 1100;
+  }
+  assert.ok(eventsClean.some((e) => e.type === 'PAPER_ENTRY_SIGNAL' && e.laneLabel === 'T-AntiDump'));
 });
