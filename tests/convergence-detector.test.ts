@@ -70,6 +70,12 @@ test("ConvergenceDetector - Detects Multi-Wallet Convergence", async () => {
     assert.equal(report.classification, "GOLDEN_ORGANIC_CONVERGENCE");
     assert.equal(report.wallets.length, 2);
     assert.equal(report.entryDeltaSec, 600); // 10 minutes apart
+    assert.equal(report.walletEntries?.length, 2);
+    assert.equal(report.walletEntries?.[0].wallet, "WalletA");
+    assert.equal(report.walletEntries?.[0].deltaSecFromFirst, 0);
+    assert.equal(report.walletEntries?.[1].wallet, "WalletB");
+    assert.equal(report.walletEntries?.[1].deltaSecFromFirst, 600);
+    assert.ok(report.walletEntries?.[0].enteredAtWib.includes("WIB"));
   });
 
   // Wallet A buys

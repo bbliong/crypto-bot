@@ -40,6 +40,17 @@ export type ConvergenceClassification =
   | "GOLDEN_ORGANIC_CONVERGENCE"
   | "ACCUMULATION_WATCH";
 
+export interface WalletEntryDetail {
+  wallet: string;
+  enteredAt: string; // ISO 8601
+  enteredAtWib: string; // Formatted WIB time (UTC+7)
+  timestamp: number; // Unix timestamp in seconds
+  deltaSecFromFirst: number; // Seconds since the first wallet entered
+  solAmount?: number;
+  tokenAmount?: number;
+  txSignature?: string;
+}
+
 export interface ConvergenceReport {
   id: string;
   mint: string;
@@ -47,6 +58,7 @@ export interface ConvergenceReport {
   detectedAt: string;
   classification: ConvergenceClassification;
   wallets: string[];
+  walletEntries?: WalletEntryDetail[];
   entryDeltaSec: number;
   isLiquidityDrained: boolean;
   maxDropPercent: number;
@@ -187,15 +199,41 @@ export class ConvergenceDetector extends EventEmitter {
     }
     this.evaluatedEvents.set(trade.mint, nowSec);
 
-    // Calculate Entry Delta between distinct wallet initial buys
-    const walletFirstBuy = new Map<string, number>();
+    // Calculate Entry Details for each distinct wallet (chronological)
+    const walletFirstBuyMap = new Map<string, TradeEvent>();
     for (const t of currentTrades) {
-      if (!walletFirstBuy.has(t.wallet) || t.timestamp < walletFirstBuy.get(t.wallet)!) {
-        walletFirstBuy.set(t.wallet, t.timestamp);
+      const existing = walletFirstBuyMap.get(t.wallet);
+      if (!existing || t.timestamp < existing.timestamp) {
+        walletFirstBuyMap.set(t.wallet, t);
       }
     }
-    const buyTimes = Array.from(walletFirstBuy.values()).sort((a, b) => a - b);
-    const entryDeltaSec = buyTimes[buyTimes.length - 1] - buyTimes[0];
+
+    const sortedTrades = Array.from(walletFirstBuyMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+    const firstTimestamp = sortedTrades[0].timestamp;
+    const lastTimestamp = sortedTrades[sortedTrades.length - 1].timestamp;
+    const entryDeltaSec = lastTimestamp - firstTimestamp;
+
+    const walletEntries: WalletEntryDetail[] = sortedTrades.map((t) => {
+      const date = new Date(t.timestamp * 1000);
+      const wibStr = date.toLocaleTimeString("id-ID", {
+        timeZone: "Asia/Jakarta",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      }) + " WIB";
+
+      return {
+        wallet: t.wallet,
+        enteredAt: date.toISOString(),
+        enteredAtWib: wibStr,
+        timestamp: t.timestamp,
+        deltaSecFromFirst: t.timestamp - firstTimestamp,
+        solAmount: t.solAmount,
+        tokenAmount: t.tokenAmount,
+        txSignature: t.txSignature
+      };
+    });
 
     // Fetch DexScreener liquidity & volume
     const dexInfo = await this.fetchDexInfo(trade.mint);
@@ -274,7 +312,8 @@ export class ConvergenceDetector extends EventEmitter {
       symbol: trade.symbol || dexInfo?.symbol || "UNKNOWN",
       detectedAt: new Date(nowSec * 1000).toISOString(),
       classification,
-      wallets: uniqueWallets,
+      wallets: sortedTrades.map((t) => t.wallet),
+      walletEntries,
       entryDeltaSec,
       isLiquidityDrained,
       maxDropPercent: Number(maxDropPercent.toFixed(1)),

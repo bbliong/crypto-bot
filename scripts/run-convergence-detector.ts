@@ -27,7 +27,15 @@ async function main() {
   detector.on("golden_signal", (report) => {
     console.log("\n" + "=".repeat(75));
     console.log(`🌟 [GOLDEN CONVERGENCE SIGNAL] Token: ${report.symbol} (${report.mint.slice(0, 8)}...)`);
-    console.log(`   Wallets involved (${report.wallets.length}): ${report.wallets.map((w: string) => w.slice(0, 6) + '...').join(', ')}`);
+    console.log(`   Wallets involved (${report.wallets.length}):`);
+    if (report.walletEntries && report.walletEntries.length > 0) {
+      for (const [idx, we] of report.walletEntries.entries()) {
+        const deltaStr = we.deltaSecFromFirst === 0 ? "First Pioneer (0s)" : `+${Math.round(we.deltaSecFromFirst / 60)}m (${we.deltaSecFromFirst}s)`;
+        console.log(`     ${idx + 1}. ${we.wallet.slice(0, 8)}...${we.wallet.slice(-6)} | Jam: ${we.enteredAtWib} | Selisih: ${deltaStr} | ${we.solAmount ? we.solAmount + ' SOL' : ''}`);
+      }
+    } else {
+      console.log(`   ${report.wallets.map((w: string) => w.slice(0, 6) + '...').join(', ')}`);
+    }
     console.log(`   Entry Delta: ~${Math.round(report.entryDeltaSec / 60)} menit`);
     console.log(`   DEX: ${report.dexInfo?.dexId || 'N/A'} | Price: $${report.dexInfo?.priceUsd || '0'} | Liquidity: $${report.dexInfo?.liquidityUsd?.toLocaleString() || '0'}`);
     console.log(`   24h Volume: $${report.dexInfo?.volume24h?.toLocaleString() || '0'} | 24h Change: ${report.dexInfo?.priceChange24h || 0}%`);
@@ -38,11 +46,18 @@ async function main() {
   detector.on("syndicate_detected", (report) => {
     console.log("\n" + "!".repeat(75));
     console.log(`🚨 [SYNDICATE DUMP DETECTED] Token: ${report.symbol} (${report.mint.slice(0, 8)}...)`);
-    console.log(`   Cluster Wallets (${report.wallets.length}): ${report.wallets.map((w: string) => w.slice(0, 6) + '...').join(', ')}`);
+    console.log(`   Cluster Wallets (${report.wallets.length}):`);
+    if (report.walletEntries && report.walletEntries.length > 0) {
+      for (const [idx, we] of report.walletEntries.entries()) {
+        console.log(`     ${idx + 1}. ${we.wallet.slice(0, 8)}...${we.wallet.slice(-6)} | Masuk: ${we.enteredAtWib} (+${we.deltaSecFromFirst}s)`);
+      }
+    } else {
+      console.log(`   ${report.wallets.map((w: string) => w.slice(0, 6) + '...').join(', ')}`);
+    }
     console.log(`   Entry Delta: ${report.entryDeltaSec} DETIK (RAPAT / SEREMPAK!)`);
     console.log(`   Liquidity Status: ${report.isLiquidityDrained ? 'DRAINED / MATI' : '$' + report.dexInfo?.liquidityUsd?.toLocaleString()}`);
     console.log(`   Max Drop: -${report.maxDropPercent}%`);
-    console.log(`   Action: Wallets ${report.wallets.map((w: string) => w.slice(0, 6) + '...').join(', ')} TELAH DI-QUARANTINE!`);
+    console.log(`   Action: Cluster wallets TELAH DI-QUARANTINE!`);
     console.log("!".repeat(75) + "\n");
   });
 

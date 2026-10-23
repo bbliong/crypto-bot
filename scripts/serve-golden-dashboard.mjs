@@ -738,9 +738,16 @@ function getDashboardHtml() {
           badgeLabel = '🚨 DUMP RISK';
         }
 
-        const walletsHtml = (s.wallets || []).map(w => 
-          \`<span class="mono" title="\${w}">\${w.slice(0, 4)}...\${w.slice(-4)}</span>\`
-        ).join(', ');
+        const walletsHtml = (s.walletEntries || s.wallets || []).map((item, idx) => {
+          if (typeof item === 'object' && item.enteredAtWib) {
+            const deltaStr = item.deltaSecFromFirst === 0
+              ? '<span style="color: #f59e0b;">First</span>'
+              : '+' + Math.round(item.deltaSecFromFirst / 60) + 'm';
+            return '<div style="margin: 2px 0;"><span class="mono" title="' + item.wallet + '" style="font-size: 11px;">' + item.wallet.slice(0, 6) + '...' + item.wallet.slice(-4) + '</span> <span style="color: #93c5fd; font-size: 11px;">@ ' + item.enteredAtWib + '</span> <span style="color: #a5b4fc; font-size: 10px;">(' + deltaStr + ')</span></div>';
+          }
+          const w = typeof item === 'string' ? item : item.wallet;
+          return '<span class="mono" title="' + w + '">' + w.slice(0, 4) + '...' + w.slice(-4) + '</span>';
+        }).join('');
 
         return \`
           <tr>
@@ -751,7 +758,7 @@ function getDashboardHtml() {
               <span class="mono copyable" style="font-size: 11px; color: var(--text-muted);" onclick="navigator.clipboard.writeText('\${s.mint}')" title="Klik untuk copy mint">\${s.mint ? s.mint.slice(0, 6) + '...' + s.mint.slice(-4) : '-'}</span>
             </td>
             <td><strong style="color: #38bdf8;">\${mcapStr}</strong> <span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8; font-size: 10px;">&lt; 100k</span></td>
-            <td>\${walletsHtml} (\${s.wallets?.length || 0} wallet)</td>
+            <td style="max-width: 280px; font-size: 12px;">\${walletsHtml}</td>
             <td><span class="badge badge-primary">\${deltaMin > 0 ? deltaMin + ' menit' : s.entryDeltaSec + ' dtk'}</span></td>
             <td>$\${s.dexInfo?.priceUsd || 0} <span style="color: \${changeColor}; font-size: 11px;">(\${change >= 0 ? '+' : ''}\${change}%)</span></td>
             <td><strong>\${liq}</strong></td>
