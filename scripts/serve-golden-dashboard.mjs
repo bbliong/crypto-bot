@@ -27,7 +27,7 @@ function loadState() {
     try {
       const data = JSON.parse(readFileSync(auditPath, "utf8"));
       cleanWallets = data.cleanOrganicWallets || [];
-      quarantinedWallets = data.purgedSyndicateWallets || [];
+      quarantinedWallets = data.syndicatesDetected || data.purgedSyndicateWallets || [];
     } catch (e) {
       log(`Error reading audit file: ${e.message}`);
     }
@@ -128,15 +128,17 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  const cleanPath = url.pathname.replace(/^\/wal-track/, "") || "/";
+
   // API State
-  if (url.pathname === "/api/state") {
+  if (cleanPath === "/api/state") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(loadState()));
     return;
   }
 
   // API Trigger Scan
-  if (url.pathname === "/api/scan" && req.method === "POST") {
+  if (cleanPath === "/api/scan" && req.method === "POST") {
     triggerScan((result) => {
       res.writeHead(result.status === "ok" ? 200 : 500, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
@@ -145,7 +147,7 @@ const server = createServer(async (req, res) => {
   }
 
   // API Logs
-  if (url.pathname === "/api/logs") {
+  if (cleanPath === "/api/logs") {
     let content = "";
     if (existsSync(LOG_FILE)) {
       try {
@@ -159,7 +161,7 @@ const server = createServer(async (req, res) => {
   }
 
   // Main Dashboard HTML
-  if (url.pathname === "/" || url.pathname === "/index.html") {
+  if (cleanPath === "/" || cleanPath === "/index.html") {
     const html = getDashboardHtml();
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
@@ -551,6 +553,7 @@ function getDashboardHtml() {
 
   <script>
     let state = null;
+    const API_BASE = window.location.pathname.startsWith('/wal-track') ? '/wal-track' : '';
 
     function switchTab(name) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -564,7 +567,7 @@ function getDashboardHtml() {
 
     async function loadData() {
       try {
-        const res = await fetch('/api/state');
+        const res = await fetch(API_BASE + '/api/state');
         state = await res.json();
         renderKPIs();
         renderGoldenSignals();
@@ -721,7 +724,7 @@ function getDashboardHtml() {
 
     async function fetchLogs() {
       try {
-        const res = await fetch('/api/logs');
+        const res = await fetch(API_BASE + '/api/logs');
         const text = await res.json();
         const box = document.getElementById('terminalLog');
         box.innerText = text;
@@ -736,7 +739,7 @@ function getDashboardHtml() {
       btn.disabled = true;
       btn.innerText = '⏳ Scanning On-Chain...';
       try {
-        const res = await fetch('/api/scan', { method: 'POST' });
+        const res = await fetch(API_BASE + '/api/scan', { method: 'POST' });
         const data = await res.json();
         await loadData();
         alert('Scan on-chain selesai!');

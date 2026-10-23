@@ -6,6 +6,11 @@ cr.bbliong.io {
         reverse_proxy 127.0.0.1:8787
     }
 
+    # Smart Wallet & Golden Signal Live Radar
+    handle_path /wal-track* {
+        reverse_proxy 127.0.0.1:4188
+    }
+
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }
