@@ -4,7 +4,7 @@ set -eo pipefail
 AWS_PROFILE="do-tor1"
 ENDPOINT="https://sgp1.digitaloceanspaces.com"
 BUCKET_PREFIX="s3://missi/crypto"
-DATE_STR="2026-10-20"
+DATE_STR="$(date '+%Y-%m-%d')"
 NOW_TS="$(date '+%Y%m%d_%H%M%S')"
 
 echo "=========================================================="
@@ -27,6 +27,10 @@ echo "Mengunggah arsip ke ${TARGET} via stream..."
   data/simulation-30m \
   data/backtest-trend20m-v2 \
   data/holder149-watch \
+  data/curated-lowcap-smart-wallets.json \
+  data/syndicate-candle-audit-results.json \
+  data/convergence-monitor-events.json \
+  data/smart-wallets-watchlist.json \
   data/crypto-bot.sqlite \
   data/crypto-bot.sqlite.bak* \
   2>/dev/null || true) | pigz -p 3 | aws --profile "${AWS_PROFILE}" --endpoint-url "${ENDPOINT}" s3 cp - "${TARGET}"
@@ -38,7 +42,7 @@ aws --profile "${AWS_PROFILE}" --endpoint-url "${ENDPOINT}" s3 ls "${TARGET}" --
 echo ""
 echo "Membersihkan direktori runs lama..."
 
-for grp in momentum-watch trend20m-watch profit4-watch smartmoney-watch syndicate-watch feed-hub; do
+for grp in momentum-watch trend20m-watch profit4-watch smartmoney-watch syndicate-watch feed-hub holder149-watch; do
   dir="data/${grp}"
   if [ -d "$dir" ]; then
     echo "  -> Membersihkan ${dir}..."
@@ -50,6 +54,9 @@ for grp in momentum-watch trend20m-watch profit4-watch smartmoney-watch syndicat
     echo '{"updatedAt": '"$(date +%s000)"', "mints": []}' > "${dir}/bought-mints.json"
   fi
 done
+
+# Bersihkan archive pre-migration lawas (2.1GB)
+rm -rf data/profit4-watch/archive-pre-migration || true
 
 # Bersihkan backup sqlite lawas
 rm -f data/crypto-bot.sqlite.bak-before-split-* || true
