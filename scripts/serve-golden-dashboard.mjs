@@ -49,13 +49,25 @@ function loadState() {
   // Check rate limit status in logs
   let rateLimitCount = 0;
   let lastRateLimitAt = null;
+  let lastProbeStats = null;
   if (existsSync(LOG_FILE)) {
     try {
       const lines = readFileSync(LOG_FILE, "utf8").split("\n");
-      for (const l of lines) {
-        if (l.includes("429") || l.includes("Too Many Requests") || l.includes("Rate limit")) {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const l = lines[i];
+        if (!lastProbeStats && l.includes("Signature Probe:")) {
+          const m = l.match(/Signature Probe: (\d+) active wallets queried, (\d+) idle skipped \(~([\d,]+) credits saved!\)/);
+          if (m) {
+            lastProbeStats = {
+              activeWallets: parseInt(m[1]),
+              idleSkipped: parseInt(m[2]),
+              creditsSaved: m[3]
+            };
+          }
+        }
+        if (/\b429\b/.test(l) && !l.includes(".429Z") && (l.includes("Too Many Requests") || l.includes("Rate limit") || l.includes("status 429") || l.includes("HTTP 429"))) {
           rateLimitCount++;
-          lastRateLimitAt = l.slice(1, 25);
+          if (!lastRateLimitAt) lastRateLimitAt = l.slice(1, 25);
         }
       }
     } catch {}
@@ -75,6 +87,7 @@ function loadState() {
       heliusApiStatus: "ONLINE",
       rateLimitCount,
       lastRateLimitAt,
+      probeStats: lastProbeStats,
       isScanning,
       lastScanAt: lastScanCompletedAt ? new Date(lastScanCompletedAt).toISOString() : null,
       lastScanDurationMs,
@@ -669,7 +682,11 @@ function getDashboardHtml() {
           kpiScanStatus.innerHTML = '<span style="color: #10b981;">🟢 Aktif (60s)</span>';
         }
         if (kpiScanSub) {
-          kpiScanSub.innerText = \`Terakhir: \${lastAgoStr} · 429: \${sh.rateLimitCount || 0}\`;
+          if (sh.probeStats) {
+            kpiScanSub.innerHTML = \`Terakhir: \${lastAgoStr} · <span style="color: #34d399; font-weight: 600;">⚡ Hemat ~\${sh.probeStats.creditsSaved} cr</span> (\${sh.probeStats.idleSkipped} idle)\`;
+          } else {
+            kpiScanSub.innerText = \`Terakhir: \${lastAgoStr} · 429: \${sh.rateLimitCount || 0}\`;
+          }
         }
       }
     }

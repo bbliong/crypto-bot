@@ -1,4 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { ConvergenceDetector, type TradeEvent } from "../src/convergence-detector.js";
 
 async function main() {
@@ -126,19 +127,96 @@ async function main() {
       console.log(`[LOWCAP-DISCOVERY] Skipped phase 1: ${e.message}`);
     }
 
-    // PHASE 2: Top-down Scan of Clean Wallets on Helius
-    console.log(`\n[PHASE 2] 🔍 Scanning on-chain transactions across ${cleanWallets.length} clean wallets...`);
+    // PHASE 2: Optimized Top-Down Scan with 1-Credit Signature Probe (95%+ Credit Savings)
+    console.log(`\n[PHASE 2] 🔍 Probing on-chain signatures across ${cleanWallets.length} clean wallets...`);
     
     const env = readFileSync(".env", "utf8");
     const heliusKey = env.match(/HELIUS_API_KEY=([^\s\r\n]+)/)?.[1] || "";
     
-    const BATCH_SIZE = 4;
+    const TRADES_CACHE_PATH = "data/.clean-wallet-trades-cache.json";
+    let walletCache: Record<string, { lastSig: string; trades: TradeEvent[]; updatedAt: number }> = {};
+    if (existsSync(TRADES_CACHE_PATH)) {
+      try {
+        walletCache = JSON.parse(readFileSync(TRADES_CACHE_PATH, "utf8"));
+      } catch {}
+    }
 
-    for (let i = 0; i < cleanWallets.length; i += BATCH_SIZE) {
-      const chunk = cleanWallets.slice(i, i + BATCH_SIZE);
+    // Step 2.1: Probe latest signatures via standard RPC getSignaturesForAddress (1 credit / call)
+    const RPC_BATCH_SIZE = 3;
+    const latestSignatures: Record<string, string> = {};
+    for (let i = 0; i < cleanWallets.length; i += RPC_BATCH_SIZE) {
+      const chunk = cleanWallets.slice(i, i + RPC_BATCH_SIZE);
+      const rpcBatch = chunk.map((w, idx) => ({
+        jsonrpc: "2.0",
+        id: i + idx,
+        method: "getSignaturesForAddress",
+        params: [w, { limit: 1 }]
+      }));
+
+      try {
+        const res = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(rpcBatch),
+          signal: AbortSignal.timeout(6000)
+        });
+
+        if (res.status === 429) {
+          await new Promise(r => setTimeout(r, 1000));
+          i -= RPC_BATCH_SIZE;
+          continue;
+        }
+
+        const results = await res.json();
+        if (Array.isArray(results)) {
+          for (const r of results) {
+            const w = chunk[r.id - i];
+            if (w && r.result?.[0]?.signature) {
+              latestSignatures[w] = r.result[0].signature;
+            }
+          }
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 350));
+    }
+
+    // Step 2.2: Identify active vs idle wallets
+    const nowSec = Math.floor(Date.now() / 1000);
+    const PRUNE_WINDOW_SEC = 5400; // 90 minutes
+    const activeWallets: string[] = [];
+    let skippedIdleCount = 0;
+
+    for (const wallet of cleanWallets) {
+      const latestSig = latestSignatures[wallet];
+      const cached = walletCache[wallet];
+
+      if (!latestSig) {
+        if (cached && cached.trades) {
+          allTrades.push(...cached.trades.filter(t => (nowSec - t.timestamp) <= PRUNE_WINDOW_SEC));
+        }
+        continue;
+      }
+
+      if (cached && cached.lastSig === latestSig) {
+        // Idle: signature has not changed since last scan!
+        skippedIdleCount++;
+        allTrades.push(...cached.trades.filter(t => (nowSec - t.timestamp) <= PRUNE_WINDOW_SEC));
+      } else {
+        // Active: signature changed or new wallet!
+        activeWallets.push(wallet);
+      }
+    }
+
+    const creditsSaved = skippedIdleCount * 100;
+    console.log(`[PHASE 2] ⚡ Signature Probe: ${activeWallets.length} active wallets queried, ${skippedIdleCount} idle skipped (~${creditsSaved.toLocaleString()} credits saved!)`);
+
+    // Step 2.3: Fetch Enhanced Transactions (100 credits) ONLY for active wallets
+    const ENHANCED_BATCH_SIZE = 3;
+    for (let i = 0; i < activeWallets.length; i += ENHANCED_BATCH_SIZE) {
+      const chunk = activeWallets.slice(i, i + ENHANCED_BATCH_SIZE);
       await Promise.all(chunk.map(async (wallet) => {
         try {
-          const url = `https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${heliusKey}&limit=25`;
+          const url = `https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${heliusKey}&limit=15`;
           const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
           if (res.status === 429) {
             await new Promise(r => setTimeout(r, 1500));
@@ -147,6 +225,7 @@ async function main() {
           const txs: any[] = await res.json();
           if (!Array.isArray(txs)) return;
 
+          const newTrades: TradeEvent[] = [];
           for (const tx of txs) {
             for (const tt of (tx.tokenTransfers || [])) {
               const mint = tt.mint;
@@ -172,14 +251,36 @@ async function main() {
                 tokenAmount: Number(tt.tokenAmount) || 0,
                 txSignature: tx.signature
               };
-
-              allTrades.push(trade);
+              newTrades.push(trade);
             }
           }
+
+          // Merge new trades into wallet cache (dedupe by signature)
+          const existingTrades = (walletCache[wallet]?.trades || []).filter(t => (nowSec - t.timestamp) <= PRUNE_WINDOW_SEC);
+          const sigSet = new Set(existingTrades.map(t => t.txSignature));
+          for (const nt of newTrades) {
+            if (!sigSet.has(nt.txSignature)) {
+              existingTrades.push(nt);
+              sigSet.add(nt.txSignature);
+            }
+          }
+
+          walletCache[wallet] = {
+            lastSig: latestSignatures[wallet] || txs[0]?.signature || "",
+            trades: existingTrades,
+            updatedAt: Date.now()
+          };
+
+          allTrades.push(...existingTrades);
         } catch {}
       }));
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 250));
     }
+
+    // Persist clean wallet trades cache
+    try {
+      writeFileSync(TRADES_CACHE_PATH, JSON.stringify(walletCache, null, 2));
+    } catch {}
 
     // Sort trades chronologically for perfect replay evaluation
     allTrades.sort((a, b) => a.timestamp - b.timestamp);
