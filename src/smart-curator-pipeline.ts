@@ -130,12 +130,14 @@ export async function fetchGmgnLowcapCandidates(cdpUrl: string = 'http://127.0.0
   const endpoints = [
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=launchpad_smart&orderby=pnl_30d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=launchpad_smart&orderby=pnl_7d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=launchpad_smart&orderby=pnl_1d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=launchpad_smart&orderby=winrate_7d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=smart_degen&orderby=pnl_30d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=smart_degen&orderby=pnl_7d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=smart_degen&orderby=winrate_7d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=fresh_wallet&orderby=pnl_30d&direction=desc&limit=100',
-    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=fresh_wallet&orderby=pnl_7d&direction=desc&limit=100'
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=fresh_wallet&orderby=pnl_7d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=fresh_wallet&orderby=pnl_1d&direction=desc&limit=100'
   ];
 
   console.log(`[CURATOR-GMGN] Fetching rankings across ${endpoints.length} lowcap discovery categories...`);
