@@ -540,6 +540,28 @@ function getDashboardHtml() {
       font-weight: 600;
       line-height: 1.3;
     }
+    .wallet-pnl-pos {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 9.5px;
+      font-weight: 700;
+      line-height: 1.3;
+      white-space: nowrap;
+    }
+    .wallet-pnl-neg {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 9.5px;
+      font-weight: 600;
+      line-height: 1.3;
+      white-space: nowrap;
+    }
 
     /* Terminal Log Box */
     .terminal-box {
@@ -811,6 +833,8 @@ function getDashboardHtml() {
         return;
       }
 
+      const walletMap = new Map((state.cleanWallets || []).map(w => [w.address, w]));
+
       tbody.innerHTML = events.map(s => {
         const deltaMin = Math.round(s.entryDeltaSec / 60);
         const liq = s.dexInfo?.liquidityUsd ? '$' + Number(s.dexInfo.liquidityUsd).toLocaleString() : 'N/A';
@@ -831,6 +855,7 @@ function getDashboardHtml() {
         }
 
         const totalWallets = s.walletEntries ? s.walletEntries.length : (s.wallets ? s.wallets.length : 0);
+        let untungCount = 0;
         let walletItemsHtml = '';
         if (s.walletEntries && s.walletEntries.length > 0) {
           walletItemsHtml = s.walletEntries.map((we, widx) => {
@@ -840,10 +865,22 @@ function getDashboardHtml() {
               : '<span class="wallet-delta-follow">+' + Math.round(we.deltaSecFromFirst / 60) + 'm</span>';
             const shortAddr = we.wallet ? (we.wallet.slice(0, 4) + '...' + we.wallet.slice(-4)) : '???';
             const wib = we.enteredAtWib || (we.enteredAt ? new Date(we.enteredAt).toLocaleTimeString('id-ID') + ' WIB' : '-');
+            
+            const wInfo = walletMap.get(we.wallet);
+            let pnlBadge = '';
+            if (wInfo && wInfo.pnl30d > 0) {
+              untungCount++;
+              const pnlStr = wInfo.pnl30d >= 1000 ? '+' + (wInfo.pnl30d / 1000).toFixed(1) + 'k' : '+' + wInfo.pnl30d;
+              pnlBadge = '<span class="wallet-pnl-pos" title="Cuan 30d: +' + Number(wInfo.pnl30d).toLocaleString() + ' USD (WR: ' + (wInfo.winrate30d || 55) + '%)">' + pnlStr + '</span>';
+            } else if (wInfo && wInfo.pnl30d < 0) {
+              pnlBadge = '<span class="wallet-pnl-neg" title="Rugi 30d: -' + Math.abs(wInfo.pnl30d) + ' USD">-$' + Math.abs(wInfo.pnl30d) + '</span>';
+            }
+
             return '<div class="wallet-row">' +
               '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + we.wallet + '\')" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
               '<div class="wallet-meta">' +
                 '<span class="wallet-time">🕒 ' + wib + '</span>' +
+                pnlBadge +
                 deltaBadge +
               '</div>' +
             '</div>';
@@ -851,20 +888,35 @@ function getDashboardHtml() {
         } else if (s.wallets && s.wallets.length > 0) {
           walletItemsHtml = s.wallets.map((w, widx) => {
             const shortAddr = w ? (w.slice(0, 4) + '...' + w.slice(-4)) : '???';
+            const wInfo = walletMap.get(w);
+            let pnlBadge = '';
+            if (wInfo && wInfo.pnl30d > 0) {
+              untungCount++;
+              const pnlStr = wInfo.pnl30d >= 1000 ? '+' + (wInfo.pnl30d / 1000).toFixed(1) + 'k' : '+' + wInfo.pnl30d;
+              pnlBadge = '<span class="wallet-pnl-pos" title="Cuan 30d: +' + Number(wInfo.pnl30d).toLocaleString() + '">' + pnlStr + '</span>';
+            } else if (wInfo && wInfo.pnl30d < 0) {
+              pnlBadge = '<span class="wallet-pnl-neg">-$' + Math.abs(wInfo.pnl30d) + '</span>';
+            }
             return '<div class="wallet-row">' +
               '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + w + '\')" title="Klik untuk copy: ' + w + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
-              '<span style="color:var(--text-muted);font-size:10px;">Logged</span>' +
+              '<div class="wallet-meta">' +
+                pnlBadge +
+                '<span style="color:var(--text-muted);font-size:10px;">Logged</span>' +
+              '</div>' +
             '</div>';
           }).join('');
         } else {
           walletItemsHtml = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">Tidak ada detail wallet</div>';
         }
 
+        const untungSummary = untungCount > 0 
+          ? '<span style="color: #34d399; font-weight: 700;">' + untungCount + ' Cuan</span>'
+          : '<span style="color: #94a3b8;">0 Cuan</span>';
         const scrollHint = totalWallets > 3 ? '<span style="font-size: 10px; color: #64748b;">(scroll ▾)</span>' : '';
         const walletsHtml = 
           '<div class="wallet-col-container">' +
             '<div class="wallet-col-header">' +
-              '<span>👛 Wallets (' + totalWallets + ')</span>' +
+              '<span>👛 (' + totalWallets + ') · ' + untungSummary + '</span>' +
               scrollHint +
             '</div>' +
             '<div class="wallet-box">' +
