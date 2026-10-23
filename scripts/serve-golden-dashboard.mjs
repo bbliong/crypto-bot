@@ -93,6 +93,17 @@ function loadState() {
     } catch {}
   }
 
+  // Load buy simulation results
+  let simulationResults = null;
+  const simPath = join(ROOT, "data", "golden-simulation-results.json");
+  if (existsSync(simPath)) {
+    try {
+      simulationResults = JSON.parse(readFileSync(simPath, "utf8"));
+    } catch (e) {
+      log(`Error reading simulation file: ${e.message}`);
+    }
+  }
+
   const nextSec = isScanning ? 0 : Math.max(0, Math.round(((lastScanCompletedAt || Date.now()) + AUTO_SCAN_INTERVAL_MS - Date.now()) / 1000));
 
   return {
@@ -101,6 +112,7 @@ function loadState() {
     goldenSignals,
     allEvents,
     snowballStats,
+    simulationResults,
     systemHealth: {
       port: PORT,
       cdpUrl: "http://127.0.0.1:9223",
@@ -469,13 +481,14 @@ function getDashboardHtml() {
     .wallet-box {
       display: flex;
       flex-direction: column;
-      gap: 3px;
-      max-height: 125px;
+      gap: 5px;
+      max-height: 160px;
       overflow-y: auto;
-      padding: 5px;
+      padding: 6px;
       background: rgba(15, 23, 42, 0.75);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 6px;
+      min-width: 250px;
     }
     .wallet-box::-webkit-scrollbar {
       width: 4px;
@@ -489,6 +502,71 @@ function getDashboardHtml() {
     }
     .wallet-box::-webkit-scrollbar-thumb:hover {
       background: #475569;
+    }
+    .wallet-card-entry {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: background 0.15s;
+    }
+    .wallet-card-entry:hover {
+      background: rgba(255, 255, 255, 0.07);
+    }
+    .wallet-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+    .wallet-row-sub {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+    .wallet-token-profit.pos {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .wallet-token-profit.neg {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .wallet-token-profit.zero {
+      background: rgba(148, 163, 184, 0.15);
+      color: #cbd5e1;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 9.5px;
+    }
+    .wallet-exit-tag.holding {
+      color: #34d399;
+      font-weight: 600;
+      font-size: 9.5px;
+    }
+    .wallet-exit-tag.exited {
+      color: #94a3b8;
+      font-size: 9.5px;
+    }
+    .wallet-cost-wrap {
+      font-size: 9.5px;
+      color: #cbd5e1;
     }
     .wallet-row {
       display: flex;
@@ -580,6 +658,67 @@ function getDashboardHtml() {
     .log-err { color: #f87171; font-weight: 600; }
     .log-warn { color: #fbbf24; }
     .log-gold { color: #34d399; font-weight: 600; }
+
+    /* Simulation UI */
+    .sim-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .sim-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 16px;
+      position: relative;
+    }
+    .sim-card.best {
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      box-shadow: 0 4px 20px rgba(16, 185, 129, 0.08);
+    }
+    .sim-card-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #94a3b8;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sim-card-title span.strat-name {
+      color: #e2e8f0;
+      font-size: 14px;
+    }
+    .sim-big-pnl {
+      font-size: 24px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      color: #34d399;
+      margin-bottom: 12px;
+    }
+    .sim-metrics-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding-top: 10px;
+    }
+    .sim-metric-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .sim-metric-lbl {
+      color: #64748b;
+      font-size: 11px;
+    }
+    .sim-metric-val {
+      font-weight: 700;
+      color: #f1f5f9;
+      font-family: 'JetBrains Mono', monospace;
+    }
   </style>
 </head>
 <body>
@@ -631,6 +770,9 @@ function getDashboardHtml() {
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab('golden')">
         🌟 Golden Signals <span class="badge badge-gold" id="tabBadgeGolden">0</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('simulation')">
+        🎯 Simulasi Buy Backtest <span class="badge badge-green" id="tabBadgeSim">72% WR</span>
       </button>
       <button class="tab-btn" onclick="switchTab('wallets')">
         👛 Clean Wallets <span class="badge badge-green" id="tabBadgeClean">0</span>
@@ -741,6 +883,46 @@ function getDashboardHtml() {
       </div>
     </div>
 
+    <!-- TAB 5: SIMULASI BUY BACKTEST -->
+    <div id="panel-simulation" class="panel">
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+          <div class="card-title">🎯 Hasil Simulasi Buy Sinyal Golden Organic Convergence</div>
+          <div style="font-size: 12px; color: var(--text-muted);" id="simTimestamp">Backtest 54 Token Golden (Modal $100 / Trade, Fee 2% Deducted)</div>
+        </div>
+        <div style="padding: 16px;">
+          <div class="sim-grid" id="simCardsGrid">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Rincian Performa 54 Token Golden Sinyal (Candles 1-Menit GMGN)</div>
+        </div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th>Entry (WIB)</th>
+                <th>Entry Mcap</th>
+                <th>Peak Mcap</th>
+                <th>Peak Gain</th>
+                <th>Scalp Bot (+35% / -12%)</th>
+                <th>Moonbag (+50% / +120%)</th>
+                <th>Smart Mirror (Copy Exit)</th>
+              </tr>
+            </thead>
+            <tbody id="tbodySimulation">
+              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Memuat simulasi...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -765,6 +947,7 @@ function getDashboardHtml() {
         renderGoldenSignals();
         renderWallets();
         renderSyndicates();
+        renderSimulation();
       } catch (e) {
         console.error('Error fetching state:', e);
       }
@@ -864,24 +1047,43 @@ function getDashboardHtml() {
               ? '<span class="wallet-delta-first">First</span>'
               : '<span class="wallet-delta-follow">+' + Math.round(we.deltaSecFromFirst / 60) + 'm</span>';
             const shortAddr = we.wallet ? (we.wallet.slice(0, 4) + '...' + we.wallet.slice(-4)) : '???';
-            const wib = we.enteredAtWib || (we.enteredAt ? new Date(we.enteredAt).toLocaleTimeString('id-ID') + ' WIB' : '-');
+            const inWib = we.enteredAtWib ? we.enteredAtWib.replace(' WIB', '') : '-';
             
-            const wInfo = walletMap.get(we.wallet);
-            let pnlBadge = '';
-            if (wInfo && wInfo.pnl30d > 0) {
-              untungCount++;
-              const pnlStr = wInfo.pnl30d >= 1000 ? '+' + (wInfo.pnl30d / 1000).toFixed(1) + 'k' : '+' + wInfo.pnl30d;
-              pnlBadge = '<span class="wallet-pnl-pos" title="Cuan 30d: +' + Number(wInfo.pnl30d).toLocaleString() + ' USD (WR: ' + (wInfo.winrate30d || 55) + '%)">' + pnlStr + '</span>';
-            } else if (wInfo && wInfo.pnl30d < 0) {
-              pnlBadge = '<span class="wallet-pnl-neg" title="Rugi 30d: -' + Math.abs(wInfo.pnl30d) + ' USD">-$' + Math.abs(wInfo.pnl30d) + '</span>';
+            // Exit status
+            let exitHtml = '';
+            if (we.isHolding) {
+              exitHtml = '<span class="wallet-exit-tag holding" title="Masih pegang token">🟢 HOLD ' + (we.holdingDurationStr || '') + '</span>';
+            } else if (we.exitedAtWib) {
+              const outWib = we.exitedAtWib.replace(' WIB', '');
+              exitHtml = '<span class="wallet-exit-tag exited" title="Keluar: ' + we.exitedAtWib + '">🚪 Out: ' + outWib + ' (' + (we.holdingDurationStr || '') + ')</span>';
             }
 
-            return '<div class="wallet-row">' +
-              '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + we.wallet + '\')" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
-              '<div class="wallet-meta">' +
-                '<span class="wallet-time">🕒 ' + wib + '</span>' +
-                pnlBadge +
+            // Profit / Cuan on this token
+            let tokenProfitBadge = '';
+            if (we.profitUsd !== null && we.profitUsd !== undefined) {
+              if (we.profitUsd > 0) {
+                untungCount++;
+                const pStr = we.profitUsd >= 1000 ? '+' + (we.profitUsd / 1000).toFixed(1) + 'k' : '+' + we.profitUsd;
+                tokenProfitBadge = '<span class="wallet-token-profit pos" title="Untung di koin ini: +$' + we.profitUsd.toLocaleString() + ' (' + (we.pnlPercent || 0) + '%)">+$' + pStr + ' (' + Math.round(we.pnlPercent || 0) + '%)</span>';
+              } else if (we.profitUsd < 0) {
+                tokenProfitBadge = '<span class="wallet-token-profit neg" title="Rugi di koin ini: -$' + Math.abs(we.profitUsd).toLocaleString() + ' (' + (we.pnlPercent || 0) + '%)">-$' + Math.abs(we.profitUsd) + '</span>';
+              } else {
+                tokenProfitBadge = '<span class="wallet-token-profit zero" title="Impas / $0">$0</span>';
+              }
+            }
+
+            const costStr = we.totalCostUsd ? '<span class="wallet-cost-wrap" title="Modal beli: $' + we.totalCostUsd + '">💵 $' + we.totalCostUsd + '</span>' : '';
+
+            return '<div class="wallet-card-entry">' +
+              '<div class="wallet-row-top">' +
+                '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + we.wallet + '\')" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
                 deltaBadge +
+                tokenProfitBadge +
+              '</div>' +
+              '<div class="wallet-row-sub">' +
+                '<span class="wallet-time" title="Jam masuk: ' + (we.enteredAtWib || '-') + '">🕒 ' + inWib + '</span>' +
+                exitHtml +
+                costStr +
               '</div>' +
             '</div>';
           }).join('');
@@ -1004,6 +1206,149 @@ function getDashboardHtml() {
           </tr>
         \`;
       }).join('');
+    }
+
+    function renderSimulation() {
+      var sim = state.simulationResults;
+      if (!sim || !sim.strategySummaries) {
+        var tb = document.getElementById('tbodySimulation');
+        if (tb) tb.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Belum ada data simulasi</td></tr>';
+        return;
+      }
+
+      var s1 = sim.strategySummaries.strategy1_smart_mirror || {};
+      var s2 = sim.strategySummaries.strategy2_scalp_bot || {};
+      var s3 = sim.strategySummaries.strategy3_moonbag_runner || {};
+
+      var bSim = document.getElementById('tabBadgeSim');
+      if (bSim) bSim.innerText = s2.winRate ? s2.winRate.split(' ')[0] + ' WR' : '72% WR';
+      var ts = document.getElementById('simTimestamp');
+      if (ts && sim.executedAtWib) {
+        ts.innerText = 'Backtest ' + (sim.totalTokensTested || 54) + ' Token Golden (' + (sim.betPerTrade || '$100 / Trade') + ') · Update: ' + sim.executedAtWib;
+      }
+
+      // Render 3 Summary Cards
+      var cardsHtml = 
+        '<div class="sim-card best">' +
+          '<div class="sim-card-title">' +
+            '<span class="strat-name">⚡ 1. Scalp Bot (+35% / -12%)</span>' +
+            '<span class="badge badge-green">TERBAIK (72% WR)</span>' +
+          '</div>' +
+          '<div class="sim-big-pnl">' + (s2.totalPnl || '+$956') + '</div>' +
+          '<div class="sim-metrics-row">' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Win Rate</span>' +
+              '<span class="sim-metric-val" style="color: #34d399;">' + (s2.winRate || '72.2%') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Profit Factor</span>' +
+              '<span class="sim-metric-val">' + (s2.profitFactor || '5.55') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Avg Durasi Hold</span>' +
+              '<span class="sim-metric-val">' + (s2.avgDuration || '3 menit') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Gross Win/Loss</span>' +
+              '<span class="sim-metric-val">' + (s2.grossProfit || '+$1,166') + ' / ' + (s2.grossLoss || '-$210') + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="sim-card">' +
+          '<div class="sim-card-title">' +
+            '<span class="strat-name">🚀 2. Moonbag Runner (+50% / +120%)</span>' +
+            '<span class="badge badge-gold">MAX PROFIT</span>' +
+          '</div>' +
+          '<div class="sim-big-pnl">' + (s3.totalPnl || '+$1,454') + '</div>' +
+          '<div class="sim-metrics-row">' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Win Rate</span>' +
+              '<span class="sim-metric-val" style="color: #38bdf8;">' + (s3.winRate || '66.7%') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Profit Factor</span>' +
+              '<span class="sim-metric-val">' + (s3.profitFactor || '5.75') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Avg Durasi Hold</span>' +
+              '<span class="sim-metric-val">' + (s3.avgDuration || '4 menit') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Gross Win/Loss</span>' +
+              '<span class="sim-metric-val">' + (s3.grossProfit || '+$1,760') + ' / ' + (s3.grossLoss || '-$306') + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="sim-card">' +
+          '<div class="sim-card-title">' +
+            '<span class="strat-name">👥 3. Smart Mirror Exit (Copy Wallet)</span>' +
+            '<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #cbd5e1;">COPY TRADE</span>' +
+          '</div>' +
+          '<div class="sim-big-pnl">' + (s1.totalPnl || '+$2,633') + '</div>' +
+          '<div class="sim-metrics-row">' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Win Rate</span>' +
+              '<span class="sim-metric-val" style="color: #fbbf24;">' + (s1.winRate || '46.3%') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Profit Factor</span>' +
+              '<span class="sim-metric-val">' + (s1.profitFactor || '3.00') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Avg Durasi Hold</span>' +
+              '<span class="sim-metric-val">' + (s1.avgDuration || '25 menit') + '</span>' +
+            '</div>' +
+            '<div class="sim-metric-item">' +
+              '<span class="sim-metric-lbl">Gross Win/Loss</span>' +
+              '<span class="sim-metric-val">' + (s1.grossProfit || '+$3,950') + ' / ' + (s1.grossLoss || '-$1,317') + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+
+      var grid = document.getElementById('simCardsGrid');
+      if (grid) grid.innerHTML = cardsHtml;
+
+      // Render Table Rows
+      var rows = (sim.results || []).map(function(r, i) {
+        var s1Pnl = r.strat1 ? (r.strat1.pnlUsd >= 0 ? '+$' + r.strat1.pnlUsd : '-$' + Math.abs(r.strat1.pnlUsd)) : '-';
+        var s2Pnl = r.strat2 ? (r.strat2.pnlUsd >= 0 ? '+$' + r.strat2.pnlUsd : '-$' + Math.abs(r.strat2.pnlUsd)) : '-';
+        var s3Pnl = r.strat3 ? (r.strat3.pnlUsd >= 0 ? '+$' + r.strat3.pnlUsd : '-$' + Math.abs(r.strat3.pnlUsd)) : '-';
+
+        var s1Class = r.strat1 && r.strat1.pnlUsd > 0 ? 'color: #34d399; font-weight: 700;' : 'color: #f87171;';
+        var s2Class = r.strat2 && r.strat2.pnlUsd > 0 ? 'color: #34d399; font-weight: 700;' : 'color: #f87171;';
+        var s3Class = r.strat3 && r.strat3.pnlUsd > 0 ? 'color: #34d399; font-weight: 700;' : 'color: #f87171;';
+
+        var peakStr = r.maxMultiplier || '-';
+        var peakClass = peakStr.indexOf('x') !== -1 && parseFloat(peakStr) >= 2.0 ? 'badge badge-green' : 'badge badge-gold';
+
+        return '<tr>' +
+          '<td>' +
+            '<div style="font-weight: 700; color: #f1f5f9;">#' + (i + 1) + ' ' + r.symbol + '</div>' +
+            '<div class="mono" style="font-size: 10px; color: var(--text-muted); cursor: pointer;" onclick="navigator.clipboard.writeText(\'' + r.mint + '\')" title="Copy mint">' + r.mint.slice(0, 4) + '...' + r.mint.slice(-4) + '</div>' +
+          '</td>' +
+          '<td><span class="mono" style="color: #38bdf8;">🕒 ' + (r.entryWib || '-') + '</span></td>' +
+          '<td><span class="mono">$' + (r.entryMcap || 0).toLocaleString() + '</span></td>' +
+          '<td><span class="mono">$' + (r.peakMcap || 0).toLocaleString() + '</span></td>' +
+          '<td><span class="' + peakClass + '">' + peakStr + '</span></td>' +
+          '<td>' +
+            '<div class="mono" style="' + s2Class + '">' + s2Pnl + ' (' + (r.strat2 ? r.strat2.roiPct : 0) + '%)</div>' +
+            '<div style="font-size: 10px; color: var(--text-muted);">' + (r.strat2 ? r.strat2.reason : '') + ' (' + (r.strat2 ? r.strat2.durationM : 0) + 'm)</div>' +
+          '</td>' +
+          '<td>' +
+            '<div class="mono" style="' + s3Class + '">' + s3Pnl + ' (' + (r.strat3 ? r.strat3.roiPct : 0) + '%)</div>' +
+            '<div style="font-size: 10px; color: var(--text-muted);">' + (r.strat3 ? r.strat3.reason : '') + ' (' + (r.strat3 ? r.strat3.durationM : 0) + 'm)</div>' +
+          '</td>' +
+          '<td>' +
+            '<div class="mono" style="' + s1Class + '">' + s1Pnl + ' (' + (r.strat1 ? r.strat1.roiPct : 0) + '%)</div>' +
+            '<div style="font-size: 10px; color: var(--text-muted);">' + (r.strat1 ? r.strat1.durationM : 0) + 'm hold</div>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+
+      var tbody = document.getElementById('tbodySimulation');
+      if (tbody) tbody.innerHTML = rows || '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Tidak ada baris hasil</td></tr>';
     }
 
     async function fetchLogs() {

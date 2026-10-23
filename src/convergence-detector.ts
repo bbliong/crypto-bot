@@ -12,6 +12,15 @@ export interface TradeEvent {
   tokenAmount?: number;
   priceUsd?: number;
   txSignature?: string;
+  exitedAt?: string | null;
+  exitedAtWib?: string | null;
+  exitTimestamp?: number | null;
+  holdingDurationSec?: number | null;
+  holdingDurationStr?: string | null;
+  isHolding?: boolean;
+  profitUsd?: number | null;
+  pnlPercent?: number | null;
+  totalCostUsd?: number | null;
 }
 
 export interface DexTokenInfo {
@@ -49,6 +58,15 @@ export interface WalletEntryDetail {
   solAmount?: number;
   tokenAmount?: number;
   txSignature?: string;
+  exitedAt?: string | null;
+  exitedAtWib?: string | null;
+  exitTimestamp?: number | null;
+  holdingDurationSec?: number | null;
+  holdingDurationStr?: string | null;
+  isHolding?: boolean;
+  profitUsd?: number | null;
+  pnlPercent?: number | null;
+  totalCostUsd?: number | null;
 }
 
 export interface ConvergenceReport {
@@ -205,6 +223,16 @@ export class ConvergenceDetector extends EventEmitter {
       const existing = walletFirstBuyMap.get(t.wallet);
       if (!existing || t.timestamp < existing.timestamp) {
         walletFirstBuyMap.set(t.wallet, t);
+      } else if (existing && (t.profitUsd !== undefined || t.exitedAt !== undefined)) {
+        if (t.profitUsd !== undefined) existing.profitUsd = t.profitUsd;
+        if (t.pnlPercent !== undefined) existing.pnlPercent = t.pnlPercent;
+        if (t.totalCostUsd !== undefined) existing.totalCostUsd = t.totalCostUsd;
+        if (t.exitedAt !== undefined) existing.exitedAt = t.exitedAt;
+        if (t.exitedAtWib !== undefined) existing.exitedAtWib = t.exitedAtWib;
+        if (t.exitTimestamp !== undefined) existing.exitTimestamp = t.exitTimestamp;
+        if (t.isHolding !== undefined) existing.isHolding = t.isHolding;
+        if (t.holdingDurationSec !== undefined) existing.holdingDurationSec = t.holdingDurationSec;
+        if (t.holdingDurationStr !== undefined) existing.holdingDurationStr = t.holdingDurationStr;
       }
     }
 
@@ -231,7 +259,16 @@ export class ConvergenceDetector extends EventEmitter {
         deltaSecFromFirst: t.timestamp - firstTimestamp,
         solAmount: t.solAmount,
         tokenAmount: t.tokenAmount,
-        txSignature: t.txSignature
+        txSignature: t.txSignature,
+        exitedAt: t.exitedAt ?? null,
+        exitedAtWib: t.exitedAtWib ?? (t.isHolding ? "HOLDING" : null),
+        exitTimestamp: t.exitTimestamp ?? null,
+        holdingDurationSec: t.holdingDurationSec ?? null,
+        holdingDurationStr: t.holdingDurationStr ?? null,
+        isHolding: t.isHolding ?? (t.exitedAt ? false : true),
+        profitUsd: t.profitUsd ?? null,
+        pnlPercent: t.pnlPercent ?? null,
+        totalCostUsd: t.totalCostUsd ?? null
       };
     });
 

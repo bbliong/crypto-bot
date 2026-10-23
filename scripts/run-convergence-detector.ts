@@ -31,7 +31,9 @@ async function main() {
     if (report.walletEntries && report.walletEntries.length > 0) {
       for (const [idx, we] of report.walletEntries.entries()) {
         const deltaStr = we.deltaSecFromFirst === 0 ? "First Pioneer (0s)" : `+${Math.round(we.deltaSecFromFirst / 60)}m (${we.deltaSecFromFirst}s)`;
-        console.log(`     ${idx + 1}. ${we.wallet.slice(0, 8)}...${we.wallet.slice(-6)} | Jam: ${we.enteredAtWib} | Selisih: ${deltaStr} | ${we.solAmount ? we.solAmount + ' SOL' : ''}`);
+        const exitStr = we.exitedAtWib ? (we.isHolding ? `Exit: HOLDING` : `Exit: ${we.exitedAtWib} (${we.holdingDurationStr || '-'})`) : "";
+        const profitStr = we.profitUsd !== null && we.profitUsd !== undefined ? ` | Cuan: ${we.profitUsd >= 0 ? '+' : ''}$${we.profitUsd.toLocaleString()} (${we.pnlPercent || 0}%)` : "";
+        console.log(`     ${idx + 1}. ${we.wallet.slice(0, 8)}...${we.wallet.slice(-6)} | Masuk: ${we.enteredAtWib} | ${exitStr}${profitStr} | Selisih: ${deltaStr}`);
       }
     } else {
       console.log(`   ${report.wallets.map((w: string) => w.slice(0, 6) + '...').join(', ')}`);
@@ -94,7 +96,8 @@ async function main() {
       for (const t of lowcapTokens.slice(0, 20)) {
         try {
           const tradersData = await page.evaluate(async (mint) => {
-            const res = await fetch(`https://gmgn.ai/vas/api/v1/token_traders/sol/${mint}?limit=30&orderby=profit&direction=desc`);
+            const params = "device_id=2d641f4c-9eb7-4dda-8e7e-9a0e273b7757&client_id=gmgn_web_20261023-5847-47b0c03&from_app=gmgn&app_ver=20261023-5847-47b0c03&tz_name=Asia_Jakarta&tz_offset=25200&app_lang=en-US&os=web&worker=0";
+            const res = await fetch(`https://gmgn.ai/vas/api/v1/token_traders/sol/${mint}?${params}&limit=50&orderby=profit&direction=desc`);
             return await res.json();
           }, t.address);
 
@@ -104,6 +107,28 @@ async function main() {
             if (wallet) {
               detector.addMonitoredWallet(wallet.address);
               const tradeTime = tr.start_holding_at || tr.last_active_timestamp || Math.floor(Date.now() / 1000);
+              
+              const exitTime = tr.end_holding_at ? Number(tr.end_holding_at) : null;
+              const isHolding = (Number(tr.amount_cur || 0) > 0) || !exitTime;
+              const exitDate = exitTime ? new Date(exitTime * 1000) : null;
+              const exitedAtWib = exitDate ? exitDate.toLocaleTimeString("id-ID", {
+                timeZone: "Asia/Jakarta",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false
+              }) + " WIB" : (isHolding ? "HOLDING" : null);
+
+              const startTs = tr.start_holding_at || tradeTime;
+              const durSec = exitTime ? Math.max(0, exitTime - startTs) : Math.max(0, Math.floor(Date.now() / 1000) - startTs);
+              const durM = Math.floor(durSec / 60);
+              const durS = durSec % 60;
+              const holdingDurationStr = durM > 0 ? `${durM}m ${durS}s` : `${durS}s`;
+
+              const profitUsd = Math.round(Number(tr.profit ?? tr.realized_profit ?? 0));
+              const pnlPercent = Number(((tr.realized_pnl ?? 0) * 100).toFixed(1));
+              const totalCostUsd = Math.round(Number(tr.total_cost ?? tr.cost_cur ?? 0));
+
               allTrades.push({
                 wallet: wallet.address,
                 mint: t.address,
@@ -112,7 +137,16 @@ async function main() {
                 timestamp: tradeTime,
                 solAmount: Number(((tr.cost_cur || 100) / 180).toFixed(3)),
                 tokenAmount: tr.buy_amount_cur || 0,
-                txSignature: `gmgn_${wallet.address.slice(0, 6)}_${t.address.slice(0, 6)}`
+                txSignature: `gmgn_${wallet.address.slice(0, 6)}_${t.address.slice(0, 6)}`,
+                exitedAt: exitDate ? exitDate.toISOString() : null,
+                exitedAtWib,
+                exitTimestamp: exitTime,
+                holdingDurationSec: durSec,
+                holdingDurationStr,
+                isHolding,
+                profitUsd,
+                pnlPercent,
+                totalCostUsd
               });
             }
           }
