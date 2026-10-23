@@ -457,7 +457,7 @@ function getDashboardHtml() {
     <div id="panel-golden" class="panel active">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Live Konvergensi Smart Wallet (Golden Signal & Early Accumulation)</div>
+          <div class="card-title">Live Konvergensi Smart Wallet (< $100k Market Cap / Early Lowcap)</div>
         </div>
         <div style="overflow-x: auto;">
           <table>
@@ -466,6 +466,7 @@ function getDashboardHtml() {
                 <th>Waktu Deteksi</th>
                 <th>Klasifikasi</th>
                 <th>Token</th>
+                <th>Market Cap</th>
                 <th>Wallets Ikut Serta</th>
                 <th>Entry Delta</th>
                 <th>Harga & 24h</th>
@@ -476,7 +477,7 @@ function getDashboardHtml() {
               </tr>
             </thead>
             <tbody id="tbodyGolden">
-              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Memuat sinyal...</td></tr>
+              <tr><td colspan="11" style="text-align: center; color: var(--text-muted);">Memuat sinyal...</td></tr>
             </tbody>
           </table>
         </div>
@@ -611,6 +612,8 @@ function getDashboardHtml() {
         const vol = s.dexInfo?.volume24h ? '$' + Number(s.dexInfo.volume24h).toLocaleString() : 'N/A';
         const change = s.dexInfo?.priceChange24h || 0;
         const changeColor = change >= 0 ? '#10b981' : '#ef4444';
+        const mcap = s.dexInfo?.fdv || s.dexInfo?.marketCap || (s.dexInfo?.liquidityUsd ? s.dexInfo.liquidityUsd * 2 : 0);
+        const mcapStr = mcap > 0 ? '$' + Math.round(mcap).toLocaleString() : 'N/A';
 
         let badgeClass = 'badge-primary';
         let badgeLabel = 'ACCUMULATION';
@@ -634,6 +637,7 @@ function getDashboardHtml() {
               <strong>\${s.symbol || (s.mint ? s.mint.slice(0, 6) : 'UNKNOWN')}</strong><br>
               <span class="mono copyable" style="font-size: 11px; color: var(--text-muted);" onclick="navigator.clipboard.writeText('\${s.mint}')" title="Klik untuk copy mint">\${s.mint ? s.mint.slice(0, 6) + '...' + s.mint.slice(-4) : '-'}</span>
             </td>
+            <td><strong style="color: #38bdf8;">\${mcapStr}</strong> <span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8; font-size: 10px;">&lt; 100k</span></td>
             <td>\${walletsHtml} (\${s.wallets?.length || 0} wallet)</td>
             <td><span class="badge badge-primary">\${deltaMin > 0 ? deltaMin + ' menit' : s.entryDeltaSec + ' dtk'}</span></td>
             <td>$\${s.dexInfo?.priceUsd || 0} <span style="color: \${changeColor}; font-size: 11px;">(\${change >= 0 ? '+' : ''}\${change}%)</span></td>

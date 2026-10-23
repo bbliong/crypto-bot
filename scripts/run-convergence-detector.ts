@@ -27,12 +27,14 @@ async function main() {
     }
   }
 
-  // 2. Initialize Detector
+  // 2. Initialize Detector with strict Lowcap boundary (< $100k MC, price < $0.50)
   const detector = new ConvergenceDetector({
     timeWindowSec: 7200, // 2 hours sliding window for organic multi-wallet accumulation
     cdpUrl: "http://127.0.0.1:9223",
     monitoredWallets: cleanWallets,
-    outputFile: "data/convergence-monitor-events.json"
+    outputFile: "data/convergence-monitor-events.json",
+    maxMarketCapUsd: 100_000, // Hard limit: < $100k Lowcaps only
+    maxPriceUsd: 0.50 // Hard limit: filter out tokenized stocks ($200+) and large caps
   });
 
   // Listen for events
@@ -67,13 +69,70 @@ async function main() {
   // 3. Scan mode: if run with --scan or default, check recent transactions
   const isScanMode = process.argv.includes("--scan") || !process.argv.includes("--live");
   if (isScanMode) {
-    console.log(`[SCAN] Scanning recent on-chain transactions across ${cleanWallets.length} clean wallets...`);
+    const allTrades: TradeEvent[] = [];
+
+    // PHASE 1: Bottom-up Discovery of $5k - $100k Lowcap Runners via GMGN CDP
+    console.log(`[PHASE 1] 🎯 Discovering active tokens in target range ($5k - $100k MC)...`);
+    try {
+      const { chromium } = await import("playwright");
+      const browser = await chromium.connectOverCDP("http://127.0.0.1:9223");
+      const page = browser.contexts()[0].pages().find(p => p.url().includes("gmgn.ai")) || browser.contexts()[0].pages()[0];
+      
+      const lowcapTokens = await page.evaluate(async () => {
+        try {
+          const r = await fetch("https://gmgn.ai/defi/quotation/v1/rank/sol/swaps/1h?limit=30&min_marketcap=5000&max_marketcap=100000");
+          const j = await r.json();
+          return j.data?.rank || [];
+        } catch {
+          return [];
+        }
+      });
+
+      console.log(`[LOWCAP-DISCOVERY] Found ${lowcapTokens.length} tokens in $5k-$100k range. Fetching early buyers...`);
+
+      for (const t of lowcapTokens.slice(0, 12)) {
+        if (t.smart_degen_count < 2) continue;
+        try {
+          const tradersData = await page.evaluate(async (mint) => {
+            const res = await fetch(`https://gmgn.ai/vas/api/v1/token_traders/sol/${mint}?limit=25&orderby=profit&direction=desc`);
+            return await res.json();
+          }, t.address);
+
+          const list = tradersData.data?.list || [];
+          const smartTraders = list.filter((tr: any) => 
+            tr.profit > 50 && 
+            !tr.is_suspicious && 
+            (!tr.maker_token_tags || !tr.maker_token_tags.includes("bundler"))
+          );
+
+          for (const tr of smartTraders) {
+            detector.addMonitoredWallet(tr.address);
+            const tradeTime = tr.start_holding_at || tr.last_active_timestamp || Math.floor(Date.now() / 1000);
+            allTrades.push({
+              wallet: tr.address,
+              mint: t.address,
+              symbol: t.symbol,
+              side: "buy",
+              timestamp: tradeTime,
+              solAmount: Number(((tr.cost_cur || 100) / 180).toFixed(3)),
+              tokenAmount: tr.buy_amount_cur || 0,
+              txSignature: `gmgn_${tr.address.slice(0, 6)}_${t.address.slice(0, 6)}`
+            });
+          }
+        } catch {}
+      }
+      console.log(`[LOWCAP-DISCOVERY] Harvested ${allTrades.length} lowcap trades across top runners.`);
+    } catch (e: any) {
+      console.log(`[LOWCAP-DISCOVERY] Skipped phase 1: ${e.message}`);
+    }
+
+    // PHASE 2: Top-down Scan of Clean Wallets on Helius
+    console.log(`\n[PHASE 2] 🔍 Scanning on-chain transactions across ${cleanWallets.length} clean wallets...`);
     
     const env = readFileSync(".env", "utf8");
     const heliusKey = env.match(/HELIUS_API_KEY=([^\s\r\n]+)/)?.[1] || "";
     
     const BATCH_SIZE = 4;
-    const allTrades: TradeEvent[] = [];
 
     for (let i = 0; i < cleanWallets.length; i += BATCH_SIZE) {
       const chunk = cleanWallets.slice(i, i + BATCH_SIZE);

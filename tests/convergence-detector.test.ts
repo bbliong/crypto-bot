@@ -49,10 +49,10 @@ test("ConvergenceDetector - Detects Multi-Wallet Convergence", async () => {
       symbol: "TEST",
       name: "Test Token",
       dexId: "pumpswap",
-      priceUsd: 0.005,
-      liquidityUsd: 45000,
-      fdv: 500000,
-      volume24h: 300000,
+      priceUsd: 0.00005,
+      liquidityUsd: 15000,
+      fdv: 50000, // $50k market cap (< 100k)
+      volume24h: 30000,
       priceChange24h: 120
     };
   });
@@ -156,4 +156,55 @@ test("ConvergenceDetector - Flags Syndicate Dump Pattern", async () => {
   assert.ok(syndicateFlagged, "Syndicate alert should be triggered");
   assert.ok(detector.isQuarantined("PuppetWallet1"), "Wallet 1 should be quarantined");
   assert.ok(detector.isQuarantined("PuppetWallet2"), "Wallet 2 should be quarantined");
+});
+
+test("ConvergenceDetector - Rejects tokens with MC > 100k or price > $0.50 (stocks/large caps)", async () => {
+  const detector = new ConvergenceDetector({ 
+    timeWindowSec: 1800,
+    maxMarketCapUsd: 100_000,
+    maxPriceUsd: 0.50
+  });
+  const now = 1729650000;
+
+  // Mock a large cap token like TTWO (Take-Two software stock, price $208)
+  detector.setDexFetcher(async (mint: string): Promise<DexTokenInfo | null> => {
+    return {
+      mint,
+      symbol: "TTWO",
+      name: "Take-Two Interactive",
+      dexId: "raydium",
+      priceUsd: 208.0, // High price stock
+      liquidityUsd: 700000,
+      fdv: 200000000,
+      volume24h: 4000000,
+      priceChange24h: 1.5
+    };
+  });
+
+  let convergenceEmitted = false;
+  detector.on("convergence", () => {
+    convergenceEmitted = true;
+  });
+
+  await detector.recordTrade({
+    wallet: "Wallet1",
+    mint: "LargeToken111111111111111111111111111111111",
+    symbol: "TTWO",
+    side: "buy",
+    timestamp: now - 300,
+    solAmount: 2.0,
+    txSignature: "sig1"
+  });
+
+  await detector.recordTrade({
+    wallet: "Wallet2",
+    mint: "LargeToken111111111111111111111111111111111",
+    symbol: "TTWO",
+    side: "buy",
+    timestamp: now,
+    solAmount: 2.0,
+    txSignature: "sig2"
+  });
+
+  assert.equal(convergenceEmitted, false, "Large cap / stock token must NOT trigger convergence");
 });

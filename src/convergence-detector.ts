@@ -65,6 +65,8 @@ export interface ConvergenceDetectorOptions {
   cdpUrl?: string; // default: 'http://127.0.0.1:9223'
   monitoredWallets?: string[];
   outputFile?: string;
+  maxMarketCapUsd?: number; // default: 100000 ($100k max for micro/lowcaps)
+  maxPriceUsd?: number; // default: 0.50 (filters out tokenized stocks like TTWO $208)
 }
 
 export class ConvergenceDetector extends EventEmitter {
@@ -75,6 +77,8 @@ export class ConvergenceDetector extends EventEmitter {
   private tradesByMint = new Map<string, TradeEvent[]>();
   private evaluatedEvents = new Map<string, number>(); // mint -> timestamp evaluated
   private outputFile: string;
+  private maxMarketCapUsd: number;
+  private maxPriceUsd: number;
 
   // Browser CDP handle for GMGN
   private browser: Browser | null = null;
@@ -89,6 +93,8 @@ export class ConvergenceDetector extends EventEmitter {
     this.timeWindowSec = options.timeWindowSec ?? 1800;
     this.cdpUrl = options.cdpUrl ?? "http://127.0.0.1:9223";
     this.outputFile = options.outputFile ?? "data/convergence-monitor-events.json";
+    this.maxMarketCapUsd = options.maxMarketCapUsd ?? 100_000;
+    this.maxPriceUsd = options.maxPriceUsd ?? 0.50;
 
     if (options.monitoredWallets && options.monitoredWallets.length > 0) {
       this.monitoredWallets = new Set(options.monitoredWallets);
@@ -105,6 +111,19 @@ export class ConvergenceDetector extends EventEmitter {
 
   public isQuarantined(wallet: string): boolean {
     return this.quarantinedWallets.has(wallet);
+  }
+
+  public addMonitoredWallet(address: string): void {
+    if (!this.monitoredWallets) {
+      this.monitoredWallets = new Set();
+    }
+    this.monitoredWallets.add(address);
+  }
+
+  public addMonitoredWallets(addresses: string[]): void {
+    for (const a of addresses) {
+      this.addMonitoredWallet(a);
+    }
   }
 
   public getQuarantinedWallets(): string[] {
@@ -177,6 +196,15 @@ export class ConvergenceDetector extends EventEmitter {
     // Fetch DexScreener liquidity & volume
     const dexInfo = await this.fetchDexInfo(trade.mint);
 
+    // Hard Gate: Filter out large tokens / tokenized stocks (> $100k MC or price > $0.50)
+    if (dexInfo) {
+      const effectiveCap = dexInfo.fdv > 0 ? dexInfo.fdv : (dexInfo.liquidityUsd * 2);
+      if (effectiveCap > this.maxMarketCapUsd || dexInfo.priceUsd > this.maxPriceUsd) {
+        // Ignored: Token is not in the lowcap <$100k target range
+        return null;
+      }
+    }
+
     // Fetch GMGN 1m candle kline
     const candles = await this.fetchCandles(trade.mint);
 
@@ -225,15 +253,15 @@ export class ConvergenceDetector extends EventEmitter {
       }
     } else if (
       entryDeltaSec >= 180 &&
-      liquidity >= 8000 &&
-      (dexInfo?.volume24h ?? 0) >= 30000 &&
-      maxDropPercent < 30
+      liquidity >= 2000 &&
+      (dexInfo?.volume24h ?? 0) >= 5000 &&
+      maxDropPercent < 35
     ) {
       classification = "GOLDEN_ORGANIC_CONVERGENCE";
-      reason = `Konsensus organik terverifikasi: ${uniqueWallets.length} wallet independen akumulasi dengan delta sehat (${Math.round(entryDeltaSec / 60)}m), likuiditas solid ($${liquidity.toLocaleString()})`;
+      reason = `Konsensus organik lowcap (<$100k): ${uniqueWallets.length} wallet independen akumulasi dengan delta sehat (${Math.round(entryDeltaSec / 60)}m), likuiditas solid ($${liquidity.toLocaleString()})`;
     } else {
       classification = "ACCUMULATION_WATCH";
-      reason = `${uniqueWallets.length} wallet masuk bersamaan dalam ${Math.round(entryDeltaSec / 60)} menit. Likuiditas: $${liquidity.toLocaleString()}`;
+      reason = `Lowcap watch: ${uniqueWallets.length} wallet masuk bersamaan dalam ${Math.round(entryDeltaSec / 60)} menit. Likuiditas: $${liquidity.toLocaleString()}`;
     }
 
     const report: ConvergenceReport = {
