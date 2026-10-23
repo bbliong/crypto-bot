@@ -439,15 +439,107 @@ function getDashboardHtml() {
       border-bottom: 1px solid var(--card-border);
     }
     td {
-      padding: 14px 16px;
+      padding: 12px 14px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      vertical-align: middle;
+      vertical-align: top;
     }
     tr:hover td { background: rgba(255, 255, 255, 0.02); }
     .copyable { cursor: pointer; border-bottom: 1px dashed #4b5563; }
     .copyable:hover { color: var(--primary); }
     a.link { color: #60a5fa; text-decoration: none; font-weight: 600; }
     a.link:hover { text-decoration: underline; }
+
+    /* Wallets Column Box */
+    .wallet-col-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 250px;
+      max-width: 320px;
+    }
+    .wallet-col-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    .wallet-box {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 125px;
+      overflow-y: auto;
+      padding: 5px;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+    }
+    .wallet-box::-webkit-scrollbar {
+      width: 4px;
+    }
+    .wallet-box::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .wallet-box::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 2px;
+    }
+    .wallet-box::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .wallet-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 3px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.02);
+      font-size: 11px;
+      transition: background 0.15s;
+    }
+    .wallet-row:hover {
+      background: rgba(255, 255, 255, 0.07);
+    }
+    .wallet-addr {
+      font-family: 'JetBrains Mono', monospace;
+      color: #e2e8f0;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .wallet-meta {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .wallet-time {
+      font-family: 'JetBrains Mono', monospace;
+      color: #38bdf8;
+      font-size: 10.5px;
+      white-space: nowrap;
+    }
+    .wallet-delta-first {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 9.5px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .wallet-delta-follow {
+      background: rgba(148, 163, 184, 0.12);
+      color: #94a3b8;
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 9.5px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
 
     /* Terminal Log Box */
     .terminal-box {
@@ -738,16 +830,47 @@ function getDashboardHtml() {
           badgeLabel = '🚨 DUMP RISK';
         }
 
-        const walletsHtml = (s.walletEntries || s.wallets || []).map((item, idx) => {
-          if (typeof item === 'object' && item.enteredAtWib) {
-            const deltaStr = item.deltaSecFromFirst === 0
-              ? '<span style="color: #f59e0b;">First</span>'
-              : '+' + Math.round(item.deltaSecFromFirst / 60) + 'm';
-            return '<div style="margin: 2px 0;"><span class="mono" title="' + item.wallet + '" style="font-size: 11px;">' + item.wallet.slice(0, 6) + '...' + item.wallet.slice(-4) + '</span> <span style="color: #93c5fd; font-size: 11px;">@ ' + item.enteredAtWib + '</span> <span style="color: #a5b4fc; font-size: 10px;">(' + deltaStr + ')</span></div>';
-          }
-          const w = typeof item === 'string' ? item : item.wallet;
-          return '<span class="mono" title="' + w + '">' + w.slice(0, 4) + '...' + w.slice(-4) + '</span>';
-        }).join('');
+        const totalWallets = s.walletEntries ? s.walletEntries.length : (s.wallets ? s.wallets.length : 0);
+        let walletItemsHtml = '';
+        if (s.walletEntries && s.walletEntries.length > 0) {
+          walletItemsHtml = s.walletEntries.map((we, widx) => {
+            const isFirst = we.deltaSecFromFirst === 0;
+            const deltaBadge = isFirst
+              ? '<span class="wallet-delta-first">First</span>'
+              : '<span class="wallet-delta-follow">+' + Math.round(we.deltaSecFromFirst / 60) + 'm</span>';
+            const shortAddr = we.wallet ? (we.wallet.slice(0, 4) + '...' + we.wallet.slice(-4)) : '???';
+            const wib = we.enteredAtWib || (we.enteredAt ? new Date(we.enteredAt).toLocaleTimeString('id-ID') + ' WIB' : '-');
+            return '<div class="wallet-row">' +
+              '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + we.wallet + '\')" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
+              '<div class="wallet-meta">' +
+                '<span class="wallet-time">🕒 ' + wib + '</span>' +
+                deltaBadge +
+              '</div>' +
+            '</div>';
+          }).join('');
+        } else if (s.wallets && s.wallets.length > 0) {
+          walletItemsHtml = s.wallets.map((w, widx) => {
+            const shortAddr = w ? (w.slice(0, 4) + '...' + w.slice(-4)) : '???';
+            return '<div class="wallet-row">' +
+              '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + w + '\')" title="Klik untuk copy: ' + w + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
+              '<span style="color:var(--text-muted);font-size:10px;">Logged</span>' +
+            '</div>';
+          }).join('');
+        } else {
+          walletItemsHtml = '<div style="color:var(--text-muted);font-size:11px;padding:4px;">Tidak ada detail wallet</div>';
+        }
+
+        const scrollHint = totalWallets > 3 ? '<span style="font-size: 10px; color: #64748b;">(scroll ▾)</span>' : '';
+        const walletsHtml = 
+          '<div class="wallet-col-container">' +
+            '<div class="wallet-col-header">' +
+              '<span>👛 Wallets (' + totalWallets + ')</span>' +
+              scrollHint +
+            '</div>' +
+            '<div class="wallet-box">' +
+              walletItemsHtml +
+            '</div>' +
+          '</div>';
 
         return \`
           <tr>
@@ -758,7 +881,7 @@ function getDashboardHtml() {
               <span class="mono copyable" style="font-size: 11px; color: var(--text-muted);" onclick="navigator.clipboard.writeText('\${s.mint}')" title="Klik untuk copy mint">\${s.mint ? s.mint.slice(0, 6) + '...' + s.mint.slice(-4) : '-'}</span>
             </td>
             <td><strong style="color: #38bdf8;">\${mcapStr}</strong> <span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8; font-size: 10px;">&lt; 100k</span></td>
-            <td style="max-width: 280px; font-size: 12px;">\${walletsHtml}</td>
+            <td style="vertical-align: top;">\${walletsHtml}</td>
             <td><span class="badge badge-primary">\${deltaMin > 0 ? deltaMin + ' menit' : s.entryDeltaSec + ' dtk'}</span></td>
             <td>$\${s.dexInfo?.priceUsd || 0} <span style="color: \${changeColor}; font-size: 11px;">(\${change >= 0 ? '+' : ''}\${change}%)</span></td>
             <td><strong>\${liq}</strong></td>
