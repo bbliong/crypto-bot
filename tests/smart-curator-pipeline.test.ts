@@ -67,15 +67,15 @@ test('filterGmgnCandidate: rejects inactive wallet (> 48h ago)', () => {
   assert.strictEqual(res, null, 'Should reject stale wallet');
 });
 
-test('filterGmgnCandidate: rejects low winrate (< 45% both 30d and 7d)', () => {
+test('filterGmgnCandidate: rejects low winrate (< 30% both 30d and 7d)', () => {
   const now = 1_700_000_000;
   const raw: RawGmgnWallet = {
     wallet_address: 'LowWrWallet111111111111111111111111111111111',
     tags: ['launchpad_smart'],
     sol_balance: '10.0',
     realized_profit_30d: '50000',
-    winrate_30d: 0.35,
-    winrate_7d: 0.30,
+    winrate_30d: 0.25,
+    winrate_7d: 0.20,
     txs_30d: 200,
     last_active: now - 3600
   };

@@ -457,13 +457,14 @@ function getDashboardHtml() {
     <div id="panel-golden" class="panel active">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Peluang Emas Terverifikasi (Konsensus Organik Multi-Wallet)</div>
+          <div class="card-title">Live Konvergensi Smart Wallet (Golden Signal & Early Accumulation)</div>
         </div>
         <div style="overflow-x: auto;">
           <table>
             <thead>
               <tr>
                 <th>Waktu Deteksi</th>
+                <th>Klasifikasi</th>
                 <th>Token</th>
                 <th>Wallets Ikut Serta</th>
                 <th>Entry Delta</th>
@@ -475,7 +476,7 @@ function getDashboardHtml() {
               </tr>
             </thead>
             <tbody id="tbodyGolden">
-              <tr><td colspan="9" style="text-align: center; color: var(--text-muted);">Memuat sinyal...</td></tr>
+              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Memuat sinyal...</td></tr>
             </tbody>
           </table>
         </div>
@@ -486,7 +487,7 @@ function getDashboardHtml() {
     <div id="panel-wallets" class="panel">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Daftar 23 Wallet Smart Trader Independen Murni</div>
+          <div class="card-title">Daftar Smart Trader Independen Murni (Clean Organic)</div>
         </div>
         <div style="overflow-x: auto;">
           <table>
@@ -579,14 +580,16 @@ function getDashboardHtml() {
     }
 
     function renderKPIs() {
-      document.getElementById('kpiGolden').innerText = state.goldenSignals?.length || 0;
-      document.getElementById('tabBadgeGolden').innerText = state.goldenSignals?.length || 0;
+      const goldenCount = state.goldenSignals?.length || 0;
+      const allEventsCount = state.allEvents?.length || 0;
+      document.getElementById('kpiGolden').innerText = \`\${goldenCount} / \${allEventsCount}\`;
+      document.getElementById('tabBadgeGolden').innerText = allEventsCount;
 
       document.getElementById('kpiClean').innerText = state.cleanWallets?.length || 0;
       document.getElementById('tabBadgeClean').innerText = state.cleanWallets?.length || 0;
 
-      document.getElementById('kpiQuarantine').innerText = state.quarantinedWallets?.length || 7;
-      document.getElementById('tabBadgeSyndicates').innerText = state.quarantinedWallets?.length || 7;
+      document.getElementById('kpiQuarantine').innerText = state.quarantinedWallets?.length || 0;
+      document.getElementById('tabBadgeSyndicates').innerText = state.quarantinedWallets?.length || 0;
 
       document.getElementById('kpiRateLimits').innerText = state.systemHealth?.rateLimitCount || 0;
       if (state.systemHealth?.rateLimitCount > 0) {
@@ -596,35 +599,47 @@ function getDashboardHtml() {
 
     function renderGoldenSignals() {
       const tbody = document.getElementById('tbodyGolden');
-      if (!state.goldenSignals || state.goldenSignals.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">Belum ada golden signal baru. Klik "Scan On-Chain Now" untuk memeriksa konvergensi.</td></tr>';
+      const events = (state.allEvents && state.allEvents.length > 0) ? state.allEvents : state.goldenSignals;
+      if (!events || events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">Belum ada sinyal konvergensi. Klik "Scan On-Chain Now" untuk memeriksa.</td></tr>';
         return;
       }
 
-      tbody.innerHTML = state.goldenSignals.map(s => {
+      tbody.innerHTML = events.map(s => {
         const deltaMin = Math.round(s.entryDeltaSec / 60);
         const liq = s.dexInfo?.liquidityUsd ? '$' + Number(s.dexInfo.liquidityUsd).toLocaleString() : 'N/A';
         const vol = s.dexInfo?.volume24h ? '$' + Number(s.dexInfo.volume24h).toLocaleString() : 'N/A';
         const change = s.dexInfo?.priceChange24h || 0;
         const changeColor = change >= 0 ? '#10b981' : '#ef4444';
 
-        const walletsHtml = s.wallets.map(w => 
+        let badgeClass = 'badge-primary';
+        let badgeLabel = 'ACCUMULATION';
+        if (s.classification === 'GOLDEN_ORGANIC_CONVERGENCE') {
+          badgeClass = 'badge-green';
+          badgeLabel = '🌟 GOLDEN SIGNAL';
+        } else if (s.classification === 'SYNDICATE_DUMP_RISK') {
+          badgeClass = 'badge-red';
+          badgeLabel = '🚨 DUMP RISK';
+        }
+
+        const walletsHtml = (s.wallets || []).map(w => 
           \`<span class="mono" title="\${w}">\${w.slice(0, 4)}...\${w.slice(-4)}</span>\`
         ).join(', ');
 
         return \`
           <tr>
             <td style="white-space: nowrap;">\${new Date(s.detectedAt).toLocaleTimeString('id-ID')} WIB</td>
+            <td><span class="badge \${badgeClass}">\${badgeLabel}</span></td>
             <td>
-              <strong>\${s.symbol}</strong><br>
-              <span class="mono copyable" style="font-size: 11px; color: var(--text-muted);" onclick="navigator.clipboard.writeText('\${s.mint}')" title="Klik untuk copy mint">\${s.mint.slice(0, 6)}...\${s.mint.slice(-4)}</span>
+              <strong>\${s.symbol || (s.mint ? s.mint.slice(0, 6) : 'UNKNOWN')}</strong><br>
+              <span class="mono copyable" style="font-size: 11px; color: var(--text-muted);" onclick="navigator.clipboard.writeText('\${s.mint}')" title="Klik untuk copy mint">\${s.mint ? s.mint.slice(0, 6) + '...' + s.mint.slice(-4) : '-'}</span>
             </td>
-            <td>\${walletsHtml} (\${s.wallets.length} wallet)</td>
+            <td>\${walletsHtml} (\${s.wallets?.length || 0} wallet)</td>
             <td><span class="badge badge-primary">\${deltaMin > 0 ? deltaMin + ' menit' : s.entryDeltaSec + ' dtk'}</span></td>
             <td>$\${s.dexInfo?.priceUsd || 0} <span style="color: \${changeColor}; font-size: 11px;">(\${change >= 0 ? '+' : ''}\${change}%)</span></td>
             <td><strong>\${liq}</strong></td>
             <td>\${vol}</td>
-            <td style="max-width: 250px; font-size: 12px; color: #a7f3d0;">\${s.reason}</td>
+            <td style="max-width: 250px; font-size: 12px; color: \${s.classification === 'GOLDEN_ORGANIC_CONVERGENCE' ? '#a7f3d0' : (s.classification === 'SYNDICATE_DUMP_RISK' ? '#fca5a5' : '#cbd5e1')};">\${s.reason}</td>
             <td>
               <a href="https://dexscreener.com/solana/\${s.mint}" target="_blank" class="link">Chart</a> · 
               <a href="https://gmgn.ai/sol/token/\${s.mint}" target="_blank" class="link">GMGN</a>
@@ -663,60 +678,25 @@ function getDashboardHtml() {
 
     function renderSyndicates() {
       const tbody = document.getElementById('tbodySyndicates');
-      const clusters = [
-        {
-          name: "Warhounds Pump & Dump Fleet",
-          wallets: [
-            "HT5EVAzfn1CzBqbWtVKcC9CRdexcemactNQNt7tM7rSc",
-            "GLv45A9aEknpjQ47XUX13tU8M1Bxwx5kRhWyDrSaiJUV",
-            "Gf2wYM2k5ojfPzN5Uqi3mbP1nWEdZhhzMyDBsKrHA3kC"
-          ],
-          token: "WARHOUNDS (C5Kuuw...)",
-          delta: "0 detik (Serempak)",
-          hold: "34 - 87 detik",
-          liq: "Kuras Habis ($0)",
-          vonis: "PUMP & DUMP OPERATOR"
-        },
-        {
-          name: "Micro-Cap Sniper Twins",
-          wallets: [
-            "D1qxDozP9EZaZvqwNVyB8pHDTTrSRcTEs1JXkLhpfDAC",
-            "4nwfXw7n98jEQn93VWY7Cuf1jnn1scHXuXCPGVYS9k6T"
-          ],
-          token: "www (HRab8H...) & SI",
-          delta: "0 detik (Presisi)",
-          hold: "24 - 90 detik",
-          liq: "Kuras Habis ($0)",
-          vonis: "MULTI-WALLET SNIPER BOT"
-        },
-        {
-          name: "Ultra-Fast Flash Scalp Twins",
-          wallets: [
-            "42wuKdjT3h1dybTMygQshSsH57EHGseZPU9vTog4VEYm",
-            "9yHA2HwcsHfjSLZQXPx3eJUQAnbYU3YdbfBuNxkgFQSP"
-          ],
-          token: "CRC, KIMCHI, chigga",
-          delta: "0 - 10 detik",
-          hold: "11 - 56 detik",
-          liq: "Kuras Habis ($0)",
-          vonis: "FLASH SCALP BOT"
-        }
-      ];
+      const qWallets = state.quarantinedWallets || [];
+      if (qWallets.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Tidak ada sindikat terdeteksi.</td></tr>';
+        return;
+      }
 
-      tbody.innerHTML = clusters.map(c => {
-        const walletsHtml = c.wallets.map(w => 
-          \`<div class="mono" style="margin-bottom: 4px;">\${w.slice(0, 6)}...\${w.slice(-4)}</div>\`
-        ).join('');
-
+      tbody.innerHTML = qWallets.map((w, idx) => {
+        const address = typeof w === 'string' ? w : (w.address || JSON.stringify(w));
         return \`
           <tr>
-            <td>\${walletsHtml}</td>
-            <td><strong>\${c.name}</strong></td>
-            <td>\${c.token}</td>
-            <td><span class="badge badge-red">\${c.delta}</span></td>
-            <td>\${c.hold}</td>
-            <td><strong style="color: var(--red);">\${c.liq}</strong></td>
-            <td><span class="badge badge-red">\${c.vonis}</span></td>
+            <td class="mono"><strong>#\${idx + 1}</strong></td>
+            <td>
+              <span class="mono copyable" onclick="navigator.clipboard.writeText('\${address}')" title="Copy">\${address}</span>
+            </td>
+            <td><strong style="color: #f87171;">Coordinated / Bot Sniper</strong></td>
+            <td><span class="badge badge-red">&Delta;t &le; 30s / Shared Dump</span></td>
+            <td>&lt; 90 detik</td>
+            <td><strong style="color: var(--red);">Drained / High-Risk</strong></td>
+            <td><span class="badge badge-red">PERMANENT BLACKLIST</span></td>
           </tr>
         \`;
       }).join('');

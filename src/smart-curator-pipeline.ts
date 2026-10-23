@@ -82,14 +82,14 @@ export function filterGmgnCandidate(w: RawGmgnWallet, nowSec: number = Math.floo
   // 1. Must be active within 48 hours
   if (ageHrs > 48) return null;
 
-  // 2. Win rate at least 45% on 30d or 7d
-  if (wr30d < 0.45 && wr7d < 0.45) return null;
+  // 2. Win rate at least 30% on 30d or 7d (adapted for asymmetric lowcap/meme runners)
+  if (wr30d < 0.30 && wr7d < 0.30) return null;
 
-  // 3. Meaningful profit: >= $3,000 in 30d OR >= $1,000 in 7d
-  if (pnl30d < 3000 && pnl7d < 1000) return null;
+  // 3. Meaningful profit: >= $2,000 in 30d OR >= $500 in 7d
+  if (pnl30d < 2000 && pnl7d < 500) return null;
 
-  // 4. Human trading activity: 20 to 2,500 trades per 30 days
-  if (txs30d < 20 || txs30d > 2500) return null;
+  // 4. Human trading activity: 15 to 4,000 trades per 30 days
+  if (txs30d < 15 || txs30d > 4000) return null;
 
   // 5. Active SOL balance: at least 0.1 SOL (~$18)
   if (solBal < 0.1) return null;
@@ -128,16 +128,37 @@ export async function fetchGmgnLowcapCandidates(cdpUrl: string = 'http://127.0.0
   console.log(`[CURATOR-GMGN] Connected to GMGN tab: ${page.url()}`);
 
   const endpoints = [
-    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=launchpad_smart&orderby=pnl_30d&direction=desc&limit=100',
-    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=launchpad_smart&orderby=pnl_7d&direction=desc&limit=100',
+    // 1. Pump.fun dedicated smart money (lowcap bonding curve)
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=pump_smart&orderby=pnl_1d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=pump_smart&orderby=pnl_7d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=pump_smart&orderby=pnl_30d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=pump_smart&orderby=winrate_7d&direction=desc&limit=100',
+
+    // 2. Early launchpad smart traders
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=launchpad_smart&orderby=pnl_1d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=launchpad_smart&orderby=pnl_7d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=launchpad_smart&orderby=pnl_30d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=launchpad_smart&orderby=winrate_7d&direction=desc&limit=100',
-    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=smart_degen&orderby=pnl_30d&direction=desc&limit=100',
+
+    // 3. Precision snipers on early launches
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=sniper&orderby=pnl_1d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=sniper&orderby=pnl_7d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=sniper&orderby=pnl_30d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=sniper&orderby=winrate_7d&direction=desc&limit=100',
+
+    // 4. Smart degen fast momentum rotators
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=smart_degen&orderby=pnl_1d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=smart_degen&orderby=pnl_7d&direction=desc&limit=100',
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=smart_degen&orderby=pnl_30d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=smart_degen&orderby=winrate_7d&direction=desc&limit=100',
-    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=fresh_wallet&orderby=pnl_30d&direction=desc&limit=100',
+
+    // 5. Fresh high-conviction breakout wallets
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=fresh_wallet&orderby=pnl_1d&direction=desc&limit=100',
     'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=fresh_wallet&orderby=pnl_7d&direction=desc&limit=100',
-    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/1d?tag=fresh_wallet&orderby=pnl_1d&direction=desc&limit=100'
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/30d?tag=fresh_wallet&orderby=pnl_30d&direction=desc&limit=100',
+
+    // 6. Alpha influencers / KOLs with verified profit
+    'https://gmgn.ai/defi/quotation/v1/rank/sol/wallets/7d?tag=kol&orderby=pnl_7d&direction=desc&limit=100'
   ];
 
   console.log(`[CURATOR-GMGN] Fetching rankings across ${endpoints.length} lowcap discovery categories...`);
@@ -326,9 +347,9 @@ export function exportCuratedWallets(
     totalCurated: wallets.length,
     criteria: {
       timeframe: '6 months / 30 days consistency',
-      target: 'Lowcap / Launchpad / Pump.fun specialists',
-      minWinrate: '>= 45%',
-      minProfit30d: '$3,000 USD',
+      target: 'Lowcap / Launchpad / Pump.fun specialists & Snipers',
+      minWinrate: '>= 30%',
+      minProfit30d: '$2,000 USD',
       onChainProof: 'Helius Verified < 48 hours activity'
     },
     wallets

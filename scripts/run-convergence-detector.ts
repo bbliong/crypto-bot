@@ -29,7 +29,7 @@ async function main() {
 
   // 2. Initialize Detector
   const detector = new ConvergenceDetector({
-    timeWindowSec: 1800, // 30 minutes sliding window
+    timeWindowSec: 7200, // 2 hours sliding window for organic multi-wallet accumulation
     cdpUrl: "http://127.0.0.1:9223",
     monitoredWallets: cleanWallets,
     outputFile: "data/convergence-monitor-events.json"
@@ -72,14 +72,14 @@ async function main() {
     const env = readFileSync(".env", "utf8");
     const heliusKey = env.match(/HELIUS_API_KEY=([^\s\r\n]+)/)?.[1] || "";
     
-    const BATCH_SIZE = 3;
-    let totalTradesIngested = 0;
+    const BATCH_SIZE = 4;
+    const allTrades: TradeEvent[] = [];
 
     for (let i = 0; i < cleanWallets.length; i += BATCH_SIZE) {
       const chunk = cleanWallets.slice(i, i + BATCH_SIZE);
       await Promise.all(chunk.map(async (wallet) => {
         try {
-          const url = `https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${heliusKey}&limit=20`;
+          const url = `https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${heliusKey}&limit=25`;
           const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
           if (res.status === 429) {
             await new Promise(r => setTimeout(r, 1500));
@@ -114,16 +114,22 @@ async function main() {
                 txSignature: tx.signature
               };
 
-              totalTradesIngested++;
-              await detector.recordTrade(trade);
+              allTrades.push(trade);
             }
           }
         } catch {}
       }));
-      await new Promise(r => setTimeout(r, 250));
+      await new Promise(r => setTimeout(r, 200));
     }
 
-    console.log(`\n[SCAN-COMPLETE] Ingested ${totalTradesIngested} buy events. Active mints tracked: ${detector.getActiveMintsCount()}`);
+    // Sort trades chronologically for perfect replay evaluation
+    allTrades.sort((a, b) => a.timestamp - b.timestamp);
+
+    for (const t of allTrades) {
+      await detector.recordTrade(t);
+    }
+
+    console.log(`\n[SCAN-COMPLETE] Ingested ${allTrades.length} buy events. Active mints tracked: ${detector.getActiveMintsCount()}`);
     console.log(`[REPORT-SAVED] Convergence history persisted to data/convergence-monitor-events.json`);
     await detector.close();
     process.exit(0);

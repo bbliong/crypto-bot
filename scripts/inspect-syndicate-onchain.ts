@@ -88,7 +88,7 @@ async function main() {
 
   const jsonPath = join(process.cwd(), 'data', 'curated-lowcap-smart-wallets.json');
   const candidateData = JSON.parse(readFileSync(jsonPath, 'utf8'));
-  const candidates = candidateData.wallets.slice(0, 30); // Audit top 30 wallets
+  const candidates = candidateData.wallets.slice(0, 100); // Audit up to top 100 wallets
 
   console.log(`Auditing ${candidates.length} smart wallet candidates on-chain...`);
   const t0 = Date.now();

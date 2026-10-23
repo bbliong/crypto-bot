@@ -225,8 +225,8 @@ export class ConvergenceDetector extends EventEmitter {
       }
     } else if (
       entryDeltaSec >= 180 &&
-      liquidity >= 10000 &&
-      (dexInfo?.volume24h ?? 0) >= 50000 &&
+      liquidity >= 8000 &&
+      (dexInfo?.volume24h ?? 0) >= 30000 &&
       maxDropPercent < 30
     ) {
       classification = "GOLDEN_ORGANIC_CONVERGENCE";
