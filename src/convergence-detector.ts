@@ -352,7 +352,15 @@ export class ConvergenceDetector extends EventEmitter {
           if (!Array.isArray(events)) events = [];
         } catch {}
       }
-      events.push(report);
+      // Deduplicate: replace if same mint and same classification within last 1 hour
+      const existingIdx = events.findIndex(
+        (e) => e.mint === report.mint && e.classification === report.classification
+      );
+      if (existingIdx !== -1) {
+        events[existingIdx] = report;
+      } else {
+        events.push(report);
+      }
       // Keep last 100 events
       if (events.length > 100) events = events.slice(-100);
       writeFileSync(this.outputFile, JSON.stringify(events, null, 2));

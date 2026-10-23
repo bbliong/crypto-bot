@@ -645,7 +645,7 @@ function getDashboardHtml() {
             <td>
               <span class="mono copyable" onclick="navigator.clipboard.writeText('\${w.address}')" title="Copy">\${w.address}</span>
             </td>
-            <td><strong style="color: var(--green);">\${(w.winRate * 100).toFixed(0)}%</strong></td>
+            <td><strong style="color: var(--green);">\${w.winrate30d ?? (w.winRate ? (w.winRate * 100).toFixed(0) : 0)}%</strong></td>
             <td>+\$\${Number(w.pnl30d).toLocaleString()}</td>
             <td><strong>\${w.solBalance?.toFixed(1) || '0.0'} SOL</strong></td>
             <td><span class="badge badge-green">VERIFIED INDEPENDENT</span></td>
