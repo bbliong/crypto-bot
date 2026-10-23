@@ -61,6 +61,8 @@ function loadState() {
     } catch {}
   }
 
+  const nextSec = isScanning ? 0 : Math.max(0, Math.round(((lastScanCompletedAt || Date.now()) + AUTO_SCAN_INTERVAL_MS - Date.now()) / 1000));
+
   return {
     cleanWallets,
     quarantinedWallets,
@@ -73,18 +75,33 @@ function loadState() {
       heliusApiStatus: "ONLINE",
       rateLimitCount,
       lastRateLimitAt,
-      lastScanAt: new Date().toISOString()
+      isScanning,
+      lastScanAt: lastScanCompletedAt ? new Date(lastScanCompletedAt).toISOString() : null,
+      lastScanDurationMs,
+      lastScanStatus,
+      totalScansRun,
+      autoScanIntervalSec: Math.round(AUTO_SCAN_INTERVAL_MS / 1000),
+      nextScanInSec: nextSec
     }
   };
 }
 
 let isScanning = false;
+let lastScanCompletedAt = Date.now();
+let lastScanDurationMs = 0;
+let lastScanStatus = "IDLE";
+let totalScansRun = 0;
+const AUTO_SCAN_INTERVAL_MS = 60_000;
+
 function triggerScan(callback) {
   if (isScanning) {
-    return callback({ status: "busy", message: "Scan already running" });
+    if (callback) callback({ status: "busy", message: "Scan already running" });
+    return;
   }
   isScanning = true;
-  log("Starting background on-chain scan...");
+  lastScanStatus = "SCANNING";
+  const start = Date.now();
+  log("🚀 Starting background on-chain scan...");
 
   const child = spawn("node", ["--import", "tsx", "scripts/run-convergence-detector.ts", "--scan"], {
     cwd: ROOT,
@@ -104,15 +121,40 @@ function triggerScan(callback) {
 
   child.on("close", (code) => {
     isScanning = false;
-    log(`Scan finished with exit code ${code}`);
-    callback({
-      status: code === 0 ? "ok" : "error",
-      exitCode: code,
-      stdout: stdout.slice(-1000),
-      stderr: stderr.slice(-1000)
-    });
+    lastScanCompletedAt = Date.now();
+    lastScanDurationMs = Date.now() - start;
+    lastScanStatus = code === 0 ? "SUCCESS" : `ERROR (code ${code})`;
+    totalScansRun++;
+    log(`✅ Scan #${totalScansRun} finished in ${(lastScanDurationMs / 1000).toFixed(1)}s with exit code ${code}`);
+    if (callback) {
+      callback({
+        status: code === 0 ? "ok" : "error",
+        exitCode: code,
+        durationMs: lastScanDurationMs,
+        stdout: stdout.slice(-1000),
+        stderr: stderr.slice(-1000)
+      });
+    }
   });
 }
+
+function scheduleNextAutoScan() {
+  setTimeout(() => {
+    if (!isScanning) {
+      triggerScan(() => {
+        scheduleNextAutoScan();
+      });
+    } else {
+      scheduleNextAutoScan();
+    }
+  }, AUTO_SCAN_INTERVAL_MS);
+}
+// Start immediate scan after 3s on boot
+setTimeout(() => {
+  triggerScan(() => {
+    scheduleNextAutoScan();
+  });
+}, 3000);
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -403,9 +445,9 @@ function getDashboardHtml() {
         <p class="subtitle">Multi-wallet convergence detector, on-chain candle verification & anti-syndicate firewall.</p>
       </div>
       <div class="actions">
-        <div class="live-indicator">
-          <span class="dot"></span>
-          <span>SYSTEM ACTIVE (:4188)</span>
+        <div class="live-indicator" id="scannerIndicator">
+          <span class="dot" id="scannerDot"></span>
+          <span id="scannerStatusText">AUTO-SCAN ACTIVE (60s)</span>
         </div>
         <button id="btnScan" class="btn btn-primary" onclick="triggerScan()">
           🔄 Scan On-Chain Now
@@ -431,9 +473,9 @@ function getDashboardHtml() {
         <div class="kpi-sub">Dump bots caught red-handed</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">⏱️ Rate Limits (429)</div>
-        <div class="kpi-value" id="kpiRateLimits">0</div>
-        <div class="kpi-sub" id="kpiCdpStatus">Chrome CDP :9223 OK</div>
+        <div class="kpi-label">🔄 Auto-Scan On-Chain</div>
+        <div class="kpi-value" id="kpiScanStatus" style="font-size: 20px;">Memuat...</div>
+        <div class="kpi-sub" id="kpiScanSub">Next: --s · Terakhir: --</div>
       </div>
     </div>
 
@@ -592,9 +634,43 @@ function getDashboardHtml() {
       document.getElementById('kpiQuarantine').innerText = state.quarantinedWallets?.length || 0;
       document.getElementById('tabBadgeSyndicates').innerText = state.quarantinedWallets?.length || 0;
 
-      document.getElementById('kpiRateLimits').innerText = state.systemHealth?.rateLimitCount || 0;
-      if (state.systemHealth?.rateLimitCount > 0) {
-        document.getElementById('kpiRateLimits').style.color = '#ef4444';
+      // Update Scanner Live Status
+      const sh = state.systemHealth || {};
+      const statusText = document.getElementById('scannerStatusText');
+      const statusDot = document.getElementById('scannerDot');
+      const btnScan = document.getElementById('btnScan');
+      const kpiScanStatus = document.getElementById('kpiScanStatus');
+      const kpiScanSub = document.getElementById('kpiScanSub');
+
+      const lastAgoSec = sh.lastScanAt ? Math.max(0, Math.round((Date.now() - new Date(sh.lastScanAt).getTime()) / 1000)) : null;
+      const lastAgoStr = lastAgoSec !== null ? (lastAgoSec < 60 ? \`\${lastAgoSec}d lalu\` : \`\${Math.round(lastAgoSec / 60)}m lalu\`) : '-';
+
+      if (sh.isScanning) {
+        if (statusText) statusText.innerText = 'SEDANG MEMINDAI ON-CHAIN...';
+        if (statusDot) statusDot.style.background = '#f59e0b';
+        if (btnScan) {
+          btnScan.disabled = true;
+          btnScan.innerText = '⏳ Sedang Memindai...';
+        }
+        if (kpiScanStatus) {
+          kpiScanStatus.innerHTML = '<span style="color: #f59e0b;">🔄 Memindai...</span>';
+        }
+        if (kpiScanSub) {
+          kpiScanSub.innerText = 'Proses validasi GMGN + Helius';
+        }
+      } else {
+        if (statusText) statusText.innerText = \`AUTO-SCAN (60s) · NEXT: \${sh.nextScanInSec || 0}s\`;
+        if (statusDot) statusDot.style.background = '#10b981';
+        if (btnScan) {
+          btnScan.disabled = false;
+          btnScan.innerText = '🔄 Scan On-Chain Now';
+        }
+        if (kpiScanStatus) {
+          kpiScanStatus.innerHTML = '<span style="color: #10b981;">🟢 Aktif (60s)</span>';
+        }
+        if (kpiScanSub) {
+          kpiScanSub.innerText = \`Terakhir: \${lastAgoStr} · 429: \${sh.rateLimitCount || 0}\`;
+        }
       }
     }
 
@@ -721,22 +797,17 @@ function getDashboardHtml() {
     async function triggerScan() {
       const btn = document.getElementById('btnScan');
       btn.disabled = true;
-      btn.innerText = '⏳ Scanning On-Chain...';
+      btn.innerText = '⏳ Memulai Scan...';
       try {
-        const res = await fetch(API_BASE + '/api/scan', { method: 'POST' });
-        const data = await res.json();
+        await fetch(API_BASE + '/api/scan', { method: 'POST' });
         await loadData();
-        alert('Scan on-chain selesai!');
       } catch (e) {
-        alert('Scan error: ' + e.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerText = '🔄 Scan On-Chain Now';
+        console.error('Scan error:', e);
       }
     }
 
     loadData();
-    setInterval(loadData, 5000);
+    setInterval(loadData, 3000);
   </script>
 </body>
 </html>`;

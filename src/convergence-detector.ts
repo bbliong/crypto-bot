@@ -84,6 +84,10 @@ export class ConvergenceDetector extends EventEmitter {
   private browser: Browser | null = null;
   private gmgnPage: Page | null = null;
 
+  // Caching to eliminate redundant lookups across overlapping tokens
+  private dexCache = new Map<string, { info: DexTokenInfo | null; exp: number }>();
+  private candleCache = new Map<string, { candles: CandleKline[]; exp: number }>();
+
   // Injectable fetchers for testing / mock
   private customDexFetcher: ((mint: string) => Promise<DexTokenInfo | null>) | null = null;
   private customCandleFetcher: ((mint: string) => Promise<CandleKline[]>) | null = null;
@@ -295,14 +299,22 @@ export class ConvergenceDetector extends EventEmitter {
     if (this.customDexFetcher) {
       return await this.customDexFetcher(mint);
     }
+    const now = Date.now();
+    const cached = this.dexCache.get(mint);
+    if (cached && cached.exp > now) {
+      return cached.info;
+    }
     try {
       const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
         signal: AbortSignal.timeout(5000)
       });
       const data: any = await res.json();
       const pair = data.pairs?.[0];
-      if (!pair) return null;
-      return {
+      if (!pair) {
+        this.dexCache.set(mint, { info: null, exp: now + 60_000 });
+        return null;
+      }
+      const info: DexTokenInfo = {
         mint,
         symbol: pair.baseToken?.symbol || "UNKNOWN",
         name: pair.baseToken?.name || "UNKNOWN",
@@ -313,7 +325,10 @@ export class ConvergenceDetector extends EventEmitter {
         volume24h: Number(pair.volume?.h24) || 0,
         priceChange24h: Number(pair.priceChange?.h24) || 0
       };
+      this.dexCache.set(mint, { info, exp: now + 60_000 });
+      return info;
     } catch {
+      this.dexCache.set(mint, { info: null, exp: now + 20_000 });
       return null;
     }
   }
@@ -321,6 +336,11 @@ export class ConvergenceDetector extends EventEmitter {
   private async fetchCandles(mint: string): Promise<CandleKline[]> {
     if (this.customCandleFetcher) {
       return await this.customCandleFetcher(mint);
+    }
+    const now = Date.now();
+    const cached = this.candleCache.get(mint);
+    if (cached && cached.exp > now) {
+      return cached.candles;
     }
 
     try {
@@ -341,8 +361,11 @@ export class ConvergenceDetector extends EventEmitter {
         }
       }, mint);
 
-      if (!Array.isArray(raw)) return [];
-      return raw.map((c: any) => ({
+      if (!Array.isArray(raw)) {
+        this.candleCache.set(mint, { candles: [], exp: now + 60_000 });
+        return [];
+      }
+      const parsed: CandleKline[] = raw.map((c: any) => ({
         time: Number(c.time) || 0,
         open: Number(c.open) || 0,
         high: Number(c.high) || 0,
@@ -350,7 +373,10 @@ export class ConvergenceDetector extends EventEmitter {
         close: Number(c.close) || 0,
         volume: Number(c.volume) || 0
       }));
+      this.candleCache.set(mint, { candles: parsed, exp: now + 60_000 });
+      return parsed;
     } catch {
+      this.candleCache.set(mint, { candles: [], exp: now + 20_000 });
       return [];
     }
   }
