@@ -1031,11 +1031,22 @@ function getDashboardHtml() {
     let state = null;
     const API_BASE = window.location.pathname.startsWith('/wal-track') ? '/wal-track' : '';
 
-    function switchTab(name) {
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function switchTab(name, evt) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       
-      event.target.closest('.tab-btn').classList.add('active');
+      const targetBtn = evt ? evt.currentTarget : (window.event ? window.event.currentTarget || window.event.target.closest('.tab-btn') : null);
+      if (targetBtn) targetBtn.classList.add('active');
       document.getElementById('panel-' + name).classList.add('active');
 
       if (name === 'logs') fetchLogs();
@@ -1045,12 +1056,12 @@ function getDashboardHtml() {
       try {
         const res = await fetch(API_BASE + '/api/state');
         state = await res.json();
-        renderKPIs();
-        renderGoldenSignals();
-        renderWallets();
-        renderSyndicates();
-        renderSimulation();
-        renderPaperTrading();
+        try { renderKPIs(); } catch (e) { console.error('renderKPIs error:', e); }
+        try { renderGoldenSignals(); } catch (e) { console.error('renderGoldenSignals error:', e); }
+        try { renderWallets(); } catch (e) { console.error('renderWallets error:', e); }
+        try { renderSyndicates(); } catch (e) { console.error('renderSyndicates error:', e); }
+        try { renderSimulation(); } catch (e) { console.error('renderSimulation error:', e); }
+        try { renderPaperTrading(); } catch (e) { console.error('renderPaperTrading error:', e); }
       } catch (e) {
         console.error('Error fetching state:', e);
       }
@@ -1179,7 +1190,7 @@ function getDashboardHtml() {
 
             return '<div class="wallet-card-entry">' +
               '<div class="wallet-row-top">' +
-                '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + we.wallet + '\')" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
+                '<span class="mono copyable wallet-addr" data-copy="' + we.wallet + '" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
                 deltaBadge +
                 tokenProfitBadge +
               '</div>' +
@@ -1203,7 +1214,7 @@ function getDashboardHtml() {
               pnlBadge = '<span class="wallet-pnl-neg">-$' + Math.abs(wInfo.pnl30d) + '</span>';
             }
             return '<div class="wallet-row">' +
-              '<span class="mono copyable wallet-addr" onclick="navigator.clipboard.writeText(\'' + w + '\')" title="Klik untuk copy: ' + w + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
+              '<span class="mono copyable wallet-addr" data-copy="' + w + '" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Klik untuk copy: ' + w + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
               '<div class="wallet-meta">' +
                 pnlBadge +
                 '<span style="color:var(--text-muted);font-size:10px;">Logged</span>' +
@@ -1260,7 +1271,7 @@ function getDashboardHtml() {
         return;
       }
 
-      tbody.innerHTML = state.cleanWallets.map((w, idx) => {
+      tbody.innerHTML = state.cleanWallets.slice(0, 100).map((w, idx) => {
         const isSnowball = w.source === 'snowball_runner';
         const badge = isSnowball
           ? \`<span class="badge" style="background: rgba(56,189,248,0.18); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3);">❄️ SNOWBALL (\${w.hitCount || 1}x)</span>\`
@@ -1270,7 +1281,7 @@ function getDashboardHtml() {
           <tr>
             <td><strong>#\${idx + 1}</strong></td>
             <td>
-              <span class="mono copyable" onclick="navigator.clipboard.writeText('\${w.address}')" title="Copy">\${w.address}</span>
+              <span class="mono copyable" data-copy="\${w.address}" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Copy">\${w.address}</span>
             </td>
             <td><strong style="color: var(--green);">\${w.winrate30d ?? (w.winRate ? (w.winRate * 100).toFixed(0) : 55)}%</strong></td>
             <td>+\$\${Number(profit).toLocaleString()}</td>
@@ -1429,7 +1440,7 @@ function getDashboardHtml() {
         return '<tr>' +
           '<td>' +
             '<div style="font-weight: 700; color: #f1f5f9;">#' + (i + 1) + ' ' + r.symbol + '</div>' +
-            '<div class="mono" style="font-size: 10px; color: var(--text-muted); cursor: pointer;" onclick="navigator.clipboard.writeText(\'' + r.mint + '\')" title="Copy mint">' + r.mint.slice(0, 4) + '...' + r.mint.slice(-4) + '</div>' +
+            '<div class="mono" style="font-size: 10px; color: var(--text-muted); cursor: pointer;" data-copy="' + r.mint + '" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Copy mint">' + r.mint.slice(0, 4) + '...' + r.mint.slice(-4) + '</div>' +
           '</td>' +
           '<td><span class="mono" style="color: #38bdf8;">🕒 ' + (r.entryWib || '-') + '</span></td>' +
           '<td><span class="mono">$' + (r.entryMcap || 0).toLocaleString() + '</span></td>' +
