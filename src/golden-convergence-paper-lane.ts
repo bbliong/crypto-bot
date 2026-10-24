@@ -113,12 +113,14 @@ export class GoldenConvergencePaperLane {
   private positions: PaperPosition[] = [];
   private openByMintAndLane: Map<string, PaperPosition> = new Map();
 
-  public static readonly STAKE_PER_TRADE = 100;
+  public stakePerTrade: number;
+  public static readonly DEFAULT_STAKE = 5; // $5 USD per trade (low-capital mode)
   public static readonly FEE_RATE = 2.0; // 2% roundtrip
 
-  constructor(options?: { storePath?: string }) {
+  constructor(options?: { storePath?: string; stakePerTradeUsd?: number }) {
     const root = process.cwd();
     this.storePath = options?.storePath || join(root, "data", "golden-paper-positions.json");
+    this.stakePerTrade = options?.stakePerTradeUsd || GoldenConvergencePaperLane.DEFAULT_STAKE;
     this.loadState();
   }
 
@@ -145,7 +147,7 @@ export class GoldenConvergencePaperLane {
   public saveState(): void {
     const payload: GoldenPaperStorePayload = {
       updatedAt: new Date().toISOString(),
-      stakePerTradeUsd: GoldenConvergencePaperLane.STAKE_PER_TRADE,
+      stakePerTradeUsd: this.stakePerTrade,
       rules: {
         roundTripFeeRate: GoldenConvergencePaperLane.FEE_RATE,
         scalp: {
@@ -216,7 +218,7 @@ export class GoldenConvergencePaperLane {
       lane: params.lane,
       mint: params.mint,
       symbol: params.symbol || "UNKNOWN",
-      stakeUsd: GoldenConvergencePaperLane.STAKE_PER_TRADE,
+      stakeUsd: this.stakePerTrade,
       entryTimestamp: nowSec,
       entryTimeWib,
       entryPriceUsd: params.entryPriceUsd,

@@ -13,7 +13,7 @@ function cleanup() {
 
 test("GoldenConvergencePaperLane - open position when wallet 2 enters", () => {
   cleanup();
-  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
+  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH, stakePerTradeUsd: 100 });
 
   const pos = lane.openPosition({
     lane: "LANE_GOLDEN_SCALP",
@@ -48,7 +48,7 @@ test("GoldenConvergencePaperLane - open position when wallet 2 enters", () => {
 
 test("GoldenConvergencePaperLane - Scalp Bot Take Profit (+35%) triggers accurately", () => {
   cleanup();
-  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
+  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH, stakePerTradeUsd: 100 });
 
   const pos = lane.openPosition({
     lane: "LANE_GOLDEN_SCALP",
@@ -119,7 +119,7 @@ test("GoldenConvergencePaperLane - Scalp Bot Trailing Stop (peak +20%, drop 7%)"
 
 test("GoldenConvergencePaperLane - Moonbag Runner (TP1 +50% and TP2 +120%)", () => {
   cleanup();
-  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
+  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH, stakePerTradeUsd: 100 });
 
   const pos = lane.openPosition({
     lane: "LANE_GOLDEN_MOONBAG",
