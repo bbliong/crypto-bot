@@ -106,15 +106,10 @@ async function main() {
     let entryPrice = report.dexInfo?.priceUsd || (report.dexInfo?.marketCapUsd ? report.dexInfo.marketCapUsd / 1e9 : 0.00001);
     const entryMcap = report.dexInfo?.marketCapUsd || 15000;
 
-    // Strict Anti-Syndicate Gate:
+    // Strict Anti-Syndicate & Quality Gates:
     // 1. Delta WAJIB >= 180 detik (tolak mutlak bundler / sindikat <= 30s)
     // 2. Likuiditas >= $2,000 dan tidak drained
     // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 180s && cuanWallets >= 2)
-    // 4. Live Fresh Only: Wajib konvergensi baru sejak bot aktif (tidak mengeksekusi sinyal lama lampau)
-    if (w2.timestamp < BOOT_TIME_SEC - 300) {
-      return false;
-    }
-
     const cuanWallets = (report.walletEntries || []).filter((w: any) => (w.profitUsd || 0) > 0);
     const isStrictGolden = (
       report.classification === "GOLDEN_ORGANIC_CONVERGENCE" ||
@@ -122,6 +117,27 @@ async function main() {
     ) && delta >= 180 && !report.isLiquidityDrained && (report.dexInfo?.liquidityUsd || 0) >= 2000;
 
     if (!isStrictGolden) {
+      return false;
+    }
+
+    // 4. Strict Real-Time Age Gate: Usia konvergensi Wallet 2 WAJIB fresh <= 180 detik (3 menit) dari sekarang
+    const nowSec = Math.floor(Date.now() / 1000);
+    const signalAgeSec = nowSec - (w2.timestamp || 0);
+    if (signalAgeSec > 180) {
+      console.log(`[GATE-REJECT] ⏱️ Sinyal ${report.symbol} ditolak: Usia sinyal W2 ${signalAgeSec}s (> 180s batas toleransi real-time)`);
+      return false;
+    }
+    if (w2.timestamp < BOOT_TIME_SEC - 60) {
+      return false;
+    }
+
+    // 5. Anti-Dump Gate: Pioneer (W1) dan Confirming (W2) WAJIB masih HOLDING
+    if (w1.isHolding === false) {
+      console.log(`[GATE-REJECT] 🚨 Pioneer Wallet #1 (${w1.wallet?.slice(0, 6)}...) sudah DUMP pada ${report.symbol} (tolak beli koin ditinggal pioneer)`);
+      return false;
+    }
+    if (w2.isHolding === false) {
+      console.log(`[GATE-REJECT] 🚨 Confirming Wallet #2 (${w2.wallet?.slice(0, 6)}...) sudah DUMP pada ${report.symbol}`);
       return false;
     }
 
