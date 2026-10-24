@@ -371,7 +371,7 @@ export class ConvergenceDetector extends EventEmitter {
     return report;
   }
 
-  private async fetchDexInfo(mint: string): Promise<DexTokenInfo | null> {
+  public async fetchDexInfo(mint: string): Promise<DexTokenInfo | null> {
     if (this.customDexFetcher) {
       return await this.customDexFetcher(mint);
     }

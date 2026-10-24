@@ -104,6 +104,17 @@ function loadState() {
     }
   }
 
+  // Load paper trading trial results (2 lanes: GMGN vs Solana RPC)
+  let paperTrading = null;
+  const paperPath = join(ROOT, "data", "golden-paper-positions.json");
+  if (existsSync(paperPath)) {
+    try {
+      paperTrading = JSON.parse(readFileSync(paperPath, "utf8"));
+    } catch (e) {
+      log(`Error reading paper trading file: ${e.message}`);
+    }
+  }
+
   const nextSec = isScanning ? 0 : Math.max(0, Math.round(((lastScanCompletedAt || Date.now()) + AUTO_SCAN_INTERVAL_MS - Date.now()) / 1000));
 
   return {
@@ -113,6 +124,7 @@ function loadState() {
     allEvents,
     snowballStats,
     simulationResults,
+    paperTrading,
     systemHealth: {
       port: PORT,
       cdpUrl: "http://127.0.0.1:9223",
@@ -222,6 +234,18 @@ const server = createServer(async (req, res) => {
   if (cleanPath === "/api/state") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(loadState()));
+    return;
+  }
+
+  // API Paper Trading
+  if (cleanPath === "/api/paper-trading") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    const paperPath = join(ROOT, "data", "golden-paper-positions.json");
+    let data = { positions: [], lanes: {} };
+    if (existsSync(paperPath)) {
+      try { data = JSON.parse(readFileSync(paperPath, "utf8")); } catch {}
+    }
+    res.end(JSON.stringify(data));
     return;
   }
 
@@ -771,6 +795,9 @@ function getDashboardHtml() {
       <button class="tab-btn active" onclick="switchTab('golden')">
         🌟 Golden Signals <span class="badge badge-gold" id="tabBadgeGolden">0</span>
       </button>
+      <button class="tab-btn" onclick="switchTab('paper')">
+        🎮 Trial Paper 2-Lane <span class="badge badge-gold" id="tabBadgePaper">0</span>
+      </button>
       <button class="tab-btn" onclick="switchTab('simulation')">
         🎯 Simulasi Buy Backtest <span class="badge badge-green" id="tabBadgeSim">72% WR</span>
       </button>
@@ -923,6 +950,81 @@ function getDashboardHtml() {
       </div>
     </div>
 
+    <!-- TAB: TRIAL PAPER TRADING 2 LANES -->
+    <div id="panel-paper" class="panel">
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+          <div class="card-title">🎮 Trial Paper Trading: GMGN Discovery vs Solana RPC Queue</div>
+          <div style="font-size: 12px; color: var(--text-muted);">
+            Rules: Buy saat Wallet #2 Masuk · TP +35% · Trailing Stop (-7% dari puncak +20%) · SL -12% · Timeout 30m · Fee 2%
+          </div>
+        </div>
+        <div style="padding: 16px;">
+          <div class="sim-grid" id="paperCardsGrid">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Open Positions -->
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+          <div class="card-title">⚡ Posisi Paper Trading Aktif (Live Monitoring)</div>
+          <div style="font-size: 12px; color: var(--text-muted);" id="paperOpenCount">0 Posisi Berjalan</div>
+        </div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Lane</th>
+                <th>Token</th>
+                <th>Jam Masuk (W2)</th>
+                <th>Entry MC</th>
+                <th>Entry Price</th>
+                <th>Live MC</th>
+                <th>Live PnL</th>
+                <th>Peak Gain</th>
+                <th>Durasi Hold</th>
+                <th>Target Exit</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyPaperOpen">
+              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Tidak ada posisi aktif saat ini. Menunggu konfirmasi masuk wallet ke-2.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Closed Trades Ledger -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📜 Riwayat Eksekusi & Hasil Trial (Closed Trades Ledger)</div>
+          <div style="font-size: 12px; color: var(--text-muted);" id="paperClosedCount">Memuat riwayat...</div>
+        </div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Lane</th>
+                <th>Token</th>
+                <th>Masuk WIB (W2)</th>
+                <th>Keluar WIB</th>
+                <th>Durasi</th>
+                <th>Entry MC</th>
+                <th>Exit MC</th>
+                <th>Alasan Exit</th>
+                <th>Net PnL (%)</th>
+                <th>Net PnL ($)</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyPaperClosed">
+              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Memuat riwayat paper trade...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -948,6 +1050,7 @@ function getDashboardHtml() {
         renderWallets();
         renderSyndicates();
         renderSimulation();
+        renderPaperTrading();
       } catch (e) {
         console.error('Error fetching state:', e);
       }
@@ -1349,6 +1452,134 @@ function getDashboardHtml() {
 
       var tbody = document.getElementById('tbodySimulation');
       if (tbody) tbody.innerHTML = rows || '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Tidak ada baris hasil</td></tr>';
+    }
+
+    function renderPaperTrading() {
+      var pt = state.paperTrading;
+      if (!pt || !pt.lanes) {
+        var tbO = document.getElementById('tbodyPaperOpen');
+        if (tbO) tbO.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 18px;">Belum ada data paper trading.</td></tr>';
+        var tbC = document.getElementById('tbodyPaperClosed');
+        if (tbC) tbC.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 18px;">Belum ada data paper trading.</td></tr>';
+        return;
+      }
+
+      var lg = pt.lanes.LANE_GMGN_DISCOVERY || {};
+      var lr = pt.lanes.LANE_SOLANA_RPC || {};
+      var positions = pt.positions || [];
+      var openPositions = positions.filter(function(p) { return p.status === 'OPEN'; });
+      var closedPositions = positions.filter(function(p) { return p.status === 'CLOSED'; });
+
+      // Update Tab badge
+      var badgeP = document.getElementById('tabBadgePaper');
+      if (badgeP) {
+        var totalNetPnl = (lg.totalPnlUsd || 0) + (lr.totalPnlUsd || 0);
+        badgeP.innerText = openPositions.length + ' Open · ' + (totalNetPnl >= 0 ? '+' : '') + '$' + Math.round(totalNetPnl);
+      }
+
+      // Render 2 Comparative Summary Cards
+      var grid = document.getElementById('paperCardsGrid');
+      if (grid) {
+        grid.innerHTML =
+          '<div class="sim-card best">' +
+            '<div class="sim-card-title">' +
+              '<span class="strat-name">⚡ Lane 2: Solana RPC Queue</span>' +
+              '<span class="badge badge-green">PROVEN WINNER (' + (lr.winRatePct || 0) + '% WR)</span>' +
+            '</div>' +
+            '<div class="sim-big-pnl" style="color: #34d399;">' + (lr.totalPnlUsd >= 0 ? '+' : '') + '$' + (lr.totalPnlUsd || 0).toLocaleString() + '</div>' +
+            '<div class="sim-metrics-row">' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #34d399;">' + (lr.winRatePct || 0) + '% (' + (lr.winningTrades || 0) + 'W / ' + (lr.losingTrades || 0) + 'L)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (lr.profitFactor || 1.0) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (lr.totalTrades || 0) + ' (' + (lr.openPositions || 0) + ' Open)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (lr.avgDurationM || 0) + 'm</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (lr.grossProfitUsd || 0) + ' / -$' + (lr.grossLossUsd || 0) + '</span></div>' +
+            '</div>' +
+            '<div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">' + (lr.description || '') + '</div>' +
+          '</div>' +
+
+          '<div class="sim-card">' +
+            '<div class="sim-card-title">' +
+              '<span class="strat-name">🎯 Lane 1: GMGN Discovery</span>' +
+              '<span class="badge badge-primary">BOTTOM-UP FILTER</span>' +
+            '</div>' +
+            '<div class="sim-big-pnl" style="color: ' + ((lg.totalPnlUsd || 0) >= 0 ? '#38bdf8' : '#f87171') + ';">' + (lg.totalPnlUsd >= 0 ? '+' : '') + '$' + (lg.totalPnlUsd || 0).toLocaleString() + '</div>' +
+            '<div class="sim-metrics-row">' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #38bdf8;">' + (lg.winRatePct || 0) + '% (' + (lg.winningTrades || 0) + 'W / ' + (lg.losingTrades || 0) + 'L)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (lg.profitFactor || 1.0) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (lg.totalTrades || 0) + ' (' + (lg.openPositions || 0) + ' Open)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (lg.avgDurationM || 0) + 'm</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (lg.grossProfitUsd || 0) + ' / -$' + (lg.grossLossUsd || 0) + '</span></div>' +
+            '</div>' +
+            '<div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">' + (lg.description || '') + '</div>' +
+          '</div>';
+      }
+
+      // Render Open Positions Table
+      var tbOpen = document.getElementById('tbodyPaperOpen');
+      var openCnt = document.getElementById('paperOpenCount');
+      if (openCnt) openCnt.innerText = openPositions.length + ' Posisi Berjalan';
+
+      if (tbOpen) {
+        if (openPositions.length === 0) {
+          tbOpen.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 18px;">Tidak ada posisi aktif saat ini. Sinyal baru otomatis masuk saat smart wallet ke-2 buy.</td></tr>';
+        } else {
+          tbOpen.innerHTML = openPositions.map(function(p) {
+            var laneBadge = p.lane === 'LANE_SOLANA_RPC' ? '<span class="badge badge-green">Solana RPC</span>' : '<span class="badge badge-primary">GMGN</span>';
+            var pnlColor = (p.currentGainPct || 0) >= 0 ? '#34d399' : '#f87171';
+            var trailBadge = p.trailingActivated ? '<span class="badge badge-gold">Trailing ON</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Waiting +20%</span>';
+            return '<tr>' +
+              '<td>' + laneBadge + '</td>' +
+              '<td><strong>' + escapeHtml(p.symbol) + '</strong></td>' +
+              '<td>' + p.entryTimeWib + '</td>' +
+              '<td>$' + Math.round(p.entryMcapUsd || 0).toLocaleString() + '</td>' +
+              '<td>$' + (p.entryPriceUsd || 0) + '</td>' +
+              '<td>$' + Math.round(p.currentMcapUsd || p.entryMcapUsd || 0).toLocaleString() + '</td>' +
+              '<td style="font-weight: 700; color: ' + pnlColor + ';">' + ((p.currentGainPct || 0) >= 0 ? '+' : '') + (p.currentGainPct || 0) + '%</td>' +
+              '<td style="color: #fbbf24;">+' + (p.peakGainPct || 0) + '%</td>' +
+              '<td>' + (p.holdingDurationStr || '0s') + '</td>' +
+              '<td>' + trailBadge + '</td>' +
+            '</tr>';
+          }).join('');
+        }
+      }
+
+      // Render Closed Positions Table
+      var tbClosed = document.getElementById('tbodyPaperClosed');
+      var closedCnt = document.getElementById('paperClosedCount');
+      if (closedCnt) closedCnt.innerText = closedPositions.length + ' Trade Selesai';
+
+      if (tbClosed) {
+        if (closedPositions.length === 0) {
+          tbClosed.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 18px;">Belum ada riwayat posisi ditutup.</td></tr>';
+        } else {
+          tbClosed.innerHTML = closedPositions.slice(0, 50).map(function(p) {
+            var laneBadge = p.lane === 'LANE_SOLANA_RPC' ? '<span class="badge badge-green">Solana RPC</span>' : '<span class="badge badge-primary">GMGN</span>';
+            var isWin = (p.pnlUsd || 0) > 0;
+            var pnlColor = isWin ? '#34d399' : '#f87171';
+            
+            var reasonBadge = '';
+            if (p.exitReason === 'TAKE_PROFIT_35') reasonBadge = '<span class="badge badge-green">🎯 TP +35%</span>';
+            else if (p.exitReason === 'TRAILING_STOP_7PCT') reasonBadge = '<span class="badge badge-gold">🛡️ Trailing Stop</span>';
+            else if (p.exitReason === 'STOP_LOSS_12') reasonBadge = '<span class="badge badge-red">🛑 SL -12%</span>';
+            else if (p.exitReason === 'EMERGENCY_DUMP_GUARD') reasonBadge = '<span class="badge badge-red">🚨 Dump Guard</span>';
+            else if (p.exitReason === 'TIMEOUT_30M') reasonBadge = '<span class="badge badge-primary">⏱️ Timeout 30m</span>';
+            else reasonBadge = '<span class="badge">' + (p.exitReason || 'Exit') + '</span>';
+
+            return '<tr>' +
+              '<td>' + laneBadge + '</td>' +
+              '<td><strong>' + escapeHtml(p.symbol) + '</strong></td>' +
+              '<td>' + p.entryTimeWib + '</td>' +
+              '<td>' + (p.exitTimeWib || '-') + '</td>' +
+              '<td>' + (p.holdingDurationStr || '-') + '</td>' +
+              '<td>$' + Math.round(p.entryMcapUsd || 0).toLocaleString() + '</td>' +
+              '<td>$' + Math.round(p.exitMcapUsd || 0).toLocaleString() + '</td>' +
+              '<td>' + reasonBadge + '</td>' +
+              '<td style="font-weight: 700; color: ' + pnlColor + ';">' + ((p.netReturnPct || 0) >= 0 ? '+' : '') + (p.netReturnPct || 0) + '%</td>' +
+              '<td style="font-weight: 700; color: ' + pnlColor + ';">' + ((p.pnlUsd || 0) >= 0 ? '+' : '') + '$' + (p.pnlUsd || 0).toLocaleString() + '</td>' +
+            '</tr>';
+          }).join('');
+        }
+      }
     }
 
     async function fetchLogs() {

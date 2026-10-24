@@ -2,11 +2,56 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ConvergenceDetector, type TradeEvent } from "../src/convergence-detector.js";
 import { SnowballCollector } from "../src/snowball-collector.js";
+import { GoldenConvergencePaperLane } from "../src/golden-convergence-paper-lane.js";
 
 async function main() {
   console.log("================================================================================");
   console.log("   🛰️  SMART WALLET LIVE CONVERGENCE & ANTI-SYNDICATE DETECTOR (SNOWBALL MODE)");
   console.log("================================================================================\n");
+
+  // Initialize Golden Convergence Paper Lane
+  const paperLane = new GoldenConvergencePaperLane();
+
+  function handlePaperBuy(report: any) {
+    if (!report.walletEntries || report.walletEntries.length < 2) return;
+    const w1 = report.walletEntries[0];
+    const w2 = report.walletEntries[1];
+
+    const entryPrice = report.dexInfo?.priceUsd || (report.dexInfo?.marketCapUsd ? report.dexInfo.marketCapUsd / 1e9 : 0.00001);
+    const entryMcap = report.dexInfo?.marketCapUsd || 15000;
+
+    // Lane 1: GMGN Discovery (Organic / Golden filter)
+    if (report.classification === "GOLDEN_ORGANIC_CONVERGENCE" || (w2.deltaSecFromFirst >= 60 && !report.isLiquidityDrained)) {
+      const posGmgn = paperLane.openPosition({
+        lane: "LANE_GMGN_DISCOVERY",
+        mint: report.mint,
+        symbol: report.symbol,
+        entryPriceUsd: entryPrice,
+        entryMcapUsd: entryMcap,
+        entryTimestamp: w2.timestamp,
+        wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
+        wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+      });
+      if (posGmgn) {
+        console.log(`[PAPER-BUY] 🎮 Opened paper position (LANE_GMGN_DISCOVERY) on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      }
+    }
+
+    // Lane 2: Solana RPC Queue (all wallet co-entries)
+    const posRpc = paperLane.openPosition({
+      lane: "LANE_SOLANA_RPC",
+      mint: report.mint,
+      symbol: report.symbol,
+      entryPriceUsd: entryPrice,
+      entryMcapUsd: entryMcap,
+      entryTimestamp: w2.timestamp,
+      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+    });
+    if (posRpc) {
+      console.log(`[PAPER-BUY] ⚡ Opened paper position (LANE_SOLANA_RPC) on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
+    }
+  }
 
   // 1. Initialize Snowball Collector and Load Clean Wallets
   const snowball = new SnowballCollector();
@@ -25,6 +70,7 @@ async function main() {
 
   // Listen for events
   detector.on("golden_signal", (report) => {
+    handlePaperBuy(report);
     console.log("\n" + "=".repeat(75));
     console.log(`🌟 [GOLDEN CONVERGENCE SIGNAL] Token: ${report.symbol} (${report.mint.slice(0, 8)}...)`);
     console.log(`   Wallets involved (${report.wallets.length}):`);
@@ -64,6 +110,7 @@ async function main() {
   });
 
   detector.on("convergence", (report) => {
+    handlePaperBuy(report);
     if (report.classification === "ACCUMULATION_WATCH") {
       console.log(`[ACCUMULATION-WATCH] Multi-wallet overlap on ${report.symbol}: ${report.reason}`);
     }
@@ -332,6 +379,33 @@ async function main() {
 
     console.log(`\n[SCAN-COMPLETE] Ingested ${allTrades.length} buy events. Active mints tracked: ${detector.getActiveMintsCount()}`);
     console.log(`[REPORT-SAVED] Convergence history persisted to data/convergence-monitor-events.json`);
+
+    // 4. Evaluate Open Paper Positions against live market prices
+    const openPositions = paperLane.getOpenPositions();
+    if (openPositions.length > 0) {
+      console.log(`\n[PAPER-UPDATE] Evaluating ${openPositions.length} open paper positions against latest prices...`);
+      for (const pos of openPositions) {
+        try {
+          const dex = await detector.fetchDexInfo(pos.mint);
+          if (dex && dex.priceUsd) {
+            const res = paperLane.evaluatePriceTick(pos, {
+              priceUsd: dex.priceUsd,
+              mcapUsd: dex.marketCapUsd,
+              timestamp: Math.floor(Date.now() / 1000),
+              isLiquidityDrained: (dex.liquidityUsd || 0) < 1000
+            });
+            if (res.closed) {
+              console.log(`[PAPER-EXIT] 🏁 Closed position on ${pos.symbol} (${pos.lane}) | Reason: ${res.reason} | PnL: ${pos.pnlUsd! >= 0 ? '+' : ''}$${pos.pnlUsd} (${pos.netReturnPct}%)`);
+            }
+          }
+        } catch {}
+      }
+    }
+    paperLane.saveState();
+    const statsGmgn = paperLane.computeLaneStats("LANE_GMGN_DISCOVERY");
+    const statsRpc = paperLane.computeLaneStats("LANE_SOLANA_RPC");
+    console.log(`[PAPER-SUMMARY] GMGN Lane: ${statsGmgn.winningTrades}W/${statsGmgn.losingTrades}L (${statsGmgn.winRatePct}% WR, ${statsGmgn.totalPnlUsd >= 0 ? '+' : ''}$${statsGmgn.totalPnlUsd}) | Solana RPC Lane: ${statsRpc.winningTrades}W/${statsRpc.losingTrades}L (${statsRpc.winRatePct}% WR, ${statsRpc.totalPnlUsd >= 0 ? '+' : ''}$${statsRpc.totalPnlUsd})`);
+
     await detector.close();
     process.exit(0);
   }
