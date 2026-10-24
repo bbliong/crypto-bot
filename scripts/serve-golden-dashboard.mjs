@@ -961,6 +961,7 @@ function getDashboardHtml() {
               <tr>
                 <th>Lane</th>
                 <th>Token</th>
+                <th>Wallets Terlibat</th>
                 <th>Jam Masuk (W2)</th>
                 <th>Entry MC</th>
                 <th>Entry Price</th>
@@ -972,7 +973,7 @@ function getDashboardHtml() {
               </tr>
             </thead>
             <tbody id="tbodyPaperOpen">
-              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Tidak ada posisi aktif saat ini. Menunggu konfirmasi masuk wallet ke-2.</td></tr>
+              <tr><td colspan="11" style="text-align: center; color: var(--text-muted);">Tidak ada posisi aktif saat ini. Menunggu konfirmasi masuk wallet ke-2.</td></tr>
             </tbody>
           </table>
         </div>
@@ -990,6 +991,7 @@ function getDashboardHtml() {
               <tr>
                 <th>Lane</th>
                 <th>Token</th>
+                <th>Wallets Terlibat</th>
                 <th>Masuk WIB (W2)</th>
                 <th>Keluar WIB</th>
                 <th>Durasi</th>
@@ -1001,7 +1003,7 @@ function getDashboardHtml() {
               </tr>
             </thead>
             <tbody id="tbodyPaperClosed">
-              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Memuat riwayat paper trade...</td></tr>
+              <tr><td colspan="11" style="text-align: center; color: var(--text-muted);">Memuat riwayat paper trade...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1430,6 +1432,94 @@ function getDashboardHtml() {
       if (tbody) tbody.innerHTML = rows || '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Tidak ada baris hasil</td></tr>';
     }
 
+    function formatPaperWalletsHtml(p) {
+      var walletMap = new Map((state.wallets || []).map(function(w) { return [w.address, w]; }));
+      var entries = p.walletEntries;
+      if ((!entries || entries.length === 0) && p.wallet1 && p.wallet2) {
+        entries = [
+          { wallet: p.wallet1.address, enteredAtWib: p.wallet1.enteredAtWib, deltaSecFromFirst: 0, isHolding: true },
+          { wallet: p.wallet2.address, enteredAtWib: p.wallet2.enteredAtWib, deltaSecFromFirst: p.wallet2.deltaSecFromFirst || 0, isHolding: true }
+        ];
+      }
+
+      if (!entries || entries.length === 0) {
+        return '<div style="color:var(--text-muted);font-size:11px;padding:4px;">Tidak ada detail wallet</div>';
+      }
+
+      var totalWallets = entries.length;
+      var untungCount = 0;
+      var walletItemsHtml = entries.map(function(we, widx) {
+        var isFirst = we.deltaSecFromFirst === 0;
+        var deltaBadge = isFirst
+          ? '<span class="wallet-delta-first">First</span>'
+          : '<span class="wallet-delta-follow">+' + Math.round((we.deltaSecFromFirst || 0) / 60) + 'm</span>';
+        var shortAddr = we.wallet ? (we.wallet.slice(0, 4) + '...' + we.wallet.slice(-4)) : '???';
+        var inWib = we.enteredAtWib ? we.enteredAtWib.replace(' WIB', '') : '-';
+
+        // Exit status
+        var exitHtml = '';
+        if (we.isHolding) {
+          exitHtml = '<span class="wallet-exit-tag holding" title="Masih pegang token">🟢 HOLD ' + (we.holdingDurationStr || '') + '</span>';
+        } else if (we.exitedAtWib) {
+          var outWib = we.exitedAtWib.replace(' WIB', '');
+          exitHtml = '<span class="wallet-exit-tag exited" title="Keluar: ' + we.exitedAtWib + '">🚪 Out: ' + outWib + ' (' + (we.holdingDurationStr || '') + ')</span>';
+        }
+
+        // Profit / Cuan on this token
+        var tokenProfitBadge = '';
+        if (we.profitUsd !== null && we.profitUsd !== undefined) {
+          if (we.profitUsd > 0) {
+            untungCount++;
+            var pStr = we.profitUsd >= 1000 ? '+' + (we.profitUsd / 1000).toFixed(1) + 'k' : '+' + we.profitUsd;
+            tokenProfitBadge = '<span class="wallet-token-profit pos" title="Untung di koin ini: +$' + we.profitUsd.toLocaleString() + ' (' + (we.pnlPercent || 0) + '%)">+$' + pStr + ' (' + Math.round(we.pnlPercent || 0) + '%)</span>';
+          } else if (we.profitUsd < 0) {
+            tokenProfitBadge = '<span class="wallet-token-profit neg" title="Rugi di koin ini: -$' + Math.abs(we.profitUsd).toLocaleString() + ' (' + (we.pnlPercent || 0) + '%)">-$' + Math.abs(we.profitUsd) + '</span>';
+          } else {
+            tokenProfitBadge = '<span class="wallet-token-profit zero" title="Impas / $0">$0</span>';
+          }
+        } else {
+          var wInfo = walletMap.get(we.wallet);
+          if (wInfo && wInfo.pnl30d > 0) {
+            untungCount++;
+            var pnlStr = wInfo.pnl30d >= 1000 ? '+' + (wInfo.pnl30d / 1000).toFixed(1) + 'k' : '+' + wInfo.pnl30d;
+            tokenProfitBadge = '<span class="wallet-token-profit pos" title="Cuan 30d: +$' + Number(wInfo.pnl30d).toLocaleString() + '">+$' + pnlStr + '</span>';
+          } else if (wInfo && wInfo.pnl30d < 0) {
+            tokenProfitBadge = '<span class="wallet-token-profit neg" title="Rugi 30d: -$' + Math.abs(wInfo.pnl30d) + '">-$' + Math.abs(wInfo.pnl30d) + '</span>';
+          }
+        }
+
+        var costStr = we.totalCostUsd ? '<span class="wallet-cost-wrap" title="Modal beli: $' + we.totalCostUsd + '">💵 $' + we.totalCostUsd + '</span>' : '';
+
+        return '<div class="wallet-card-entry">' +
+          '<div class="wallet-row-top">' +
+            '<span class="mono copyable wallet-addr" data-copy="' + we.wallet + '" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
+            deltaBadge +
+            tokenProfitBadge +
+          '</div>' +
+          '<div class="wallet-row-sub">' +
+            '<span class="wallet-time" title="Jam masuk: ' + (we.enteredAtWib || '-') + '">🕒 ' + inWib + '</span>' +
+            exitHtml +
+            costStr +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      var untungSummary = untungCount > 0 
+        ? '<span style="color: #34d399; font-weight: 700;">' + untungCount + ' Cuan</span>'
+        : '<span style="color: #94a3b8;">' + totalWallets + ' Wallets</span>';
+      var scrollHint = totalWallets > 2 ? '<span style="font-size: 10px; color: #64748b;">(scroll ▾)</span>' : '';
+
+      return '<div class="wallet-col-container" style="min-width: 190px; max-width: 250px;">' +
+        '<div class="wallet-col-header">' +
+          '<span>👛 (' + totalWallets + ') · ' + untungSummary + '</span>' +
+          scrollHint +
+        '</div>' +
+        '<div class="wallet-box" style="max-height: 125px;">' +
+          walletItemsHtml +
+        '</div>' +
+      '</div>';
+    }
+
     function renderPaperTrading() {
       var pt = state.paperTrading;
       if (!pt || !pt.lanes) {
@@ -1504,7 +1594,7 @@ function getDashboardHtml() {
 
       if (tbOpen) {
         if (openPositions.length === 0) {
-          tbOpen.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 18px;">Tidak ada posisi aktif saat ini. Sinyal baru otomatis masuk saat smart wallet ke-2 buy.</td></tr>';
+          tbOpen.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 18px;">Tidak ada posisi aktif saat ini. Sinyal baru otomatis masuk saat smart wallet ke-2 buy.</td></tr>';
         } else {
           tbOpen.innerHTML = openPositions.map(function(p) {
             var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>';
@@ -1521,6 +1611,7 @@ function getDashboardHtml() {
             return '<tr>' +
               '<td>' + laneBadge + '</td>' +
               '<td>' + tokenCell + '</td>' +
+              '<td style="vertical-align: top;">' + formatPaperWalletsHtml(p) + '</td>' +
               '<td>' + timeCell + '</td>' +
               '<td>$' + Math.round(p.entryMcapUsd || 0).toLocaleString() + '</td>' +
               '<td>$' + (p.entryPriceUsd || 0) + '</td>' +
@@ -1541,7 +1632,7 @@ function getDashboardHtml() {
 
       if (tbClosed) {
         if (closedPositions.length === 0) {
-          tbClosed.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 18px;">Belum ada riwayat posisi ditutup.</td></tr>';
+          tbClosed.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 18px;">Belum ada riwayat posisi ditutup.</td></tr>';
         } else {
           tbClosed.innerHTML = closedPositions.slice(0, 50).map(function(p) {
             var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>';
@@ -1566,15 +1657,12 @@ function getDashboardHtml() {
               '<div style="font-family: monospace; font-size: 10px; color: var(--text-muted); margin-top: 2px;">' + mintSnippet + '</div>';
 
             var w2Delta = (p.wallet2 && p.wallet2.deltaSecFromFirst) ? '<div style="font-size: 10px; color: #a78bfa; font-weight: 600; margin-top: 2px;">Δt: +' + p.wallet2.deltaSecFromFirst + 's</div>' : '';
-            var wDetails = '';
-            if (p.wallet1 && p.wallet2) {
-              wDetails = '<div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">W1: ' + p.wallet1.address.slice(0, 3) + '..' + p.wallet1.address.slice(-3) + ' · W2: ' + p.wallet2.address.slice(0, 3) + '..' + p.wallet2.address.slice(-3) + '</div>';
-            }
-            var timeCell = '<div>' + p.entryTimeWib + '</div>' + w2Delta + wDetails;
+            var timeCell = '<div>' + p.entryTimeWib + '</div>' + w2Delta;
 
             return '<tr>' +
               '<td>' + laneBadge + '</td>' +
               '<td>' + tokenCell + '</td>' +
+              '<td style="vertical-align: top;">' + formatPaperWalletsHtml(p) + '</td>' +
               '<td>' + timeCell + '</td>' +
               '<td>' + (p.exitTimeWib || '-') + '</td>' +
               '<td>' + (p.holdingDurationStr || '-') + '</td>' +

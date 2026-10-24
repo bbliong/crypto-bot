@@ -34,6 +34,7 @@ export interface PaperPosition {
     enteredAtWib: string;
     deltaSecFromFirst: number;     // Seconds after wallet 1
   };
+  walletEntries?: any[];           // All participating smart wallets from golden signal
   status: "OPEN" | "CLOSED";
   
   // Real Swap Route execution info
@@ -208,6 +209,7 @@ export class GoldenConvergencePaperLane {
     entryTimestamp?: number;
     wallet1: { address: string; enteredAtWib: string };
     wallet2: { address: string; enteredAtWib: string; deltaSecFromFirst: number };
+    walletEntries?: any[];
     realSwapRouteBuy?: any;
   }): PaperPosition | null {
     const key = `${params.lane}_${params.mint}`;
@@ -254,6 +256,10 @@ export class GoldenConvergencePaperLane {
       entryMcapUsd: params.entryMcapUsd,
       wallet1: params.wallet1,
       wallet2: params.wallet2,
+      walletEntries: params.walletEntries || (params.wallet1 && params.wallet2 ? [
+        { wallet: params.wallet1.address, enteredAtWib: params.wallet1.enteredAtWib, deltaSecFromFirst: 0, isHolding: true },
+        { wallet: params.wallet2.address, enteredAtWib: params.wallet2.enteredAtWib, deltaSecFromFirst: params.wallet2.deltaSecFromFirst, isHolding: true }
+      ] : []),
       realSwapRouteBuy: params.realSwapRouteBuy,
       status: "OPEN",
       peakPriceUsd: params.entryPriceUsd,

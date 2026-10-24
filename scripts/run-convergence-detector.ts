@@ -148,6 +148,7 @@ async function main() {
       entryTimestamp: executionNowSec,
       wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
       wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      walletEntries: report.walletEntries || [],
       realSwapRouteBuy: realBuyRoute?.ok ? {
         exchange: realBuyRoute.routeData?.exchange,
         impliedPriceUsd: realBuyRoute.impliedPriceUsd,
@@ -170,6 +171,7 @@ async function main() {
       entryTimestamp: executionNowSec,
       wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
       wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      walletEntries: report.walletEntries || [],
       realSwapRouteBuy: realBuyRoute?.ok ? {
         exchange: realBuyRoute.routeData?.exchange,
         impliedPriceUsd: realBuyRoute.impliedPriceUsd,
