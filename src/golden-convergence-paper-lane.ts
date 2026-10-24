@@ -36,6 +36,22 @@ export interface PaperPosition {
   };
   status: "OPEN" | "CLOSED";
   
+  // Real Swap Route execution info
+  realSwapRouteBuy?: {
+    exchange?: string;
+    impliedPriceUsd?: number;
+    tokensOut?: string;
+    latencyMs?: number;
+    priceImpactPct?: string | number;
+  };
+  realSwapRouteSell?: {
+    exchange?: string;
+    impliedPriceUsd?: number;
+    amountOutUsd?: number;
+    latencyMs?: number;
+    priceImpactPct?: string | number;
+  };
+  
   // High-water mark tracking
   peakPriceUsd: number;
   peakGainPct: number;
@@ -192,6 +208,7 @@ export class GoldenConvergencePaperLane {
     entryTimestamp?: number;
     wallet1: { address: string; enteredAtWib: string };
     wallet2: { address: string; enteredAtWib: string; deltaSecFromFirst: number };
+    realSwapRouteBuy?: any;
   }): PaperPosition | null {
     const key = `${params.lane}_${params.mint}`;
     if (this.openByMintAndLane.has(key)) {
@@ -237,6 +254,7 @@ export class GoldenConvergencePaperLane {
       entryMcapUsd: params.entryMcapUsd,
       wallet1: params.wallet1,
       wallet2: params.wallet2,
+      realSwapRouteBuy: params.realSwapRouteBuy,
       status: "OPEN",
       peakPriceUsd: params.entryPriceUsd,
       peakGainPct: 0,
@@ -268,9 +286,14 @@ export class GoldenConvergencePaperLane {
       highPriceUsd?: number;
       lowPriceUsd?: number;
       isLiquidityDrained?: boolean;
+      realSwapRouteSell?: any;
     }
   ): { closed: boolean; reason?: ExitReason } {
     if (pos.status !== "OPEN") return { closed: false };
+
+    if (marketData.realSwapRouteSell) {
+      pos.realSwapRouteSell = marketData.realSwapRouteSell;
+    }
 
     const tickTime = marketData.timestamp || Math.floor(Date.now() / 1000);
     const currentPrice = marketData.priceUsd;

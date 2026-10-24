@@ -13,13 +13,15 @@ async function main() {
   const defaultStake = Number(process.env.PAPER_STAKE_USD || 5);
   const paperLane = new GoldenConvergencePaperLane({ stakePerTradeUsd: defaultStake });
 
-  function handlePaperBuy(report: any) {
+  async function handlePaperBuy(report: any) {
     if (!report.walletEntries || report.walletEntries.length < 2) return;
     const w1 = report.walletEntries[0];
-    const w2 = report.walletEntries[1];
-    const delta = w2.deltaSecFromFirst || 0;
+    // Find the confirming organic wallet (delta >= 180s) or fallback to wallet 2
+    const organicWallet = report.walletEntries.find((w: any) => (w.deltaSecFromFirst || 0) >= 180) || report.walletEntries[1];
+    const w2 = organicWallet;
+    const delta = w2.deltaSecFromFirst || report.entryDeltaSec || 0;
 
-    const entryPrice = report.dexInfo?.priceUsd || (report.dexInfo?.marketCapUsd ? report.dexInfo.marketCapUsd / 1e9 : 0.00001);
+    let entryPrice = report.dexInfo?.priceUsd || (report.dexInfo?.marketCapUsd ? report.dexInfo.marketCapUsd / 1e9 : 0.00001);
     const entryMcap = report.dexInfo?.marketCapUsd || 15000;
 
     // Strict Anti-Syndicate Gate:
@@ -42,6 +44,16 @@ async function main() {
       return;
     }
 
+    // Hit real GMGN swap route API (/txproxy/v1/get_swap_route) via CDP
+    let realBuyRoute: any = null;
+    try {
+      realBuyRoute = await detector.fetchRealSwapRoute(report.mint, "buy", defaultStake);
+      if (realBuyRoute?.ok && realBuyRoute.impliedPriceUsd && realBuyRoute.impliedPriceUsd > 0) {
+        console.log(`[SWAP-ROUTE-BUY] 🎯 Real GMGN execution price: $${realBuyRoute.impliedPriceUsd} (Latency: ${realBuyRoute.latencyMs}ms, Exchange: ${realBuyRoute.routeData?.exchange || "AMM"})`);
+        entryPrice = realBuyRoute.impliedPriceUsd;
+      }
+    } catch {}
+
     const stakeAmount = defaultStake;
     // 1. Lane A: Golden Scalp Bot (+35% TP / -12% SL / Trailing 7% dari +20% / Max 30m)
     const posScalp = paperLane.openPosition({
@@ -52,7 +64,14 @@ async function main() {
       entryMcapUsd: entryMcap,
       entryTimestamp: w2.timestamp,
       wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      realSwapRouteBuy: realBuyRoute?.ok ? {
+        exchange: realBuyRoute.routeData?.exchange,
+        impliedPriceUsd: realBuyRoute.impliedPriceUsd,
+        tokensOut: realBuyRoute.quote?.outAmount,
+        latencyMs: realBuyRoute.latencyMs,
+        priceImpactPct: realBuyRoute.quote?.priceImpactPct
+      } : undefined
     });
     if (posScalp) {
       console.log(`[PAPER-BUY] ⚡ Opened Scalp Bot position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
@@ -67,7 +86,14 @@ async function main() {
       entryMcapUsd: entryMcap,
       entryTimestamp: w2.timestamp,
       wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      realSwapRouteBuy: realBuyRoute?.ok ? {
+        exchange: realBuyRoute.routeData?.exchange,
+        impliedPriceUsd: realBuyRoute.impliedPriceUsd,
+        tokensOut: realBuyRoute.quote?.outAmount,
+        latencyMs: realBuyRoute.latencyMs,
+        priceImpactPct: realBuyRoute.quote?.priceImpactPct
+      } : undefined
     });
     if (posMoon) {
       console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
@@ -90,8 +116,8 @@ async function main() {
   });
 
   // Listen for events
-  detector.on("golden_signal", (report) => {
-    handlePaperBuy(report);
+  detector.on("golden_signal", async (report) => {
+    await handlePaperBuy(report);
     console.log("\n" + "=".repeat(75));
     console.log(`🌟 [GOLDEN CONVERGENCE SIGNAL] Token: ${report.symbol} (${report.mint.slice(0, 8)}...)`);
     console.log(`   Wallets involved (${report.wallets.length}):`);
@@ -150,9 +176,9 @@ async function main() {
       
       const lowcapTokens = await page.evaluate(async () => {
         try {
-          const r = await fetch("https://gmgn.ai/defi/quotation/v1/rank/sol/swaps/1h?limit=30&min_marketcap=5000&max_marketcap=100000");
-          const j = await r.json();
-          return j.data?.rank || [];
+          const r = await fetch("/defi/quotation/v1/rank/sol/swaps/1h?limit=30&min_marketcap=5000&max_marketcap=100000");
+          const j = await r.json().catch(() => null);
+          return j?.data?.rank || [];
         } catch {
           return [];
         }
@@ -162,10 +188,16 @@ async function main() {
 
       for (const t of lowcapTokens.slice(0, 20)) {
         try {
+          await new Promise((r) => setTimeout(r, 60));
           const tradersData = await page.evaluate(async (mint) => {
-            const params = "device_id=2d641f4c-9eb7-4dda-8e7e-9a0e273b7757&client_id=gmgn_web_20261023-5847-47b0c03&from_app=gmgn&app_ver=20261023-5847-47b0c03&tz_name=Asia_Jakarta&tz_offset=25200&app_lang=en-US&os=web&worker=0";
-            const res = await fetch(`https://gmgn.ai/vas/api/v1/token_traders/sol/${mint}?${params}&limit=50&orderby=profit&direction=desc`);
-            return await res.json();
+            try {
+              const res = await fetch(`/vas/api/v1/token_traders/sol/${mint}?limit=50&orderby=profit&direction=desc`, {
+                credentials: "include"
+              });
+              return await res.json().catch(() => null);
+            } catch {
+              return null;
+            }
           }, t.address);
 
           const list = tradersData.data?.list || [];
@@ -442,6 +474,22 @@ async function main() {
             }
           }
 
+          // Real GMGN Swap Route Check (/txproxy/v1/get_swap_route)
+          let realSellRoute: any = null;
+          try {
+            const tokenUnits = pos.realSwapRouteBuy?.tokensOut || undefined;
+            realSellRoute = await detector.fetchRealSwapRoute(pos.mint, "sell", pos.stakeUsd, tokenUnits);
+            if (realSellRoute?.ok && realSellRoute.impliedPriceUsd && realSellRoute.impliedPriceUsd > 0) {
+              console.log(`[SWAP-ROUTE-SELL] ⚡ Real GMGN sell quote for ${pos.symbol}: $${realSellRoute.impliedPriceUsd} (Impact: ${realSellRoute.quote?.priceImpactPct}%, Out: $${realSellRoute.quote?.amountOutUsd})`);
+              priceUsd = realSellRoute.impliedPriceUsd;
+              if (!highPriceUsd || priceUsd > highPriceUsd) highPriceUsd = priceUsd;
+              if (!lowPriceUsd || priceUsd < lowPriceUsd) lowPriceUsd = priceUsd;
+            } else if (realSellRoute && !realSellRoute.ok) {
+              console.log(`[SWAP-ROUTE-SELL] ⚠️  GMGN sell route error for ${pos.symbol}: ${realSellRoute.error}`);
+              isLiquidityDrained = true;
+            }
+          } catch {}
+
           if (priceUsd && priceUsd > 0) {
             const res = paperLane.evaluatePriceTick(pos, {
               priceUsd,
@@ -449,7 +497,14 @@ async function main() {
               highPriceUsd,
               lowPriceUsd,
               timestamp: Math.floor(Date.now() / 1000),
-              isLiquidityDrained
+              isLiquidityDrained,
+              realSwapRouteSell: realSellRoute?.ok ? {
+                exchange: realSellRoute.routeData?.exchange,
+                impliedPriceUsd: realSellRoute.impliedPriceUsd,
+                amountOutUsd: realSellRoute.quote?.amountOutUsd,
+                latencyMs: realSellRoute.latencyMs,
+                priceImpactPct: realSellRoute.quote?.priceImpactPct
+              } : undefined
             });
             if (res.closed) {
               console.log(`[PAPER-EXIT] 🏁 Closed position on ${pos.symbol} (${pos.lane}) | Reason: ${res.reason} | PnL: ${pos.pnlUsd! >= 0 ? '+' : ''}$${pos.pnlUsd} (${pos.netReturnPct}%)`);

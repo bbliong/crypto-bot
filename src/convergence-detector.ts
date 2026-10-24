@@ -1,6 +1,12 @@
 import { EventEmitter } from "node:events";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
+import {
+  getBrowserBuySwapRoute,
+  getBrowserSellSwapRoute,
+  DEFAULT_SWAP_WALLET,
+  type SwapRouteResult,
+} from "./browser-swap-route.js";
 
 export interface TradeEvent {
   wallet: string;
@@ -454,6 +460,29 @@ export class ConvergenceDetector extends EventEmitter {
     } catch {
       this.candleCache.set(mint, { candles: [], exp: now + 20_000 });
       return [];
+    }
+  }
+
+  /**
+   * Panggil API GMGN Swap Route (/txproxy/v1/get_swap_route) via CDP untuk mendapatkan harga real executable
+   */
+  public async fetchRealSwapRoute(
+    mint: string,
+    side: "buy" | "sell" = "buy",
+    stakeUsd: number = 5.0,
+    inputTokenUnits?: string
+  ): Promise<SwapRouteResult | null> {
+    try {
+      const page = await this.getGmgnPage();
+      if (!page) return null;
+      if (side === "buy") {
+        return await getBrowserBuySwapRoute(page, mint, DEFAULT_SWAP_WALLET, stakeUsd);
+      } else {
+        const units = inputTokenUnits || "1000000000";
+        return await getBrowserSellSwapRoute(page, mint, DEFAULT_SWAP_WALLET, units);
+      }
+    } catch {
+      return null;
     }
   }
 

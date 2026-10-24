@@ -1535,7 +1535,8 @@ function getDashboardHtml() {
             var pnlColor = (p.currentGainPct || 0) >= 0 ? '#34d399' : '#f87171';
             var trailBadge = p.trailingActivated ? '<span class="badge badge-gold">Trailing ON</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Waiting +20%</span>';
             var mintSnippet = p.mint ? p.mint.slice(0, 4) + '...' + p.mint.slice(-4) : '';
-            var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong></div>' +
+            var routeBadge = p.realSwapRouteBuy ? '<span class="badge" style="background: rgba(96, 165, 250, 0.15); color: #60a5fa; font-size: 10px; margin-left: 4px;">🎯 Real AMM ' + (p.realSwapRouteBuy.latencyMs || '') + 'ms</span>' : '';
+            var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong>' + routeBadge + '</div>' +
               '<div style="font-size: 11px; margin-top: 3px;"><a href="https://gmgn.ai/sol/token/' + p.mint + '" target="_blank" style="color: #60a5fa; text-decoration: none; font-weight: 600;">GMGN ↗</a> · <a href="https://dexscreener.com/solana/' + p.mint + '" target="_blank" style="color: #34d399; text-decoration: none; font-weight: 600;">DEX ↗</a></div>' +
               '<div style="font-family: monospace; font-size: 10px; color: var(--text-muted); margin-top: 2px;">' + mintSnippet + '</div>';
             var w2Delta = (p.wallet2 && p.wallet2.deltaSecFromFirst) ? '<div style="font-size: 10px; color: #a78bfa; font-weight: 600; margin-top: 2px;">Δt: +' + p.wallet2.deltaSecFromFirst + 's</div>' : '';
@@ -1583,7 +1584,8 @@ function getDashboardHtml() {
             else reasonBadge = '<span class="badge">' + (p.exitReason || 'Exit') + '</span>';
 
             var mintSnippet = p.mint ? p.mint.slice(0, 4) + '...' + p.mint.slice(-4) : '';
-            var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong></div>' +
+            var routeBadge = p.realSwapRouteBuy ? '<span class="badge" style="background: rgba(96, 165, 250, 0.15); color: #60a5fa; font-size: 10px; margin-left: 4px;">🎯 Real AMM ' + (p.realSwapRouteBuy.latencyMs || '') + 'ms</span>' : '';
+            var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong>' + routeBadge + '</div>' +
               '<div style="font-size: 11px; margin-top: 3px;"><a href="https://gmgn.ai/sol/token/' + p.mint + '" target="_blank" style="color: #60a5fa; text-decoration: none; font-weight: 600;">GMGN ↗</a> · <a href="https://dexscreener.com/solana/' + p.mint + '" target="_blank" style="color: #34d399; text-decoration: none; font-weight: 600;">DEX ↗</a></div>' +
               '<div style="font-family: monospace; font-size: 10px; color: var(--text-muted); margin-top: 2px;">' + mintSnippet + '</div>';
 
