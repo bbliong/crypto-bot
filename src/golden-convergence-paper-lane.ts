@@ -198,6 +198,18 @@ export class GoldenConvergencePaperLane {
       return null;
     }
 
+    // Prevent duplicate entries for the same token/event across scans
+    const alreadyTraded = this.positions.some(
+      (p) => p.lane === params.lane && p.mint === params.mint && (
+        p.status === "OPEN" ||
+        p.entryTimestamp === (params.entryTimestamp || 0) ||
+        Math.abs(p.entryTimestamp - (params.entryTimestamp || Math.floor(Date.now() / 1000))) < 3600
+      )
+    );
+    if (alreadyTraded) {
+      return null;
+    }
+
     if (!params.entryPriceUsd || params.entryPriceUsd <= 0) {
       return null;
     }
