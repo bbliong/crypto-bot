@@ -26,6 +26,12 @@ async function main() {
     // 1. Delta WAJIB >= 180 detik (tolak mutlak bundler / sindikat <= 30s)
     // 2. Likuiditas >= $2,000 dan tidak drained
     // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 180s && cuanWallets >= 2)
+    // 4. Live Fresh Only: Wajib entry dari implementasi jam 19.00 WIB (1792843200) ke atas
+    const LIVE_TRIAL_START_TS = 1792843200; // 19.00.00 WIB (24 Okt 2026)
+    if (w2.timestamp < LIVE_TRIAL_START_TS) {
+      return;
+    }
+
     const cuanWallets = (report.walletEntries || []).filter((w: any) => (w.profitUsd || 0) > 0);
     const isStrictGolden = (
       report.classification === "GOLDEN_ORGANIC_CONVERGENCE" ||
