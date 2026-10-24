@@ -1534,10 +1534,17 @@ function getDashboardHtml() {
             var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>';
             var pnlColor = (p.currentGainPct || 0) >= 0 ? '#34d399' : '#f87171';
             var trailBadge = p.trailingActivated ? '<span class="badge badge-gold">Trailing ON</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Waiting +20%</span>';
+            var mintSnippet = p.mint ? p.mint.slice(0, 4) + '...' + p.mint.slice(-4) : '';
+            var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong></div>' +
+              '<div style="font-size: 11px; margin-top: 3px;"><a href="https://gmgn.ai/sol/token/' + p.mint + '" target="_blank" style="color: #60a5fa; text-decoration: none; font-weight: 600;">GMGN ↗</a> · <a href="https://dexscreener.com/solana/' + p.mint + '" target="_blank" style="color: #34d399; text-decoration: none; font-weight: 600;">DEX ↗</a></div>' +
+              '<div style="font-family: monospace; font-size: 10px; color: var(--text-muted); margin-top: 2px;">' + mintSnippet + '</div>';
+            var w2Delta = (p.wallet2 && p.wallet2.deltaSecFromFirst) ? '<div style="font-size: 10px; color: #a78bfa; font-weight: 600; margin-top: 2px;">Δt: +' + p.wallet2.deltaSecFromFirst + 's</div>' : '';
+            var timeCell = '<div>' + p.entryTimeWib + '</div>' + w2Delta;
+
             return '<tr>' +
               '<td>' + laneBadge + '</td>' +
-              '<td><strong>' + escapeHtml(p.symbol) + '</strong></td>' +
-              '<td>' + p.entryTimeWib + '</td>' +
+              '<td>' + tokenCell + '</td>' +
+              '<td>' + timeCell + '</td>' +
               '<td>$' + Math.round(p.entryMcapUsd || 0).toLocaleString() + '</td>' +
               '<td>$' + (p.entryPriceUsd || 0) + '</td>' +
               '<td>$' + Math.round(p.currentMcapUsd || p.entryMcapUsd || 0).toLocaleString() + '</td>' +
@@ -1563,7 +1570,7 @@ function getDashboardHtml() {
             var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>';
             var isWin = (p.pnlUsd || 0) > 0;
             var pnlColor = isWin ? '#34d399' : '#f87171';
-            
+          
             var reasonBadge = '';
             if (p.exitReason === 'TAKE_PROFIT_35') reasonBadge = '<span class="badge badge-green">🎯 TP +35%</span>';
             else if (p.exitReason === 'TP1_50_TP2_120_HIT') reasonBadge = '<span class="badge badge-green">🚀 TP1 + TP2 Hit</span>';
@@ -1575,10 +1582,22 @@ function getDashboardHtml() {
             else if (p.exitReason === 'TIMEOUT_60M') reasonBadge = '<span class="badge badge-primary">⏱️ Timeout 60m</span>';
             else reasonBadge = '<span class="badge">' + (p.exitReason || 'Exit') + '</span>';
 
+            var mintSnippet = p.mint ? p.mint.slice(0, 4) + '...' + p.mint.slice(-4) : '';
+            var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong></div>' +
+              '<div style="font-size: 11px; margin-top: 3px;"><a href="https://gmgn.ai/sol/token/' + p.mint + '" target="_blank" style="color: #60a5fa; text-decoration: none; font-weight: 600;">GMGN ↗</a> · <a href="https://dexscreener.com/solana/' + p.mint + '" target="_blank" style="color: #34d399; text-decoration: none; font-weight: 600;">DEX ↗</a></div>' +
+              '<div style="font-family: monospace; font-size: 10px; color: var(--text-muted); margin-top: 2px;">' + mintSnippet + '</div>';
+
+            var w2Delta = (p.wallet2 && p.wallet2.deltaSecFromFirst) ? '<div style="font-size: 10px; color: #a78bfa; font-weight: 600; margin-top: 2px;">Δt: +' + p.wallet2.deltaSecFromFirst + 's</div>' : '';
+            var wDetails = '';
+            if (p.wallet1 && p.wallet2) {
+              wDetails = '<div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">W1: ' + p.wallet1.address.slice(0, 3) + '..' + p.wallet1.address.slice(-3) + ' · W2: ' + p.wallet2.address.slice(0, 3) + '..' + p.wallet2.address.slice(-3) + '</div>';
+            }
+            var timeCell = '<div>' + p.entryTimeWib + '</div>' + w2Delta + wDetails;
+
             return '<tr>' +
               '<td>' + laneBadge + '</td>' +
-              '<td><strong>' + escapeHtml(p.symbol) + '</strong></td>' +
-              '<td>' + p.entryTimeWib + '</td>' +
+              '<td>' + tokenCell + '</td>' +
+              '<td>' + timeCell + '</td>' +
               '<td>' + (p.exitTimeWib || '-') + '</td>' +
               '<td>' + (p.holdingDurationStr || '-') + '</td>' +
               '<td>$' + Math.round(p.entryMcapUsd || 0).toLocaleString() + '</td>' +
