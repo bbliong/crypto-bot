@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-export type PaperLaneType = "LANE_GOLDEN_SCALP" | "LANE_GOLDEN_MOONBAG";
+export type PaperLaneType = "LANE_GOLDEN_SCALP" | "LANE_GOLDEN_MOONBAG" | "LANE_GOLDEN_MICRO_SCALP";
 
 export type ExitReason =
   | "TAKE_PROFIT_35"
@@ -12,6 +12,10 @@ export type ExitReason =
   | "TP1_50_TRAILING_10"
   | "STOP_LOSS_15"
   | "TIMEOUT_60M"
+  | "TAKE_PROFIT_15"
+  | "TRAILING_STOP_FROM_10"
+  | "STOP_LOSS_8"
+  | "TIMEOUT_15M"
   | "EMERGENCY_DUMP_GUARD"
   | "MANUAL_CLOSE";
 
@@ -120,6 +124,13 @@ export interface GoldenPaperStorePayload {
       trailingDropPct: number;     // 10%
       maxDurationSec: number;      // 3600s (60m)
     };
+    microScalp?: {
+      tpPct: number;               // +15%
+      slPct: number;               // -8%
+      trailingActivatePct: number; // +10%
+      trailingDropPct: number;     // 3%
+      maxDurationSec: number;      // 900s (15m)
+    };
   };
   lanes: Record<PaperLaneType, LaneStats>;
   positions: PaperPosition[];
@@ -181,11 +192,19 @@ export class GoldenConvergencePaperLane {
           trailingActivatePct: 30,
           trailingDropPct: 10,
           maxDurationSec: 3600
+        },
+        microScalp: {
+          tpPct: 15,
+          slPct: -8,
+          trailingActivatePct: 10,
+          trailingDropPct: 3,
+          maxDurationSec: 900
         }
       },
       lanes: {
         LANE_GOLDEN_SCALP: this.computeLaneStats("LANE_GOLDEN_SCALP"),
-        LANE_GOLDEN_MOONBAG: this.computeLaneStats("LANE_GOLDEN_MOONBAG")
+        LANE_GOLDEN_MOONBAG: this.computeLaneStats("LANE_GOLDEN_MOONBAG"),
+        LANE_GOLDEN_MICRO_SCALP: this.computeLaneStats("LANE_GOLDEN_MICRO_SCALP")
       },
       positions: this.positions
     };
@@ -243,7 +262,7 @@ export class GoldenConvergencePaperLane {
       hour12: false
     }) + " WIB";
 
-    const lanePrefix = params.lane === "LANE_GOLDEN_SCALP" ? "scalp" : "moon";
+    const lanePrefix = params.lane === "LANE_GOLDEN_SCALP" ? "scalp" : (params.lane === "LANE_GOLDEN_MICRO_SCALP" ? "micro" : "moon");
     const pos: PaperPosition = {
       id: `pos_${lanePrefix}_${params.mint.slice(0, 6)}_${nowSec}`,
       lane: params.lane,
@@ -321,6 +340,14 @@ export class GoldenConvergencePaperLane {
     if (highPrice > pos.peakPriceUsd) {
       pos.peakPriceUsd = highPrice;
       pos.peakGainPct = Number((curGain * 100).toFixed(2));
+    }
+
+    if (pos.lane === "LANE_GOLDEN_SCALP" && pos.peakPriceUsd >= pos.entryPriceUsd * 1.20) {
+      pos.trailingActivated = true;
+    } else if (pos.lane === "LANE_GOLDEN_MOONBAG" && pos.peakPriceUsd >= pos.entryPriceUsd * 1.30) {
+      pos.trailingActivated = true;
+    } else if (pos.lane === "LANE_GOLDEN_MICRO_SCALP" && pos.peakPriceUsd >= pos.entryPriceUsd * 1.10) {
+      pos.trailingActivated = true;
     }
 
     // ====================================================
@@ -416,6 +443,44 @@ export class GoldenConvergencePaperLane {
           this.closePosition(pos, currentPrice, "TIMEOUT_60M", tickTime, marketData.mcapUsd, exitFraction);
           return { closed: true, reason: "TIMEOUT_60M" };
         }
+      }
+    }
+
+    // ====================================================
+    // STRATEGY C: QUICK MICRO-SCALP (+15% TP / -8% SL / Trailing 3% from +10% / Max 15m)
+    // ====================================================
+    if (pos.lane === "LANE_GOLDEN_MICRO_SCALP") {
+      // 1. Take Profit (+15%)
+      if (curGain >= 0.15) {
+        const exitPrice = pos.entryPriceUsd * 1.15;
+        this.closePosition(pos, exitPrice, "TAKE_PROFIT_15", tickTime, pos.entryMcapUsd * 1.15, 1.15);
+        return { closed: true, reason: "TAKE_PROFIT_15" };
+      }
+
+      // 2. Trailing Stop (activated if peak >= +10% and pulled back 3%)
+      const pullbackFromPeak = (pos.peakPriceUsd - lowPrice) / pos.peakPriceUsd;
+      if (pos.peakPriceUsd >= pos.entryPriceUsd * 1.10 && pullbackFromPeak >= 0.03) {
+        const exitPrice = pos.peakPriceUsd * 0.97;
+        const exitMult = exitPrice / pos.entryPriceUsd;
+        this.closePosition(pos, exitPrice, "TRAILING_STOP_FROM_10", tickTime, pos.entryMcapUsd * exitMult, exitMult);
+        return { closed: true, reason: "TRAILING_STOP_FROM_10" };
+      }
+
+      // 3. Stop Loss (-8%)
+      if (curLoss <= -0.08) {
+        const exitPrice = pos.entryPriceUsd * 0.92;
+        this.closePosition(pos, exitPrice, "STOP_LOSS_8", tickTime, pos.entryMcapUsd * 0.92, 0.92);
+        return { closed: true, reason: "STOP_LOSS_8" };
+      }
+
+      // 4. Timeout (15 minutes = 900 seconds)
+      if (holdingSec >= 900) {
+        if (Math.abs(currentPrice - pos.entryPriceUsd) < 1e-12 && !marketData.highPriceUsd) {
+          return { closed: false };
+        }
+        const exitMult = currentPrice / pos.entryPriceUsd;
+        this.closePosition(pos, currentPrice, "TIMEOUT_15M", tickTime, marketData.mcapUsd, exitMult);
+        return { closed: true, reason: "TIMEOUT_15M" };
       }
     }
 
@@ -531,6 +596,11 @@ export class GoldenConvergencePaperLane {
         name: "🚀 Lane B: Golden Moonbag Runner",
         desc: "Runner bertingkat (TP1 +50% jual 50%, TP2 +120% / -15% SL / Trailing 10% dari +30% / Max 60m). Net Profit tertinggi.",
         tag: "+$1,454 · MAX PROFIT"
+      },
+      LANE_GOLDEN_MICRO_SCALP: {
+        name: "🎯 Lane C: Quick Micro-Scalp (10-20%)",
+        desc: "Cuan kilat 10-20% (+15% TP / -8% SL / Trailing 3% dari +10% / Max 15m). Fokus konsistensi win-rate & perputaran modal cepat.",
+        tag: "10-20% QUICK CUAN"
       }
     };
 

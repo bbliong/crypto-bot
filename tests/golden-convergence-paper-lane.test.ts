@@ -255,3 +255,86 @@ test("GoldenConvergencePaperLane - uses real GMGN swap sell execution quote when
   assert.equal(pos.netReturnPct, 28.0); // +28.0% real net return
   cleanup();
 });
+
+test("GoldenConvergencePaperLane - Lane C: Quick Micro-Scalp TP (+15%) & SL (-8%)", () => {
+  cleanup();
+  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH, stakePerTradeUsd: 5.0 });
+
+  // 1. TP +15% Test
+  const posTP = lane.openPosition({
+    lane: "LANE_GOLDEN_MICRO_SCALP",
+    mint: "MintMicroTP11111111111111111111111111111111",
+    symbol: "MICRO_TP",
+    entryPriceUsd: 0.001,
+    entryMcapUsd: 10000,
+    entryTimestamp: 1000,
+    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
+    wallet2: { address: "W2", enteredAtWib: "10.03 WIB", deltaSecFromFirst: 180 }
+  })!;
+
+  // Price jumps +16%
+  const tpRes = lane.evaluatePriceTick(posTP, {
+    priceUsd: 0.00116,
+    highPriceUsd: 0.00116,
+    timestamp: 1120
+  });
+
+  assert.equal(tpRes.closed, true);
+  assert.equal(tpRes.reason, "TAKE_PROFIT_15");
+  assert.equal(posTP.status, "CLOSED");
+  assert.equal(posTP.grossReturnPct, 15);
+  assert.equal(posTP.netReturnPct, 13); // 15% - 2% fee
+
+  // 2. Trailing Stop from +10% peak
+  const posTrail = lane.openPosition({
+    lane: "LANE_GOLDEN_MICRO_SCALP",
+    mint: "MintMicroTrail1111111111111111111111111111",
+    symbol: "MICRO_TRAIL",
+    entryPriceUsd: 0.001,
+    entryMcapUsd: 10000,
+    entryTimestamp: 1000,
+    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
+    wallet2: { address: "W2", enteredAtWib: "10.03 WIB", deltaSecFromFirst: 180 }
+  })!;
+
+  // Peak reaches +12%
+  lane.evaluatePriceTick(posTrail, {
+    priceUsd: 0.00112,
+    highPriceUsd: 0.00112,
+    timestamp: 1060
+  });
+  assert.equal(posTrail.trailingActivated, true);
+
+  // Pulls back 4% to 0.00107
+  const trailRes = lane.evaluatePriceTick(posTrail, {
+    priceUsd: 0.00107,
+    highPriceUsd: 0.00112,
+    lowPriceUsd: 0.00107,
+    timestamp: 1090
+  });
+  assert.equal(trailRes.closed, true);
+  assert.equal(trailRes.reason, "TRAILING_STOP_FROM_10");
+
+  // 3. Stop Loss -8% Test
+  const posSL = lane.openPosition({
+    lane: "LANE_GOLDEN_MICRO_SCALP",
+    mint: "MintMicroSL1111111111111111111111111111111",
+    symbol: "MICRO_SL",
+    entryPriceUsd: 0.001,
+    entryMcapUsd: 10000,
+    entryTimestamp: 1000,
+    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
+    wallet2: { address: "W2", enteredAtWib: "10.03 WIB", deltaSecFromFirst: 180 }
+  })!;
+
+  const slRes = lane.evaluatePriceTick(posSL, {
+    priceUsd: 0.00091,
+    lowPriceUsd: 0.00091,
+    timestamp: 1050
+  });
+  assert.equal(slRes.closed, true);
+  assert.equal(slRes.reason, "STOP_LOSS_8");
+  assert.equal(posSL.netReturnPct, -10); // -8% - 2% fee
+
+  cleanup();
+});

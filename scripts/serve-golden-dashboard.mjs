@@ -1627,6 +1627,7 @@ function getDashboardHtml() {
 
       var ls = pt.lanes.LANE_GOLDEN_SCALP || {};
       var lm = pt.lanes.LANE_GOLDEN_MOONBAG || {};
+      var lc = pt.lanes.LANE_GOLDEN_MICRO_SCALP || {};
       var positions = pt.positions || [];
       var openPositions = positions.filter(function(p) { return p.status === 'OPEN'; });
       var closedPositions = positions.filter(function(p) { return p.status === 'CLOSED'; });
@@ -1634,24 +1635,27 @@ function getDashboardHtml() {
       // Update Tab badge
       var badgeP = document.getElementById('tabBadgePaper');
       if (badgeP) {
-        var totalNetPnl = (ls.totalPnlUsd || 0) + (lm.totalPnlUsd || 0);
+        var totalNetPnl = (ls.totalPnlUsd || 0) + (lm.totalPnlUsd || 0) + (lc.totalPnlUsd || 0);
         badgeP.innerText = openPositions.length + ' Open · +$' + Math.round(totalNetPnl).toLocaleString();
       }
 
-      // Render 2 Comparative Summary Cards
+      // Render 3 Comparative Summary Cards
       var grid = document.getElementById('paperCardsGrid');
       if (grid) {
         var sPnl = Number((ls.totalPnlUsd !== undefined ? ls.totalPnlUsd : 0).toFixed(2));
         var mPnl = Number((lm.totalPnlUsd !== undefined ? lm.totalPnlUsd : 0).toFixed(2));
+        var cPnl = Number((lc.totalPnlUsd !== undefined ? lc.totalPnlUsd : 0).toFixed(2));
         var sPnlSign = sPnl >= 0 ? '+' : '';
         var mPnlSign = mPnl >= 0 ? '+' : '';
+        var cPnlSign = cPnl >= 0 ? '+' : '';
         var sPnlCol = sPnl >= 0 ? '#34d399' : '#f87171';
         var mPnlCol = mPnl >= 0 ? '#38bdf8' : '#f87171';
+        var cPnlCol = cPnl >= 0 ? '#34d399' : '#f87171';
 
         grid.innerHTML =
-          '<div class="sim-card best">' +
+          '<div class="sim-card">' +
             '<div class="sim-card-title">' +
-              '<span class="strat-name">⚡ Lane A: Golden Scalp Bot (+35% / -12%)</span>' +
+              '<span class="strat-name">⚡ Lane A: Golden Scalp (+35% / -12%)</span>' +
               '<span class="badge badge-green">STAKE $5</span>' +
             '</div>' +
             '<div class="sim-big-pnl" style="color: ' + sPnlCol + ';">' + sPnlSign + '$' + sPnl.toLocaleString() + '</div>' +
@@ -1663,6 +1667,22 @@ function getDashboardHtml() {
               '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (ls.grossProfitUsd || 0) + ' / -$' + (ls.grossLossUsd || 0) + '</span></div>' +
             '</div>' +
             '<div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">' + (ls.description || 'Scalp cepat pasca konvergensi wallet ke-2.') + '</div>' +
+          '</div>' +
+
+          '<div class="sim-card best">' +
+            '<div class="sim-card-title">' +
+              '<span class="strat-name">🎯 Lane C: Quick Micro-Scalp (10-20%)</span>' +
+              '<span class="badge" style="background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4);">STAKE $5</span>' +
+            '</div>' +
+            '<div class="sim-big-pnl" style="color: ' + cPnlCol + ';">' + cPnlSign + '$' + cPnl.toLocaleString() + '</div>' +
+            '<div class="sim-metrics-row">' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #38bdf8;">' + (lc.winRatePct || 0) + '% (' + (lc.winningTrades || 0) + 'W / ' + (lc.losingTrades || 0) + 'L)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (lc.profitFactor || 0) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (lc.totalTrades || 0) + ' (' + (lc.openPositions || 0) + ' Open)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (lc.avgDurationM || 0) + 'm</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (lc.grossProfitUsd || 0) + ' / -$' + (lc.grossLossUsd || 0) + '</span></div>' +
+            '</div>' +
+            '<div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">' + (lc.description || 'Cuan kilat 10-20% (+15% TP / -8% SL / Trailing dari +10% / Max 15m).') + '</div>' +
           '</div>' +
 
           '<div class="sim-card">' +
@@ -1692,9 +1712,10 @@ function getDashboardHtml() {
           tbOpen.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 18px;">Tidak ada posisi aktif saat ini. Sinyal baru otomatis masuk saat smart wallet ke-2 buy.</td></tr>';
         } else {
           tbOpen.innerHTML = openPositions.map(function(p) {
-            var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>';
+            var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : (p.lane === 'LANE_GOLDEN_MICRO_SCALP' ? '<span class="badge" style="background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4);">🎯 Micro</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>');
             var pnlColor = (p.currentGainPct || 0) >= 0 ? '#34d399' : '#f87171';
-            var trailBadge = p.trailingActivated ? '<span class="badge badge-gold">Trailing ON</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Waiting +20%</span>';
+            var trailThreshold = p.lane === 'LANE_GOLDEN_MICRO_SCALP' ? '+10%' : (p.lane === 'LANE_GOLDEN_MOONBAG' ? '+30%' : '+20%');
+            var trailBadge = p.trailingActivated ? '<span class="badge badge-gold">Trailing ON</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Waiting ' + trailThreshold + '</span>';
             var mintSnippet = p.mint ? p.mint.slice(0, 4) + '...' + p.mint.slice(-4) : '';
             var routeBadge = p.realSwapRouteBuy ? '<span class="badge" style="background: rgba(96, 165, 250, 0.15); color: #60a5fa; font-size: 10px; margin-left: 4px;">🎯 Real AMM ' + (p.realSwapRouteBuy.latencyMs || '') + 'ms</span>' : '';
             var tokenCell = '<div><strong>' + escapeHtml(p.symbol) + '</strong>' + routeBadge + '</div>' +
@@ -1730,12 +1751,16 @@ function getDashboardHtml() {
           tbClosed.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 18px;">Belum ada riwayat posisi ditutup.</td></tr>';
         } else {
           tbClosed.innerHTML = closedPositions.slice(0, 50).map(function(p) {
-            var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>';
+            var laneBadge = p.lane === 'LANE_GOLDEN_SCALP' ? '<span class="badge badge-green">⚡ Scalp</span>' : (p.lane === 'LANE_GOLDEN_MICRO_SCALP' ? '<span class="badge" style="background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4);">🎯 Micro</span>' : '<span class="badge badge-gold">🚀 Moonbag</span>');
             var isWin = (p.pnlUsd || 0) > 0;
             var pnlColor = isWin ? '#34d399' : '#f87171';
           
             var reasonBadge = '';
             if (p.exitReason === 'TAKE_PROFIT_35') reasonBadge = '<span class="badge badge-green">🎯 TP +35%</span>';
+            else if (p.exitReason === 'TAKE_PROFIT_15') reasonBadge = '<span class="badge badge-green">🎯 TP +15%</span>';
+            else if (p.exitReason === 'TRAILING_STOP_FROM_10') reasonBadge = '<span class="badge badge-gold">🛡️ Trailing (+10%)</span>';
+            else if (p.exitReason === 'STOP_LOSS_8') reasonBadge = '<span class="badge badge-red">🛑 SL -8%</span>';
+            else if (p.exitReason === 'TIMEOUT_15M') reasonBadge = '<span class="badge badge-primary">⏱️ Timeout 15m</span>';
             else if (p.exitReason === 'TP1_50_TP2_120_HIT') reasonBadge = '<span class="badge badge-green">🚀 TP1 + TP2 Hit</span>';
             else if (p.exitReason === 'TP1_50_TRAILING_10') reasonBadge = '<span class="badge badge-gold">🛡️ Trailing Stop</span>';
             else if (p.exitReason === 'TRAILING_STOP_7PCT') reasonBadge = '<span class="badge badge-gold">🛡️ Trailing Stop</span>';

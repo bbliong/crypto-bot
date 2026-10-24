@@ -184,7 +184,30 @@ async function main() {
       console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
     }
 
-    if (posScalp || posMoon) {
+    // 3. Lane C: Golden Quick Micro-Scalp (+15% TP / -8% SL / Trailing 3% dari +10% / Max 15m)
+    const posMicro = paperLane.openPosition({
+      lane: "LANE_GOLDEN_MICRO_SCALP",
+      mint: report.mint,
+      symbol: report.symbol,
+      entryPriceUsd: entryPrice,
+      entryMcapUsd: entryMcap,
+      entryTimestamp: executionNowSec,
+      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      walletEntries: report.walletEntries || [],
+      realSwapRouteBuy: realBuyRoute?.ok ? {
+        exchange: realBuyRoute.routeData?.exchange,
+        impliedPriceUsd: realBuyRoute.impliedPriceUsd,
+        tokensOut: realBuyRoute.quote?.outAmount,
+        latencyMs: realBuyRoute.latencyMs,
+        priceImpactPct: realBuyRoute.quote?.priceImpactPct
+      } : undefined
+    });
+    if (posMicro) {
+      console.log(`[PAPER-BUY] 🎯 Opened Quick Micro-Scalp position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
+    }
+
+    if (posScalp || posMoon || posMicro) {
       paperLane.saveState();
       await subscribeTokenWs(report.mint);
       return true;
@@ -267,6 +290,17 @@ async function main() {
         } else if (!pos.tp1Hit && curLoss <= -0.15) {
           triggered = true;
           reason = "STOP_LOSS_15";
+        }
+      } else if (pos.lane === "LANE_GOLDEN_MICRO_SCALP") {
+        if (curGain >= 0.15) {
+          triggered = true;
+          reason = "TAKE_PROFIT_15";
+        } else if (pos.peakPriceUsd >= pos.entryPriceUsd * 1.10 && (pos.peakPriceUsd - priceUsd) / pos.peakPriceUsd >= 0.03) {
+          triggered = true;
+          reason = "TRAILING_STOP_FROM_10";
+        } else if (curLoss <= -0.08) {
+          triggered = true;
+          reason = "STOP_LOSS_8";
         }
       }
 
@@ -451,7 +485,7 @@ async function main() {
         const nowSec = Math.floor(Date.now() / 1000);
         for (const pos of openPos) {
           const durSec = nowSec - pos.entryTimestamp;
-          const maxSec = pos.lane === "LANE_GOLDEN_SCALP" ? 1800 : 3600;
+          const maxSec = pos.lane === "LANE_GOLDEN_SCALP" ? 1800 : (pos.lane === "LANE_GOLDEN_MICRO_SCALP" ? 900 : 3600);
           if (durSec >= maxSec && !(pos as any)._closing) {
             console.log(`[TIMEOUT-FALLBACK] ⏳ Position on ${pos.symbol} (${pos.lane}) reached timeout (${Math.round(durSec/60)}m). Closing with real swap quote...`);
             (pos as any)._closing = true;
