@@ -94,6 +94,8 @@ async function main() {
     } catch {}
   }
 
+  const BOOT_TIME_SEC = Math.floor(Date.now() / 1000);
+
   async function handlePaperBuy(report: any): Promise<boolean> {
     if (!report.walletEntries || report.walletEntries.length < 2) return false;
     const w1 = report.walletEntries[0];
@@ -108,9 +110,8 @@ async function main() {
     // 1. Delta WAJIB >= 180 detik (tolak mutlak bundler / sindikat <= 30s)
     // 2. Likuiditas >= $2,000 dan tidak drained
     // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 180s && cuanWallets >= 2)
-    // 4. Live Fresh Only: Wajib entry dari masa uji aktif (2 jam terakhir)
-    const LIVE_TRIAL_START_TS = Math.floor(Date.now() / 1000) - 7200;
-    if (w2.timestamp < LIVE_TRIAL_START_TS) {
+    // 4. Live Fresh Only: Wajib konvergensi baru sejak bot aktif (tidak mengeksekusi sinyal lama lampau)
+    if (w2.timestamp < BOOT_TIME_SEC - 300) {
       return false;
     }
 
@@ -135,6 +136,8 @@ async function main() {
     } catch {}
 
     const stakeAmount = defaultStake;
+    const executionNowSec = Math.floor(Date.now() / 1000);
+
     // 1. Lane A: Golden Scalp Bot (+35% TP / -12% SL / Trailing 7% dari +20% / Max 30m)
     const posScalp = paperLane.openPosition({
       lane: "LANE_GOLDEN_SCALP",
@@ -142,7 +145,7 @@ async function main() {
       symbol: report.symbol,
       entryPriceUsd: entryPrice,
       entryMcapUsd: entryMcap,
-      entryTimestamp: w2.timestamp,
+      entryTimestamp: executionNowSec,
       wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
       wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
       realSwapRouteBuy: realBuyRoute?.ok ? {
@@ -164,7 +167,7 @@ async function main() {
       symbol: report.symbol,
       entryPriceUsd: entryPrice,
       entryMcapUsd: entryMcap,
-      entryTimestamp: w2.timestamp,
+      entryTimestamp: executionNowSec,
       wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
       wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
       realSwapRouteBuy: realBuyRoute?.ok ? {

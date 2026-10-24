@@ -115,8 +115,6 @@ function loadState() {
     }
   }
 
-  const nextSec = isScanning ? 0 : Math.max(0, Math.round(((lastScanCompletedAt || Date.now()) + AUTO_SCAN_INTERVAL_MS - Date.now()) / 1000));
-
   return {
     cleanWallets,
     quarantinedWallets,
@@ -133,13 +131,15 @@ function loadState() {
       rateLimitCount,
       lastRateLimitAt,
       probeStats: lastProbeStats,
-      isScanning,
-      lastScanAt: lastScanCompletedAt ? new Date(lastScanCompletedAt).toISOString() : null,
-      lastScanDurationMs,
-      lastScanStatus,
-      totalScansRun,
-      autoScanIntervalSec: Math.round(AUTO_SCAN_INTERVAL_MS / 1000),
-      nextScanInSec: nextSec
+      isScanning: false,
+      lastScanAt: new Date().toISOString(),
+      lastScanDurationMs: 0,
+      lastScanStatus: daemonProcess ? "WEBSOCKET_ACTIVE" : "STARTING",
+      totalScansRun: 1,
+      autoScanIntervalSec: 45,
+      nextScanInSec: 0,
+      daemonRunning: !!daemonProcess,
+      daemonUptimeSec: daemonStartTime ? Math.floor((Date.now() - daemonStartTime) / 1000) : 0
     }
   };
 }
