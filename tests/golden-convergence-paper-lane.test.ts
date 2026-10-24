@@ -213,3 +213,45 @@ test("GoldenConvergencePaperLane - Anti-fake timeout protection (avoids 71% fals
   assert.equal(lossPos.exitPriceUsd, 0.00096);
   cleanup();
 });
+
+test("GoldenConvergencePaperLane - uses real GMGN swap sell execution quote when exiting", () => {
+  cleanup();
+  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH, stakePerTradeUsd: 5.0 });
+
+  const pos = lane.openPosition({
+    lane: "LANE_GOLDEN_SCALP",
+    mint: "MintRealSell111111111111111111111111111111111",
+    symbol: "REAL_SELL",
+    entryPriceUsd: 0.00005,
+    entryMcapUsd: 15000,
+    entryTimestamp: 1000,
+    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
+    wallet2: { address: "W2", enteredAtWib: "10.03 WIB", deltaSecFromFirst: 180 },
+    realSwapRouteBuy: {
+      exchange: "pump_amm",
+      tokensOut: "100000000",
+      latencyMs: 150
+    }
+  })!;
+
+  // Trigger TP +35% with real swap route sell quote (e.g. pool returned $6.40 real USD after impact/fee)
+  const res = lane.evaluatePriceTick(pos, {
+    priceUsd: 0.00007,
+    highPriceUsd: 0.00007,
+    timestamp: 1100,
+    realSwapRouteSell: {
+      exchange: "pump_amm",
+      impliedPriceUsd: 0.000064,
+      amountOutUsd: 6.40,
+      latencyMs: 180,
+      priceImpactPct: "0.2"
+    }
+  });
+
+  assert.equal(res.closed, true);
+  assert.equal(pos.status, "CLOSED");
+  assert.equal(pos.exitPriceUsd, 0.000064);
+  assert.equal(pos.pnlUsd, 1.40); // $6.40 - $5.00 stake = +$1.40
+  assert.equal(pos.netReturnPct, 28.0); // +28.0% real net return
+  cleanup();
+});

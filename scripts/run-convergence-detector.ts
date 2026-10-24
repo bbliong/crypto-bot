@@ -501,7 +501,7 @@ async function main() {
               realSwapRouteSell: realSellRoute?.ok ? {
                 exchange: realSellRoute.routeData?.exchange,
                 impliedPriceUsd: realSellRoute.impliedPriceUsd,
-                amountOutUsd: realSellRoute.quote?.amountOutUsd,
+                amountOutUsd: realSellRoute.quote?.amountOutUsd ?? (realSellRoute.routeData?.amount_out_usd ? Number(realSellRoute.routeData.amount_out_usd) : undefined),
                 latencyMs: realSellRoute.latencyMs,
                 priceImpactPct: realSellRoute.quote?.priceImpactPct
               } : undefined

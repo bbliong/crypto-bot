@@ -443,15 +443,44 @@ export class GoldenConvergencePaperLane {
       pos.exitMcapUsd = Math.round(pos.entryMcapUsd * (exitPrice / pos.entryPriceUsd));
     }
 
-    const mult = realizedMultiplier !== undefined ? realizedMultiplier : (exitPrice / pos.entryPriceUsd);
-    const grossReturnPct = Number(((mult - 1) * 100).toFixed(2));
-    const netReturnPct = Number((grossReturnPct - GoldenConvergencePaperLane.FEE_RATE).toFixed(2));
-    const pnlUsd = Number(((pos.stakeUsd * netReturnPct) / 100).toFixed(2));
+    // Check if we have real execution swap data from GMGN AMM
+    const realSell = pos.realSwapRouteSell;
+    if (realSell && realSell.amountOutUsd && realSell.amountOutUsd > 0) {
+      const realAmountOutUsd = Number(realSell.amountOutUsd);
+      if (realSell.impliedPriceUsd && realSell.impliedPriceUsd > 0) {
+        pos.exitPriceUsd = Number(realSell.impliedPriceUsd.toFixed(8));
+      }
 
-    pos.grossReturnPct = grossReturnPct;
-    pos.netReturnPct = netReturnPct;
-    pos.pnlUsd = pnlUsd;
-    pos.isProfitable = pnlUsd > 0;
+      let netPnl = 0;
+      let netReturnPct = 0;
+
+      if (pos.lane === "LANE_GOLDEN_MOONBAG" && pos.tp1Hit) {
+        // TP1 (+50%) locked 50% earlier = $5 * 0.5 * 1.50 = $3.75
+        const lockedTp1Usd = pos.stakeUsd * 0.5 * 1.50;
+        const runnerUsd = realAmountOutUsd * 0.5;
+        const totalOut = lockedTp1Usd + runnerUsd;
+        netPnl = Number((totalOut - pos.stakeUsd).toFixed(2));
+        netReturnPct = Number((((totalOut - pos.stakeUsd) / pos.stakeUsd) * 100).toFixed(2));
+      } else {
+        netPnl = Number((realAmountOutUsd - pos.stakeUsd).toFixed(2));
+        netReturnPct = Number((((realAmountOutUsd - pos.stakeUsd) / pos.stakeUsd) * 100).toFixed(2));
+      }
+
+      pos.grossReturnPct = netReturnPct;
+      pos.netReturnPct = netReturnPct;
+      pos.pnlUsd = netPnl;
+      pos.isProfitable = netPnl > 0;
+    } else {
+      const mult = realizedMultiplier !== undefined ? realizedMultiplier : (exitPrice / pos.entryPriceUsd);
+      const grossReturnPct = Number(((mult - 1) * 100).toFixed(2));
+      const netReturnPct = Number((grossReturnPct - GoldenConvergencePaperLane.FEE_RATE).toFixed(2));
+      const pnlUsd = Number(((pos.stakeUsd * netReturnPct) / 100).toFixed(2));
+
+      pos.grossReturnPct = grossReturnPct;
+      pos.netReturnPct = netReturnPct;
+      pos.pnlUsd = pnlUsd;
+      pos.isProfitable = pnlUsd > 0;
+    }
 
     this.openByMintAndLane.delete(`${pos.lane}_${pos.mint}`);
   }
