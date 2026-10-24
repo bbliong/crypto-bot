@@ -1520,6 +1520,101 @@ function getDashboardHtml() {
       '</div>';
     }
 
+    function formatTradeLossAudit(p) {
+      var entries = p.walletEntries || [];
+      if (!entries || entries.length === 0) {
+        if (p.wallet1 && p.wallet2) {
+          entries = [
+            { wallet: p.wallet1.address, enteredAtWib: p.wallet1.enteredAtWib, deltaSecFromFirst: 0, isHolding: true },
+            { wallet: p.wallet2.address, enteredAtWib: p.wallet2.enteredAtWib, deltaSecFromFirst: p.wallet2.deltaSecFromFirst || 0, isHolding: true }
+          ];
+        } else {
+          return '';
+        }
+      }
+
+      var w1Addr = p.wallet1 ? p.wallet1.address : (entries[0] ? entries[0].wallet : null);
+      var w2Addr = p.wallet2 ? p.wallet2.address : (entries[1] ? entries[1].wallet : null);
+
+      var w1 = entries.find(function(e) { return e.wallet === w1Addr; }) || entries[0];
+      var w2 = entries.find(function(e) { return e.wallet === w2Addr; }) || entries[1];
+
+      var entryTs = p.entryTimestamp || 0;
+      var exitTs = p.exitTimestamp || Math.floor(Date.now() / 1000);
+
+      // Analyze Wallet 1
+      var w1Text = 'W1: -';
+      var w1Color = '#94a3b8';
+      if (w1) {
+        if (w1.isHolding) {
+          w1Text = 'W1: 🟢 Masih HOLD';
+          w1Color = '#34d399';
+        } else if (w1.exitTimestamp || w1.exitedAtWib) {
+          var tStr = w1.exitedAtWib ? w1.exitedAtWib.replace(' WIB', '') : '';
+          var exitW1Ts = w1.exitTimestamp || 0;
+          if (exitW1Ts > 0 && exitW1Ts < entryTs) {
+            w1Text = 'W1: ⚠️ Jual Sblm Beli (' + tStr + ')';
+            w1Color = '#fbbf24';
+          } else if (exitW1Ts > 0 && exitW1Ts <= (exitTs + 15)) {
+            w1Text = 'W1: 🚨 Dump Pas Hold (' + tStr + ')';
+            w1Color = '#f87171';
+          } else {
+            w1Text = 'W1: 🚪 Jual Stlh Exit (' + tStr + ')';
+            w1Color = '#60a5fa';
+          }
+        }
+      }
+
+      // Analyze Wallet 2
+      var w2Text = 'W2: -';
+      var w2Color = '#94a3b8';
+      if (w2) {
+        if (w2.isHolding) {
+          w2Text = 'W2: 🟢 Masih HOLD';
+          w2Color = '#34d399';
+        } else if (w2.exitTimestamp || w2.exitedAtWib) {
+          var t2Str = w2.exitedAtWib ? w2.exitedAtWib.replace(' WIB', '') : '';
+          var exitW2Ts = w2.exitTimestamp || 0;
+          if (exitW2Ts > 0 && exitW2Ts <= (exitTs + 15)) {
+            w2Text = 'W2: 🚨 Jual Pas Hold (' + t2Str + ')';
+            w2Color = '#f87171';
+          } else {
+            w2Text = 'W2: 🚪 Jual Stlh Exit (' + t2Str + ')';
+            w2Color = '#60a5fa';
+          }
+        }
+      }
+
+      // Analyze Subsequent Wallets (Wallets entered after our entry)
+      var subsequent = entries.filter(function(e) {
+        return e.wallet !== w1Addr && e.wallet !== w2Addr && (e.timestamp ? e.timestamp >= entryTs : true);
+      });
+
+      var subCount = subsequent.length;
+      var subText = '';
+      var subColor = '#94a3b8';
+      if (subCount === 0) {
+        subText = 'Susulan: ❌ 0 Smart Wallet';
+        subColor = '#ef4444';
+      } else {
+        var subHolding = subsequent.filter(function(e) { return e.isHolding; }).length;
+        subText = 'Susulan: 👛 +' + subCount + ' Wallet (' + subHolding + ' Hold)';
+        subColor = '#38bdf8';
+      }
+
+      var isLoss = (p.pnlUsd || 0) < 0;
+      var borderColor = isLoss ? 'rgba(239, 68, 68, 0.25)' : 'rgba(52, 211, 153, 0.2)';
+      var headerColor = isLoss ? '#f87171' : '#34d399';
+      var titleText = isLoss ? '🔍 Audit Sebab Loss:' : '🔍 Alur Smart Money:';
+
+      return '<div style="margin-top: 6px; padding: 4px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.25); border: 1px solid ' + borderColor + '; font-size: 10px; line-height: 1.35; text-align: left; min-width: 170px;">' +
+        '<div style="font-weight: 700; color: ' + headerColor + '; font-size: 9px; text-transform: uppercase; margin-bottom: 2px;">' + titleText + '</div>' +
+        '<div style="color: ' + w1Color + '; font-weight: 600;">' + escapeHtml(w1Text) + '</div>' +
+        '<div style="color: ' + w2Color + '; font-weight: 600;">' + escapeHtml(w2Text) + '</div>' +
+        '<div style="color: ' + subColor + '; font-weight: 600;">' + escapeHtml(subText) + '</div>' +
+      '</div>';
+    }
+
     function renderPaperTrading() {
       var pt = state.paperTrading;
       if (!pt || !pt.lanes) {
@@ -1619,7 +1714,7 @@ function getDashboardHtml() {
               '<td style="font-weight: 700; color: ' + pnlColor + ';">' + ((p.currentGainPct || 0) >= 0 ? '+' : '') + (p.currentGainPct || 0) + '%</td>' +
               '<td style="color: #fbbf24;">+' + (p.peakGainPct || 0) + '%</td>' +
               '<td>' + (p.holdingDurationStr || '0s') + '</td>' +
-              '<td>' + trailBadge + '</td>' +
+              '<td style="vertical-align: top;">' + trailBadge + formatTradeLossAudit(p) + '</td>' +
             '</tr>';
           }).join('');
         }
@@ -1668,7 +1763,7 @@ function getDashboardHtml() {
               '<td>' + (p.holdingDurationStr || '-') + '</td>' +
               '<td>$' + Math.round(p.entryMcapUsd || 0).toLocaleString() + '</td>' +
               '<td>$' + Math.round(p.exitMcapUsd || 0).toLocaleString() + '</td>' +
-              '<td>' + reasonBadge + '</td>' +
+              '<td style="vertical-align: top;">' + reasonBadge + formatTradeLossAudit(p) + '</td>' +
               '<td style="font-weight: 700; color: ' + pnlColor + ';">' + ((p.netReturnPct || 0) >= 0 ? '+' : '') + (p.netReturnPct || 0) + '%</td>' +
               '<td style="font-weight: 700; color: ' + pnlColor + ';">' + ((p.pnlUsd || 0) >= 0 ? '+' : '') + '$' + (p.pnlUsd || 0).toLocaleString() + '</td>' +
             '</tr>';
