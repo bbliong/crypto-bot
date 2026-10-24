@@ -163,7 +163,7 @@ function triggerScan(callback) {
 
   const child = spawn("node", ["--import", "tsx", "scripts/run-convergence-detector.ts", "--scan"], {
     cwd: ROOT,
-    env: process.env
+    env: { ...process.env, PAPER_STAKE_USD: "5" }
   });
 
   let stdout = "";
@@ -1480,19 +1480,26 @@ function getDashboardHtml() {
       // Render 2 Comparative Summary Cards
       var grid = document.getElementById('paperCardsGrid');
       if (grid) {
+        var sPnl = Number((ls.totalPnlUsd !== undefined ? ls.totalPnlUsd : 0).toFixed(2));
+        var mPnl = Number((lm.totalPnlUsd !== undefined ? lm.totalPnlUsd : 0).toFixed(2));
+        var sPnlSign = sPnl >= 0 ? '+' : '';
+        var mPnlSign = mPnl >= 0 ? '+' : '';
+        var sPnlCol = sPnl >= 0 ? '#34d399' : '#f87171';
+        var mPnlCol = mPnl >= 0 ? '#38bdf8' : '#f87171';
+
         grid.innerHTML =
           '<div class="sim-card best">' +
             '<div class="sim-card-title">' +
               '<span class="strat-name">⚡ Lane A: Golden Scalp Bot (+35% / -12%)</span>' +
-              '<span class="badge badge-green">TERBAIK (72.2% WR)</span>' +
+              '<span class="badge badge-green">STAKE $5</span>' +
             '</div>' +
-            '<div class="sim-big-pnl" style="color: #34d399;">+$' + (ls.totalPnlUsd || 956).toLocaleString() + '</div>' +
+            '<div class="sim-big-pnl" style="color: ' + sPnlCol + ';">' + sPnlSign + '$' + sPnl.toLocaleString() + '</div>' +
             '<div class="sim-metrics-row">' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #34d399;">' + (ls.winRatePct || 72.2) + '% (' + (ls.winningTrades || 39) + 'W / ' + (ls.losingTrades || 15) + 'L)</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (ls.profitFactor || 5.55) + '</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (ls.totalTrades || 54) + ' (' + (ls.openPositions || 0) + ' Open)</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (ls.avgDurationM || 2.7) + 'm</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (ls.grossProfitUsd || 1166) + ' / -$' + (ls.grossLossUsd || 210) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #34d399;">' + (ls.winRatePct || 0) + '% (' + (ls.winningTrades || 0) + 'W / ' + (ls.losingTrades || 0) + 'L)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (ls.profitFactor || 0) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (ls.totalTrades || 0) + ' (' + (ls.openPositions || 0) + ' Open)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (ls.avgDurationM || 0) + 'm</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (ls.grossProfitUsd || 0) + ' / -$' + (ls.grossLossUsd || 0) + '</span></div>' +
             '</div>' +
             '<div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">' + (ls.description || 'Scalp cepat pasca konvergensi wallet ke-2.') + '</div>' +
           '</div>' +
@@ -1500,15 +1507,15 @@ function getDashboardHtml() {
           '<div class="sim-card">' +
             '<div class="sim-card-title">' +
               '<span class="strat-name">🚀 Lane B: Golden Moonbag Runner (+50% / +120%)</span>' +
-              '<span class="badge badge-gold">MAX PROFIT (+$1,454)</span>' +
+              '<span class="badge badge-gold">STAKE $5</span>' +
             '</div>' +
-            '<div class="sim-big-pnl" style="color: #38bdf8;">+$' + (lm.totalPnlUsd || 1454).toLocaleString() + '</div>' +
+            '<div class="sim-big-pnl" style="color: ' + mPnlCol + ';">' + mPnlSign + '$' + mPnl.toLocaleString() + '</div>' +
             '<div class="sim-metrics-row">' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #38bdf8;">' + (lm.winRatePct || 66.7) + '% (' + (lm.winningTrades || 36) + 'W / ' + (lm.losingTrades || 18) + 'L)</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (lm.profitFactor || 5.75) + '</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (lm.totalTrades || 54) + ' (' + (lm.openPositions || 0) + ' Open)</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (lm.avgDurationM || 4.2) + 'm</span></div>' +
-              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (lm.grossProfitUsd || 1760) + ' / -$' + (lm.grossLossUsd || 306) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Win Rate</span><span class="sim-metric-val" style="color: #38bdf8;">' + (lm.winRatePct || 0) + '% (' + (lm.winningTrades || 0) + 'W / ' + (lm.losingTrades || 0) + 'L)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Profit Factor</span><span class="sim-metric-val">' + (lm.profitFactor || 0) + '</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Total Trades</span><span class="sim-metric-val">' + (lm.totalTrades || 0) + ' (' + (lm.openPositions || 0) + ' Open)</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Avg Duration</span><span class="sim-metric-val">' + (lm.avgDurationM || 0) + 'm</span></div>' +
+              '<div class="sim-metric-item"><span class="sim-metric-lbl">Gross Win/Loss</span><span class="sim-metric-val">+$' + (lm.grossProfitUsd || 0) + ' / -$' + (lm.grossLossUsd || 0) + '</span></div>' +
             '</div>' +
             '<div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">' + (lm.description || 'Runner bertingkat saat volume breakout.') + '</div>' +
           '</div>';

@@ -154,3 +154,62 @@ test("GoldenConvergencePaperLane - Moonbag Runner (TP1 +50% and TP2 +120%)", () 
   assert.ok(pos.pnlUsd! >= 80); // Massive profit
   cleanup();
 });
+
+test("GoldenConvergencePaperLane - Anti-fake timeout protection (avoids 71% false timeout)", () => {
+  cleanup();
+  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH, stakePerTradeUsd: 100 });
+
+  const pos = lane.openPosition({
+    lane: "LANE_GOLDEN_SCALP",
+    mint: "MintTimeout111111111111111111111111111111111",
+    symbol: "TIMEOUT_COIN",
+    entryPriceUsd: 0.001,
+    entryMcapUsd: 10000,
+    entryTimestamp: 1000,
+    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
+    wallet2: { address: "W2", enteredAtWib: "10.04 WIB", deltaSecFromFirst: 240 }
+  })!;
+
+  // 1. Tick at 31 minutes with EXACT SAME price as entry (stale DexScreener source)
+  const staleRes = lane.evaluatePriceTick(pos, {
+    priceUsd: 0.001,
+    timestamp: 1000 + 1860 // 31 minutes later
+  });
+  // Should NOT close because it's stale 0 diff
+  assert.equal(staleRes.closed, false);
+  assert.equal(pos.status, "OPEN");
+
+  // 2. Tick at 35 minutes with +15% profit (still below 35% TP, but positive)
+  const profitRes = lane.evaluatePriceTick(pos, {
+    priceUsd: 0.00115,
+    highPriceUsd: 0.00115,
+    timestamp: 1000 + 2100 // 35 minutes
+  });
+  // Should let the winner run!
+  assert.equal(profitRes.closed, false);
+  assert.equal(pos.status, "OPEN");
+
+  // 3. Genuine timeout: at 32 minutes with a small loss (-4%)
+  const lossPos = lane.openPosition({
+    lane: "LANE_GOLDEN_SCALP",
+    mint: "MintLoss1111111111111111111111111111111111111",
+    symbol: "LOSS_COIN",
+    entryPriceUsd: 0.001,
+    entryMcapUsd: 10000,
+    entryTimestamp: 1000,
+    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
+    wallet2: { address: "W2", enteredAtWib: "10.04 WIB", deltaSecFromFirst: 240 }
+  })!;
+
+  const lossRes = lane.evaluatePriceTick(lossPos, {
+    priceUsd: 0.00096,
+    highPriceUsd: 0.00097,
+    lowPriceUsd: 0.00095,
+    timestamp: 1000 + 1900
+  });
+  assert.equal(lossRes.closed, true);
+  assert.equal(lossRes.reason, "TIMEOUT_30M");
+  assert.equal(lossPos.status, "CLOSED");
+  assert.equal(lossPos.exitPriceUsd, 0.00096);
+  cleanup();
+});

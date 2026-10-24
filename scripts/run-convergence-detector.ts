@@ -10,52 +10,61 @@ async function main() {
   console.log("================================================================================\n");
 
   // Initialize Golden Convergence Paper Lane
-  const paperLane = new GoldenConvergencePaperLane();
+  const defaultStake = Number(process.env.PAPER_STAKE_USD || 5);
+  const paperLane = new GoldenConvergencePaperLane({ stakePerTradeUsd: defaultStake });
 
   function handlePaperBuy(report: any) {
     if (!report.walletEntries || report.walletEntries.length < 2) return;
     const w1 = report.walletEntries[0];
     const w2 = report.walletEntries[1];
+    const delta = w2.deltaSecFromFirst || 0;
 
     const entryPrice = report.dexInfo?.priceUsd || (report.dexInfo?.marketCapUsd ? report.dexInfo.marketCapUsd / 1e9 : 0.00001);
     const entryMcap = report.dexInfo?.marketCapUsd || 15000;
 
-    // Gate: Hanya masuk pada token Golden Organic Convergence / terbukti 2+ smart wallet cuan
-    const cuanWallets = report.walletEntries.filter((w: any) => (w.profitUsd || 0) > 0);
-    const isGolden = report.classification === "GOLDEN_ORGANIC_CONVERGENCE" ||
-      cuanWallets.length >= 2 ||
-      (w2.deltaSecFromFirst >= 180 && !report.isLiquidityDrained);
+    // Strict Anti-Syndicate Gate:
+    // 1. Delta WAJIB >= 180 detik (tolak mutlak bundler / sindikat <= 30s)
+    // 2. Likuiditas >= $2,000 dan tidak drained
+    // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 180s && cuanWallets >= 2)
+    const cuanWallets = (report.walletEntries || []).filter((w: any) => (w.profitUsd || 0) > 0);
+    const isStrictGolden = (
+      report.classification === "GOLDEN_ORGANIC_CONVERGENCE" ||
+      (delta >= 180 && cuanWallets.length >= 2)
+    ) && delta >= 180 && !report.isLiquidityDrained && (report.dexInfo?.liquidityUsd || 0) >= 2000;
 
-    if (isGolden) {
-      // 1. Lane A: Golden Scalp Bot (+35% TP / -12% SL / Trailing 7% dari +20% / Max 30m)
-      const posScalp = paperLane.openPosition({
-        lane: "LANE_GOLDEN_SCALP",
-        mint: report.mint,
-        symbol: report.symbol,
-        entryPriceUsd: entryPrice,
-        entryMcapUsd: entryMcap,
-        entryTimestamp: w2.timestamp,
-        wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-        wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
-      });
-      if (posScalp) {
-        console.log(`[PAPER-BUY] ⚡ Opened Scalp Bot position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
-      }
+    if (!isStrictGolden) {
+      return;
+    }
 
-      // 2. Lane B: Golden Moonbag Runner (+50% TP1, +120% TP2 / -15% SL / Trailing 10% / Max 60m)
-      const posMoon = paperLane.openPosition({
-        lane: "LANE_GOLDEN_MOONBAG",
-        mint: report.mint,
-        symbol: report.symbol,
-        entryPriceUsd: entryPrice,
-        entryMcapUsd: entryMcap,
-        entryTimestamp: w2.timestamp,
-        wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-        wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
-      });
-      if (posMoon) {
-        console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
-      }
+    const stakeAmount = defaultStake;
+    // 1. Lane A: Golden Scalp Bot (+35% TP / -12% SL / Trailing 7% dari +20% / Max 30m)
+    const posScalp = paperLane.openPosition({
+      lane: "LANE_GOLDEN_SCALP",
+      mint: report.mint,
+      symbol: report.symbol,
+      entryPriceUsd: entryPrice,
+      entryMcapUsd: entryMcap,
+      entryTimestamp: w2.timestamp,
+      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+    });
+    if (posScalp) {
+      console.log(`[PAPER-BUY] ⚡ Opened Scalp Bot position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
+    }
+
+    // 2. Lane B: Golden Moonbag Runner (+50% TP1, +120% TP2 / -15% SL / Trailing 10% / Max 60m)
+    const posMoon = paperLane.openPosition({
+      lane: "LANE_GOLDEN_MOONBAG",
+      mint: report.mint,
+      symbol: report.symbol,
+      entryPriceUsd: entryPrice,
+      entryMcapUsd: entryMcap,
+      entryTimestamp: w2.timestamp,
+      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+    });
+    if (posMoon) {
+      console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
     }
   }
 
@@ -116,7 +125,6 @@ async function main() {
   });
 
   detector.on("convergence", (report) => {
-    handlePaperBuy(report);
     if (report.classification === "ACCUMULATION_WATCH") {
       console.log(`[ACCUMULATION-WATCH] Multi-wallet overlap on ${report.symbol}: ${report.reason}`);
     }
@@ -392,19 +400,58 @@ async function main() {
       console.log(`\n[PAPER-UPDATE] Evaluating ${openPositions.length} open paper positions against latest prices...`);
       for (const pos of openPositions) {
         try {
-          const dex = await detector.fetchDexInfo(pos.mint);
-          if (dex && dex.priceUsd) {
+          let priceUsd = pos.currentPriceUsd;
+          let mcapUsd = pos.currentMcapUsd;
+          let highPriceUsd: number | undefined;
+          let lowPriceUsd: number | undefined;
+          let isLiquidityDrained = false;
+
+          // Prefer GMGN 1-minute Candlesticks for high/low precision
+          const candles = await detector.fetchCandles(pos.mint);
+          if (candles && candles.length > 0) {
+            const sinceEntry = candles.filter(c => c.time >= (pos.entryTimestamp - 60) * 1000);
+            const evalCandles = sinceEntry.length > 0 ? sinceEntry : candles.slice(-5);
+            
+            const peakHighMcap = Math.max(...evalCandles.map(c => c.high));
+            const deepLowMcap = Math.min(...evalCandles.map(c => c.low));
+            const lastCandle = evalCandles[evalCandles.length - 1];
+            
+            mcapUsd = lastCandle.close;
+            const ratioHigh = peakHighMcap / (pos.entryMcapUsd || 15000);
+            const ratioLow = deepLowMcap / (pos.entryMcapUsd || 15000);
+            const ratioClose = lastCandle.close / (pos.entryMcapUsd || 15000);
+
+            highPriceUsd = pos.entryPriceUsd * ratioHigh;
+            lowPriceUsd = pos.entryPriceUsd * ratioLow;
+            priceUsd = pos.entryPriceUsd * ratioClose;
+          } else {
+            // Fallback to DexScreener if candles are unavailable
+            const dex = await detector.fetchDexInfo(pos.mint);
+            if (dex && dex.priceUsd) {
+              priceUsd = dex.priceUsd;
+              mcapUsd = dex.marketCapUsd || pos.currentMcapUsd;
+              highPriceUsd = priceUsd;
+              lowPriceUsd = priceUsd;
+              isLiquidityDrained = (dex.liquidityUsd || 0) < 1000;
+            }
+          }
+
+          if (priceUsd && priceUsd > 0) {
             const res = paperLane.evaluatePriceTick(pos, {
-              priceUsd: dex.priceUsd,
-              mcapUsd: dex.marketCapUsd,
+              priceUsd,
+              mcapUsd,
+              highPriceUsd,
+              lowPriceUsd,
               timestamp: Math.floor(Date.now() / 1000),
-              isLiquidityDrained: (dex.liquidityUsd || 0) < 1000
+              isLiquidityDrained
             });
             if (res.closed) {
               console.log(`[PAPER-EXIT] 🏁 Closed position on ${pos.symbol} (${pos.lane}) | Reason: ${res.reason} | PnL: ${pos.pnlUsd! >= 0 ? '+' : ''}$${pos.pnlUsd} (${pos.netReturnPct}%)`);
             }
           }
-        } catch {}
+        } catch (err: any) {
+          console.warn(`[PAPER-EVAL-WARN] Could not evaluate ${pos.symbol}: ${err?.message}`);
+        }
       }
     }
     paperLane.saveState();

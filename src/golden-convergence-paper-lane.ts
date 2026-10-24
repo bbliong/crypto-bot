@@ -311,9 +311,18 @@ export class GoldenConvergencePaperLane {
 
       // 4. Timeout (30 minutes)
       if (holdingSec >= 1800) {
-        const exitMult = currentPrice / pos.entryPriceUsd;
-        this.closePosition(pos, currentPrice, "TIMEOUT_30M", tickTime, marketData.mcapUsd, exitMult);
-        return { closed: true, reason: "TIMEOUT_30M" };
+        // Anti-fake timeout protection: do not close if price data is stale (exact 0 diff)
+        if (Math.abs(currentPrice - pos.entryPriceUsd) < 1e-12 && !marketData.highPriceUsd) {
+          return { closed: false };
+        }
+        // If position is in profit and liquidity is healthy, allow runner to extend up to 60m
+        if (currentPrice > pos.entryPriceUsd && !marketData.isLiquidityDrained && holdingSec < 3600) {
+          // let winner run towards TP
+        } else {
+          const exitMult = currentPrice / pos.entryPriceUsd;
+          this.closePosition(pos, currentPrice, "TIMEOUT_30M", tickTime, marketData.mcapUsd, exitMult);
+          return { closed: true, reason: "TIMEOUT_30M" };
+        }
       }
     }
 
@@ -353,10 +362,19 @@ export class GoldenConvergencePaperLane {
 
       // Timeout (60 minutes)
       if (holdingSec >= 3600) {
-        const closeMult = currentPrice / pos.entryPriceUsd;
-        const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * closeMult : closeMult);
-        this.closePosition(pos, currentPrice, "TIMEOUT_60M", tickTime, marketData.mcapUsd, exitFraction);
-        return { closed: true, reason: "TIMEOUT_60M" };
+        // Anti-fake timeout protection: do not close if price data is stale (exact 0 diff)
+        if (Math.abs(currentPrice - pos.entryPriceUsd) < 1e-12 && !marketData.highPriceUsd) {
+          return { closed: false };
+        }
+        // If trade is in profit or TP1 already hit, allow runner to extend up to 120m
+        if ((currentPrice > pos.entryPriceUsd || pos.tp1Hit) && !marketData.isLiquidityDrained && holdingSec < 7200) {
+          // let moonbag runner run towards TP2
+        } else {
+          const closeMult = currentPrice / pos.entryPriceUsd;
+          const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * closeMult : closeMult);
+          this.closePosition(pos, currentPrice, "TIMEOUT_60M", tickTime, marketData.mcapUsd, exitFraction);
+          return { closed: true, reason: "TIMEOUT_60M" };
+        }
       }
     }
 

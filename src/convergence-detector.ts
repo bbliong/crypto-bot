@@ -409,7 +409,7 @@ export class ConvergenceDetector extends EventEmitter {
     }
   }
 
-  private async fetchCandles(mint: string): Promise<CandleKline[]> {
+  public async fetchCandles(mint: string): Promise<CandleKline[]> {
     if (this.customCandleFetcher) {
       return await this.customCandleFetcher(mint);
     }
