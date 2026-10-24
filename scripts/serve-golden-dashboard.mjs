@@ -144,75 +144,55 @@ function loadState() {
   };
 }
 
-let isScanning = false;
-let lastScanCompletedAt = Date.now();
-let lastScanDurationMs = 0;
-let lastScanStatus = "IDLE";
-let totalScansRun = 0;
-const AUTO_SCAN_INTERVAL_MS = 60_000;
+let daemonProcess = null;
+let daemonStartTime = Date.now();
 
-function triggerScan(callback) {
-  if (isScanning) {
-    if (callback) callback({ status: "busy", message: "Scan already running" });
-    return;
-  }
-  isScanning = true;
-  lastScanStatus = "SCANNING";
-  const start = Date.now();
-  log("🚀 Starting background on-chain scan...");
-
-  const child = spawn("node", ["--import", "tsx", "scripts/run-convergence-detector.ts", "--scan"], {
+function startDaemon() {
+  if (daemonProcess) return;
+  log("🚀 Spawning persistent Golden WebSocket + AMM Swap Daemon...");
+  daemonStartTime = Date.now();
+  daemonProcess = spawn("node", ["--import", "tsx", "scripts/run-convergence-detector.ts", "--daemon"], {
     cwd: ROOT,
     env: { ...process.env, PAPER_STAKE_USD: "5" }
   });
 
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (d) => {
-    stdout += d;
-    log(`[SCAN-OUT] ${d.toString().trim()}`);
-  });
-  child.stderr.on("data", (d) => {
-    stderr += d;
-    log(`[SCAN-ERR] ${d.toString().trim()}`);
+  daemonProcess.stdout.on("data", (d) => {
+    const lines = d.toString().split("\n");
+    for (const l of lines) {
+      if (l.trim()) log(`[DAEMON] ${l.trim()}`);
+    }
   });
 
-  child.on("close", (code) => {
-    isScanning = false;
-    lastScanCompletedAt = Date.now();
-    lastScanDurationMs = Date.now() - start;
-    lastScanStatus = code === 0 ? "SUCCESS" : `ERROR (code ${code})`;
-    totalScansRun++;
-    log(`✅ Scan #${totalScansRun} finished in ${(lastScanDurationMs / 1000).toFixed(1)}s with exit code ${code}`);
-    if (callback) {
-      callback({
-        status: code === 0 ? "ok" : "error",
-        exitCode: code,
-        durationMs: lastScanDurationMs,
-        stdout: stdout.slice(-1000),
-        stderr: stderr.slice(-1000)
-      });
+  daemonProcess.stderr.on("data", (d) => {
+    const lines = d.toString().split("\n");
+    for (const l of lines) {
+      if (l.trim()) log(`[DAEMON-ERR] ${l.trim()}`);
     }
+  });
+
+  daemonProcess.on("close", (code) => {
+    log(`⚠️ Golden Daemon exited with code ${code}. Respawning in 5s...`);
+    daemonProcess = null;
+    setTimeout(startDaemon, 5000);
   });
 }
 
-function scheduleNextAutoScan() {
-  setTimeout(() => {
-    if (!isScanning) {
-      triggerScan(() => {
-        scheduleNextAutoScan();
-      });
-    } else {
-      scheduleNextAutoScan();
-    }
-  }, AUTO_SCAN_INTERVAL_MS);
-}
-// Start immediate scan after 3s on boot
-setTimeout(() => {
-  triggerScan(() => {
-    scheduleNextAutoScan();
-  });
-}, 3000);
+// Clean termination on shutdown
+process.on("SIGINT", () => {
+  if (daemonProcess) {
+    try { daemonProcess.kill("SIGTERM"); } catch {}
+  }
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  if (daemonProcess) {
+    try { daemonProcess.kill("SIGTERM"); } catch {}
+  }
+  process.exit(0);
+});
+
+// Start daemon 2s after server boot
+setTimeout(startDaemon, 2000);
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -251,10 +231,13 @@ const server = createServer(async (req, res) => {
 
   // API Trigger Scan
   if (cleanPath === "/api/scan" && req.method === "POST") {
-    triggerScan((result) => {
-      res.writeHead(result.status === "ok" ? 200 : 500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
-    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      status: "ok",
+      message: "Golden Daemon is running continuous live WebSocket tick-by-tick & AMM execution loop.",
+      daemonRunning: !!daemonProcess,
+      uptimeSec: Math.floor((Date.now() - daemonStartTime) / 1000)
+    }));
     return;
   }
 
@@ -1090,35 +1073,17 @@ function getDashboardHtml() {
       const kpiScanStatus = document.getElementById('kpiScanStatus');
       const kpiScanSub = document.getElementById('kpiScanSub');
 
-      const lastAgoSec = sh.lastScanAt ? Math.max(0, Math.round((Date.now() - new Date(sh.lastScanAt).getTime()) / 1000)) : null;
-      const lastAgoStr = lastAgoSec !== null ? (lastAgoSec < 60 ? \`\${lastAgoSec}d lalu\` : \`\${Math.round(lastAgoSec / 60)}m lalu\`) : '-';
-
-      if (sh.isScanning) {
-        if (statusText) statusText.innerText = 'SEDANG MEMINDAI ON-CHAIN...';
-        if (statusDot) statusDot.style.background = '#f59e0b';
-        if (btnScan) {
-          btnScan.disabled = true;
-          btnScan.innerText = '⏳ Sedang Memindai...';
-        }
-        if (kpiScanStatus) {
-          kpiScanStatus.innerHTML = '<span style="color: #f59e0b;">🔄 Memindai...</span>';
-        }
-        if (kpiScanSub) {
-          kpiScanSub.innerText = 'Harvesting GMGN lowcap runners & Snowball';
-        }
-      } else {
-        if (statusText) statusText.innerText = \`AUTO-SCAN (60s) · NEXT: \${sh.nextScanInSec || 0}s\`;
-        if (statusDot) statusDot.style.background = '#10b981';
-        if (btnScan) {
-          btnScan.disabled = false;
-          btnScan.innerText = '🔄 Scan On-Chain Now';
-        }
-        if (kpiScanStatus) {
-          kpiScanStatus.innerHTML = '<span style="color: #10b981;">🟢 Aktif (60s)</span>';
-        }
-        if (kpiScanSub) {
-          kpiScanSub.innerHTML = \`Terakhir: \${lastAgoStr} · <span style="color: #38bdf8; font-weight: 600;">❄️ Snowball Mode (0 Helius Cr)</span>\`;
-        }
+      if (statusText) statusText.innerText = '⚡ WEBSOCKET STREAM + REAL AMM SWAP ACTIVE';
+      if (statusDot) statusDot.style.background = '#10b981';
+      if (btnScan) {
+        btnScan.disabled = false;
+        btnScan.innerText = '⚡ Live Stream Active';
+      }
+      if (kpiScanStatus) {
+        kpiScanStatus.innerHTML = '<span style="color: #10b981;">⚡ WS Stream Active</span>';
+      }
+      if (kpiScanSub) {
+        kpiScanSub.innerHTML = 'Tick-by-tick via GMGN CDP · Real AMM Swap Exit';
       }
     }
 
