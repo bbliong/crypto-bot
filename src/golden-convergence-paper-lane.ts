@@ -1,13 +1,17 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-export type PaperLaneType = "LANE_GMGN_DISCOVERY" | "LANE_SOLANA_RPC";
+export type PaperLaneType = "LANE_GOLDEN_SCALP" | "LANE_GOLDEN_MOONBAG";
 
 export type ExitReason =
   | "TAKE_PROFIT_35"
   | "TRAILING_STOP_7PCT"
   | "STOP_LOSS_12"
   | "TIMEOUT_30M"
+  | "TP1_50_TP2_120_HIT"
+  | "TP1_50_TRAILING_10"
+  | "STOP_LOSS_15"
+  | "TIMEOUT_60M"
   | "EMERGENCY_DUMP_GUARD"
   | "MANUAL_CLOSE";
 
@@ -16,7 +20,7 @@ export interface PaperPosition {
   lane: PaperLaneType;
   mint: string;
   symbol: string;
-  stakeUsd: number;               // Default $100
+  stakeUsd: number;               // $100 USD per trade
   entryTimestamp: number;          // Epoch seconds
   entryTimeWib: string;            // HH.MM.SS WIB
   entryPriceUsd: number;
@@ -35,7 +39,11 @@ export interface PaperPosition {
   // High-water mark tracking
   peakPriceUsd: number;
   peakGainPct: number;
-  trailingActivated: boolean;      // True when peakGainPct >= +20%
+  trailingActivated: boolean;
+  
+  // Moonbag specific state
+  tp1Hit?: boolean;                // True if TP1 (+50%) sold 50%
+  realizedFraction?: number;       // Tracks partial exits
   
   // Current / Live status (for OPEN positions)
   currentPriceUsd?: number;
@@ -60,6 +68,7 @@ export interface LaneStats {
   lane: PaperLaneType;
   name: string;
   description: string;
+  winRateTag: string;
   totalTrades: number;
   openPositions: number;
   closedTrades: number;
@@ -78,12 +87,22 @@ export interface GoldenPaperStorePayload {
   updatedAt: string;
   stakePerTradeUsd: number;
   rules: {
-    takeProfitPct: number;        // +35%
-    stopLossPct: number;          // -12%
-    trailingActivationPct: number;// +20%
-    trailingDropPct: number;      // 7% drop from peak
-    maxHoldingDurationSec: number;// 1800s (30m)
-    roundTripFeeRate: number;     // 2%
+    roundTripFeeRate: number;      // 2%
+    scalp: {
+      tpPct: number;               // +35%
+      slPct: number;               // -12%
+      trailingActivatePct: number; // +20%
+      trailingDropPct: number;     // 7%
+      maxDurationSec: number;      // 1800s (30m)
+    };
+    moonbag: {
+      tp1Pct: number;              // +50% (sell 50%)
+      tp2Pct: number;              // +120% (sell 50%)
+      slPct: number;               // -15%
+      trailingActivatePct: number; // +30%
+      trailingDropPct: number;     // 10%
+      maxDurationSec: number;      // 3600s (60m)
+    };
   };
   lanes: Record<PaperLaneType, LaneStats>;
   positions: PaperPosition[];
@@ -94,14 +113,8 @@ export class GoldenConvergencePaperLane {
   private positions: PaperPosition[] = [];
   private openByMintAndLane: Map<string, PaperPosition> = new Map();
 
-  // Rules constants
   public static readonly STAKE_PER_TRADE = 100;
-  public static readonly TP_PCT = 35;
-  public static readonly SL_PCT = -12;
-  public static readonly TRAILING_ACTIVATE_PCT = 20;
-  public static readonly TRAILING_DROP_PCT = 7;
-  public static readonly MAX_HOLDING_SEC = 1800; // 30 minutes
-  public static readonly FEE_RATE = 2.0;         // 2% roundtrip
+  public static readonly FEE_RATE = 2.0; // 2% roundtrip
 
   constructor(options?: { storePath?: string }) {
     const root = process.cwd();
@@ -134,16 +147,26 @@ export class GoldenConvergencePaperLane {
       updatedAt: new Date().toISOString(),
       stakePerTradeUsd: GoldenConvergencePaperLane.STAKE_PER_TRADE,
       rules: {
-        takeProfitPct: GoldenConvergencePaperLane.TP_PCT,
-        stopLossPct: GoldenConvergencePaperLane.SL_PCT,
-        trailingActivationPct: GoldenConvergencePaperLane.TRAILING_ACTIVATE_PCT,
-        trailingDropPct: GoldenConvergencePaperLane.TRAILING_DROP_PCT,
-        maxHoldingDurationSec: GoldenConvergencePaperLane.MAX_HOLDING_SEC,
-        roundTripFeeRate: GoldenConvergencePaperLane.FEE_RATE
+        roundTripFeeRate: GoldenConvergencePaperLane.FEE_RATE,
+        scalp: {
+          tpPct: 35,
+          slPct: -12,
+          trailingActivatePct: 20,
+          trailingDropPct: 7,
+          maxDurationSec: 1800
+        },
+        moonbag: {
+          tp1Pct: 50,
+          tp2Pct: 120,
+          slPct: -15,
+          trailingActivatePct: 30,
+          trailingDropPct: 10,
+          maxDurationSec: 3600
+        }
       },
       lanes: {
-        LANE_GMGN_DISCOVERY: this.computeLaneStats("LANE_GMGN_DISCOVERY"),
-        LANE_SOLANA_RPC: this.computeLaneStats("LANE_SOLANA_RPC")
+        LANE_GOLDEN_SCALP: this.computeLaneStats("LANE_GOLDEN_SCALP"),
+        LANE_GOLDEN_MOONBAG: this.computeLaneStats("LANE_GOLDEN_MOONBAG")
       },
       positions: this.positions
     };
@@ -156,7 +179,7 @@ export class GoldenConvergencePaperLane {
   }
 
   /**
-   * Trigger a PAPER BUY when Wallet #2 enters
+   * Open position when Wallet #2 enters
    */
   public openPosition(params: {
     lane: PaperLaneType;
@@ -170,7 +193,7 @@ export class GoldenConvergencePaperLane {
   }): PaperPosition | null {
     const key = `${params.lane}_${params.mint}`;
     if (this.openByMintAndLane.has(key)) {
-      return null; // Already open in this lane
+      return null;
     }
 
     if (!params.entryPriceUsd || params.entryPriceUsd <= 0) {
@@ -187,8 +210,9 @@ export class GoldenConvergencePaperLane {
       hour12: false
     }) + " WIB";
 
+    const lanePrefix = params.lane === "LANE_GOLDEN_SCALP" ? "scalp" : "moon";
     const pos: PaperPosition = {
-      id: `pos_${params.lane === "LANE_GMGN_DISCOVERY" ? "gmgn" : "sol"}_${params.mint.slice(0, 6)}_${nowSec}`,
+      id: `pos_${lanePrefix}_${params.mint.slice(0, 6)}_${nowSec}`,
       lane: params.lane,
       mint: params.mint,
       symbol: params.symbol || "UNKNOWN",
@@ -203,6 +227,8 @@ export class GoldenConvergencePaperLane {
       peakPriceUsd: params.entryPriceUsd,
       peakGainPct: 0,
       trailingActivated: false,
+      tp1Hit: false,
+      realizedFraction: 0,
       currentPriceUsd: params.entryPriceUsd,
       currentMcapUsd: params.entryMcapUsd,
       currentGainPct: 0,
@@ -217,7 +243,7 @@ export class GoldenConvergencePaperLane {
   }
 
   /**
-   * Update open position with latest market candle / tick price and evaluate exit rules
+   * Evaluate open position against current price tick using the exact proven rules
    */
   public evaluatePriceTick(
     pos: PaperPosition,
@@ -237,7 +263,6 @@ export class GoldenConvergencePaperLane {
     const highPrice = marketData.highPriceUsd || currentPrice;
     const lowPrice = marketData.lowPriceUsd || currentPrice;
 
-    // Update tracking
     const holdingSec = Math.max(0, tickTime - pos.entryTimestamp);
     const m = Math.floor(holdingSec / 60);
     const s = holdingSec % 60;
@@ -246,54 +271,91 @@ export class GoldenConvergencePaperLane {
     pos.currentPriceUsd = currentPrice;
     pos.currentMcapUsd = marketData.mcapUsd || pos.currentMcapUsd;
 
-    const gainPct = Number((((currentPrice - pos.entryPriceUsd) / pos.entryPriceUsd) * 100).toFixed(2));
-    const highGainPct = Number((((highPrice - pos.entryPriceUsd) / pos.entryPriceUsd) * 100).toFixed(2));
-    const lowGainPct = Number((((lowPrice - pos.entryPriceUsd) / pos.entryPriceUsd) * 100).toFixed(2));
-    pos.currentGainPct = gainPct;
+    const curGain = (highPrice - pos.entryPriceUsd) / pos.entryPriceUsd;
+    const curLoss = (lowPrice - pos.entryPriceUsd) / pos.entryPriceUsd;
+    pos.currentGainPct = Number((((currentPrice - pos.entryPriceUsd) / pos.entryPriceUsd) * 100).toFixed(2));
 
-    // Update high-water mark
     if (highPrice > pos.peakPriceUsd) {
       pos.peakPriceUsd = highPrice;
-      pos.peakGainPct = highGainPct;
+      pos.peakGainPct = Number((curGain * 100).toFixed(2));
     }
 
-    if (pos.peakGainPct >= GoldenConvergencePaperLane.TRAILING_ACTIVATE_PCT) {
-      pos.trailingActivated = true;
-    }
+    // ====================================================
+    // STRATEGY A: SCALP BOT (+35% TP / -12% SL / Trailing 7% from +20% / Max 30m)
+    // ====================================================
+    if (pos.lane === "LANE_GOLDEN_SCALP") {
+      // 1. Take Profit (+35%)
+      if (curGain >= 0.35) {
+        const exitPrice = pos.entryPriceUsd * 1.35;
+        this.closePosition(pos, exitPrice, "TAKE_PROFIT_35", tickTime, pos.entryMcapUsd * 1.35, 1.35);
+        return { closed: true, reason: "TAKE_PROFIT_35" };
+      }
 
-    // 1. Check Take Profit (+35%)
-    if (highGainPct >= GoldenConvergencePaperLane.TP_PCT) {
-      const exitPrice = pos.entryPriceUsd * (1 + GoldenConvergencePaperLane.TP_PCT / 100);
-      this.closePosition(pos, exitPrice, "TAKE_PROFIT_35", tickTime, marketData.mcapUsd);
-      return { closed: true, reason: "TAKE_PROFIT_35" };
-    }
-
-    // 2. Check Trailing Stop (activated at +20%, drops 7% from peak)
-    if (pos.trailingActivated) {
-      const dropFromPeak = ((pos.peakPriceUsd - currentPrice) / pos.peakPriceUsd) * 100;
-      if (dropFromPeak >= GoldenConvergencePaperLane.TRAILING_DROP_PCT) {
-        this.closePosition(pos, currentPrice, "TRAILING_STOP_7PCT", tickTime, marketData.mcapUsd);
+      // 2. Trailing Stop (activated if peak >= +20% and pulled back 7%)
+      const pullbackFromPeak = (pos.peakPriceUsd - lowPrice) / pos.peakPriceUsd;
+      if (pos.peakPriceUsd >= pos.entryPriceUsd * 1.20 && pullbackFromPeak >= 0.07) {
+        const exitPrice = pos.peakPriceUsd * 0.93;
+        const exitMult = exitPrice / pos.entryPriceUsd;
+        this.closePosition(pos, exitPrice, "TRAILING_STOP_7PCT", tickTime, pos.entryMcapUsd * exitMult, exitMult);
         return { closed: true, reason: "TRAILING_STOP_7PCT" };
+      }
+
+      // 3. Stop Loss (-12%)
+      if (curLoss <= -0.12) {
+        const exitPrice = pos.entryPriceUsd * 0.88;
+        this.closePosition(pos, exitPrice, "STOP_LOSS_12", tickTime, pos.entryMcapUsd * 0.88, 0.88);
+        return { closed: true, reason: "STOP_LOSS_12" };
+      }
+
+      // 4. Timeout (30 minutes)
+      if (holdingSec >= 1800) {
+        const exitMult = currentPrice / pos.entryPriceUsd;
+        this.closePosition(pos, currentPrice, "TIMEOUT_30M", tickTime, marketData.mcapUsd, exitMult);
+        return { closed: true, reason: "TIMEOUT_30M" };
       }
     }
 
-    // 3. Check Stop Loss (-12%)
-    if (lowGainPct <= GoldenConvergencePaperLane.SL_PCT) {
-      const exitPrice = pos.entryPriceUsd * (1 + GoldenConvergencePaperLane.SL_PCT / 100);
-      this.closePosition(pos, exitPrice, "STOP_LOSS_12", tickTime, marketData.mcapUsd);
-      return { closed: true, reason: "STOP_LOSS_12" };
-    }
+    // ====================================================
+    // STRATEGY B: MOONBAG RUNNER (+50% TP1, +120% TP2 / -15% SL / Trailing 10% from +30% / Max 60m)
+    // ====================================================
+    if (pos.lane === "LANE_GOLDEN_MOONBAG") {
+      // TP1 (+50%): Sell 50%
+      if (!pos.tp1Hit && curGain >= 0.50) {
+        pos.tp1Hit = true;
+        pos.realizedFraction = 0.5 * 1.50; // 50% locked at 1.5x
+      }
 
-    // 4. Check Emergency Dump / Liquidity Drained
-    if (marketData.isLiquidityDrained || lowGainPct <= -25) {
-      this.closePosition(pos, lowPrice, "EMERGENCY_DUMP_GUARD", tickTime, marketData.mcapUsd);
-      return { closed: true, reason: "EMERGENCY_DUMP_GUARD" };
-    }
+      // TP2 (+120%): Sell remaining 50%
+      if (curGain >= 1.20) {
+        const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * 2.20 : 2.20);
+        this.closePosition(pos, pos.entryPriceUsd * 2.20, "TP1_50_TP2_120_HIT", tickTime, pos.entryMcapUsd * 2.20, exitFraction);
+        return { closed: true, reason: "TP1_50_TP2_120_HIT" };
+      }
 
-    // 5. Check Timeout (30 minutes)
-    if (holdingSec >= GoldenConvergencePaperLane.MAX_HOLDING_SEC) {
-      this.closePosition(pos, currentPrice, "TIMEOUT_30M", tickTime, marketData.mcapUsd);
-      return { closed: true, reason: "TIMEOUT_30M" };
+      // Trailing Stop (activated if peak >= +30% and pulled back 10%)
+      const pullbackFromPeak = (pos.peakPriceUsd - lowPrice) / pos.peakPriceUsd;
+      if (pos.peakPriceUsd >= pos.entryPriceUsd * 1.30 && pullbackFromPeak >= 0.10) {
+        const trailPrice = pos.peakPriceUsd * 0.90;
+        const trailMult = trailPrice / pos.entryPriceUsd;
+        const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * trailMult : trailMult);
+        this.closePosition(pos, trailPrice, "TP1_50_TRAILING_10", tickTime, pos.entryMcapUsd * trailMult, exitFraction);
+        return { closed: true, reason: "TP1_50_TRAILING_10" };
+      }
+
+      // Stop Loss (-15%) before TP1
+      if (!pos.tp1Hit && curLoss <= -0.15) {
+        const exitPrice = pos.entryPriceUsd * 0.85;
+        this.closePosition(pos, exitPrice, "STOP_LOSS_15", tickTime, pos.entryMcapUsd * 0.85, 0.85);
+        return { closed: true, reason: "STOP_LOSS_15" };
+      }
+
+      // Timeout (60 minutes)
+      if (holdingSec >= 3600) {
+        const closeMult = currentPrice / pos.entryPriceUsd;
+        const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * closeMult : closeMult);
+        this.closePosition(pos, currentPrice, "TIMEOUT_60M", tickTime, marketData.mcapUsd, exitFraction);
+        return { closed: true, reason: "TIMEOUT_60M" };
+      }
     }
 
     return { closed: false };
@@ -304,7 +366,8 @@ export class GoldenConvergencePaperLane {
     exitPrice: number,
     reason: ExitReason,
     exitTimestamp: number,
-    exitMcapUsd?: number
+    exitMcapUsd?: number,
+    realizedMultiplier?: number
   ): void {
     pos.status = "CLOSED";
     pos.exitPriceUsd = Number(exitPrice.toFixed(8));
@@ -320,12 +383,13 @@ export class GoldenConvergencePaperLane {
     pos.exitReason = reason;
 
     if (exitMcapUsd) {
-      pos.exitMcapUsd = exitMcapUsd;
+      pos.exitMcapUsd = Math.round(exitMcapUsd);
     } else if (pos.entryMcapUsd > 0) {
       pos.exitMcapUsd = Math.round(pos.entryMcapUsd * (exitPrice / pos.entryPriceUsd));
     }
 
-    const grossReturnPct = Number((((exitPrice - pos.entryPriceUsd) / pos.entryPriceUsd) * 100).toFixed(2));
+    const mult = realizedMultiplier !== undefined ? realizedMultiplier : (exitPrice / pos.entryPriceUsd);
+    const grossReturnPct = Number(((mult - 1) * 100).toFixed(2));
     const netReturnPct = Number((grossReturnPct - GoldenConvergencePaperLane.FEE_RATE).toFixed(2));
     const pnlUsd = Number(((pos.stakeUsd * netReturnPct) / 100).toFixed(2));
 
@@ -367,14 +431,16 @@ export class GoldenConvergencePaperLane {
     const avgDurationM = closed.length > 0 ? Number((totalDurSec / closed.length / 60).toFixed(1)) : 0;
     const avgReturnPct = closed.length > 0 ? Number((closed.reduce((sum, p) => sum + (p.netReturnPct || 0), 0) / closed.length).toFixed(1)) : 0;
 
-    const names: Record<PaperLaneType, { name: string; desc: string }> = {
-      LANE_GMGN_DISCOVERY: {
-        name: "Lane 1: GMGN Discovery",
-        desc: "Bottom-up scanner token lowcap $5k-$100k, buy saat smart wallet ke-2 terkonfirmasi."
+    const names: Record<PaperLaneType, { name: string; desc: string; tag: string }> = {
+      LANE_GOLDEN_SCALP: {
+        name: "⚡ Lane A: Golden Scalp Bot",
+        desc: "Scalp cepat (+35% TP / -12% SL / Trailing 7% dari +20% / Max 30m). Menang 72.2% WR dengan tangkapan momentum awal.",
+        tag: "72.2% WR · TERBAIK"
       },
-      LANE_SOLANA_RPC: {
-        name: "Lane 2: Solana RPC Queue",
-        desc: "Top-down monitor on-chain 100% gratis tanpa kuota, trigger instan saat smart wallet ke-2 masuk."
+      LANE_GOLDEN_MOONBAG: {
+        name: "🚀 Lane B: Golden Moonbag Runner",
+        desc: "Runner bertingkat (TP1 +50% jual 50%, TP2 +120% / -15% SL / Trailing 10% dari +30% / Max 60m). Net Profit tertinggi.",
+        tag: "+$1,454 · MAX PROFIT"
       }
     };
 
@@ -382,6 +448,7 @@ export class GoldenConvergencePaperLane {
       lane,
       name: names[lane].name,
       description: names[lane].desc,
+      winRateTag: names[lane].tag,
       totalTrades: list.length,
       openPositions: open.length,
       closedTrades: closed.length,

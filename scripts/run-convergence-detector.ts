@@ -20,10 +20,16 @@ async function main() {
     const entryPrice = report.dexInfo?.priceUsd || (report.dexInfo?.marketCapUsd ? report.dexInfo.marketCapUsd / 1e9 : 0.00001);
     const entryMcap = report.dexInfo?.marketCapUsd || 15000;
 
-    // Lane 1: GMGN Discovery (Organic / Golden filter)
-    if (report.classification === "GOLDEN_ORGANIC_CONVERGENCE" || (w2.deltaSecFromFirst >= 60 && !report.isLiquidityDrained)) {
-      const posGmgn = paperLane.openPosition({
-        lane: "LANE_GMGN_DISCOVERY",
+    // Gate: Hanya masuk pada token Golden Organic Convergence / terbukti 2+ smart wallet cuan
+    const cuanWallets = report.walletEntries.filter((w: any) => (w.profitUsd || 0) > 0);
+    const isGolden = report.classification === "GOLDEN_ORGANIC_CONVERGENCE" ||
+      cuanWallets.length >= 2 ||
+      (w2.deltaSecFromFirst >= 180 && !report.isLiquidityDrained);
+
+    if (isGolden) {
+      // 1. Lane A: Golden Scalp Bot (+35% TP / -12% SL / Trailing 7% dari +20% / Max 30m)
+      const posScalp = paperLane.openPosition({
+        lane: "LANE_GOLDEN_SCALP",
         mint: report.mint,
         symbol: report.symbol,
         entryPriceUsd: entryPrice,
@@ -32,24 +38,24 @@ async function main() {
         wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
         wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
       });
-      if (posGmgn) {
-        console.log(`[PAPER-BUY] 🎮 Opened paper position (LANE_GMGN_DISCOVERY) on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      if (posScalp) {
+        console.log(`[PAPER-BUY] ⚡ Opened Scalp Bot position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
       }
-    }
 
-    // Lane 2: Solana RPC Queue (all wallet co-entries)
-    const posRpc = paperLane.openPosition({
-      lane: "LANE_SOLANA_RPC",
-      mint: report.mint,
-      symbol: report.symbol,
-      entryPriceUsd: entryPrice,
-      entryMcapUsd: entryMcap,
-      entryTimestamp: w2.timestamp,
-      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
-    });
-    if (posRpc) {
-      console.log(`[PAPER-BUY] ⚡ Opened paper position (LANE_SOLANA_RPC) on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      // 2. Lane B: Golden Moonbag Runner (+50% TP1, +120% TP2 / -15% SL / Trailing 10% / Max 60m)
+      const posMoon = paperLane.openPosition({
+        lane: "LANE_GOLDEN_MOONBAG",
+        mint: report.mint,
+        symbol: report.symbol,
+        entryPriceUsd: entryPrice,
+        entryMcapUsd: entryMcap,
+        entryTimestamp: w2.timestamp,
+        wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
+        wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst }
+      });
+      if (posMoon) {
+        console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $100 | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      }
     }
   }
 
@@ -402,9 +408,9 @@ async function main() {
       }
     }
     paperLane.saveState();
-    const statsGmgn = paperLane.computeLaneStats("LANE_GMGN_DISCOVERY");
-    const statsRpc = paperLane.computeLaneStats("LANE_SOLANA_RPC");
-    console.log(`[PAPER-SUMMARY] GMGN Lane: ${statsGmgn.winningTrades}W/${statsGmgn.losingTrades}L (${statsGmgn.winRatePct}% WR, ${statsGmgn.totalPnlUsd >= 0 ? '+' : ''}$${statsGmgn.totalPnlUsd}) | Solana RPC Lane: ${statsRpc.winningTrades}W/${statsRpc.losingTrades}L (${statsRpc.winRatePct}% WR, ${statsRpc.totalPnlUsd >= 0 ? '+' : ''}$${statsRpc.totalPnlUsd})`);
+    const statsScalp = paperLane.computeLaneStats("LANE_GOLDEN_SCALP");
+    const statsMoon = paperLane.computeLaneStats("LANE_GOLDEN_MOONBAG");
+    console.log(`[PAPER-SUMMARY] Scalp Lane: ${statsScalp.winningTrades}W/${statsScalp.losingTrades}L (${statsScalp.winRatePct}% WR, ${statsScalp.totalPnlUsd >= 0 ? '+' : ''}$${statsScalp.totalPnlUsd}) | Moonbag Lane: ${statsMoon.winningTrades}W/${statsMoon.losingTrades}L (${statsMoon.winRatePct}% WR, ${statsMoon.totalPnlUsd >= 0 ? '+' : ''}$${statsMoon.totalPnlUsd})`);
 
     await detector.close();
     process.exit(0);

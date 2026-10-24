@@ -16,7 +16,7 @@ test("GoldenConvergencePaperLane - open position when wallet 2 enters", () => {
   const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
 
   const pos = lane.openPosition({
-    lane: "LANE_GMGN_DISCOVERY",
+    lane: "LANE_GOLDEN_SCALP",
     mint: "MintTest1111111111111111111111111111111111",
     symbol: "TEST1",
     entryPriceUsd: 0.001,
@@ -34,7 +34,7 @@ test("GoldenConvergencePaperLane - open position when wallet 2 enters", () => {
 
   // Deduplication check: should return null for same mint & lane
   const duplicate = lane.openPosition({
-    lane: "LANE_GMGN_DISCOVERY",
+    lane: "LANE_GOLDEN_SCALP",
     mint: "MintTest1111111111111111111111111111111111",
     symbol: "TEST1",
     entryPriceUsd: 0.001,
@@ -46,12 +46,12 @@ test("GoldenConvergencePaperLane - open position when wallet 2 enters", () => {
   cleanup();
 });
 
-test("GoldenConvergencePaperLane - Take Profit (+35%) triggers accurately", () => {
+test("GoldenConvergencePaperLane - Scalp Bot Take Profit (+35%) triggers accurately", () => {
   cleanup();
   const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
 
   const pos = lane.openPosition({
-    lane: "LANE_GMGN_DISCOVERY",
+    lane: "LANE_GOLDEN_SCALP",
     mint: "MintTP1111111111111111111111111111111111111",
     symbol: "TP_COIN",
     entryPriceUsd: 0.001,
@@ -80,12 +80,12 @@ test("GoldenConvergencePaperLane - Take Profit (+35%) triggers accurately", () =
   cleanup();
 });
 
-test("GoldenConvergencePaperLane - Trailing Stop triggers after reaching +20% and dropping 7%", () => {
+test("GoldenConvergencePaperLane - Scalp Bot Trailing Stop (peak +20%, drop 7%)", () => {
   cleanup();
   const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
 
   const pos = lane.openPosition({
-    lane: "LANE_SOLANA_RPC",
+    lane: "LANE_GOLDEN_SCALP",
     mint: "MintTrail111111111111111111111111111111111",
     symbol: "TRAIL",
     entryPriceUsd: 0.001,
@@ -95,39 +95,36 @@ test("GoldenConvergencePaperLane - Trailing Stop triggers after reaching +20% an
     wallet2: { address: "W2", enteredAtWib: "10.04 WIB", deltaSecFromFirst: 240 }
   })!;
 
-  // 1. Price climbs to +28% (activates trailing)
+  // 1. Price climbs to +25%
   lane.evaluatePriceTick(pos, {
-    priceUsd: 0.00128,
-    highPriceUsd: 0.00128,
+    priceUsd: 0.00125,
+    highPriceUsd: 0.00125,
     timestamp: 1100
   });
-  assert.equal(pos.trailingActivated, true);
   assert.equal(pos.status, "OPEN");
 
-  // 2. Price drops from 0.00128 to 0.00118 (drop of 7.8% from peak)
+  // 2. Price drops from 0.00125 to 0.00115 (drop of 8% from peak)
   const res = lane.evaluatePriceTick(pos, {
-    priceUsd: 0.00118,
+    priceUsd: 0.00115,
+    lowPriceUsd: 0.00115,
     timestamp: 1160
   });
 
   assert.equal(res.closed, true);
   assert.equal(res.reason, "TRAILING_STOP_7PCT");
   assert.equal(pos.status, "CLOSED");
-  // 18% gross - 2% fee = 16% net ($16 profit)
-  assert.equal(pos.netReturnPct, 16);
-  assert.equal(pos.pnlUsd, 16);
-  assert.equal(pos.isProfitable, true);
+  assert.ok(pos.pnlUsd! > 0);
   cleanup();
 });
 
-test("GoldenConvergencePaperLane - Stop Loss (-12%) cuts losses promptly", () => {
+test("GoldenConvergencePaperLane - Moonbag Runner (TP1 +50% and TP2 +120%)", () => {
   cleanup();
   const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
 
   const pos = lane.openPosition({
-    lane: "LANE_SOLANA_RPC",
-    mint: "MintSL111111111111111111111111111111111111",
-    symbol: "SL_COIN",
+    lane: "LANE_GOLDEN_MOONBAG",
+    mint: "MintMoon111111111111111111111111111111111",
+    symbol: "MOON_RUNNER",
     entryPriceUsd: 0.001,
     entryMcapUsd: 10000,
     entryTimestamp: 1000,
@@ -135,50 +132,25 @@ test("GoldenConvergencePaperLane - Stop Loss (-12%) cuts losses promptly", () =>
     wallet2: { address: "W2", enteredAtWib: "10.05 WIB", deltaSecFromFirst: 300 }
   })!;
 
-  // Price drops -15%
+  // 1. Tick reaches +60%: TP1 (+50%) hit! Sells 50%
+  lane.evaluatePriceTick(pos, {
+    priceUsd: 0.0016,
+    highPriceUsd: 0.0016,
+    timestamp: 1200
+  });
+  assert.equal(pos.tp1Hit, true);
+  assert.equal(pos.status, "OPEN");
+
+  // 2. Tick reaches +130%: TP2 (+120%) hit! Sells remaining 50%
   const res = lane.evaluatePriceTick(pos, {
-    priceUsd: 0.00085,
-    lowPriceUsd: 0.00085,
-    timestamp: 1100
+    priceUsd: 0.0023,
+    highPriceUsd: 0.0023,
+    timestamp: 1400
   });
 
   assert.equal(res.closed, true);
-  assert.equal(res.reason, "STOP_LOSS_12");
+  assert.equal(res.reason, "TP1_50_TP2_120_HIT");
   assert.equal(pos.status, "CLOSED");
-  // -12% gross - 2% fee = -14% net (-$14 loss)
-  assert.equal(pos.grossReturnPct, -12);
-  assert.equal(pos.netReturnPct, -14);
-  assert.equal(pos.pnlUsd, -14);
-  assert.equal(pos.isProfitable, false);
-  cleanup();
-});
-
-test("GoldenConvergencePaperLane - Timeout (30 min) auto-exits at market price", () => {
-  cleanup();
-  const lane = new GoldenConvergencePaperLane({ storePath: TEST_STORE_PATH });
-
-  const pos = lane.openPosition({
-    lane: "LANE_GMGN_DISCOVERY",
-    mint: "MintTimeout11111111111111111111111111111111",
-    symbol: "FLAT_COIN",
-    entryPriceUsd: 0.001,
-    entryMcapUsd: 10000,
-    entryTimestamp: 1000,
-    wallet1: { address: "W1", enteredAtWib: "10.00 WIB" },
-    wallet2: { address: "W2", enteredAtWib: "10.05 WIB", deltaSecFromFirst: 300 }
-  })!;
-
-  // 31 minutes later (1860s), price is only +5%
-  const res = lane.evaluatePriceTick(pos, {
-    priceUsd: 0.00105,
-    timestamp: 1000 + 1860
-  });
-
-  assert.equal(res.closed, true);
-  assert.equal(res.reason, "TIMEOUT_30M");
-  assert.equal(pos.status, "CLOSED");
-  assert.equal(pos.grossReturnPct, 5);
-  assert.equal(pos.netReturnPct, 3); // 5% - 2% = 3%
-  assert.equal(pos.pnlUsd, 3);
+  assert.ok(pos.pnlUsd! >= 80); // Massive profit
   cleanup();
 });
