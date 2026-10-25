@@ -105,7 +105,7 @@ async function main() {
   async function handlePaperBuy(report: any): Promise<boolean> {
     if (!report.walletEntries || report.walletEntries.length < 2) return false;
     const w1 = report.walletEntries[0];
-    const organicWallet = report.walletEntries.find((w: any) => (w.deltaSecFromFirst || 0) >= 180) || report.walletEntries[1];
+    const organicWallet = report.walletEntries.find((w: any) => (w.deltaSecFromFirst || 0) >= 45) || report.walletEntries[1];
     const w2 = organicWallet;
     const delta = w2.deltaSecFromFirst || report.entryDeltaSec || 0;
 
@@ -123,28 +123,50 @@ async function main() {
       return false;
     }
 
-    // 1. Delta WAJIB >= 180 detik (tolak mutlak bundler / sindikat <= 30s)
+    // 1. Delta WAJIB >= 45 detik (tolak mutlak bundler / sindikat <= 30s)
     // 2. Likuiditas >= $2,000 dan tidak drained
-    // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 180s && cuanWallets >= 2)
+    // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 45s && cuanWallets >= 2)
     const cuanWallets = (report.walletEntries || []).filter((w: any) => (w.profitUsd || 0) > 0);
     const isStrictGolden = (
       report.classification === "GOLDEN_ORGANIC_CONVERGENCE" ||
-      (delta >= 180 && cuanWallets.length >= 2)
-    ) && delta >= 180 && !report.isLiquidityDrained && (report.dexInfo?.liquidityUsd || 0) >= 2000;
+      (delta >= 45 && cuanWallets.length >= 2)
+    ) && delta >= 45 && !report.isLiquidityDrained && (report.dexInfo?.liquidityUsd || 0) >= 2000;
 
     if (!isStrictGolden) {
       return false;
     }
 
-    // 4. Strict Real-Time Age Gate: Usia konvergensi Wallet 2 WAJIB fresh <= 180 detik (3 menit) dari sekarang
+    // 4. Dynamic Real-Time Age Gate berdasarkan Mutu Smart Money:
+    // - Tier S / Tier A (Whales / Proven Smart Money): Toleransi hingga 1,200 detik (20 menit)
+    // - Tier B (2x Consistent Scalpers): Toleransi hingga 600 detik (10 menit)
+    // - Standard / Lainnya: 180 detik (3 menit)
     const nowSec = Math.floor(Date.now() / 1000);
     const signalAgeSec = nowSec - (w2.timestamp || 0);
-    if (signalAgeSec > 180) {
-      console.log(`[GATE-REJECT] ⏱️ Sinyal ${report.symbol} ditolak: Usia sinyal W2 ${signalAgeSec}s (> 180s batas toleransi real-time)`);
+
+    let maxAllowedAgeSec = 180;
+    if (hasTierS || hasTierA) {
+      maxAllowedAgeSec = 1200; // 20 menit untuk Tier S & A
+    } else if (tierBCount >= 2) {
+      maxAllowedAgeSec = 600;  // 10 menit untuk 2x Tier B
+    }
+
+    if (signalAgeSec > maxAllowedAgeSec) {
+      console.log(`[GATE-REJECT] ⏱️ Sinyal ${report.symbol} ditolak: Usia sinyal W2 ${signalAgeSec}s (> ${maxAllowedAgeSec}s batas toleransi Tier ${hasTierS ? 'S' : (hasTierA ? 'A' : 'B')})`);
       return false;
     }
-    if (w2.timestamp < BOOT_TIME_SEC - 60) {
-      return false;
+
+    // Proteksi Tambahan untuk Sinyal Usia Lebih Lama (> 180s):
+    // Jika usia sinyal 3 s.d. 20 menit, pastikan likuiditas >= $5,000 dan tidak sedang dump parah (> 25% drop)
+    if (signalAgeSec > 180) {
+      const liq = report.dexInfo?.liquidityUsd || 0;
+      if (liq < 5000) {
+        console.log(`[GATE-REJECT] 💧 Sinyal ${report.symbol} ditolak: Usia ${signalAgeSec}s butuh likuiditas solid >= $5k (saat ini $${liq})`);
+        return false;
+      }
+      if (report.maxDropPercent && report.maxDropPercent > 25) {
+        console.log(`[GATE-REJECT] 📉 Sinyal ${report.symbol} ditolak: Token mengalami koreksi drop -${report.maxDropPercent.toFixed(1)}% (> 25%)`);
+        return false;
+      }
     }
 
     // 5. Anti-Dump Gate: Pioneer (W1) dan Confirming (W2) WAJIB masih HOLDING

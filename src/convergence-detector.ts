@@ -382,15 +382,15 @@ export class ConvergenceDetector extends EventEmitter {
         this.quarantinedWallets.add(w);
       }
     } else if (
-      entryDeltaSec >= 180 &&
+      entryDeltaSec >= 45 &&
       liquidity >= 2000 &&
-      (dexInfo?.volume24h ?? 0) >= 5000 &&
+      (dexInfo?.volume24h ?? 0) >= 3000 &&
       maxDropPercent < 35 &&
       isQualityConvergence
     ) {
       classification = "GOLDEN_ORGANIC_CONVERGENCE";
       reason = `Konsensus Tier Mutu (${tierSummary}) lowcap (<$100k): ${uniqueWallets.length} smart wallet akumulasi sehat (${Math.round(entryDeltaSec / 60)}m), likuiditas solid ($${liquidity.toLocaleString()})`;
-    } else if (entryDeltaSec >= 180 && !isQualityConvergence) {
+    } else if (entryDeltaSec >= 45 && !isQualityConvergence) {
       classification = "ACCUMULATION_WATCH";
       reason = `Akumulasi terpantau dari trader retail/scout (${tierSummary}). Menunggu konfirmasi smart money Tier S/A/B sebelum eksekusi.`;
     } else {
