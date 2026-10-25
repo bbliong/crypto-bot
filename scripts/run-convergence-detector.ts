@@ -418,27 +418,42 @@ async function main() {
     category: string;
   }> = [];
   let isProcessingTrenchesQueue = false;
+  let trenchesBackoffUntil = 0;
 
   async function processTrenchesQueue() {
     if (isProcessingTrenchesQueue) return;
     isProcessingTrenchesQueue = true;
 
     while (trenchesProcessingQueue.length > 0) {
+      if (Date.now() < trenchesBackoffUntil) {
+        const waitMs = trenchesBackoffUntil - Date.now();
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+
       const item = trenchesProcessingQueue.shift();
       if (!item) continue;
 
       try {
-        await new Promise((r) => setTimeout(r, 60)); // avoid hammering GMGN API
+        await new Promise((r) => setTimeout(r, 1200)); // Pacing 1,200ms (safe threshold for GMGN API)
         const tradersData = await page.evaluate(async (mint: string) => {
           try {
             const res = await fetch(`/vas/api/v1/token_traders/sol/${mint}?limit=50&orderby=profit&direction=desc`, {
               credentials: "include"
             });
+            if (res.status === 429) {
+              return { rateLimited: true, status: 429 };
+            }
             return await res.json().catch(() => null);
           } catch {
             return null;
           }
         }, item.mint);
+
+        if (tradersData?.rateLimited) {
+          console.warn(`[TRENCHES-RATE-LIMIT] ⚠️ HTTP 429 on /vas/api/v1/token_traders. Backing off 20s...`);
+          trenchesBackoffUntil = Date.now() + 20000;
+          continue;
+        }
 
         const list = tradersData?.data?.list || [];
         let smartWalletsFound = 0;
@@ -502,6 +517,7 @@ async function main() {
           for (const t of allTrades) {
             await detector.recordTrade(t);
           }
+          snowball.saveSnowball();
         }
       } catch (err: any) {
         // quiet error
@@ -543,9 +559,14 @@ async function main() {
             const exchange = sig.d.ex || "pump";
             const liquidity = Number(sig.d.lq || 0);
 
-            // Filter Lowcap: MC $2,500 - $100,000 atau progress >= 15% (Almost Bonded/Migrated)
-            const isLowcap = (mc >= 2500 && mc <= 100000) || progress >= 0.15;
-            if (!isLowcap) continue;
+            // Pre-Filter Anti-Spam: Hindari membuang kuota rate limit pada ribuan koin baru lahir (0s, $2 liq, 0 buyers).
+            // Hanya koin dengan traksi awal nyata yang dikirim ke trader inspection:
+            // 1. Almost Bonded (progress 20% - 99%)
+            // 2. Migrated (progress 100% atau Raydium / Meteora)
+            // 3. New Creation bertraksi nyata: progress >= 15% ATAU (MC >= $6,000 & Liq >= $1,000)
+            const hasTraction = (progress >= 0.15) || (mc >= 6000 && liquidity >= 1000);
+            const isTargetLowcap = mc <= 100000;
+            if (!hasTraction || !isTargetLowcap) continue;
 
             const nowSec = Math.floor(Date.now() / 1000);
             const lastEval = trenchesEvaluatedCooldown.get(mint) || 0;
@@ -560,6 +581,10 @@ async function main() {
             }
 
             console.log(`[TRENCHES-WS] 🌊 [${category.toUpperCase()}] ${symbol} (${mint.slice(0, 8)}...) | MC: $${Math.round(mc).toLocaleString()} | Progress: ${(progress * 100).toFixed(0)}% | Liq: $${Math.round(liquidity).toLocaleString()} | Ex: ${exchange}`);
+
+            if (trenchesProcessingQueue.length >= 25) {
+              trenchesProcessingQueue.shift(); // Drop oldest to keep queue ultra-fresh
+            }
 
             trenchesProcessingQueue.push({
               mint,
@@ -619,79 +644,30 @@ async function main() {
 
       console.log(`[LOWCAP-DISCOVERY] Inspecting ${(lowcapTokens as any)?.tokens?.length} tokens (1m, 5m, 1h ranks) in $5k-$100k MC range...`);
 
-      for (const t of ((lowcapTokens as any)?.tokens || []).slice(0, 25)) {
-        try {
-          await new Promise((r) => setTimeout(r, 60));
-          const tradersData = await page.evaluate(async (mint: string) => {
-            try {
-              const res = await fetch(`/vas/api/v1/token_traders/sol/${mint}?limit=50&orderby=profit&direction=desc`, {
-                credentials: "include"
-              });
-              return await res.json().catch(() => null);
-            } catch {
-              return null;
-            }
-          }, t.address);
+      for (const t of ((lowcapTokens as any)?.tokens || []).slice(0, 10)) {
+        if (!t || !t.address) continue;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const lastEval = trenchesEvaluatedCooldown.get(t.address) || 0;
+        if (nowSec - lastEval < 60) continue;
+        trenchesEvaluatedCooldown.set(t.address, nowSec);
 
-          const list = tradersData.data?.list || [];
-          for (const tr of list) {
-            const { isNew, wallet } = snowball.ingestTrader(tr, t.symbol, t.address);
-            if (wallet) {
-              detector.addMonitoredWallet(wallet.address, wallet.tier);
-              const tradeTime = tr.start_holding_at || tr.last_active_timestamp || Math.floor(Date.now() / 1000);
-              const exitTime = tr.end_holding_at ? Number(tr.end_holding_at) : null;
-              const isHolding = (Number(tr.amount_cur || 0) > 0) || !exitTime;
-              const exitDate = exitTime ? new Date(exitTime * 1000) : null;
-              const exitedAtWib = exitDate ? exitDate.toLocaleTimeString("id-ID", {
-                timeZone: "Asia/Jakarta",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false
-              }) + " WIB" : (isHolding ? "HOLDING" : null);
+        if (trenchesProcessingQueue.length >= 25) {
+          trenchesProcessingQueue.shift();
+        }
 
-              const startTs = tr.start_holding_at || tradeTime;
-              const durSec = exitTime ? Math.max(0, exitTime - startTs) : Math.max(0, Math.floor(Date.now() / 1000) - startTs);
-              const durM = Math.floor(durSec / 60);
-              const durS = durSec % 60;
-              const holdingDurationStr = durM > 0 ? `${durM}m ${durS}s` : `${durS}s`;
-
-              const profitUsd = Math.round(Number(tr.profit ?? tr.realized_profit ?? 0));
-              const pnlPercent = Number(((tr.realized_pnl ?? 0) * 100).toFixed(1));
-              const totalCostUsd = Math.round(Number(tr.total_cost ?? tr.cost_cur ?? 0));
-
-              allTrades.push({
-                wallet: wallet.address,
-                tier: wallet.tier,
-                mint: t.address,
-                symbol: t.symbol,
-                side: "buy",
-                timestamp: tradeTime,
-                solAmount: Number(((tr.cost_cur || 100) / 180).toFixed(3)),
-                tokenAmount: tr.buy_amount_cur || 0,
-                txSignature: `gmgn_${wallet.address.slice(0, 6)}_${t.address.slice(0, 6)}`,
-                exitedAt: exitDate ? exitDate.toISOString() : null,
-                exitedAtWib,
-                exitTimestamp: exitTime,
-                holdingDurationSec: durSec,
-                holdingDurationStr,
-                isHolding,
-                profitUsd,
-                pnlPercent,
-                totalCostUsd
-              });
-            }
-          }
-        } catch {}
+        trenchesProcessingQueue.push({
+          mint: t.address,
+          symbol: t.symbol || "UNKNOWN",
+          marketCap: Number(t.market_cap || 0),
+          progress: 0.5,
+          exchange: "swap_rank",
+          liquidity: Number(t.liquidity || 0),
+          category: "swap_rank"
+        });
       }
 
-      snowball.saveSnowball();
-
-      allTrades.sort((a, b) => a.timestamp - b.timestamp);
-      for (const t of allTrades) {
-        await detector.recordTrade(t);
-      }
-      return allTrades.length;
+      processTrenchesQueue().catch(() => {});
+      return trenchesProcessingQueue.length;
     } catch (err: any) {
       console.warn(`[DISCOVERY-CYCLE-WARN] ${err.message}`);
       return 0;
