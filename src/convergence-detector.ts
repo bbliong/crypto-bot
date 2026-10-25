@@ -375,21 +375,24 @@ export class ConvergenceDetector extends EventEmitter {
     let classification: ConvergenceClassification = "ACCUMULATION_WATCH";
     let reason = "";
 
-    if (entryDeltaSec <= 30 && (isLiquidityDrained || maxDropPercent > 35 || (dexInfo?.priceChange24h ?? 0) < -40)) {
+    const isObviousDump = (liquidity > 0 && liquidity < 1000) || maxDropPercent > 50 || (dexInfo?.priceChange24h ?? 0) < -70;
+
+    if (entryDeltaSec <= 30 && (isObviousDump || (!isQualityConvergence && isLiquidityDrained))) {
       classification = "SYNDICATE_DUMP_RISK";
       reason = `Delta entry sangat rapat (${entryDeltaSec}s) dengan indikasi dump likuiditas ($${liquidity.toFixed(0)}) dan drop -${maxDropPercent.toFixed(1)}%`;
       for (const w of uniqueWallets) {
         this.quarantinedWallets.add(w);
       }
-    } else if (
-      entryDeltaSec >= 45 &&
-      liquidity >= 2000 &&
-      (dexInfo?.volume24h ?? 0) >= 3000 &&
-      maxDropPercent < 35 &&
-      isQualityConvergence
-    ) {
-      classification = "GOLDEN_ORGANIC_CONVERGENCE";
-      reason = `Konsensus Tier Mutu (${tierSummary}) lowcap (<$100k): ${uniqueWallets.length} smart wallet akumulasi sehat (${Math.round(entryDeltaSec / 60)}m), likuiditas solid ($${liquidity.toLocaleString()})`;
+    } else if (isQualityConvergence) {
+      // Aturan delta 45s dihilangkan untuk Tier S, A, B:
+      // Delta berapapun (termasuk <= 30s) diizinkan selama bukan dump dan drop tidak parah
+      if ((liquidity >= 2000 || !dexInfo) && maxDropPercent < 45 && (dexInfo?.priceChange24h ?? 0) >= -60) {
+        classification = "GOLDEN_ORGANIC_CONVERGENCE";
+        reason = `Konsensus Tier Mutu S/A/B (${tierSummary}) lowcap (<$100k): ${uniqueWallets.length} smart wallet terdeteksi (Delta: ${entryDeltaSec}s). Aturan delta 45s di-bypass untuk Tier S/A/B. Likuiditas: $${liquidity.toLocaleString()}`;
+      } else {
+        classification = "ACCUMULATION_WATCH";
+        reason = `Tier Mutu S/A/B (${tierSummary}) terdeteksi namun likuiditas belum cukup ($${liquidity.toFixed(0)}) atau drop > 45%`;
+      }
     } else if (entryDeltaSec >= 45 && !isQualityConvergence) {
       classification = "ACCUMULATION_WATCH";
       reason = `Akumulasi terpantau dari trader retail/scout (${tierSummary}). Menunggu konfirmasi smart money Tier S/A/B sebelum eksekusi.`;
