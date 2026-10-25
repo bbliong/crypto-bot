@@ -398,17 +398,33 @@ async function main() {
     try {
       const lowcapTokens = await page.evaluate(async () => {
         try {
-          const r = await fetch("/defi/quotation/v1/rank/sol/swaps/1h?limit=30&min_marketcap=5000&max_marketcap=100000");
-          const j = await r.json().catch(() => null);
-          return j?.data?.rank || [];
-        } catch {
-          return [];
+          const intervals = ["1m", "5m", "1h"];
+          const ranks = await Promise.all(intervals.map(async (iv) => {
+            const res = await fetch(`/defi/quotation/v1/rank/sol/swaps/${iv}?limit=15&min_marketcap=5000&max_marketcap=100000`);
+            const json = await res.json().catch(() => null);
+            return json?.data?.rank || [];
+          }));
+
+          const seen = new Set<string>();
+          const combined: any[] = [];
+          for (const list of ranks) {
+            for (const item of (list || [])) {
+              if (item && item.address && !seen.has(item.address)) {
+                seen.add(item.address);
+                combined.push(item);
+              }
+            }
+          }
+
+          return { tokens: combined, err: null };
+        } catch (err: any) {
+          return { tokens: [], err: err?.message || String(err) };
         }
       });
 
-      console.log(`[LOWCAP-DISCOVERY] Inspecting ${lowcapTokens.length} tokens in $5k-$100k MC range...`);
+      console.log(`[LOWCAP-DISCOVERY] Inspecting ${(lowcapTokens as any)?.tokens?.length} tokens (1m, 5m, 1h ranks) in $5k-$100k MC range...`);
 
-      for (const t of lowcapTokens.slice(0, 20)) {
+      for (const t of ((lowcapTokens as any)?.tokens || []).slice(0, 25)) {
         try {
           await new Promise((r) => setTimeout(r, 60));
           const tradersData = await page.evaluate(async (mint: string) => {
