@@ -41,7 +41,12 @@ async function main() {
   const { chromium } = await import("playwright");
   const browser = await chromium.connectOverCDP("http://127.0.0.1:9223");
   const page = browser.contexts()[0].pages().find(p => p.url().includes("gmgn.ai")) || browser.contexts()[0].pages()[0];
-  console.log(`[CDP] Attached to active GMGN tab: ${page.url()}`);
+  if (!page.url().includes("gmgn.ai/?chain=sol") && page.url() !== "https://gmgn.ai/") {
+    console.log(`[CDP] 🌐 Navigating tab to GMGN Trenches: https://gmgn.ai/?chain=sol`);
+    await page.goto("https://gmgn.ai/?chain=sol", { waitUntil: "commit" }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  console.log(`[CDP] Attached to active GMGN Trenches tab: ${page.url()}`);
 
   const subscribedMints = new Set<string>();
 
@@ -401,6 +406,110 @@ async function main() {
     }
   }
 
+  // Trenches Live WebSocket Queue & Ingestion Engine
+  const trenchesEvaluatedCooldown = new Map<string, number>();
+  const trenchesProcessingQueue: Array<{
+    mint: string;
+    symbol: string;
+    marketCap: number;
+    progress: number;
+    exchange: string;
+    liquidity: number;
+    category: string;
+  }> = [];
+  let isProcessingTrenchesQueue = false;
+
+  async function processTrenchesQueue() {
+    if (isProcessingTrenchesQueue) return;
+    isProcessingTrenchesQueue = true;
+
+    while (trenchesProcessingQueue.length > 0) {
+      const item = trenchesProcessingQueue.shift();
+      if (!item) continue;
+
+      try {
+        await new Promise((r) => setTimeout(r, 60)); // avoid hammering GMGN API
+        const tradersData = await page.evaluate(async (mint: string) => {
+          try {
+            const res = await fetch(`/vas/api/v1/token_traders/sol/${mint}?limit=50&orderby=profit&direction=desc`, {
+              credentials: "include"
+            });
+            return await res.json().catch(() => null);
+          } catch {
+            return null;
+          }
+        }, item.mint);
+
+        const list = tradersData?.data?.list || [];
+        let smartWalletsFound = 0;
+        const allTrades: TradeEvent[] = [];
+
+        for (const tr of list) {
+          const { isNew, wallet } = snowball.ingestTrader(tr, item.symbol, item.mint);
+          if (wallet) {
+            detector.addMonitoredWallet(wallet.address, wallet.tier);
+            if (wallet.tier === "S" || wallet.tier === "A" || wallet.tier === "B") {
+              smartWalletsFound++;
+            }
+            const tradeTime = tr.start_holding_at || tr.last_active_timestamp || Math.floor(Date.now() / 1000);
+            const exitTime = tr.end_holding_at ? Number(tr.end_holding_at) : null;
+            const isHolding = (Number(tr.amount_cur || 0) > 0) || !exitTime;
+            const exitDate = exitTime ? new Date(exitTime * 1000) : null;
+            const exitedAtWib = exitDate ? exitDate.toLocaleTimeString("id-ID", {
+              timeZone: "Asia/Jakarta",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hour12: false
+            }) + " WIB" : (isHolding ? "HOLDING" : null);
+
+            const startTs = tr.start_holding_at || tradeTime;
+            const durSec = exitTime ? Math.max(0, exitTime - startTs) : Math.max(0, Math.floor(Date.now() / 1000) - startTs);
+            const durM = Math.floor(durSec / 60);
+            const durS = durSec % 60;
+            const holdingDurationStr = durM > 0 ? `${durM}m ${durS}s` : `${durS}s`;
+
+            const profitUsd = Math.round(Number(tr.profit ?? tr.realized_profit ?? 0));
+            const pnlPercent = Number(((tr.realized_pnl ?? 0) * 100).toFixed(1));
+            const totalCostUsd = Math.round(Number(tr.total_cost ?? tr.cost_cur ?? 0));
+
+            allTrades.push({
+              wallet: wallet.address,
+              tier: wallet.tier,
+              mint: item.mint,
+              symbol: item.symbol,
+              side: "buy",
+              timestamp: tradeTime,
+              solAmount: Number(((tr.cost_cur || 100) / 180).toFixed(3)),
+              tokenAmount: tr.buy_amount_cur || 0,
+              txSignature: `gmgn_${wallet.address.slice(0, 6)}_${item.mint.slice(0, 6)}`,
+              exitedAt: exitDate ? exitDate.toISOString() : null,
+              exitedAtWib,
+              exitTimestamp: exitTime,
+              holdingDurationSec: durSec,
+              holdingDurationStr,
+              isHolding,
+              profitUsd,
+              pnlPercent,
+              totalCostUsd
+            });
+          }
+        }
+
+        if (smartWalletsFound > 0) {
+          console.log(`[TRENCHES-SMART] 🎯 ${item.symbol} (${item.mint.slice(0, 8)}...): ${smartWalletsFound} Smart Wallet (S/A/B) terdeteksi! [${item.category.toUpperCase()}] MC: $${Math.round(item.marketCap).toLocaleString()}`);
+          allTrades.sort((a, b) => a.timestamp - b.timestamp);
+          for (const t of allTrades) {
+            await detector.recordTrade(t);
+          }
+        }
+      } catch (err: any) {
+        // quiet error
+      }
+    }
+    isProcessingTrenchesQueue = false;
+  }
+
   // Setup CDP WebSocket listener
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Network.enable");
@@ -410,6 +519,8 @@ async function main() {
       const payload = p.response.payloadData;
       if (!payload || !payload.startsWith("{")) return;
       const j = JSON.parse(payload);
+
+      // 1. Tick-by-tick evaluation for subscribed open positions
       if ((j.channel === "token_activity" || j.channel === "token_stat") && Array.isArray(j.data)) {
         for (const item of j.data) {
           const mint = item.a;
@@ -417,6 +528,51 @@ async function main() {
           const price = Number(item.pu || item.p);
           if (!price || isNaN(price) || price <= 0) continue;
           await handleWebSocketTick(mint, price, item);
+        }
+      }
+
+      // 2. Live Trenches Stream: New Creation, Almost Bonded, Migrated
+      if (j.channel === "public_broadcast" && Array.isArray(j.data)) {
+        for (const d of j.data) {
+          if (d.et === "signal" && d.ed?.d?.a) {
+            const sig = d.ed;
+            const mint = sig.d.a;
+            const symbol = sig.d.s || "UNKNOWN";
+            const mc = Number(sig.d.mc || 0);
+            const progress = Number(sig.d.pg || 0);
+            const exchange = sig.d.ex || "pump";
+            const liquidity = Number(sig.d.lq || 0);
+
+            // Filter Lowcap: MC $2,500 - $100,000 atau progress >= 15% (Almost Bonded/Migrated)
+            const isLowcap = (mc >= 2500 && mc <= 100000) || progress >= 0.15;
+            if (!isLowcap) continue;
+
+            const nowSec = Math.floor(Date.now() / 1000);
+            const lastEval = trenchesEvaluatedCooldown.get(mint) || 0;
+            if (nowSec - lastEval < 45) continue; // Cooldown 45 detik per mint
+            trenchesEvaluatedCooldown.set(mint, nowSec);
+
+            let category = "new_creation";
+            if (progress >= 0.20 && progress < 1.00) {
+              category = "almost_bonded";
+            } else if (progress >= 1.00 || exchange !== "pump") {
+              category = "migrated";
+            }
+
+            console.log(`[TRENCHES-WS] 🌊 [${category.toUpperCase()}] ${symbol} (${mint.slice(0, 8)}...) | MC: $${Math.round(mc).toLocaleString()} | Progress: ${(progress * 100).toFixed(0)}% | Liq: $${Math.round(liquidity).toLocaleString()} | Ex: ${exchange}`);
+
+            trenchesProcessingQueue.push({
+              mint,
+              symbol,
+              marketCap: mc,
+              progress,
+              exchange,
+              liquidity,
+              category
+            });
+
+            processTrenchesQueue().catch(() => {});
+          }
         }
       }
     } catch {}
