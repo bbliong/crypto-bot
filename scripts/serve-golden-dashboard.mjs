@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const PORT = 4188;
 const ROOT = process.cwd();
@@ -65,6 +66,37 @@ function loadState() {
       tierBreakdown = cdata.tierBreakdown || null;
       if (cdata.wallets && cdata.wallets.length > 0) {
         cleanWallets = cdata.wallets;
+        const dbPath = join(ROOT, "data", "crypto-bot.sqlite");
+        if (existsSync(dbPath)) {
+          try {
+            const db = new DatabaseSync(dbPath);
+            const audits = db.prepare("SELECT address, win_day_rate, positive_days, negative_days, total_net_pnl, is_ultra, status, audited_at FROM wallet_daily_profit_audits WHERE status = 'PROCESSED'").all();
+            const auditMap = new Map(audits.map(a => [a.address, a]));
+            for (const w of cleanWallets) {
+              const a = auditMap.get(w.address);
+              if (a) {
+                w.dailyAuditStatus = a.status;
+                w.dailyAuditAt = a.audited_at;
+                w.winDayRate = a.win_day_rate;
+                w.posDays60d = a.positive_days;
+                w.negDays60d = a.negative_days;
+                w.pnl60d = a.total_net_pnl;
+                w.isUltra = a.is_ultra === 1;
+                if (a.is_ultra === 1) {
+                  w.tier = "ULTRA";
+                }
+              }
+            }
+            db.close();
+          } catch {}
+        }
+        // Recount tierBreakdown including ULTRA
+        const tb = { ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+        for (const w of cleanWallets) {
+          const t = w.tier || 'D';
+          if (tb[t] !== undefined) tb[t]++;
+        }
+        tierBreakdown = tb;
       }
     } catch {}
   }
@@ -441,6 +473,7 @@ function getDashboardHtml() {
       font-weight: 700;
       letter-spacing: 0.3px;
     }
+    .tier-badge-ultra { background: linear-gradient(135deg, rgba(236, 72, 153, 0.4), rgba(168, 85, 247, 0.4)); color: #f472b6; border: 1px solid #ec4899; box-shadow: 0 0 10px rgba(236, 72, 153, 0.5); font-weight: 800; }
     .tier-badge-sss { background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(245, 158, 11, 0.3)); color: #fbbf24; border: 1px solid #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); font-weight: 800; }
     .tier-badge-ss { background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 800; }
     .tier-badge-s { background: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.4); }
@@ -875,6 +908,11 @@ function getDashboardHtml() {
     <div id="panel-wallets" class="panel">
       <!-- Tier Overview Cards -->
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        <div class="stat-card" style="border-left: 4px solid #ec4899; padding: 14px;">
+          <div style="font-size: 11px; color: #ec4899; font-weight: 700;">🌟 TIER ULTRA (Elite Consistency)</div>
+          <div id="tierCountULTRA" style="font-size: 22px; font-weight: 800; margin-top: 4px; color: #f472b6;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Win-Day &ge; 65% (M1 & M2) &bull; Cuan 60d &ge; $5k</div>
+        </div>
         <div class="stat-card" style="border-left: 4px solid #ef4444; padding: 14px;">
           <div style="font-size: 11px; color: #ef4444; font-weight: 700;">👑 TIER SSS (Apex Alpha)</div>
           <div id="tierCountSSS" style="font-size: 22px; font-weight: 800; margin-top: 4px; color: #fbbf24;">0</div>
@@ -921,12 +959,13 @@ function getDashboardHtml() {
         <div class="card-header" style="display: flex; flex-direction: column; gap: 14px;">
           <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; width: 100%;">
             <div>
-              <div class="card-title">Daftar Smart Trader Berjenjang (Tier SSS &ndash; E)</div>
+              <div class="card-title">Daftar Smart Trader Berjenjang (Tier ULTRA &ndash; E)</div>
               <div id="walletFilterStatus" style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">Menampilkan 0 wallet</div>
             </div>
             <!-- Filter Buttons -->
             <div style="display: flex; flex-wrap: wrap; gap: 6px;">
               <button class="tier-filter-btn active" onclick="filterWallets('ALL', this)">Semua (<span id="btnCountAll">0</span>)</button>
+              <button class="tier-filter-btn" onclick="filterWallets('ULTRA', this)">🌟 Tier ULTRA (<span id="btnCountULTRA">0</span>)</button>
               <button class="tier-filter-btn" onclick="filterWallets('SSS', this)">👑 Tier SSS (<span id="btnCountSSS">0</span>)</button>
               <button class="tier-filter-btn" onclick="filterWallets('SS', this)">💎 Tier SS (<span id="btnCountSS">0</span>)</button>
               <button class="tier-filter-btn" onclick="filterWallets('S', this)">🏆 Tier S (<span id="btnCountS">0</span>)</button>
@@ -1434,6 +1473,7 @@ function getDashboardHtml() {
     function getTierBadgeHtml(tier) {
       const t = (tier || 'D').toUpperCase();
       const map = {
+        ULTRA: '<span class="tier-badge tier-badge-ultra">🌟 TIER ULTRA</span>',
         SSS: '<span class="tier-badge tier-badge-sss">👑 TIER SSS</span>',
         SS: '<span class="tier-badge tier-badge-ss">💎 TIER SS</span>',
         S: '<span class="tier-badge tier-badge-s">🏆 TIER S</span>',
@@ -1455,7 +1495,7 @@ function getDashboardHtml() {
       }
 
       // Update Tier counts in header and filter buttons
-      const counts = state.tierBreakdown || { SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+      const counts = state.tierBreakdown || { ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
       if (!state.tierBreakdown) {
         allList.forEach(w => {
           const t = w.tier || 'D';
@@ -1468,6 +1508,7 @@ function getDashboardHtml() {
         if (el) el.innerText = Number(val || 0).toLocaleString();
       };
 
+      updateEl('tierCountULTRA', counts.ULTRA);
       updateEl('tierCountSSS', counts.SSS);
       updateEl('tierCountSS', counts.SS);
       updateEl('tierCountS', counts.S);
@@ -1478,6 +1519,7 @@ function getDashboardHtml() {
       updateEl('tierCountE', counts.E);
 
       updateEl('btnCountAll', allList.length);
+      updateEl('btnCountULTRA', counts.ULTRA);
       updateEl('btnCountSSS', counts.SSS);
       updateEl('btnCountSS', counts.SS);
       updateEl('btnCountS', counts.S);

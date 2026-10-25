@@ -364,10 +364,10 @@ export class ConvergenceDetector extends EventEmitter {
 
     // Quality Tier Consensus check
     const tiers = walletEntries.map((w) => w.tier || (this.monitoredWallets ? "D" : "A"));
-    const hasTierWhale = tiers.some((t) => ["SSS", "SS", "S"].includes(t));
+    const hasTierWhale = tiers.some((t) => ["ULTRA", "SSS", "SS", "S"].includes(t));
     const hasTierA = tiers.includes("A");
     const tierBCount = tiers.filter((t) => t === "B").length;
-    // Convergence is valid if at least 1 Tier SSS/SS/S or A, OR at least 2 Tier B wallets participate
+    // Convergence is valid if at least 1 Tier ULTRA/SSS/SS/S or A, OR at least 2 Tier B wallets participate
     const isQualityConvergence = hasTierWhale || hasTierA || (tierBCount >= 2);
     const tierSummary = walletEntries.map((w) => `${w.wallet.slice(0, 4)}..[${w.tier || 'D'}]`).join(" + ");
 
