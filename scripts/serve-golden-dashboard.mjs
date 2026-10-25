@@ -55,12 +55,17 @@ function loadState() {
     snowballedCount: cleanWallets.filter(w => w.source === "snowball_runner").length,
     newThisCycle: 0
   };
+  let tierBreakdown = null;
   const curatedPath = join(ROOT, "data", "curated-lowcap-smart-wallets.json");
   if (existsSync(curatedPath)) {
     try {
       const cdata = JSON.parse(readFileSync(curatedPath, "utf8"));
       snowballStats.totalCurated = cdata.totalCurated || (cdata.wallets ? cdata.wallets.length : cleanWallets.length);
       snowballStats.snowballedCount = cdata.snowballedWalletsCount || snowballStats.snowballedCount;
+      tierBreakdown = cdata.tierBreakdown || null;
+      if (cdata.wallets && cdata.wallets.length > 0) {
+        cleanWallets = cdata.wallets;
+      }
     } catch {}
   }
 
@@ -117,6 +122,7 @@ function loadState() {
 
   return {
     cleanWallets,
+    tierBreakdown,
     quarantinedWallets,
     goldenSignals,
     allEvents,
@@ -425,6 +431,43 @@ function getDashboardHtml() {
     .badge-gold { background: var(--amber-bg); color: var(--amber); }
     .badge-red { background: var(--red-bg); color: var(--red); }
     .badge-green { background: var(--green-bg); color: var(--green); }
+
+    /* Tier Badges */
+    .tier-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .tier-badge-s { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .tier-badge-a { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+    .tier-badge-b { background: rgba(6, 182, 212, 0.2); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.4); }
+    .tier-badge-c { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .tier-badge-d { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .tier-badge-e { background: rgba(100, 116, 139, 0.15); color: #64748b; border: 1px solid rgba(100, 116, 139, 0.3); }
+
+    .tier-filter-btn {
+      padding: 6px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .tier-filter-btn:hover {
+      border-color: var(--primary);
+      color: var(--text);
+    }
+    .tier-filter-btn.active {
+      background: rgba(99, 102, 241, 0.25);
+      border-color: #818cf8;
+      color: #fff;
+    }
 
     /* Content Cards */
     .panel { display: none; }
@@ -828,9 +871,53 @@ function getDashboardHtml() {
 
     <!-- TAB 2: CLEAN WALLETS -->
     <div id="panel-wallets" class="panel">
+      <!-- Tier Overview Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        <div class="stat-card" style="border-left: 4px solid #f59e0b; padding: 14px;">
+          <div style="font-size: 11px; color: #f59e0b; font-weight: 700;">🏆 TIER S (Whales / Elite)</div>
+          <div id="tierCountS" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Cuan &ge; $2k &bull; Saldo &ge; 2 SOL</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid #a855f7; padding: 14px;">
+          <div style="font-size: 11px; color: #a855f7; font-weight: 700;">💎 TIER A (Proven Smart)</div>
+          <div id="tierCountA" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">3+ Hits &bull; Cuan &ge; $500</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid #06b6d4; padding: 14px;">
+          <div style="font-size: 11px; color: #06b6d4; font-weight: 700;">⚡ TIER B (Scalpers)</div>
+          <div id="tierCountB" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">3+ Hits &bull; Cuan &ge; $150</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid #10b981; padding: 14px;">
+          <div style="font-size: 11px; color: #10b981; font-weight: 700;">🌱 TIER C (Emerging)</div>
+          <div id="tierCountC" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">2+ Hits &bull; Cuan &ge; $100</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid #94a3b8; padding: 14px;">
+          <div style="font-size: 11px; color: #94a3b8; font-weight: 700;">🎯 TIER D (Punters)</div>
+          <div id="tierCountD" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Single-hit retail / untung 1x</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid #64748b; padding: 14px;">
+          <div style="font-size: 11px; color: #64748b; font-weight: 700;">⏳ TIER E (Dust)</div>
+          <div id="tierCountE" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Saldo &lt; 0.01 SOL / nonaktif</div>
+        </div>
+      </div>
+
       <div class="card">
-        <div class="card-header">
-          <div class="card-title">Daftar Smart Trader Independen Murni (Clean Organic)</div>
+        <div class="card-header" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+          <div class="card-title">Daftar Smart Trader Berjenjang (Tier S &ndash; E)</div>
+          <!-- Filter Buttons -->
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <button class="tier-filter-btn active" onclick="filterWallets('ALL', this)">Semua (<span id="btnCountAll">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('S', this)">🏆 Tier S (<span id="btnCountS">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('A', this)">💎 Tier A (<span id="btnCountA">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('B', this)">⚡ Tier B (<span id="btnCountB">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('C', this)">🌱 Tier C (<span id="btnCountC">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('D', this)">🎯 Tier D (<span id="btnCountD">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('E', this)">⏳ Tier E (<span id="btnCountE">0</span>)</button>
+          </div>
         </div>
         <div style="overflow-x: auto;">
           <table>
@@ -838,6 +925,8 @@ function getDashboardHtml() {
               <tr>
                 <th># Rank</th>
                 <th>Alamat Wallet</th>
+                <th>Tier Mutu</th>
+                <th>Konsistensi</th>
                 <th>Win Rate (30D)</th>
                 <th>Profit Bersih (30D)</th>
                 <th>Saldo SOL</th>
@@ -846,7 +935,7 @@ function getDashboardHtml() {
               </tr>
             </thead>
             <tbody id="tbodyWallets">
-              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Memuat wallet...</td></tr>
+              <tr><td colspan="9" style="text-align: center; color: var(--text-muted);">Memuat wallet...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1154,10 +1243,12 @@ function getDashboardHtml() {
             }
 
             const costStr = we.totalCostUsd ? '<span class="wallet-cost-wrap" title="Modal beli: $' + we.totalCostUsd + '">💵 $' + we.totalCostUsd + '</span>' : '';
+            const tierVal = (we.tier || (walletMap.get(we.wallet)?.tier) || 'D').toUpperCase();
+            const tierBadge = '<span class="tier-badge tier-badge-' + tierVal.toLowerCase() + '" style="font-size:9px;padding:1px 5px;margin-left:4px;vertical-align:middle;">T-' + tierVal + '</span>';
 
             return '<div class="wallet-card-entry">' +
               '<div class="wallet-row-top">' +
-                '<span class="mono copyable wallet-addr" data-copy="' + we.wallet + '" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + '</span>' +
+                '<span class="mono copyable wallet-addr" data-copy="' + we.wallet + '" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Klik untuk copy: ' + we.wallet + '">#' + (widx + 1) + ' ' + shortAddr + tierBadge + '</span>' +
                 deltaBadge +
                 tokenProfitBadge +
               '</div>' +
@@ -1231,18 +1322,82 @@ function getDashboardHtml() {
       }).join('');
     }
 
+    let activeTierFilter = 'ALL';
+
+    function filterWallets(tier, btn) {
+      activeTierFilter = tier;
+      document.querySelectorAll('.tier-filter-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderWallets();
+    }
+
+    function getTierBadgeHtml(tier) {
+      const t = (tier || 'D').toUpperCase();
+      const map = {
+        S: '<span class="tier-badge tier-badge-s">🏆 TIER S</span>',
+        A: '<span class="tier-badge tier-badge-a">💎 TIER A</span>',
+        B: '<span class="tier-badge tier-badge-b">⚡ TIER B</span>',
+        C: '<span class="tier-badge tier-badge-c">🌱 TIER C</span>',
+        D: '<span class="tier-badge tier-badge-d">🎯 TIER D</span>',
+        E: '<span class="tier-badge tier-badge-e">⏳ TIER E</span>'
+      };
+      return map[t] || map.D;
+    }
+
     function renderWallets() {
       const tbody = document.getElementById('tbodyWallets');
-      if (!state.cleanWallets || state.cleanWallets.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Tidak ada data wallet.</td></tr>';
+      const allList = state.cleanWallets || [];
+      if (allList.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-muted);">Tidak ada data wallet.</td></tr>';
         return;
       }
 
-      tbody.innerHTML = state.cleanWallets.slice(0, 100).map((w, idx) => {
+      // Update Tier counts in header and filter buttons
+      const counts = state.tierBreakdown || { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+      if (!state.tierBreakdown) {
+        allList.forEach(w => {
+          const t = w.tier || 'D';
+          if (counts[t] !== undefined) counts[t]++;
+        });
+      }
+
+      const updateEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = Number(val || 0).toLocaleString();
+      };
+
+      updateEl('tierCountS', counts.S);
+      updateEl('tierCountA', counts.A);
+      updateEl('tierCountB', counts.B);
+      updateEl('tierCountC', counts.C);
+      updateEl('tierCountD', counts.D);
+      updateEl('tierCountE', counts.E);
+
+      updateEl('btnCountAll', allList.length);
+      updateEl('btnCountS', counts.S);
+      updateEl('btnCountA', counts.A);
+      updateEl('btnCountB', counts.B);
+      updateEl('btnCountC', counts.C);
+      updateEl('btnCountD', counts.D);
+      updateEl('btnCountE', counts.E);
+
+      let filtered = allList;
+      if (activeTierFilter !== 'ALL') {
+        filtered = allList.filter(w => (w.tier || 'D') === activeTierFilter);
+      }
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-muted);">Tidak ada wallet pada Tier ' + activeTierFilter + '.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.slice(0, 100).map((w, idx) => {
         const isSnowball = w.source === 'snowball_runner';
+        const tierBadge = getTierBadgeHtml(w.tier);
+        const hitsBadge = \`<span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3);">\${w.hitCount || 1} koin</span>\`;
         const badge = isSnowball
-          ? \`<span class="badge" style="background: rgba(56,189,248,0.18); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3);">❄️ SNOWBALL (\${w.hitCount || 1}x)</span>\`
-          : \`<span class="badge badge-green">VERIFIED INDEPENDENT</span>\`;
+          ? \`<span class="badge" style="background: rgba(56,189,248,0.12); color: #7dd3fc;">❄️ SNOWBALL</span>\`
+          : \`<span class="badge badge-green">VERIFIED ELITE</span>\`;
         const profit = w.pnl30d !== undefined ? w.pnl30d : 0;
         return \`
           <tr>
@@ -1250,12 +1405,14 @@ function getDashboardHtml() {
             <td>
               <span class="mono copyable" data-copy="\${w.address}" onclick="navigator.clipboard.writeText(this.dataset.copy)" title="Copy">\${w.address}</span>
             </td>
+            <td>\${tierBadge}</td>
+            <td>\${hitsBadge}</td>
             <td><strong style="color: var(--green);">\${w.winrate30d ?? (w.winRate ? (w.winRate * 100).toFixed(0) : 55)}%</strong></td>
             <td>+\$\${Number(profit).toLocaleString()}</td>
             <td><strong>\${w.solBalance ? Number(w.solBalance).toFixed(1) : '0.0'} SOL</strong></td>
             <td>\${badge}</td>
             <td>
-              <a href="https://solscan.io/account/\${w.address}" target="_blank" class="link">Solscan</a> · 
+              <a href="https://solscan.io/account/\${w.address}" target="_blank" class="link">Solscan</a> &bull; 
               <a href="https://gmgn.ai/sol/address/\${w.address}" target="_blank" class="link">GMGN</a>
             </td>
           </tr>

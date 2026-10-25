@@ -1,6 +1,49 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+export type WalletTier = "S" | "A" | "B" | "C" | "D" | "E";
+
+export function computeWalletTier(wallet: {
+  source?: string;
+  pnl30d?: number;
+  hitCount?: number;
+  solBalance?: number;
+  score?: number;
+}): WalletTier {
+  const pnl = Number(wallet.pnl30d || 0);
+  const hits = Number(wallet.hitCount || 1);
+  const bal = Number(wallet.solBalance || 0);
+  const isCurator = wallet.source === "gmgn_curator";
+
+  // Tier S: Whales / Curated Elite (Top conviction)
+  if ((isCurator && pnl >= 2000) || (hits >= 5 && pnl >= 2000 && bal >= 2.0)) {
+    return "S";
+  }
+
+  // Tier A: Proven Multi-Token Smart Money
+  if (isCurator || (hits >= 3 && pnl >= 500 && bal >= 0.5)) {
+    return "A";
+  }
+
+  // Tier B: Consistent Scalpers / Active Scouts (3+ tokens)
+  if (hits >= 3 && pnl >= 150 && bal >= 0.1) {
+    return "B";
+  }
+
+  // Tier C: Emerging / Developing (at least 2 tokens)
+  if (hits >= 2 && pnl >= 100 && bal >= 0.05) {
+    return "C";
+  }
+
+  // Tier D: Single-Hit / Retail Punter
+  if (pnl >= 50 && bal >= 0.01) {
+    return "D";
+  }
+
+  // Tier E: Dust / Burner / Inactive
+  return "E";
+}
+
 export interface SnowballWallet {
   address: string;
   score: number;
@@ -12,6 +55,7 @@ export interface SnowballWallet {
   hitCount: number;
   firstSeenAt: string;
   lastActiveAt: string;
+  tier: WalletTier;
 }
 
 export interface SnowballStats {
@@ -55,6 +99,7 @@ export class SnowballCollector {
         const list: any[] = data.wallets || (Array.isArray(data) ? data : []);
         for (const w of list) {
           if (!w.address || this.quarantinedSet.has(w.address)) continue;
+          const tier = w.tier || computeWalletTier(w);
           this.walletsMap.set(w.address, {
             address: w.address,
             score: w.score || 70,
@@ -65,7 +110,8 @@ export class SnowballCollector {
             successfulTokens: Array.isArray(w.successfulTokens) ? w.successfulTokens : [],
             hitCount: w.hitCount || 1,
             firstSeenAt: w.firstSeenAt || new Date().toISOString(),
-            lastActiveAt: w.lastActiveAt || new Date().toISOString()
+            lastActiveAt: w.lastActiveAt || new Date().toISOString(),
+            tier
           });
         }
       } catch {}
@@ -100,6 +146,9 @@ export class SnowballCollector {
       if (tokenSymbol && !existing.successfulTokens.includes(tokenSymbol)) {
         existing.successfulTokens.push(tokenSymbol);
       }
+      existing.pnl30d = Math.round(existing.pnl30d + profit);
+      if (solBalance > 0) existing.solBalance = Number(solBalance.toFixed(2));
+      existing.tier = computeWalletTier(existing);
       this.hitsThisRun++;
       return { isNew: false, wallet: existing };
     }
@@ -116,8 +165,10 @@ export class SnowballCollector {
       successfulTokens: tokenSymbol ? [tokenSymbol] : [tokenMint.slice(0, 8)],
       hitCount: 1,
       firstSeenAt: nowIso,
-      lastActiveAt: nowIso
+      lastActiveAt: nowIso,
+      tier: "D"
     };
+    newWallet.tier = computeWalletTier(newWallet);
 
     this.walletsMap.set(address, newWallet);
     this.newThisRun++;
@@ -126,19 +177,39 @@ export class SnowballCollector {
 
   public saveSnowball(): { totalCurated: number; newSnowballed: number } {
     const list = Array.from(this.walletsMap.values());
-    // Sort by hit count and score
-    list.sort((a, b) => (b.hitCount * 100 + b.score) - (a.hitCount * 100 + a.score));
+    // Refresh tiers for all wallets
+    const tierCounts = { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+    for (const w of list) {
+      w.tier = computeWalletTier(w);
+      tierCounts[w.tier]++;
+    }
+
+    // Sort by tier weight, hit count, and score
+    const tierWeight = { S: 5, A: 4, B: 3, C: 2, D: 1, E: 0 };
+    list.sort((a, b) => {
+      const wa = tierWeight[a.tier] || 0;
+      const wb = tierWeight[b.tier] || 0;
+      if (wa !== wb) return wb - wa;
+      return (b.hitCount * 100 + b.score) - (a.hitCount * 100 + a.score);
+    });
 
     // Save curated wallets JSON
     const payload = {
       updatedAt: new Date().toISOString(),
       totalCurated: list.length,
       snowballedWalletsCount: list.filter(w => w.source === "snowball_runner").length,
+      tierBreakdown: tierCounts,
       criteria: {
         target: "Lowcap / Launchpad / Pump.fun specialists & Snipers",
-        minProfit: "$50+ USD per verified lowcap runner",
-        antiSyndicate: "Auto-quarantined on pump-and-dump",
-        mode: "100% Free GMGN Auto-Collector Snowball"
+        tiers: {
+          S: "Whale / Curated Elite (PnL >= $2k & Bal >= 2 SOL)",
+          A: "Proven Smart Money (3+ hits, PnL >= $500, Bal >= 0.5 SOL)",
+          B: "Consistent Scouts (3+ hits, PnL >= $150, Bal >= 0.1 SOL)",
+          C: "Emerging (2+ hits, PnL >= $100, Bal >= 0.05 SOL)",
+          D: "Single-Hit Retail / Lucky Punter",
+          E: "Dust / Burner / Inactive"
+        },
+        executionMinTier: "Tier B (Hanya Tier S, A, B yang memicu Auto-Buy)"
       },
       wallets: list
     };
@@ -153,6 +224,7 @@ export class SnowballCollector {
     if (existsSync(this.auditPath)) {
       try {
         const auditData = JSON.parse(readFileSync(this.auditPath, "utf8"));
+        auditData.tierBreakdown = tierCounts;
         auditData.cleanOrganicWallets = list.map(w => ({
           address: w.address,
           winrate30d: w.winrate30d,
@@ -160,7 +232,8 @@ export class SnowballCollector {
           solBalance: w.solBalance,
           score: w.score,
           hitCount: w.hitCount,
-          source: w.source
+          source: w.source,
+          tier: w.tier
         }));
         writeFileSync(this.auditPath, JSON.stringify(auditData, null, 2));
       } catch (e: any) {
@@ -180,6 +253,10 @@ export class SnowballCollector {
       newSnowballedThisRun: this.newThisRun,
       knownHitsThisRun: this.hitsThisRun
     };
+  }
+
+  public getWallet(address: string): SnowballWallet | undefined {
+    return this.walletsMap.get(address);
   }
 
   public getAllWallets(): SnowballWallet[] {

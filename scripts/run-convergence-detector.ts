@@ -16,16 +16,22 @@ async function main() {
   const defaultStake = Number(process.env.PAPER_STAKE_USD || 5);
   const paperLane = new GoldenConvergencePaperLane({ stakePerTradeUsd: defaultStake });
 
-  // 1. Initialize Snowball Collector and Load Clean Wallets
+  // 1. Initialize Snowball Collector and Load Clean Wallets with Tiers
   const snowball = new SnowballCollector();
+  const allWallets = snowball.getAllWallets();
+  const walletTiers = new Map<string, any>();
+  for (const w of allWallets) {
+    walletTiers.set(w.address, w.tier);
+  }
   let cleanWallets: string[] = snowball.getAllAddresses();
-  console.log(`[INIT] Loaded ${cleanWallets.length} clean organic wallets from Snowball Collector.`);
+  console.log(`[INIT] Loaded ${cleanWallets.length} clean organic wallets from Snowball Collector (Tiers S-E).`);
 
-  // 2. Initialize Detector with strict Lowcap boundary (< $100k MC, price < $0.50)
+  // 2. Initialize Detector with strict Lowcap boundary (< $100k MC, price < $0.50) and Wallet Tiers
   const detector = new ConvergenceDetector({
     timeWindowSec: 7200, // 2 hours sliding window for organic multi-wallet accumulation
     cdpUrl: "http://127.0.0.1:9223",
     monitoredWallets: cleanWallets,
+    walletTiers,
     outputFile: "data/convergence-monitor-events.json",
     maxMarketCapUsd: 100_000, // Hard limit: < $100k Lowcaps only
     maxPriceUsd: 0.50 // Hard limit: filter out tokenized stocks ($200+) and large caps
@@ -107,6 +113,16 @@ async function main() {
     const entryMcap = report.dexInfo?.marketCapUsd || 15000;
 
     // Strict Anti-Syndicate & Quality Gates:
+    // 0. Quality Tier Consensus Gate: Wajib melibatkan Smart Money nyata (min 1x Tier S/A atau 2x Tier B)
+    const tiers = (report.walletEntries || []).map((w: any) => w.tier || "D");
+    const hasTierS = tiers.includes("S");
+    const hasTierA = tiers.includes("A");
+    const tierBCount = tiers.filter((t: string) => t === "B").length;
+    if (!hasTierS && !hasTierA && tierBCount < 2) {
+      console.log(`[GATE-REJECT] 🎯 Sinyal ${report.symbol} ditolak: Kombinasi Tier [${tiers.join("+")}] belum memenuhi standar (min 1x Tier S/A atau 2x Tier B)`);
+      return false;
+    }
+
     // 1. Delta WAJIB >= 180 detik (tolak mutlak bundler / sindikat <= 30s)
     // 2. Likuiditas >= $2,000 dan tidak drained
     // 3. Status GOLDEN_ORGANIC_CONVERGENCE atau (delta >= 180s && cuanWallets >= 2)
@@ -162,8 +178,8 @@ async function main() {
       entryPriceUsd: entryPrice,
       entryMcapUsd: entryMcap,
       entryTimestamp: executionNowSec,
-      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      wallet1: { address: w1.wallet, tier: w1.tier, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, tier: w2.tier, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
       walletEntries: report.walletEntries || [],
       realSwapRouteBuy: realBuyRoute?.ok ? {
         exchange: realBuyRoute.routeData?.exchange,
@@ -174,7 +190,7 @@ async function main() {
       } : undefined
     });
     if (posScalp) {
-      console.log(`[PAPER-BUY] ⚡ Opened Scalp Bot position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      console.log(`[PAPER-BUY] ⚡ Opened Scalp Bot position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) [Tier: ${w1.tier || 'D'}+${w2.tier || 'D'}] | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
     }
 
     // 2. Lane B: Golden Moonbag Runner (+50% TP1, +120% TP2 / -15% SL / Trailing 10% / Max 60m)
@@ -185,8 +201,8 @@ async function main() {
       entryPriceUsd: entryPrice,
       entryMcapUsd: entryMcap,
       entryTimestamp: executionNowSec,
-      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      wallet1: { address: w1.wallet, tier: w1.tier, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, tier: w2.tier, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
       walletEntries: report.walletEntries || [],
       realSwapRouteBuy: realBuyRoute?.ok ? {
         exchange: realBuyRoute.routeData?.exchange,
@@ -197,7 +213,7 @@ async function main() {
       } : undefined
     });
     if (posMoon) {
-      console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      console.log(`[PAPER-BUY] 🚀 Opened Moonbag Runner position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) [Tier: ${w1.tier || 'D'}+${w2.tier || 'D'}] | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
     }
 
     // 3. Lane C: Golden Quick Micro-Scalp (+15% TP / -8% SL / Trailing 3% dari +10% / Max 15m)
@@ -208,8 +224,8 @@ async function main() {
       entryPriceUsd: entryPrice,
       entryMcapUsd: entryMcap,
       entryTimestamp: executionNowSec,
-      wallet1: { address: w1.wallet, enteredAtWib: w1.enteredAtWib },
-      wallet2: { address: w2.wallet, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
+      wallet1: { address: w1.wallet, tier: w1.tier, enteredAtWib: w1.enteredAtWib },
+      wallet2: { address: w2.wallet, tier: w2.tier, enteredAtWib: w2.enteredAtWib, deltaSecFromFirst: w2.deltaSecFromFirst },
       walletEntries: report.walletEntries || [],
       realSwapRouteBuy: realBuyRoute?.ok ? {
         exchange: realBuyRoute.routeData?.exchange,
@@ -220,7 +236,7 @@ async function main() {
       } : undefined
     });
     if (posMicro) {
-      console.log(`[PAPER-BUY] 🎯 Opened Quick Micro-Scalp position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
+      console.log(`[PAPER-BUY] 🎯 Opened Quick Micro-Scalp position on ${report.symbol} at Wallet #2 entry (${w2.enteredAtWib}) [Tier: ${w1.tier || 'D'}+${w2.tier || 'D'}] | Stake: $${stakeAmount} | MC: $${Math.round(entryMcap).toLocaleString()}`);
     }
 
     if (posScalp || posMoon || posMicro) {
@@ -242,7 +258,8 @@ async function main() {
         const deltaStr = we.deltaSecFromFirst === 0 ? "First Pioneer (0s)" : `+${Math.round(we.deltaSecFromFirst / 60)}m (${we.deltaSecFromFirst}s)`;
         const exitStr = we.exitedAtWib ? (we.isHolding ? `Exit: HOLDING` : `Exit: ${we.exitedAtWib} (${we.holdingDurationStr || '-'})`) : "";
         const profitStr = we.profitUsd !== null && we.profitUsd !== undefined ? ` | Cuan: ${we.profitUsd >= 0 ? '+' : ''}$${we.profitUsd.toLocaleString()} (${we.pnlPercent || 0}%)` : "";
-        console.log(`     ${idx + 1}. ${we.wallet.slice(0, 8)}...${we.wallet.slice(-6)} | Masuk: ${we.enteredAtWib} | ${exitStr}${profitStr} | Selisih: ${deltaStr}`);
+        const tierBadge = `[Tier ${we.tier || 'D'}]`;
+        console.log(`     ${idx + 1}. ${tierBadge} ${we.wallet.slice(0, 8)}...${we.wallet.slice(-6)} | Masuk: ${we.enteredAtWib} | ${exitStr}${profitStr} | Selisih: ${deltaStr}`);
       }
     }
     console.log(`   Entry Delta: ~${Math.round(report.entryDeltaSec / 60)} menit`);
@@ -442,7 +459,7 @@ async function main() {
           for (const tr of list) {
             const { isNew, wallet } = snowball.ingestTrader(tr, t.symbol, t.address);
             if (wallet) {
-              detector.addMonitoredWallet(wallet.address);
+              detector.addMonitoredWallet(wallet.address, wallet.tier);
               const tradeTime = tr.start_holding_at || tr.last_active_timestamp || Math.floor(Date.now() / 1000);
               const exitTime = tr.end_holding_at ? Number(tr.end_holding_at) : null;
               const isHolding = (Number(tr.amount_cur || 0) > 0) || !exitTime;
@@ -467,6 +484,7 @@ async function main() {
 
               allTrades.push({
                 wallet: wallet.address,
+                tier: wallet.tier,
                 mint: t.address,
                 symbol: t.symbol,
                 side: "buy",

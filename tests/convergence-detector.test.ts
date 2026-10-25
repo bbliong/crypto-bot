@@ -214,3 +214,101 @@ test("ConvergenceDetector - Rejects tokens with MC > 100k or price > $0.50 (stoc
 
   assert.equal(convergenceEmitted, false, "Large cap / stock token must NOT trigger convergence");
 });
+
+test("ConvergenceDetector - Tier S/A/B triggers Golden Convergence while Tier D+D is demoted to Accumulation Watch", async () => {
+  const detector = new ConvergenceDetector({
+    timeWindowSec: 1800,
+    monitoredWallets: ["WhaleS", "RetailD1", "RetailD2", "ScalperB1", "ScalperB2"]
+  });
+  detector.setWalletTier("WhaleS", "S");
+  detector.setWalletTier("RetailD1", "D");
+  detector.setWalletTier("RetailD2", "D");
+  detector.setWalletTier("ScalperB1", "B");
+  detector.setWalletTier("ScalperB2", "B");
+
+  const now = 1729650000;
+
+  detector.setDexFetcher(async (mint: string): Promise<DexTokenInfo | null> => {
+    return {
+      mint,
+      symbol: "PUMP",
+      name: "Pump Token",
+      dexId: "pumpswap",
+      priceUsd: 0.0001,
+      liquidityUsd: 10000,
+      fdv: 40000,
+      volume24h: 20000,
+      priceChange24h: 50
+    };
+  });
+  detector.setCandleFetcher(async () => []);
+
+  // 1. Two Tier D punters meet (Birthday paradox) -> should NOT be GOLDEN_ORGANIC_CONVERGENCE
+  await detector.recordTrade({
+    wallet: "RetailD1",
+    mint: "TokenNoise11111111111111111111111111111111",
+    symbol: "NOISE",
+    side: "buy",
+    timestamp: now - 300,
+    solAmount: 0.1
+  });
+
+  const repNoise = await detector.recordTrade({
+    wallet: "RetailD2",
+    mint: "TokenNoise11111111111111111111111111111111",
+    symbol: "NOISE",
+    side: "buy",
+    timestamp: now,
+    solAmount: 0.1
+  });
+
+  assert.ok(repNoise);
+  assert.equal(repNoise.classification, "ACCUMULATION_WATCH", "D+D punters should be demoted to ACCUMULATION_WATCH");
+  assert.ok(repNoise.reason.includes("retail/scout"));
+
+  // 2. Whale Tier S + Retail D2 -> SHOULD trigger GOLDEN_ORGANIC_CONVERGENCE
+  await detector.recordTrade({
+    wallet: "WhaleS",
+    mint: "TokenGolden1111111111111111111111111111111",
+    symbol: "GOLD",
+    side: "buy",
+    timestamp: now - 300,
+    solAmount: 5.0
+  });
+
+  const repGold = await detector.recordTrade({
+    wallet: "RetailD2",
+    mint: "TokenGolden1111111111111111111111111111111",
+    symbol: "GOLD",
+    side: "buy",
+    timestamp: now,
+    solAmount: 0.5
+  });
+
+  assert.ok(repGold);
+  assert.equal(repGold.classification, "GOLDEN_ORGANIC_CONVERGENCE", "Whale Tier S + Retail D must trigger Golden Convergence");
+  assert.equal(repGold.walletEntries?.[0].tier, "S");
+  assert.equal(repGold.walletEntries?.[1].tier, "D");
+
+  // 3. Scalper B1 + Scalper B2 -> SHOULD trigger GOLDEN_ORGANIC_CONVERGENCE
+  await detector.recordTrade({
+    wallet: "ScalperB1",
+    mint: "TokenScalp11111111111111111111111111111111",
+    symbol: "SCALP",
+    side: "buy",
+    timestamp: now - 300,
+    solAmount: 1.0
+  });
+
+  const repScalp = await detector.recordTrade({
+    wallet: "ScalperB2",
+    mint: "TokenScalp11111111111111111111111111111111",
+    symbol: "SCALP",
+    side: "buy",
+    timestamp: now,
+    solAmount: 1.0
+  });
+
+  assert.ok(repScalp);
+  assert.equal(repScalp.classification, "GOLDEN_ORGANIC_CONVERGENCE", "Two Tier B scalpers must trigger Golden Convergence");
+});

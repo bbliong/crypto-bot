@@ -7,6 +7,9 @@ import {
   DEFAULT_SWAP_WALLET,
   type SwapRouteResult,
 } from "./browser-swap-route.js";
+import type { WalletTier } from "./snowball-collector.js";
+
+export type { WalletTier };
 
 export interface TradeEvent {
   wallet: string;
@@ -18,6 +21,7 @@ export interface TradeEvent {
   tokenAmount?: number;
   priceUsd?: number;
   txSignature?: string;
+  tier?: WalletTier;
   exitedAt?: string | null;
   exitedAtWib?: string | null;
   exitTimestamp?: number | null;
@@ -57,6 +61,7 @@ export type ConvergenceClassification =
 
 export interface WalletEntryDetail {
   wallet: string;
+  tier?: WalletTier;
   enteredAt: string; // ISO 8601
   enteredAtWib: string; // Formatted WIB time (UTC+7)
   timestamp: number; // Unix timestamp in seconds
@@ -100,6 +105,7 @@ export interface ConvergenceDetectorOptions {
   timeWindowSec?: number; // default: 1800 (30 mins)
   cdpUrl?: string; // default: 'http://127.0.0.1:9223'
   monitoredWallets?: string[];
+  walletTiers?: Record<string, WalletTier> | Map<string, WalletTier>;
   outputFile?: string;
   maxMarketCapUsd?: number; // default: 100000 ($100k max for micro/lowcaps)
   maxPriceUsd?: number; // default: 0.50 (filters out tokenized stocks like TTWO $208)
@@ -109,6 +115,7 @@ export class ConvergenceDetector extends EventEmitter {
   private timeWindowSec: number;
   private cdpUrl: string;
   private monitoredWallets: Set<string> | null = null;
+  private walletTiers = new Map<string, WalletTier>();
   private quarantinedWallets = new Set<string>();
   private tradesByMint = new Map<string, TradeEvent[]>();
   private evaluatedEvents = new Map<string, number>(); // mint -> timestamp evaluated
@@ -139,6 +146,17 @@ export class ConvergenceDetector extends EventEmitter {
     if (options.monitoredWallets && options.monitoredWallets.length > 0) {
       this.monitoredWallets = new Set(options.monitoredWallets);
     }
+    if (options.walletTiers) {
+      if (options.walletTiers instanceof Map) {
+        for (const [addr, tier] of options.walletTiers.entries()) {
+          this.walletTiers.set(addr, tier);
+        }
+      } else {
+        for (const [addr, tier] of Object.entries(options.walletTiers)) {
+          this.walletTiers.set(addr, tier);
+        }
+      }
+    }
   }
 
   public setDexFetcher(fn: (mint: string) => Promise<DexTokenInfo | null>): void {
@@ -153,16 +171,31 @@ export class ConvergenceDetector extends EventEmitter {
     return this.quarantinedWallets.has(wallet);
   }
 
-  public addMonitoredWallet(address: string): void {
+  public setWalletTier(address: string, tier: WalletTier): void {
+    this.walletTiers.set(address, tier);
+  }
+
+  public getWalletTier(address: string): WalletTier {
+    return this.walletTiers.get(address) || (this.monitoredWallets ? "D" : "A");
+  }
+
+  public addMonitoredWallet(address: string, tier?: WalletTier): void {
     if (!this.monitoredWallets) {
       this.monitoredWallets = new Set();
     }
     this.monitoredWallets.add(address);
+    if (tier) {
+      this.walletTiers.set(address, tier);
+    }
   }
 
-  public addMonitoredWallets(addresses: string[]): void {
-    for (const a of addresses) {
-      this.addMonitoredWallet(a);
+  public addMonitoredWallets(wallets: { address: string; tier?: WalletTier }[] | string[]): void {
+    for (const item of wallets) {
+      if (typeof item === "string") {
+        this.addMonitoredWallet(item);
+      } else {
+        this.addMonitoredWallet(item.address, item.tier);
+      }
     }
   }
 
@@ -257,8 +290,11 @@ export class ConvergenceDetector extends EventEmitter {
         hour12: false
       }) + " WIB";
 
+      const tier: WalletTier = t.tier || this.walletTiers.get(t.wallet) || (this.monitoredWallets ? "D" : "A");
+
       return {
         wallet: t.wallet,
+        tier,
         enteredAt: date.toISOString(),
         enteredAtWib: wibStr,
         timestamp: t.timestamp,
@@ -326,6 +362,15 @@ export class ConvergenceDetector extends EventEmitter {
     const liquidity = dexInfo?.liquidityUsd ?? 0;
     const isLiquidityDrained = liquidity < 5000;
 
+    // Quality Tier Consensus check
+    const tiers = walletEntries.map((w) => w.tier || (this.monitoredWallets ? "D" : "A"));
+    const hasTierS = tiers.includes("S");
+    const hasTierA = tiers.includes("A");
+    const tierBCount = tiers.filter((t) => t === "B").length;
+    // Convergence is valid if at least 1 Tier S or A, OR at least 2 Tier B wallets participate
+    const isQualityConvergence = hasTierS || hasTierA || (tierBCount >= 2);
+    const tierSummary = walletEntries.map((w) => `${w.wallet.slice(0, 4)}..[${w.tier || 'D'}]`).join(" + ");
+
     // Classification Decision
     let classification: ConvergenceClassification = "ACCUMULATION_WATCH";
     let reason = "";
@@ -340,13 +385,17 @@ export class ConvergenceDetector extends EventEmitter {
       entryDeltaSec >= 180 &&
       liquidity >= 2000 &&
       (dexInfo?.volume24h ?? 0) >= 5000 &&
-      maxDropPercent < 35
+      maxDropPercent < 35 &&
+      isQualityConvergence
     ) {
       classification = "GOLDEN_ORGANIC_CONVERGENCE";
-      reason = `Konsensus organik lowcap (<$100k): ${uniqueWallets.length} wallet independen akumulasi dengan delta sehat (${Math.round(entryDeltaSec / 60)}m), likuiditas solid ($${liquidity.toLocaleString()})`;
+      reason = `Konsensus Tier Mutu (${tierSummary}) lowcap (<$100k): ${uniqueWallets.length} smart wallet akumulasi sehat (${Math.round(entryDeltaSec / 60)}m), likuiditas solid ($${liquidity.toLocaleString()})`;
+    } else if (entryDeltaSec >= 180 && !isQualityConvergence) {
+      classification = "ACCUMULATION_WATCH";
+      reason = `Akumulasi terpantau dari trader retail/scout (${tierSummary}). Menunggu konfirmasi smart money Tier S/A/B sebelum eksekusi.`;
     } else {
       classification = "ACCUMULATION_WATCH";
-      reason = `Lowcap watch: ${uniqueWallets.length} wallet masuk bersamaan dalam ${Math.round(entryDeltaSec / 60)} menit. Likuiditas: $${liquidity.toLocaleString()}`;
+      reason = `Lowcap watch (${tierSummary}): ${uniqueWallets.length} wallet masuk bersamaan dalam ${Math.round(entryDeltaSec / 60)} menit. Likuiditas: $${liquidity.toLocaleString()}`;
     }
 
     const report: ConvergenceReport = {
