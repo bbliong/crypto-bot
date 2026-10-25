@@ -364,11 +364,11 @@ export class ConvergenceDetector extends EventEmitter {
 
     // Quality Tier Consensus check
     const tiers = walletEntries.map((w) => w.tier || (this.monitoredWallets ? "D" : "A"));
-    const hasTierS = tiers.includes("S");
+    const hasTierWhale = tiers.some((t) => ["SSS", "SS", "S"].includes(t));
     const hasTierA = tiers.includes("A");
     const tierBCount = tiers.filter((t) => t === "B").length;
-    // Convergence is valid if at least 1 Tier S or A, OR at least 2 Tier B wallets participate
-    const isQualityConvergence = hasTierS || hasTierA || (tierBCount >= 2);
+    // Convergence is valid if at least 1 Tier SSS/SS/S or A, OR at least 2 Tier B wallets participate
+    const isQualityConvergence = hasTierWhale || hasTierA || (tierBCount >= 2);
     const tierSummary = walletEntries.map((w) => `${w.wallet.slice(0, 4)}..[${w.tier || 'D'}]`).join(" + ");
 
     // Classification Decision
@@ -392,18 +392,18 @@ export class ConvergenceDetector extends EventEmitter {
         this.quarantinedWallets.add(w);
       }
     } else if (isQualityConvergence) {
-      // Aturan delta 45s dihilangkan untuk Tier S, A, B:
+      // Aturan delta 45s dihilangkan untuk Tier SSS, SS, S, A, B:
       // Delta berapapun (termasuk <= 30s) diizinkan selama bukan dump dan drop tidak parah
       if ((liquidity >= 2000 || !dexInfo) && maxDropPercent < 45 && (dexInfo?.priceChange24h ?? 0) >= -60) {
         classification = "GOLDEN_ORGANIC_CONVERGENCE";
-        reason = `Konsensus Tier Mutu S/A/B (${tierSummary}) lowcap (<$100k): ${uniqueWallets.length} smart wallet terdeteksi (Delta: ${entryDeltaSec}s). Aturan delta 45s di-bypass untuk Tier S/A/B. Likuiditas: $${liquidity.toLocaleString()}`;
+        reason = `Konsensus Smart Money (${tierSummary}) lowcap (<$100k): ${uniqueWallets.length} smart wallet terdeteksi (Delta: ${entryDeltaSec}s). Aturan delta 45s di-bypass untuk Tier SSS/SS/S/A/B. Likuiditas: $${liquidity.toLocaleString()}`;
       } else {
         classification = "ACCUMULATION_WATCH";
-        reason = `Tier Mutu S/A/B (${tierSummary}) terdeteksi namun likuiditas belum cukup ($${liquidity.toFixed(0)}) atau drop > 45%`;
+        reason = `Tier Mutu (${tierSummary}) terdeteksi namun likuiditas belum cukup ($${liquidity.toFixed(0)}) atau drop > 45%`;
       }
     } else if (entryDeltaSec >= 45 && !isQualityConvergence) {
       classification = "ACCUMULATION_WATCH";
-      reason = `Akumulasi terpantau dari trader retail/scout (${tierSummary}). Menunggu konfirmasi smart money Tier S/A/B sebelum eksekusi.`;
+      reason = `Akumulasi terpantau dari trader retail/scout (${tierSummary}). Menunggu konfirmasi smart money Tier SSS/SS/S/A/B sebelum eksekusi.`;
     } else {
       classification = "ACCUMULATION_WATCH";
       reason = `Lowcap watch (${tierSummary}): ${uniqueWallets.length} wallet masuk bersamaan dalam ${Math.round(entryDeltaSec / 60)} menit. Likuiditas: $${liquidity.toLocaleString()}`;

@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-export type WalletTier = "S" | "A" | "B" | "C" | "D" | "E";
+export type WalletTier = "SSS" | "SS" | "S" | "A" | "B" | "C" | "D" | "E";
 
 export function computeWalletTier(wallet: {
   source?: string;
@@ -15,7 +15,19 @@ export function computeWalletTier(wallet: {
   const bal = Number(wallet.solBalance || 0);
   const isCurator = wallet.source === "gmgn_curator";
 
-  // Tier S: Whales / Curated Elite (Top conviction)
+  // Tier SSS: Apex Alpha / God Snipers (Top 0.5% - Serial multi-token winner, massive PnL & heavy bankroll)
+  // Syarat: (Hits >= 50 && PnL >= $25k && Bal >= 10 SOL) ATAU (PnL >= $100k && Hits >= 20 && Bal >= 15 SOL)
+  if ((hits >= 50 && pnl >= 25000 && bal >= 10.0) || (pnl >= 100000 && hits >= 20 && bal >= 15.0)) {
+    return "SSS";
+  }
+
+  // Tier SS: Master Scouts / Heavy Smart Money (Top ~2%)
+  // Syarat: (Hits >= 20 && PnL >= $8k && Bal >= 4 SOL) ATAU (Hits >= 35 && PnL >= $5k && Bal >= 3 SOL) ATAU (PnL >= $30k && bal >= 10 SOL)
+  if ((hits >= 20 && pnl >= 8000 && bal >= 4.0) || (hits >= 35 && pnl >= 5000 && bal >= 3.0) || (pnl >= 30000 && bal >= 10.0)) {
+    return "SS";
+  }
+
+  // Tier S: Whales / Curated Elite (Top conviction baseline)
   if ((isCurator && pnl >= 2000) || (hits >= 5 && pnl >= 2000 && bal >= 2.0)) {
     return "S";
   }
@@ -99,7 +111,7 @@ export class SnowballCollector {
         const list: any[] = data.wallets || (Array.isArray(data) ? data : []);
         for (const w of list) {
           if (!w.address || this.quarantinedSet.has(w.address)) continue;
-          const tier = w.tier || computeWalletTier(w);
+          const tier = computeWalletTier(w);
           this.walletsMap.set(w.address, {
             address: w.address,
             score: w.score || 70,
@@ -178,14 +190,14 @@ export class SnowballCollector {
   public saveSnowball(): { totalCurated: number; newSnowballed: number } {
     const list = Array.from(this.walletsMap.values());
     // Refresh tiers for all wallets
-    const tierCounts = { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+    const tierCounts: Record<WalletTier, number> = { SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
     for (const w of list) {
       w.tier = computeWalletTier(w);
       tierCounts[w.tier]++;
     }
 
     // Sort by tier weight, hit count, and score
-    const tierWeight = { S: 5, A: 4, B: 3, C: 2, D: 1, E: 0 };
+    const tierWeight: Record<WalletTier, number> = { SSS: 7, SS: 6, S: 5, A: 4, B: 3, C: 2, D: 1, E: 0 };
     list.sort((a, b) => {
       const wa = tierWeight[a.tier] || 0;
       const wb = tierWeight[b.tier] || 0;
@@ -202,14 +214,16 @@ export class SnowballCollector {
       criteria: {
         target: "Lowcap / Launchpad / Pump.fun specialists & Snipers",
         tiers: {
-          S: "Whale / Curated Elite (PnL >= $2k & Bal >= 2 SOL)",
+          SSS: "Apex Alpha / God Snipers (50+ hits, PnL >= $25k, Bal >= 10 SOL atau PnL >= $100k)",
+          SS: "Master Scouts / Heavy Smart (20+ hits, PnL >= $8k, Bal >= 4 SOL)",
+          S: "Whale / Curated Elite (5+ hits, PnL >= $2k & Bal >= 2 SOL)",
           A: "Proven Smart Money (3+ hits, PnL >= $500, Bal >= 0.5 SOL)",
           B: "Consistent Scouts (3+ hits, PnL >= $150, Bal >= 0.1 SOL)",
           C: "Emerging (2+ hits, PnL >= $100, Bal >= 0.05 SOL)",
           D: "Single-Hit Retail / Lucky Punter",
           E: "Dust / Burner / Inactive"
         },
-        executionMinTier: "Tier B (Hanya Tier S, A, B yang memicu Auto-Buy)"
+        executionMinTier: "Tier B (Hanya Tier SSS, SS, S, A, B yang memicu Auto-Buy)"
       },
       wallets: list
     };

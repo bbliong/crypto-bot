@@ -441,7 +441,9 @@ function getDashboardHtml() {
       font-weight: 700;
       letter-spacing: 0.3px;
     }
-    .tier-badge-s { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .tier-badge-sss { background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(245, 158, 11, 0.3)); color: #fbbf24; border: 1px solid #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); font-weight: 800; }
+    .tier-badge-ss { background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 800; }
+    .tier-badge-s { background: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.4); }
     .tier-badge-a { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
     .tier-badge-b { background: rgba(6, 182, 212, 0.2); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.4); }
     .tier-badge-c { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
@@ -872,11 +874,21 @@ function getDashboardHtml() {
     <!-- TAB 2: CLEAN WALLETS -->
     <div id="panel-wallets" class="panel">
       <!-- Tier Overview Cards -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        <div class="stat-card" style="border-left: 4px solid #ef4444; padding: 14px;">
+          <div style="font-size: 11px; color: #ef4444; font-weight: 700;">👑 TIER SSS (Apex Alpha)</div>
+          <div id="tierCountSSS" style="font-size: 22px; font-weight: 800; margin-top: 4px; color: #fbbf24;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">50+ Hits &bull; Cuan &ge; $25k &bull; 10+ SOL</div>
+        </div>
         <div class="stat-card" style="border-left: 4px solid #f59e0b; padding: 14px;">
-          <div style="font-size: 11px; color: #f59e0b; font-weight: 700;">🏆 TIER S (Whales / Elite)</div>
+          <div style="font-size: 11px; color: #f59e0b; font-weight: 700;">💎 TIER SS (Master Scouts)</div>
+          <div id="tierCountSS" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">20+ Hits &bull; Cuan &ge; $8k &bull; 4+ SOL</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid #eab308; padding: 14px;">
+          <div style="font-size: 11px; color: #eab308; font-weight: 700;">🏆 TIER S (Whales / Elite)</div>
           <div id="tierCountS" style="font-size: 22px; font-weight: 800; margin-top: 4px;">0</div>
-          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Cuan &ge; $2k &bull; Saldo &ge; 2 SOL</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">5+ Hits &bull; Cuan &ge; $2k &bull; 2+ SOL</div>
         </div>
         <div class="stat-card" style="border-left: 4px solid #a855f7; padding: 14px;">
           <div style="font-size: 11px; color: #a855f7; font-weight: 700;">💎 TIER A (Proven Smart)</div>
@@ -907,10 +919,12 @@ function getDashboardHtml() {
 
       <div class="card">
         <div class="card-header" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
-          <div class="card-title">Daftar Smart Trader Berjenjang (Tier S &ndash; E)</div>
+          <div class="card-title">Daftar Smart Trader Berjenjang (Tier SSS &ndash; E)</div>
           <!-- Filter Buttons -->
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             <button class="tier-filter-btn active" onclick="filterWallets('ALL', this)">Semua (<span id="btnCountAll">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('SSS', this)">👑 Tier SSS (<span id="btnCountSSS">0</span>)</button>
+            <button class="tier-filter-btn" onclick="filterWallets('SS', this)">💎 Tier SS (<span id="btnCountSS">0</span>)</button>
             <button class="tier-filter-btn" onclick="filterWallets('S', this)">🏆 Tier S (<span id="btnCountS">0</span>)</button>
             <button class="tier-filter-btn" onclick="filterWallets('A', this)">💎 Tier A (<span id="btnCountA">0</span>)</button>
             <button class="tier-filter-btn" onclick="filterWallets('B', this)">⚡ Tier B (<span id="btnCountB">0</span>)</button>
@@ -1334,6 +1348,8 @@ function getDashboardHtml() {
     function getTierBadgeHtml(tier) {
       const t = (tier || 'D').toUpperCase();
       const map = {
+        SSS: '<span class="tier-badge tier-badge-sss">👑 TIER SSS</span>',
+        SS: '<span class="tier-badge tier-badge-ss">💎 TIER SS</span>',
         S: '<span class="tier-badge tier-badge-s">🏆 TIER S</span>',
         A: '<span class="tier-badge tier-badge-a">💎 TIER A</span>',
         B: '<span class="tier-badge tier-badge-b">⚡ TIER B</span>',
@@ -1353,7 +1369,7 @@ function getDashboardHtml() {
       }
 
       // Update Tier counts in header and filter buttons
-      const counts = state.tierBreakdown || { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+      const counts = state.tierBreakdown || { SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
       if (!state.tierBreakdown) {
         allList.forEach(w => {
           const t = w.tier || 'D';
@@ -1366,6 +1382,8 @@ function getDashboardHtml() {
         if (el) el.innerText = Number(val || 0).toLocaleString();
       };
 
+      updateEl('tierCountSSS', counts.SSS);
+      updateEl('tierCountSS', counts.SS);
       updateEl('tierCountS', counts.S);
       updateEl('tierCountA', counts.A);
       updateEl('tierCountB', counts.B);
@@ -1374,6 +1392,8 @@ function getDashboardHtml() {
       updateEl('tierCountE', counts.E);
 
       updateEl('btnCountAll', allList.length);
+      updateEl('btnCountSSS', counts.SSS);
+      updateEl('btnCountSS', counts.SS);
       updateEl('btnCountS', counts.S);
       updateEl('btnCountA', counts.A);
       updateEl('btnCountB', counts.B);

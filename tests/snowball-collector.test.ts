@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { SnowballCollector } from "../src/snowball-collector.js";
+import { SnowballCollector, computeWalletTier } from "../src/snowball-collector.js";
 
 test("SnowballCollector: correctly loads existing wallets and ingests new smart traders", () => {
   const tmpCurated = join(process.cwd(), "data", ".test-curated.json");
@@ -86,6 +86,15 @@ test("SnowballCollector: correctly loads existing wallets and ingests new smart 
   const saveRes = collector.saveSnowball();
   assert.equal(saveRes.totalCurated, 2);
   assert.equal(saveRes.newSnowballed, 1);
+
+  // 7. Test computeWalletTier for SSS, SS, S
+  assert.equal(computeWalletTier({ hitCount: 55, pnl30d: 30000, solBalance: 25 }), "SSS");
+  assert.equal(computeWalletTier({ hitCount: 22, pnl30d: 110000, solBalance: 16 }), "SSS");
+  assert.equal(computeWalletTier({ hitCount: 22, pnl30d: 10000, solBalance: 5 }), "SS");
+  assert.equal(computeWalletTier({ hitCount: 38, pnl30d: 6000, solBalance: 3.5 }), "SS");
+  assert.equal(computeWalletTier({ hitCount: 1, pnl30d: 35000, solBalance: 12 }), "SS");
+  assert.equal(computeWalletTier({ source: "gmgn_curator", pnl30d: 2500 }), "S");
+  assert.equal(computeWalletTier({ hitCount: 8, pnl30d: 2500, solBalance: 3 }), "S");
 
   // Clean up
   if (existsSync(tmpCurated)) unlinkSync(tmpCurated);

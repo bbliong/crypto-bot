@@ -215,16 +215,18 @@ test("ConvergenceDetector - Rejects tokens with MC > 100k or price > $0.50 (stoc
   assert.equal(convergenceEmitted, false, "Large cap / stock token must NOT trigger convergence");
 });
 
-test("ConvergenceDetector - Tier S/A/B triggers Golden Convergence while Tier D+D is demoted to Accumulation Watch", async () => {
-  const detector = new ConvergenceDetector({
-    timeWindowSec: 1800,
-    monitoredWallets: ["WhaleS", "RetailD1", "RetailD2", "ScalperB1", "ScalperB2"]
-  });
-  detector.setWalletTier("WhaleS", "S");
-  detector.setWalletTier("RetailD1", "D");
-  detector.setWalletTier("RetailD2", "D");
-  detector.setWalletTier("ScalperB1", "B");
-  detector.setWalletTier("ScalperB2", "B");
+test("ConvergenceDetector - Tier SSS/SS/S/A/B triggers Golden Convergence while Tier D+D is demoted to Accumulation Watch", async () => {
+const detector = new ConvergenceDetector({
+  timeWindowSec: 1800,
+  monitoredWallets: ["ApexSSS", "MasterSS", "WhaleS", "RetailD1", "RetailD2", "ScalperB1", "ScalperB2"]
+});
+detector.setWalletTier("ApexSSS", "SSS");
+detector.setWalletTier("MasterSS", "SS");
+detector.setWalletTier("WhaleS", "S");
+detector.setWalletTier("RetailD1", "D");
+detector.setWalletTier("RetailD2", "D");
+detector.setWalletTier("ScalperB1", "B");
+detector.setWalletTier("ScalperB2", "B");
 
   const now = 1729650000;
 
@@ -311,4 +313,28 @@ test("ConvergenceDetector - Tier S/A/B triggers Golden Convergence while Tier D+
 
   assert.ok(repScalp);
   assert.equal(repScalp.classification, "GOLDEN_ORGANIC_CONVERGENCE", "Two Tier B scalpers must trigger Golden Convergence");
+
+  // 4. Apex SSS + Master SS -> SHOULD trigger GOLDEN_ORGANIC_CONVERGENCE
+  await detector.recordTrade({
+    wallet: "ApexSSS",
+    mint: "TokenApex111111111111111111111111111111111",
+    symbol: "APEX",
+    side: "buy",
+    timestamp: now - 120,
+    solAmount: 15.0
+  });
+
+  const repApex = await detector.recordTrade({
+    wallet: "MasterSS",
+    mint: "TokenApex111111111111111111111111111111111",
+    symbol: "APEX",
+    side: "buy",
+    timestamp: now,
+    solAmount: 5.0
+  });
+
+  assert.ok(repApex);
+  assert.equal(repApex.classification, "GOLDEN_ORGANIC_CONVERGENCE", "Tier SSS + SS must trigger Golden Convergence");
+  assert.equal(repApex.walletEntries?.[0].tier, "SSS");
+  assert.equal(repApex.walletEntries?.[1].tier, "SS");
 });
