@@ -750,7 +750,7 @@ async function main() {
               realSellRoute = await detector.fetchRealSwapRoute(pos.mint, "sell", pos.stakeUsd, pos.realSwapRouteBuy?.tokensOut);
             } catch {}
 
-            paperLane.evaluatePriceTick(pos, {
+            const res = paperLane.evaluatePriceTick(pos, {
               priceUsd: realSellRoute?.impliedPriceUsd || pos.currentPriceUsd,
               timestamp: nowSec,
               realSwapRouteSell: realSellRoute?.ok ? {
@@ -761,9 +761,13 @@ async function main() {
                 priceImpactPct: realSellRoute.quote?.priceImpactPct
               } : undefined
             });
-            paperLane.saveState();
-            const rem = paperLane.getOpenPositions().filter(p => p.mint === pos.mint);
-            if (rem.length === 0) await unsubscribeTokenWs(pos.mint);
+            if (res.closed) {
+              paperLane.saveState();
+              const rem = paperLane.getOpenPositions().filter(p => p.mint === pos.mint);
+              if (rem.length === 0) await unsubscribeTokenWs(pos.mint);
+            } else {
+              (pos as any)._closing = false;
+            }
           }
         }
         paperLane.saveState();
