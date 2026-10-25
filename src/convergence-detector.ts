@@ -377,9 +377,17 @@ export class ConvergenceDetector extends EventEmitter {
 
     const isObviousDump = (liquidity > 0 && liquidity < 1000) || maxDropPercent > 50 || (dexInfo?.priceChange24h ?? 0) < -70;
 
-    if (entryDeltaSec <= 30 && (isObviousDump || (!isQualityConvergence && isLiquidityDrained))) {
+    // Deteksi Cabal Insider: Pembelian awal terlalu raksasa (potensi dev/insider memegang >40% suplai untuk dump)
+    const zeroSecSol = walletEntries
+      .filter((w) => (w.deltaSecFromFirst || 0) === 0)
+      .reduce((sum, w) => sum + (w.solAmount || 0), 0);
+    const isCabalSupplyRisk = zeroSecSol > 20.0 || (walletEntries[0]?.solAmount || 0) > 15.0;
+
+    if (isCabalSupplyRisk || (entryDeltaSec <= 30 && (isObviousDump || (!isQualityConvergence && isLiquidityDrained)))) {
       classification = "SYNDICATE_DUMP_RISK";
-      reason = `Delta entry sangat rapat (${entryDeltaSec}s) dengan indikasi dump likuiditas ($${liquidity.toFixed(0)}) dan drop -${maxDropPercent.toFixed(1)}%`;
+      reason = isCabalSupplyRisk
+        ? `Cabal supply risk: Pembelian awal detik 0 mencapai ${zeroSecSol.toFixed(1)} SOL (> 20 SOL batas aman), dominasi insider siap dump`
+        : `Delta entry sangat rapat (${entryDeltaSec}s) dengan indikasi dump likuiditas ($${liquidity.toFixed(0)}) dan drop -${maxDropPercent.toFixed(1)}%`;
       for (const w of uniqueWallets) {
         this.quarantinedWallets.add(w);
       }

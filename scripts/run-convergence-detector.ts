@@ -124,6 +124,55 @@ async function main() {
       return false;
     }
 
+    // 1. Anti-Cabal Supply Gate: Dev/Insider tidak boleh mendominasi suplai di detik 0 (Cegah kasus PUMPGOBLIN 41 SOL)
+    const zeroSecEntries = (report.walletEntries || []).filter((w: any) => (w.deltaSecFromFirst || 0) === 0);
+    const zeroSecSolTotal = zeroSecEntries.reduce((sum: number, w: any) => sum + (w.solAmount || 0), 0);
+    const w1Sol = w1.solAmount || 0;
+
+    if (w1Sol > 15.0 || zeroSecSolTotal > 20.0) {
+      console.log(`[GATE-REJECT] 🚨 Cabal supply risk pada ${report.symbol}: Pioneer detik 0 memborong ${w1Sol.toFixed(1)} SOL (total detik 0: ${zeroSecSolTotal.toFixed(1)} SOL > 20 SOL batas aman). Dominasi suplai siap dump!`);
+      return false;
+    }
+
+    // 2. Zero-Exit Gate: TIDAK BOLEH ada satupun smart wallet yang sudah mulai exit/TP sebelum bot masuk
+    const exitedWallet = (report.walletEntries || []).find((w: any) => w.isHolding === false);
+    if (exitedWallet) {
+      console.log(`[GATE-REJECT] 🚨 Sinyal ${report.symbol} ditolak: Smart Wallet (${exitedWallet.wallet?.slice(0, 6)}... [Tier ${exitedWallet.tier || "D"}]) sudah EXIT/TP (cuan +$${exitedWallet.profitUsd || 0}). Fase dump sudah dimulai!`);
+      return false;
+    }
+
+    // 3. Breadth & Heavyweight Confirmation Gate:
+    // Sinyal lolos jika ada Paus Jumbo Tier S/A (modal >= $1,500 / >= 7 SOL) ATAU didukung minimal 3 smart wallet unik (breadth >= 3)
+    const smartEntries = (report.walletEntries || []);
+    const heavyWhale = smartEntries.find((w: any) => {
+      const isQuality = ["S", "A"].includes(w.tier);
+      const cost = w.totalCostUsd || (w.solAmount ? w.solAmount * 180 : 0);
+      return isQuality && (cost >= 1500 || (w.solAmount || 0) >= 7.0);
+    });
+
+    const isHeavyWhale = !!heavyWhale;
+    const hasSufficientBreadth = smartEntries.length >= 3;
+
+    if (!isHeavyWhale && !hasSufficientBreadth) {
+      console.log(`[GATE-REJECT] ⚠️ Sinyal ${report.symbol} ditolak: Hanya didukung ${smartEntries.length} wallet tanpa Paus Jumbo Tier S/A (butuh min 3 wallet unik atau Tier S/A modal >= $1,500)`);
+      return false;
+    }
+
+    // 4. Whale Capital Ratio Gate:
+    // Jika W1 adalah scout (Tier C/D/E), konfirmasi Tier S/A wajib membawa komitmen dana nyata (>= 1.5 SOL atau >= $300)
+    const isW1Scout = w1.tier && !["S", "A"].includes(w1.tier);
+    if (isW1Scout) {
+      const qualityConfirmers = smartEntries.slice(1).filter((w: any) => ["S", "A"].includes(w.tier));
+      const hasSignificantCapital = qualityConfirmers.some((w: any) => {
+        const cost = w.totalCostUsd || (w.solAmount ? w.solAmount * 180 : 0);
+        return cost >= 300 || (w.solAmount || 0) >= 1.5;
+      });
+      if (qualityConfirmers.length > 0 && !hasSignificantCapital && !isHeavyWhale) {
+        console.log(`[GATE-REJECT] ⚠️ Sinyal ${report.symbol} ditolak: Tier S/A pengkonfirmasi hanya membawa modal kecil (< $300 / < 1.5 SOL), berisiko jadi exit liquidity bagi pioneer`);
+        return false;
+      }
+    }
+
     // Aturan delta 45 detik dihilangkan untuk Tier S/A/B: w2 diambil langsung dari urutan transaksi riil
     const organicWallet = isQualityConvergence ? report.walletEntries[1] : (report.walletEntries.find((w: any) => (w.deltaSecFromFirst || 0) >= 45) || report.walletEntries[1]);
     const w2 = organicWallet;
@@ -145,7 +194,7 @@ async function main() {
       return false;
     }
 
-    // 4. Dynamic Real-Time Age Gate:
+    // Dynamic Real-Time Age Gate:
     // Rules 20 menit & 10 menit DIHILANGKAN untuk Tier S, A, B sesuai arahan user!
     const nowSec = Math.floor(Date.now() / 1000);
     const signalAgeSec = nowSec - (w2.timestamp || 0);
@@ -169,16 +218,6 @@ async function main() {
       }
     } else {
       console.log(`[GATE-PASS] 🚀 Sinyal ${report.symbol} Tier S/A/B lolos: Aturan 20m & Delta 45s di-bypass (Age: ${signalAgeSec}s | Delta: ${delta}s)`);
-    }
-
-    // 5. Anti-Dump Gate: Pioneer (W1) dan Confirming (W2) WAJIB masih HOLDING
-    if (w1.isHolding === false) {
-      console.log(`[GATE-REJECT] 🚨 Pioneer Wallet #1 (${w1.wallet?.slice(0, 6)}...) sudah DUMP pada ${report.symbol} (tolak beli koin ditinggal pioneer)`);
-      return false;
-    }
-    if (w2.isHolding === false) {
-      console.log(`[GATE-REJECT] 🚨 Confirming Wallet #2 (${w2.wallet?.slice(0, 6)}...) sudah DUMP pada ${report.symbol}`);
-      return false;
     }
 
     // Hit real GMGN swap route API (/txproxy/v1/get_swap_route) via CDP
