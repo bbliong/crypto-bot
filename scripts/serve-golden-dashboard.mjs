@@ -1157,7 +1157,7 @@ function getDashboardHtml() {
       
       let targetBtn = evt ? evt.currentTarget : (window.event ? window.event.currentTarget || window.event.target.closest('.tab-btn') : null);
       if (!targetBtn) {
-        targetBtn = document.querySelector('.tab-btn[onclick*="\'' + name + '\'"]');
+        targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => (b.getAttribute('onclick') || '').includes(name));
       }
       if (targetBtn) targetBtn.classList.add('active');
       const targetPanel = document.getElementById('panel-' + name);
@@ -1171,7 +1171,10 @@ function getDashboardHtml() {
       if (name === 'logs') fetchLogs();
     }
 
+    let isLoading = false;
     async function loadData() {
+      if (isLoading) return;
+      isLoading = true;
       try {
         const res = await fetch(API_BASE + '/api/state');
         state = await res.json();
@@ -1183,6 +1186,8 @@ function getDashboardHtml() {
         try { renderPaperTrading(); } catch (e) { console.error('renderPaperTrading error:', e); }
       } catch (e) {
         console.error('Error fetching state:', e);
+      } finally {
+        isLoading = false;
       }
     }
 
@@ -2122,7 +2127,7 @@ function getDashboardHtml() {
       }
       if (hash.includes('tier=')) {
         const t = hash.split('tier=')[1].split('&')[0].toUpperCase();
-        const btn = document.querySelector('.tier-filter-btn[onclick*="\'' + t + '\'"]');
+        const btn = Array.from(document.querySelectorAll('.tier-filter-btn')).find(b => (b.getAttribute('onclick') || '').includes(t));
         if (btn) filterWallets(t, btn);
       }
     }
