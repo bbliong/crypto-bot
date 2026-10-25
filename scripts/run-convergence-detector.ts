@@ -334,6 +334,70 @@ async function main() {
     console.log(`🚨 [SYNDICATE DUMP DETECTED] Token: ${report.symbol} (${report.mint.slice(0, 8)}...) | Delta: ${report.entryDeltaSec}s -> QUARANTINED`);
   });
 
+  // Dynamic Whale-Backed Stop Loss Helper
+  const whaleHoldingCache = new Map<string, { holding: boolean; exited: boolean; checkedAt: number }>();
+
+  async function checkPositionWhaleStatus(pos: any): Promise<{ whaleStillHolding: boolean; whaleExited: boolean }> {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const cached = whaleHoldingCache.get(pos.mint);
+    if (cached && nowSec - cached.checkedAt < 30) {
+      return { whaleStillHolding: cached.holding, whaleExited: cached.exited };
+    }
+
+    const highTierWallets: string[] = (pos.walletEntries || [])
+      .filter((w: any) => ["S", "A", "B"].includes(w.tier))
+      .map((w: any) => w.wallet);
+
+    if (pos.wallet1?.address && !highTierWallets.includes(pos.wallet1.address)) {
+      highTierWallets.push(pos.wallet1.address);
+    }
+    if (pos.wallet2?.address && !highTierWallets.includes(pos.wallet2.address)) {
+      highTierWallets.push(pos.wallet2.address);
+    }
+
+    if (highTierWallets.length === 0) {
+      return { whaleStillHolding: false, whaleExited: false };
+    }
+
+    try {
+      let anyStillHolding = false;
+      let anyExited = false;
+      const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+
+      for (const w of highTierWallets.slice(0, 3)) {
+        const res = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "getTokenAccountsByOwner",
+            params: [w, { mint: pos.mint }, { encoding: "jsonParsed", commitment: "confirmed" }]
+          }),
+          signal: AbortSignal.timeout(3000)
+        });
+        const data: any = await res.json();
+        const accounts = data?.result?.value || [];
+        let ui = 0;
+        for (const a of accounts) {
+          ui += Number(a.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0);
+        }
+        if (ui > 0) {
+          anyStillHolding = true;
+        } else {
+          anyExited = true;
+        }
+      }
+
+      const holding = anyStillHolding;
+      const exited = !anyStillHolding && anyExited;
+      whaleHoldingCache.set(pos.mint, { holding, exited, checkedAt: nowSec });
+      return { whaleStillHolding: holding, whaleExited: exited };
+    } catch {
+      return { whaleStillHolding: true, whaleExited: false };
+    }
+  }
+
   // Real-time WebSocket tick handler
   async function handleWebSocketTick(mint: string, priceUsd: number, rawItem: any) {
     const openPositions = paperLane.getOpenPositions().filter(p => p.mint === mint && !(p as any)._closing);
@@ -384,9 +448,28 @@ async function main() {
         } else if (pos.peakPriceUsd >= pos.entryPriceUsd * 1.30 && (pos.peakPriceUsd - priceUsd) / pos.peakPriceUsd >= 0.10) {
           triggered = true;
           reason = "TP1_50_TRAILING_10";
-        } else if (!pos.tp1Hit && curLoss <= -0.15) {
-          triggered = true;
-          reason = "STOP_LOSS_15";
+        } else if (!pos.tp1Hit && curLoss <= -0.05) {
+          // Dynamic Whale-Backed Stop Loss Check:
+          const { whaleStillHolding, whaleExited } = await checkPositionWhaleStatus(pos);
+          (pos as any)._whaleStillHolding = whaleStillHolding;
+          (pos as any)._whaleExited = whaleExited;
+
+          if (curLoss <= -0.40) {
+            triggered = true;
+            reason = "CATASTROPHE_STOP_40";
+          } else if (whaleExited) {
+            triggered = true;
+            reason = "WHALE_EXIT_TRIGGER";
+          } else if (curLoss <= -0.15 && !whaleStillHolding) {
+            triggered = true;
+            reason = "STOP_LOSS_15";
+          } else if (whaleStillHolding) {
+            const nowTime = Math.floor(Date.now() / 1000);
+            if (!pos._lastWhaleLog || nowTime - pos._lastWhaleLog > 60) {
+              console.log(`[WHALE-BACKED-HOLD] 🐋 ${pos.symbol} [Moonbag] floating loss ${(curLoss * 100).toFixed(1)}%, tapi Smart Wallet masih HOLD! Tahan posisi.`);
+              pos._lastWhaleLog = nowTime;
+            }
+          }
         }
       } else if (pos.lane === "LANE_GOLDEN_MICRO_SCALP") {
         if (curGain >= 0.15) {
@@ -419,6 +502,8 @@ async function main() {
         const res = paperLane.evaluatePriceTick(pos, {
           priceUsd: realSellRoute?.impliedPriceUsd || priceUsd,
           timestamp: nowSec,
+          whaleStillHolding: (pos as any)._whaleStillHolding,
+          whaleExited: (pos as any)._whaleExited,
           realSwapRouteSell: realSellRoute?.ok ? {
             exchange: realSellRoute.routeData?.exchange,
             impliedPriceUsd: realSellRoute.impliedPriceUsd,
@@ -741,7 +826,10 @@ async function main() {
         const nowSec = Math.floor(Date.now() / 1000);
         for (const pos of openPos) {
           const durSec = nowSec - pos.entryTimestamp;
-          const maxSec = pos.lane === "LANE_GOLDEN_SCALP" ? 1800 : (pos.lane === "LANE_GOLDEN_MICRO_SCALP" ? 900 : 3600);
+          let maxSec = pos.lane === "LANE_GOLDEN_SCALP" ? 1800 : (pos.lane === "LANE_GOLDEN_MICRO_SCALP" ? 900 : 3600);
+          if (pos.lane === "LANE_GOLDEN_MOONBAG" && (pos as any)._whaleStillHolding) {
+            maxSec = 7200; // Allow Moonbag runner up to 2 hours while whale is holding
+          }
           if (durSec >= maxSec && !(pos as any)._closing) {
             console.log(`[TIMEOUT-FALLBACK] ⏳ Position on ${pos.symbol} (${pos.lane}) reached timeout (${Math.round(durSec/60)}m). Closing with real swap quote...`);
             (pos as any)._closing = true;

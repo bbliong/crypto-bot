@@ -17,6 +17,8 @@ export type ExitReason =
   | "STOP_LOSS_8"
   | "TIMEOUT_15M"
   | "EMERGENCY_DUMP_GUARD"
+  | "WHALE_EXIT_TRIGGER"
+  | "CATASTROPHE_STOP_40"
   | "MANUAL_CLOSE";
 
 export interface PaperPosition {
@@ -313,6 +315,8 @@ export class GoldenConvergencePaperLane {
       lowPriceUsd?: number;
       isLiquidityDrained?: boolean;
       realSwapRouteSell?: any;
+      whaleStillHolding?: boolean;
+      whaleExited?: boolean;
     }
   ): { closed: boolean; reason?: ExitReason } {
     if (pos.status !== "OPEN") return { closed: false };
@@ -396,23 +400,31 @@ export class GoldenConvergencePaperLane {
     }
 
     // ====================================================
-    // STRATEGY B: MOONBAG RUNNER (+50% TP1, +120% TP2 / -15% SL / Trailing 10% from +30% / Max 60m)
+    // Lane B: Golden Moonbag Runner (+50% TP1, +120% TP2 / Whale-Backed SL / Trailing 10% / Max 60m)
     // ====================================================
     if (pos.lane === "LANE_GOLDEN_MOONBAG") {
-      // TP1 (+50%): Sell 50%
+      // 1. Whale Exit Trigger: Smart money sells out -> We exit immediately!
+      if (marketData.whaleExited) {
+        const closeMult = currentPrice / pos.entryPriceUsd;
+        const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * closeMult : closeMult);
+        this.closePosition(pos, currentPrice, "WHALE_EXIT_TRIGGER", tickTime, marketData.mcapUsd, exitFraction);
+        return { closed: true, reason: "WHALE_EXIT_TRIGGER" };
+      }
+
+      // 2. TP1 (+50%): Sell 50%
       if (!pos.tp1Hit && curGain >= 0.50) {
         pos.tp1Hit = true;
         pos.realizedFraction = 0.5 * 1.50; // 50% locked at 1.5x
       }
 
-      // TP2 (+120%): Sell remaining 50%
+      // 3. TP2 (+120%): Sell remaining 50%
       if (curGain >= 1.20) {
         const exitFraction = (pos.realizedFraction || 0) + (pos.tp1Hit ? 0.5 * 2.20 : 2.20);
         this.closePosition(pos, pos.entryPriceUsd * 2.20, "TP1_50_TP2_120_HIT", tickTime, pos.entryMcapUsd * 2.20, exitFraction);
         return { closed: true, reason: "TP1_50_TP2_120_HIT" };
       }
 
-      // Trailing Stop (activated if peak >= +30% and pulled back 10%)
+      // 4. Trailing Stop (activated if peak >= +30% and pulled back 10%)
       const pullbackFromPeak = (pos.peakPriceUsd - lowPrice) / pos.peakPriceUsd;
       if (pos.peakPriceUsd >= pos.entryPriceUsd * 1.30 && pullbackFromPeak >= 0.10) {
         const trailPrice = pos.peakPriceUsd * 0.90;
@@ -422,11 +434,23 @@ export class GoldenConvergencePaperLane {
         return { closed: true, reason: "TP1_50_TRAILING_10" };
       }
 
-      // Stop Loss (-15%) before TP1
-      if (!pos.tp1Hit && curLoss <= -0.15) {
-        const exitPrice = pos.entryPriceUsd * 0.85;
-        this.closePosition(pos, exitPrice, "STOP_LOSS_15", tickTime, pos.entryMcapUsd * 0.85, 0.85);
-        return { closed: true, reason: "STOP_LOSS_15" };
+      // 5. Dynamic Whale-Backed Stop Loss before TP1:
+      // Catastrophe Floor (-40% emergency hard stop if token is completely dumped/abandoned)
+      if (!pos.tp1Hit) {
+        if (curLoss <= -0.40) {
+          const exitPrice = pos.entryPriceUsd * 0.60;
+          this.closePosition(pos, exitPrice, "CATASTROPHE_STOP_40", tickTime, pos.entryMcapUsd * 0.60, 0.60);
+          return { closed: true, reason: "CATASTROPHE_STOP_40" };
+        }
+
+        // Jika Smart Wallet MASIH HOLD: Jangan Sell! Tahan posisi bersama Paus
+        if (marketData.whaleStillHolding) {
+          // Keep holding
+        } else if (curLoss <= -0.15) {
+          const exitPrice = pos.entryPriceUsd * 0.85;
+          this.closePosition(pos, exitPrice, "STOP_LOSS_15", tickTime, pos.entryMcapUsd * 0.85, 0.85);
+          return { closed: true, reason: "STOP_LOSS_15" };
+        }
       }
 
       // Timeout (60 minutes)
