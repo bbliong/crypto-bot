@@ -1,12 +1,23 @@
 import { chromium } from "playwright";
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = "/home/bbliong/project/crypto-bot";
 const DB_PATH = join(ROOT, "data", "crypto-bot.sqlite");
 const CURATED_JSON_PATH = join(ROOT, "data", "curated-lowcap-smart-wallets.json");
+const LOG_FILE = join(ROOT, "data", "audit-wallet-consistency.log");
 const CDP_URL = "http://127.0.0.1:9223";
+
+const origLog = console.log;
+console.log = (...args) => {
+  const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a)).join(' ');
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try {
+    appendFileSync(LOG_FILE, line);
+  } catch {}
+  origLog(...args);
+};
 
 // Inisialisasi Database SQLite
 function initDb() {
@@ -45,7 +56,7 @@ function initDb() {
 
 // Dapatkan daftar wallet yang sudah selesai diproses dari DB
 function getProcessedAddresses(db) {
-  const rows = db.prepare("SELECT address FROM wallet_daily_profit_audits WHERE status = 'PROCESSED'").all();
+  const rows = db.prepare("SELECT address FROM wallet_daily_profit_audits WHERE status IN ('PROCESSED', 'NO_DATA')").all();
   return new Set(rows.map(r => r.address));
 }
 
@@ -254,14 +265,19 @@ async function main() {
 
       // Handle rate limit atau Cloudflare glitch
       if (apiResult?.code === 429 || apiResult?.code === 403) {
-        console.warn(`[AUDIT-ULTRA] ⚠️ Respon status ${apiResult.code} (${apiResult.msg}). Istirahat 25 detik sebelum retry...`);
-        await sleep(25000);
+        console.warn(`[AUDIT-ULTRA] ⚠️ Respon status ${apiResult.code} (${apiResult.msg}). Istirahat 30 detik sebelum retry...`);
+        await sleep(30000);
         retryCount++;
       } else {
         console.warn(`[AUDIT-ULTRA] ⚠️ Gagal fetch (${apiResult?.code || 'unknown'}: ${apiResult?.msg}). Retry #${retryCount + 1}...`);
         await sleep(5000);
         retryCount++;
       }
+    }
+
+    if (!apiResult || apiResult.code !== 0 || !Array.isArray(apiResult.data?.list)) {
+      console.error(`[AUDIT-ULTRA] ❌ Gagal mendapatkan data untuk ${w.address} setelah 3 percobaan. Melewati wallet ini.`);
+      continue;
     }
 
     const list = apiResult?.data?.list || [];
