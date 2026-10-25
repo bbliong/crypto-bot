@@ -354,6 +354,7 @@ async function main() {
       const curGain = (priceUsd - pos.entryPriceUsd) / pos.entryPriceUsd;
       const curLoss = curGain;
       pos.currentGainPct = Number((curGain * 100).toFixed(2));
+      pos.peakGainPct = Number(((pos.peakPriceUsd - pos.entryPriceUsd) / pos.entryPriceUsd * 100).toFixed(2));
 
       let triggered = false;
       let reason: any = "";
@@ -440,6 +441,7 @@ async function main() {
         }
       }
     }
+    paperLane.saveState();
   }
 
   // Trenches Live WebSocket Queue & Ingestion Engine
@@ -719,6 +721,20 @@ async function main() {
       try {
         const count = await runDiscoveryCycle();
         console.log(`[DAEMON-CYCLE] Processed ${count} buyer events. Active Mints Tracked: ${detector.getActiveMintsCount()} | Open WS Mints: ${subscribedMints.size}`);
+
+        // Active Periodic Price & TP/SL Audit for Open Positions (Raydium / AMM / Dexscreener)
+        const openPosForAudit = paperLane.getOpenPositions().filter(p => !(p as any)._closing);
+        const uniqueOpenMints = [...new Set(openPosForAudit.map(p => p.mint))];
+        for (const m of uniqueOpenMints) {
+          try {
+            const dexInfo = await detector.fetchDexInfo(m);
+            if (dexInfo?.priceUsd && dexInfo.priceUsd > 0) {
+              await handleWebSocketTick(m, dexInfo.priceUsd, { priceUsd: dexInfo.priceUsd, source: "PERIODIC_DEX_AUDIT" });
+            }
+          } catch (err: any) {
+            console.warn(`[AUDIT-WARN] Periodic price audit failed for ${m}: ${err.message}`);
+          }
+        }
 
         // Timeout Fallback Check for open positions
         const openPos = paperLane.getOpenPositions();
