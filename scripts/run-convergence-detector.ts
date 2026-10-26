@@ -40,11 +40,21 @@ async function main() {
   // Connect to Chrome CDP on port 9223
   const { chromium } = await import("playwright");
   const browser = await chromium.connectOverCDP("http://127.0.0.1:9223");
-  const page = browser.contexts()[0].pages().find(p => p.url().includes("gmgn.ai")) || browser.contexts()[0].pages()[0];
-  if (!page.url().includes("gmgn.ai/?chain=sol") && page.url() !== "https://gmgn.ai/") {
-    console.log(`[CDP] 🌐 Navigating tab to GMGN Trenches: https://gmgn.ai/?chain=sol`);
-    await page.goto("https://gmgn.ai/?chain=sol", { waitUntil: "commit" }).catch(() => {});
-    await new Promise((r) => setTimeout(r, 2000));
+  const ctx = browser.contexts()[0];
+  let page = ctx.pages().find(p => p.url().includes("gmgn.ai/?chain=sol") || p.url() === "https://gmgn.ai/");
+  if (!page) {
+    // Pastikan JANGAN membajak tab yang sedang dipakai untuk wallet address monitoring
+    const candidate = ctx.pages().find(p => !p.url().includes("/address/") && !p.url().includes("3azG8rmt"));
+    if (candidate) {
+      page = candidate;
+    } else {
+      page = await ctx.newPage();
+    }
+    if (!page.url().includes("gmgn.ai/?chain=sol")) {
+      console.log(`[CDP] 🌐 Navigating tab to GMGN Trenches: https://gmgn.ai/?chain=sol`);
+      await page.goto("https://gmgn.ai/?chain=sol", { waitUntil: "commit" }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
   console.log(`[CDP] Attached to active GMGN Trenches tab: ${page.url()}`);
 

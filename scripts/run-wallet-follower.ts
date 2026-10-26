@@ -640,9 +640,31 @@ export class WalletFollowerRunner {
     const now = Date.now();
     const openPositions = this.lane.getOpenPositions();
 
+    // Watchdog: pastikan tab tetap berada di halaman target wallet
+    if (!this.page || this.page.isClosed() || !this.page.url().includes(this.targetWallet)) {
+      console.warn(`[WATCHDOG] ⚠️ Tab target terlepas (${this.page?.url()}). Mengarahkan kembali ke ${WALLET_PAGE_URL}...`);
+      try {
+        if (!this.page || this.page.isClosed()) {
+          const ctx = this.browser?.contexts()[0];
+          if (ctx) this.page = await ctx.newPage();
+        }
+        if (this.page) {
+          await this.page.goto(WALLET_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          this.cdp = await this.page.context().newCDPSession(this.page);
+          await this.cdp.send('Network.enable');
+          this.cdp.on('Network.webSocketFrameReceived', ({ response }) => {
+            this.handleIncomingWsFrame(response.payloadData);
+          });
+          console.log(`[WATCHDOG] ✅ Berhasil merecover tab target wallet!`);
+        }
+      } catch (err: any) {
+        console.error(`[WATCHDOG-ERR] Gagal recover tab: ${err?.message}`);
+      }
+    }
+
     if (now - this.lastMtmLogAt > 30000) {
       this.lastMtmLogAt = now;
-      console.log(`\n[HEARTBEAT] Follower Aktif | Open Positions: ${openPositions.length} | Target: ${this.targetWallet.slice(0, 8)}...`);
+      console.log(`\n[HEARTBEAT] Follower Aktif | Open Positions: ${openPositions.length} | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       for (const p of openPositions) {
         const curValue = p.totalTokens * p.lastObservedPriceUsd;
         const unPnl = curValue - p.remainingCostBasisUsd;
