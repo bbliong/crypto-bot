@@ -48,7 +48,7 @@ export class WalletFollowerRunner {
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
   private isRunning = false;
-  private currentSubscribedToken: string | null = null;
+  private subscribedTokens: Set<string> = new Set();
   private solPriceUsd = 101.5;
   private lastMtmLogAt = 0;
   private processedTxHashes: Set<string> = new Set();
@@ -212,6 +212,8 @@ export class WalletFollowerRunner {
         timestamp: tx.timestamp || Math.floor(Date.now() / 1000),
       };
 
+      await this.ensureTokenSubscribed(tokenMint);
+
       if (action === 'buy') {
         await this.handleTargetBuy(signal);
       } else {
@@ -290,6 +292,8 @@ export class WalletFollowerRunner {
         txHash: sig,
         timestamp: tx.timestamp || Math.floor(Date.now() / 1000),
       };
+
+      await this.ensureTokenSubscribed(tokenMint);
 
       if (action === 'buy') {
         await this.handleTargetBuy(signal);
@@ -1015,6 +1019,8 @@ export class WalletFollowerRunner {
     console.log(`[SMART DIP BUY EXECUTED] ${evalSmart.buyType} ${signal.symbol} | Stake: $${actualStakeUsd.toFixed(2)} | Tokens: ${tokensBought.toLocaleString()} @ $${execPrice}`);
     console.log(`=========================================================\n`);
 
+    await this.ensureTokenSubscribed(signal.mint);
+
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
     this.smartDipLane.appendEvent({
       id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1150,58 +1156,70 @@ export class WalletFollowerRunner {
   }
 
   private async ensureTokenSubscribed(mint: string): Promise<void> {
-    if (this.currentSubscribedToken === mint || !this.page) return;
+    if (!mint || this.subscribedTokens.has(mint) || !this.page) return;
 
     try {
-      const prevMint = this.currentSubscribedToken;
-      this.currentSubscribedToken = mint;
+      this.subscribedTokens.add(mint);
 
       await this.page.evaluate(
-        ({ prevMint, newMint }) => {
+        (targetMint) => {
           const ws = (window as any).__gmgnWs;
           if (!ws || ws.readyState !== 1) return;
 
-          // Unsubscribe token lama jika ada
-          if (prevMint) {
-            ws.send(JSON.stringify({
-              action: 'unsubscribe',
-              channel: 'token_activity',
-              f: 'w',
-              id: 'unsub_token_act',
-              data: [{ chain: 'sol', addresses: prevMint }],
-            }));
-            ws.send(JSON.stringify({
-              action: 'unsubscribe',
-              channel: 'token_stat',
-              f: 'w',
-              id: 'unsub_token_stat',
-              data: [{ chain: 'sol', addresses: prevMint }],
-            }));
-          }
-
-          // Subscribe token baru
           ws.send(JSON.stringify({
             action: 'subscribe',
             channel: 'token_activity',
             f: 'w',
-            id: 'sub_token_act',
-            data: [{ chain: 'sol', addresses: newMint }],
+            id: `sub_act_${targetMint.slice(0, 8)}`,
+            data: [{ chain: 'sol', addresses: targetMint }],
           }));
           ws.send(JSON.stringify({
             action: 'subscribe',
             channel: 'token_stat',
             f: 'w',
-            id: 'sub_token_stat',
-            data: [{ chain: 'sol', addresses: newMint }],
+            id: `sub_stat_${targetMint.slice(0, 8)}`,
+            data: [{ chain: 'sol', addresses: targetMint }],
           }));
         },
-        { prevMint, newMint: mint }
+        mint
       );
 
-      console.log(`[DYNAMIC TOKEN WS] Berhasil subscribe sub-second feed untuk token: ${mint}`);
+      console.log(`[DYNAMIC TOKEN WS] Berhasil subscribe sub-second feed untuk token: ${mint} (Total aktif: ${this.subscribedTokens.size})`);
     } catch (err: any) {
+      this.subscribedTokens.delete(mint);
       console.warn(`[DYNAMIC-SUB-WARN] Gagal subscribe token: ${err?.message}`);
     }
+  }
+
+  private async unsubscribeToken(mint: string): Promise<void> {
+    if (!mint || !this.subscribedTokens.has(mint) || !this.page) return;
+
+    try {
+      this.subscribedTokens.delete(mint);
+      await this.page.evaluate(
+        (targetMint) => {
+          const ws = (window as any).__gmgnWs;
+          if (!ws || ws.readyState !== 1) return;
+
+          ws.send(JSON.stringify({
+            action: 'unsubscribe',
+            channel: 'token_activity',
+            f: 'w',
+            id: `unsub_act_${targetMint.slice(0, 8)}`,
+            data: [{ chain: 'sol', addresses: targetMint }],
+          }));
+          ws.send(JSON.stringify({
+            action: 'unsubscribe',
+            channel: 'token_stat',
+            f: 'w',
+            id: `unsub_stat_${targetMint.slice(0, 8)}`,
+            data: [{ chain: 'sol', addresses: targetMint }],
+          }));
+        },
+        mint
+      );
+      console.log(`[DYNAMIC TOKEN WS] Unsubscribed token: ${mint} (Sisa: ${this.subscribedTokens.size})`);
+    } catch {}
   }
 
   private async performHealthcheck(): Promise<void> {
@@ -1246,6 +1264,49 @@ export class WalletFollowerRunner {
         }
       } catch {}
 
+      // 1. Sinkronisasi subscribe token aktif dan batch price heartbeat
+      const smartOpen = this.smartDipLane.getOpenPositions();
+      const allOpenMints = Array.from(new Set([
+        ...openPositions.map(p => p.mint),
+        ...smartOpen.map(p => p.mint)
+      ]));
+
+      for (const mint of allOpenMints) {
+        if (!this.subscribedTokens.has(mint)) {
+          await this.ensureTokenSubscribed(mint);
+        }
+      }
+
+      // 2. Heartbeat batch price polling via DexScreener API (fallback 30s)
+      if (allOpenMints.length > 0) {
+        try {
+          const mintsQuery = allOpenMints.slice(0, 30).join(',');
+          const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mintsQuery}`, {
+            signal: AbortSignal.timeout(3000),
+          });
+          if (res.ok) {
+            const data = await res.json() as any;
+            const pairs = data.pairs || [];
+            const bestPrices = new Map<string, number>();
+            for (const pair of pairs) {
+              const baseMint = pair.baseToken?.address;
+              const price = parseFloat(pair.priceUsd) || 0;
+              const liq = pair.liquidity?.usd || 0;
+              if (baseMint && price > 0) {
+                if (!bestPrices.has(baseMint) || liq > 1000) {
+                  bestPrices.set(baseMint, price);
+                }
+              }
+            }
+
+            for (const [mint, price] of bestPrices.entries()) {
+              this.lane.updateTokenTick(mint, price);
+              await this.handleSmartDipPriceTick(mint, price);
+            }
+          }
+        } catch {}
+      }
+
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       console.log(`--- LANE 1 (Direct Scalper $20 Pool, $2/buy) ---`);
       for (const p of openPositions) {
@@ -1255,7 +1316,6 @@ export class WalletFollowerRunner {
         console.log(`  -> ${p.symbol}: Stake $${p.remainingCostBasisUsd.toFixed(2)} (${p.entryCount}/5) | CurValue: $${curValue.toFixed(2)} | UnPnl: ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)`);
       }
 
-      const smartOpen = this.smartDipLane.getOpenPositions();
       const smartSum = this.smartDipLane.getSummary();
       console.log(`--- LANE 2 (Smart Dip TP + Rebound, $5 Stake) | Invested: $${smartSum.totalCapitalInvested.toFixed(2)} | Realized: $${smartSum.totalRealizedPnlUsd.toFixed(2)} ---`);
       for (const sp of smartOpen) {
@@ -1263,11 +1323,6 @@ export class WalletFollowerRunner {
         const unPnl = curValue - sp.remainingCostBasisUsd;
         const roi = sp.remainingCostBasisUsd > 0 ? (unPnl / sp.remainingCostBasisUsd) * 100 : 0;
         console.log(`  -> ${sp.symbol} [${sp.phase}]: Stake $${sp.remainingCostBasisUsd.toFixed(2)} | Tokens: ${sp.totalTokens.toLocaleString()} | Entry: $${sp.avgEntryPriceUsd} | CurPrice: $${sp.lastObservedPriceUsd} | UnPnl: ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)`);
-
-        // Trigger TP check jika harga update
-        if (sp.lastObservedPriceUsd > 0) {
-          await this.handleSmartDipPriceTick(sp.mint, sp.lastObservedPriceUsd);
-        }
       }
     }
   }
