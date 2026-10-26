@@ -822,35 +822,6 @@ export class WalletFollowerRunner {
       }
       return;
     }
-      this.lane.appendComparisonEvent({
-        id: eventId,
-        timestamp: nowMs,
-        timeWib,
-        tokenMint: signal.mint,
-        tokenSymbol: signal.symbol,
-        tokenName: signal.tokenName,
-        target: {
-          action: 'SELL',
-          tokenAmount: signal.tokenAmount,
-          tokenAmountFormatted: formatAmount(signal.tokenAmount),
-          usdAmount: signal.usdAmount,
-          priceUsd: signal.priceUsd,
-          remainingHolding: signal.remainingHolding,
-          remainingHoldingFormatted: formatAmount(signal.remainingHolding),
-          sellRatioPct: evalSell.sellRatioPct,
-          txHash: signal.txHash,
-        },
-        bot: {
-          action: 'SKIP_NO_POSITION',
-          tokensBoughtOrSold: 0,
-          tokensFormatted: '0',
-          executionPriceUsd: signal.priceUsd,
-          positionStatus: 'CLOSED',
-          reason: 'NO_OPEN_POSITION',
-        },
-      });
-      return;
-    }
 
     console.log(`[FOLLOW SELL TRIGGER] Target Sell Ratio: ${evalSell.sellRatioPct}% | Jual ${evalSell.botTokensToSell.toLocaleString()} tokens bot... (${evalSell.isFullExit ? 'FULL EXIT' : 'PARTIAL'})`);
 
