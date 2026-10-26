@@ -189,6 +189,61 @@ test('WalletFollowerLane: Proportional Sell calculation (Target sells 30%)', () 
   cleanup();
 });
 
+test('WalletFollowerLane: Blocks entry when target already held pre-existing bag (onlyNewTokens = true)', () => {
+  cleanup();
+  const lane = new WalletFollowerLane({
+    targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
+    stakePerEntryUsd: 2.0,
+    maxEntriesPerToken: 5,
+    maxTotalStakeUsd: 10.0,
+    onlyNewTokens: true,
+    positionsFilePath: POS_FILE,
+    tradesFilePath: TRADES_FILE,
+  });
+
+  // Target buys 100K tokens, but remainingHolding is 500K tokens (target held 400K tokens before!)
+  const oldBagSignal: WalletTradeSignal = {
+    action: 'buy',
+    mint: 'TokenOldBag111111111111111111111111111111',
+    symbol: 'OLDBAG',
+    tokenName: 'Old Bag Token',
+    tokenAmount: 100000,
+    remainingHolding: 500000,
+    solAmount: 1.0,
+    usdAmount: 150,
+    priceUsd: 0.0015,
+    txHash: 'tx_old',
+    timestamp: 1700000000,
+  };
+
+  const evalBuy = lane.evaluateBuySignal(oldBagSignal);
+  assert.equal(evalBuy.canEnter, false);
+  assert.match(evalBuy.reason, /REJECT_PRE_EXISTING_BAG/);
+
+  // Target buys 200K tokens on a FRESH new token (holding before was 0!)
+  const freshSignal: WalletTradeSignal = {
+    action: 'buy',
+    mint: 'TokenFresh2222222222222222222222222222222',
+    symbol: 'FRESH',
+    tokenName: 'Fresh Token',
+    tokenAmount: 200000,
+    remainingHolding: 200000, // exact match -> held 0 before
+    solAmount: 2.0,
+    usdAmount: 300,
+    priceUsd: 0.0015,
+    txHash: 'tx_fresh',
+    timestamp: 1700000005,
+  };
+
+  const evalFresh = lane.evaluateBuySignal(freshSignal);
+  assert.equal(evalFresh.canEnter, true);
+  assert.equal(evalFresh.stakeUsd, 2.0);
+  assert.equal(evalFresh.entryNum, 1);
+  assert.match(evalFresh.reason, /NEW_TOKEN_FRESH_ENTRY_1/);
+
+  cleanup();
+});
+
 test('WalletFollowerLane: Target Full Exit (100% or Dust remaining)', () => {
   cleanup();
   const lane = new WalletFollowerLane({

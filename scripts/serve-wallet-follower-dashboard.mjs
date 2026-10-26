@@ -449,6 +449,7 @@ function renderHtmlDashboard() {
         </div>
       </div>
       <div class="header-badges">
+        <span class="badge" style="background: rgba(236, 72, 153, 0.2); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.4);">🍎 Apple to Apple: Fresh Tokens Only</span>
         <span class="badge badge-rule">Stake: $2.00 / Entry</span>
         <span class="badge badge-rule">Cap: 5x ($10 Maks/Token)</span>
         <span class="badge badge-rule">Sell: Proporsional %</span>

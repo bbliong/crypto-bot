@@ -101,6 +101,7 @@ export interface FollowerLaneConfig {
   stakePerEntryUsd: number; // default $2.0
   maxEntriesPerToken: number; // default 5
   maxTotalStakeUsd: number; // default $10.0
+  onlyNewTokens?: boolean; // default true: hanya ikuti saat target mulai beli token baru dari 0
   positionsFilePath?: string;
   tradesFilePath?: string;
   eventsFilePath?: string;
@@ -111,6 +112,7 @@ export class WalletFollowerLane {
   public readonly stakePerEntryUsd: number;
   public readonly maxEntriesPerToken: number;
   public readonly maxTotalStakeUsd: number;
+  public readonly onlyNewTokens: boolean;
   private positionsFilePath: string;
   private tradesFilePath: string;
   private eventsFilePath: string;
@@ -124,6 +126,7 @@ export class WalletFollowerLane {
     this.stakePerEntryUsd = config.stakePerEntryUsd ?? 2.0;
     this.maxEntriesPerToken = config.maxEntriesPerToken ?? 5;
     this.maxTotalStakeUsd = config.maxTotalStakeUsd ?? 10.0;
+    this.onlyNewTokens = config.onlyNewTokens ?? true;
     this.positionsFilePath = config.positionsFilePath || path.resolve(process.cwd(), 'data/wallet-follower-positions.json');
     this.tradesFilePath = config.tradesFilePath || path.resolve(process.cwd(), 'data/wallet-follower-trades.json');
     this.eventsFilePath = config.eventsFilePath || path.resolve(process.cwd(), 'data/wallet-follower-events.json');
@@ -156,11 +159,24 @@ export class WalletFollowerLane {
     const existing = this.positions.get(signal.mint);
 
     if (!existing || existing.status === 'CLOSED') {
+      // Hitung saldo target sebelum transaksi buy ini
+      const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
+      
+      // Jika mode onlyNewTokens aktif: target harus beli dari ground zero (saldo awal <= 5% dari pembelian atau <= 1,000 token)
+      if (this.onlyNewTokens && targetBalanceBefore > 0.05 * signal.tokenAmount && targetBalanceBefore > 1000) {
+        return {
+          canEnter: false,
+          stakeUsd: 0,
+          entryNum: 0,
+          reason: `REJECT_PRE_EXISTING_BAG_NOT_NEW_TOKEN (Target held ${Math.round(targetBalanceBefore).toLocaleString()} tokens before)`,
+        };
+      }
+
       return {
         canEnter: true,
         stakeUsd: this.stakePerEntryUsd,
         entryNum: 1,
-        reason: 'NEW_TOKEN_ENTRY_1',
+        reason: 'NEW_TOKEN_FRESH_ENTRY_1',
       };
     }
 
