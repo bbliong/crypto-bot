@@ -3,7 +3,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
-import { getSolanaRpcUrl } from './solana-rpc-config.mjs';
+import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
 
 const TARGET_WALLET = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 const CDP_ENDPOINT = process.env.CDP_ENDPOINT || 'http://127.0.0.1:9223';
@@ -53,6 +53,8 @@ export class WalletFollowerRunner {
   private heliusApiKey = '';
   private heliusPollInterval: NodeJS.Timeout | null = null;
   private isPollingHelius = false;
+  private heliusWs: WebSocket | null = null;
+  private heliusWsReconnectTimer: NodeJS.Timeout | null = null;
 
   private initHeliusKey(): void {
     if (process.env.HELIUS_API_KEY) {
@@ -75,7 +77,7 @@ export class WalletFollowerRunner {
       console.log('[HELIUS] HELIUS_API_KEY tidak ditemukan, poller on-chain dinonaktifkan.');
       return;
     }
-    console.log('[HELIUS] On-chain transaction stream/poller aktif (interval: 3.5s)');
+    console.log('[HELIUS] On-chain backup poller aktif (interval: 6s)');
     this.heliusPollInterval = setInterval(async () => {
       if (!this.isRunning || this.isPollingHelius) return;
       this.isPollingHelius = true;
@@ -84,7 +86,136 @@ export class WalletFollowerRunner {
       } catch {} finally {
         this.isPollingHelius = false;
       }
-    }, 3500);
+    }, 6000);
+  }
+
+  private startHeliusWebSocket(): void {
+    this.initHeliusKey();
+    const wsUrl = getSolanaRpcWsUrl();
+    if (!wsUrl || !this.heliusApiKey) return;
+
+    try {
+      console.log('[HELIUS WS] Menghubungkan WebSocket on-chain logsSubscribe...');
+      this.heliusWs = new WebSocket(wsUrl);
+
+      this.heliusWs.onopen = () => {
+        console.log('[HELIUS WS] WebSocket on-chain terhubung! Mendengarkan real-time logs target wallet (processed commitment)...');
+        const req = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'logsSubscribe',
+          params: [
+            { mentions: [this.targetWallet] },
+            { commitment: 'processed' },
+          ],
+        };
+        this.heliusWs?.send(JSON.stringify(req));
+      };
+
+      this.heliusWs.onmessage = async (event: any) => {
+        try {
+          const raw = typeof event.data === 'string' ? event.data : event.data.toString();
+          const msg = JSON.parse(raw);
+          if (msg.method === 'logsNotification') {
+            const val = msg.params?.result?.value;
+            const sig = val?.signature;
+            if (sig && !val?.err && !this.processedTxHashes.has(sig)) {
+              console.log(`\n[HELIUS WS PUSH] Transaksi baru terdeteksi instan via WebSocket: ${sig.slice(0, 10)}...`);
+              await this.processHeliusSignature(sig);
+            }
+          }
+        } catch {}
+      };
+
+      this.heliusWs.onerror = () => {};
+
+      this.heliusWs.onclose = () => {
+        if (!this.isRunning) return;
+        console.log('[HELIUS WS] Terputus. Reconnecting dalam 3 detik...');
+        if (this.heliusWsReconnectTimer) clearTimeout(this.heliusWsReconnectTimer);
+        this.heliusWsReconnectTimer = setTimeout(() => {
+          if (this.isRunning) this.startHeliusWebSocket();
+        }, 3000);
+      };
+    } catch (err: any) {
+      console.log(`[HELIUS WS ERROR] Gagal inisiasi WebSocket: ${err.message}`);
+    }
+  }
+
+  private async processHeliusSignature(sig: string): Promise<void> {
+    if (this.processedTxHashes.has(sig)) return;
+    this.processedTxHashes.add(sig);
+    if (this.processedTxHashes.size > 2000) {
+      const first = this.processedTxHashes.values().next().value;
+      if (first) this.processedTxHashes.delete(first);
+    }
+
+    try {
+      const url = `https://api.helius.xyz/v0/transactions?api-key=${this.heliusApiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions: [sig] }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) return;
+      const txs = await res.json() as any[];
+      if (!Array.isArray(txs) || txs.length === 0) return;
+      const tx = txs[0];
+      if (tx.type !== 'SWAP' && !tx.events?.swap) return;
+
+      let tokenMint = null;
+      let tokenDiff = 0;
+      let decimals = 6;
+      for (const acc of tx.accountData || []) {
+        for (const ch of acc.tokenBalanceChanges || []) {
+          if (ch.userAccount === this.targetWallet && ch.mint !== 'So11111111111111111111111111111111111111112') {
+            tokenMint = ch.mint;
+            decimals = ch.rawTokenAmount?.decimals ?? 6;
+            tokenDiff += Number(ch.rawTokenAmount?.tokenAmount || 0) / (10 ** decimals);
+          }
+        }
+      }
+
+      if (!tokenMint || tokenDiff === 0) return;
+
+      const action: 'buy' | 'sell' = tokenDiff > 0 ? 'buy' : 'sell';
+      const tokenAmount = Math.abs(tokenDiff);
+
+      let solDiff = 0;
+      for (const acc of tx.accountData || []) {
+        if (acc.account === this.targetWallet) {
+          solDiff = (acc.nativeBalanceChange || 0) / 1e9;
+          break;
+        }
+      }
+      const solAmount = Math.abs(solDiff);
+      const usdAmount = solAmount * this.solPriceUsd;
+      const priceUsd = tokenAmount > 0 ? usdAmount / tokenAmount : 0;
+
+      console.log(`\n---------------------------------------------------------`);
+      console.log(`[HELIUS WS DETECTED] ${action.toUpperCase()} ${tokenMint.slice(0, 8)}... (${tokenAmount.toLocaleString()} tokens, ${solAmount.toFixed(3)} SOL) [sig: ${sig.slice(0, 10)}...]`);
+
+      const signal: WalletTradeSignal = {
+        action,
+        mint: tokenMint,
+        symbol: 'TOKEN',
+        tokenName: '',
+        tokenAmount,
+        remainingHolding: tokenAmount,
+        solAmount,
+        usdAmount,
+        priceUsd,
+        txHash: sig,
+        timestamp: tx.timestamp || Math.floor(Date.now() / 1000),
+      };
+
+      if (action === 'buy') {
+        await this.handleTargetBuy(signal);
+      } else {
+        await this.handleTargetSell(signal);
+      }
+    } catch {}
   }
 
   private async pollHeliusTransactions(): Promise<void> {
@@ -217,6 +348,7 @@ export class WalletFollowerRunner {
     this.isRunning = true;
     await this.refreshSolPrice();
     setInterval(() => this.refreshSolPrice(), 60000);
+    this.startHeliusWebSocket();
     this.startHeliusPoller();
     await this.connectAndSetup();
 
@@ -236,6 +368,14 @@ export class WalletFollowerRunner {
   public async stop(): Promise<void> {
     console.log(`[FOLLOWER] Menghentikan Wallet Follower...`);
     this.isRunning = false;
+    if (this.heliusWsReconnectTimer) {
+      clearTimeout(this.heliusWsReconnectTimer);
+      this.heliusWsReconnectTimer = null;
+    }
+    if (this.heliusWs) {
+      this.heliusWs.close();
+      this.heliusWs = null;
+    }
     if (this.heliusPollInterval) {
       clearInterval(this.heliusPollInterval);
       this.heliusPollInterval = null;
