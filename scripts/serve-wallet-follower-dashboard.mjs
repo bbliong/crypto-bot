@@ -8,6 +8,10 @@ const POS_FILE = join(ROOT, 'data', 'wallet-follower-positions.json');
 const TRADES_FILE = join(ROOT, 'data', 'wallet-follower-trades.json');
 const EVENTS_FILE = join(ROOT, 'data', 'wallet-follower-events.json');
 
+const SMART_DIP_POS_FILE = join(ROOT, 'data', 'smart-dip-positions.json');
+const SMART_DIP_TRADES_FILE = join(ROOT, 'data', 'smart-dip-trades.json');
+const SMART_DIP_EVENTS_FILE = join(ROOT, 'data', 'smart-dip-events.json');
+
 const TARGET_WALLET = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 const SWAP_WALLET = 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
 
@@ -30,10 +34,21 @@ function loadDashboardState() {
   const totalRealizedPnl = positions.reduce((acc, p) => acc + (p.realizedPnlUsd || 0), 0);
   const totalCostBasis = openPositions.reduce((acc, p) => acc + (p.remainingCostBasisUsd || 0), 0);
 
-  // Hitung win rate dari closed trades
+  // Hitung win rate dari closed trades Lane 1
   const tradesWithPnl = closedTrades.filter((t) => t.exits && t.exits.length > 0);
   const winTrades = tradesWithPnl.filter((t) => (t.realizedPnlUsd || 0) > 0);
   const winRate = tradesWithPnl.length > 0 ? (winTrades.length / tradesWithPnl.length) * 100 : 0;
+
+  // Lane 2: Smart Dip $5 Stake
+  const smartPositions = safeReadJson(SMART_DIP_POS_FILE, []);
+  const smartClosedTrades = safeReadJson(SMART_DIP_TRADES_FILE, []);
+  const smartEvents = safeReadJson(SMART_DIP_EVENTS_FILE, []);
+
+  const smartOpen = smartPositions.filter((p) => p.status === 'OPEN');
+  const smartRealizedPnl = smartClosedTrades.reduce((acc, t) => acc + (t.realizedPnlUsd || 0), 0) + smartPositions.reduce((acc, p) => acc + (p.realizedPnlUsd || 0), 0);
+  const smartCostBasis = smartOpen.reduce((acc, p) => acc + (p.remainingCostBasisUsd || 0), 0);
+  const smartWinTrades = smartClosedTrades.filter((t) => (t.realizedPnlUsd || 0) > 0);
+  const smartWinRate = smartClosedTrades.length > 0 ? (smartWinTrades.length / smartClosedTrades.length) * 100 : 0;
 
   return {
     targetWallet: TARGET_WALLET,
@@ -56,6 +71,27 @@ function loadDashboardState() {
     openPositions,
     recentEvents: events.slice(0, 300),
     closedTrades: closedTrades.slice(0, 50),
+    smartDip: {
+      rule: {
+        stakeUsd: 5.0,
+        initialTpRange: '+30% to +50% (100% Full Exit)',
+        moonbagRule: '>+50% (70% Sell, 30% Moonbag)',
+        reboundRule: 'Target 2x Buys/Large Buy on Dip Rebound -> Quick TP +20%',
+        targetExitRule: 'Target Full Exit -> 100% Exit',
+      },
+      summary: {
+        openPositionsCount: smartOpen.length,
+        totalCapitalInvested: Number(smartCostBasis.toFixed(2)),
+        totalRealizedPnlUsd: Number(smartRealizedPnl.toFixed(4)),
+        closedTradesCount: smartClosedTrades.length,
+        winRatePct: Number(smartWinRate.toFixed(1)),
+        totalEventsCaptured: smartEvents.length,
+        lastEventTime: smartEvents.length > 0 ? smartEvents[0].timeWib : '-',
+      },
+      openPositions: smartOpen,
+      recentEvents: smartEvents.slice(0, 300),
+      closedTrades: smartClosedTrades.slice(0, 50),
+    },
   };
 }
 
@@ -436,6 +472,41 @@ function renderHtmlDashboard(initialState = {}) {
       </div>
     </header>
 
+    <!-- Dual Lane Comparison Switcher -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px;">
+      <!-- Lane 1 Card -->
+      <div id="lane1-card" onclick="switchLane(1)" style="background: var(--card-bg); border: 2px solid var(--primary); border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="color: var(--primary); font-size: 16px;">🏁 Lane 1: Direct Scalper Follower</strong>
+          <span class="badge badge-rule">Pool: $20 ($2/Buy)</span>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          Direct proportional follow, max 5x akumulasi per koin.
+        </div>
+        <div style="display: flex; gap: 16px; font-family: ui-monospace, monospace; font-size: 13px;">
+          <div><span style="color: var(--text-muted);">Realized:</span> <strong id="l1-pnl" style="color: var(--emerald);">+$0.00</strong></div>
+          <div><span style="color: var(--text-muted);">Win Rate:</span> <strong id="l1-wr">0%</strong></div>
+          <div><span style="color: var(--text-muted);">Active:</span> <strong id="l1-open">0 pos</strong></div>
+        </div>
+      </div>
+
+      <!-- Lane 2 Card -->
+      <div id="lane2-card" onclick="switchLane(2)" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="color: #f59e0b; font-size: 16px;">🎯 Lane 2: Smart TP $5 & Dip Rebound</strong>
+          <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4);">Modal: $5 / Trade</span>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          TP +30%-50% (100% Sell), &gt;50% (70% Sell), Serok Dip Target 2x Buy &rarr; Quick TP +20%.
+        </div>
+        <div style="display: flex; gap: 16px; font-family: ui-monospace, monospace; font-size: 13px;">
+          <div><span style="color: var(--text-muted);">Realized:</span> <strong id="l2-pnl" style="color: var(--emerald);">+$0.00</strong></div>
+          <div><span style="color: var(--text-muted);">Win Rate:</span> <strong id="l2-wr">0%</strong></div>
+          <div><span style="color: var(--text-muted);">Active:</span> <strong id="l2-open">0 pos</strong></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Metrics Row -->
     <div class="metrics-grid">
       <div class="metric-card">
@@ -492,7 +563,23 @@ function renderHtmlDashboard(initialState = {}) {
 
   <script>
     let currentFilter = 'all';
+    let currentLane = 1;
+    let latestData = null;
     let allEvents = [];
+
+    function switchLane(laneNum) {
+      currentLane = laneNum;
+      const c1 = document.getElementById('lane1-card');
+      const c2 = document.getElementById('lane2-card');
+      if (laneNum === 1) {
+        c1.style.border = '2px solid var(--primary)';
+        c2.style.border = '1px solid var(--card-border)';
+      } else {
+        c1.style.border = '1px solid var(--card-border)';
+        c2.style.border = '2px solid #f59e0b';
+      }
+      if (latestData) updateDashboard(latestData);
+    }
 
     function setFilter(f) {
       currentFilter = f;
@@ -510,13 +597,90 @@ function renderHtmlDashboard(initialState = {}) {
       }
 
       const filtered = allEvents.filter(ev => {
-        if (currentFilter === 'buy') return ev.target.action === 'BUY';
-        if (currentFilter === 'sell') return ev.target.action === 'SELL';
+        if (currentFilter === 'buy') {
+          return (ev.target && ev.target.action === 'BUY') || (ev.action && ev.action.includes('BUY'));
+        }
+        if (currentFilter === 'sell') {
+          return (ev.target && ev.target.action === 'SELL') || (ev.action && ev.action.includes('SELL'));
+        }
         return true;
       });
 
       if (filtered.length === 0) {
         container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Tidak ada transaksi untuk filter ini.</div>';
+        return;
+      }
+
+      if (currentLane === 2) {
+        container.innerHTML = filtered.map(ev => {
+          const isBuy = ev.action && ev.action.includes('BUY');
+          const isSell = ev.action && ev.action.includes('SELL');
+          let actionBadge = '';
+          if (ev.action === 'BUY_INITIAL') actionBadge = '<span class="badge-buy">BUY INITIAL ($5.00)</span>';
+          else if (ev.action === 'BUY_REBOUND') actionBadge = '<span class="badge-buy" style="background: rgba(16,185,129,0.25);">BUY REBOUND ($5.00)</span>';
+          else if (ev.action === 'SELL_TP_FULL') actionBadge = '<span class="badge-sell">TP +30%-50% (FULL 100%)</span>';
+          else if (ev.action === 'SELL_TP_70') actionBadge = '<span class="badge-sell" style="background: rgba(245,158,11,0.2); color: #f59e0b;">TP >50% (SELL 70%)</span>';
+          else if (ev.action === 'SELL_REBOUND_TP20') actionBadge = '<span class="badge-sell">REBOUND TP +20%</span>';
+          else actionBadge = '<span class="badge-sell">TARGET EXIT (100%)</span>';
+
+          const dateParts = (ev.timeWib || '').split(' ');
+          const dateStr = dateParts[0] || '';
+          const timeSecStr = (dateParts[1] || '') + ' ' + (dateParts[2] || '');
+
+          return `
+          <div class="compare-card">
+            <div class="col-meta">
+              <div class="meta-time">${dateStr}</div>
+              <div class="meta-time-sec">${timeSecStr}</div>
+              <div class="meta-symbol">${ev.tokenSymbol || 'TOKEN'}</div>
+              <a href="https://solscan.io/token/${ev.tokenMint}" target="_blank" class="meta-mint">
+                ${ev.tokenMint ? ev.tokenMint.slice(0, 6) + '...' + ev.tokenMint.slice(-4) : ''}
+              </a>
+            </div>
+            <div class="col-side col-target" style="border-right: 1px solid var(--card-border);">
+              <div class="side-header">
+                <span>🎯 Lane 2: Smart Rule Trigger</span>
+                ${actionBadge}
+              </div>
+              <div class="trade-row">
+                <span style="color: var(--text-muted);">Alasan Trigger:</span>
+                <span class="trade-val" style="color: #a5b4fc;">${ev.reason || '-'}</span>
+              </div>
+              <div class="trade-row">
+                <span style="color: var(--text-muted);">Nilai Transaksi:</span>
+                <span class="trade-val">$${(ev.stakeOrProceedsUsd || 0).toFixed(2)} USD</span>
+              </div>
+            </div>
+            <div class="col-side col-bot">
+              <div class="side-header">
+                <span>Eksekusi AMM Swap</span>
+                <span class="swap-badge">Raydium/Pump AMM</span>
+              </div>
+              <div class="trade-row">
+                <span style="color: var(--text-muted);">Tokens:</span>
+                <span class="trade-val">${(ev.tokens || 0).toLocaleString()} ${ev.tokenSymbol || ''}</span>
+              </div>
+              <div class="trade-row">
+                <span style="color: var(--text-muted);">Harga Eksekusi:</span>
+                <span class="trade-val">$${ev.executionPriceUsd || 0}</span>
+              </div>
+              ${isSell ? `
+              <div class="trade-row">
+                <span style="color: var(--text-muted);">Realized PnL:</span>
+                <span class="${(ev.pnlUsd || 0) >= 0 ? 'bot-pnl-win' : 'bot-pnl-loss'}">
+                  ${(ev.pnlUsd || 0) >= 0 ? '+' : ''}$${(ev.pnlUsd || 0).toFixed(4)} (${ev.roiPct || 0}%)
+                </span>
+              </div>
+              ` : `
+              <div class="trade-row">
+                <span style="color: var(--text-muted);">Status Posisi:</span>
+                <span style="color: var(--emerald); font-weight: 700;">${ev.positionStatus || 'OPEN'}</span>
+              </div>
+              `}
+            </div>
+          </div>
+          `;
+        }).join('');
         return;
       }
 
@@ -617,52 +781,73 @@ function renderHtmlDashboard(initialState = {}) {
 
     function updateDashboard(data) {
       if (!data) return;
+      latestData = data;
 
-      document.getElementById('m-open').innerText = data.summary.openPositionsCount || 0;
-      document.getElementById('m-invested').innerText = 'Modal: \$' + (data.summary.totalCapitalInvested || 0).toFixed(2) + ' terpasang';
+      // Update Top Comparison Cards
+      const l1Pnl = (data.summary && data.summary.totalRealizedPnlUsd) || 0;
+      const l1El = document.getElementById('l1-pnl');
+      l1El.innerText = (l1Pnl >= 0 ? '+' : '') + '$' + l1Pnl.toFixed(2);
+      l1El.style.color = l1Pnl >= 0 ? 'var(--emerald)' : 'var(--rose)';
+      document.getElementById('l1-wr').innerText = ((data.summary && data.summary.winRatePct) || 0).toFixed(1) + '%';
+      document.getElementById('l1-open').innerText = ((data.summary && data.summary.openPositionsCount) || 0) + ' pos';
+
+      const sData = data.smartDip || { summary: {}, openPositions: [], recentEvents: [] };
+      const l2Pnl = (sData.summary && sData.summary.totalRealizedPnlUsd) || 0;
+      const l2El = document.getElementById('l2-pnl');
+      l2El.innerText = (l2Pnl >= 0 ? '+' : '') + '$' + l2Pnl.toFixed(2);
+      l2El.style.color = l2Pnl >= 0 ? 'var(--emerald)' : 'var(--rose)';
+      document.getElementById('l2-wr').innerText = ((sData.summary && sData.summary.winRatePct) || 0).toFixed(1) + '%';
+      document.getElementById('l2-open').innerText = ((sData.summary && sData.summary.openPositionsCount) || 0) + ' pos';
+
+      // Pick active lane dataset
+      const curSummary = currentLane === 1 ? data.summary : sData.summary;
+      const curOpenPositions = currentLane === 1 ? (data.openPositions || []) : (sData.openPositions || []);
+      const curEvents = currentLane === 1 ? (data.recentEvents || []) : (sData.recentEvents || []);
+
+      document.getElementById('m-open').innerText = curSummary.openPositionsCount || 0;
+      document.getElementById('m-invested').innerText = 'Modal: $' + (curSummary.totalCapitalInvested || 0).toFixed(2) + ' terpasang';
 
       const pnlEl = document.getElementById('m-pnl');
-      const pnlVal = data.summary.totalRealizedPnlUsd || 0;
-      pnlEl.innerText = (pnlVal >= 0 ? '+' : '') + '\$' + pnlVal.toFixed(4);
+      const pnlVal = curSummary.totalRealizedPnlUsd || 0;
+      pnlEl.innerText = (pnlVal >= 0 ? '+' : '') + '$' + pnlVal.toFixed(4);
       pnlEl.style.color = pnlVal >= 0 ? 'var(--emerald)' : 'var(--rose)';
-      document.getElementById('m-trades').innerText = (data.summary.closedTradesCount || 0) + ' closed trades';
+      document.getElementById('m-trades').innerText = (curSummary.closedTradesCount || 0) + ' closed trades';
 
-      document.getElementById('m-winrate').innerText = (data.summary.winRatePct || 0).toFixed(1) + '%';
-      document.getElementById('m-events').innerText = data.summary.totalEventsCaptured || 0;
-      document.getElementById('m-last-time').innerText = data.summary.lastEventTime || 'Menunggu trade...';
+      document.getElementById('m-winrate').innerText = (curSummary.winRatePct || 0).toFixed(1) + '%';
+      document.getElementById('m-events').innerText = curSummary.totalEventsCaptured || 0;
+      document.getElementById('m-last-time').innerText = curSummary.lastEventTime || 'Menunggu trade...';
 
       // Active positions panel
       const posPanel = document.getElementById('pos-panel');
       const posChips = document.getElementById('pos-chips');
-      const openPositions = data.openPositions || [];
 
-      if (openPositions.length > 0) {
+      if (curOpenPositions.length > 0) {
         posPanel.style.display = 'block';
-        document.getElementById('pos-count').innerText = openPositions.length + ' token aktif';
-        posChips.innerHTML = openPositions.map(p => {
+        document.getElementById('pos-count').innerText = curOpenPositions.length + ' token aktif';
+        posChips.innerHTML = curOpenPositions.map(p => {
           const curVal = p.totalTokens * (p.lastObservedPriceUsd || p.avgEntryPriceUsd);
           const unPnl = curVal - p.remainingCostBasisUsd;
           const roi = p.remainingCostBasisUsd > 0 ? (unPnl / p.remainingCostBasisUsd) * 100 : 0;
-          return \`
+          return `
           <div class="pos-chip">
             <div class="pos-chip-top">
-              <span>\${p.symbol}</span>
-              <span style="color: \${unPnl >= 0 ? 'var(--emerald)' : 'var(--rose)'};">
-                \${unPnl >= 0 ? '+' : ''}\$\${unPnl.toFixed(2)} (\${roi.toFixed(1)}%)
+              <span>${p.symbol} ${p.phase ? '<small style="color: #f59e0b; margin-left: 4px;">[' + p.phase + ']</small>' : ''}</span>
+              <span style="color: ${unPnl >= 0 ? 'var(--emerald)' : 'var(--rose)'};">
+                ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)
               </span>
             </div>
             <div class="pos-chip-sub">
-              <span>Stake: \$\${p.remainingCostBasisUsd.toFixed(2)} (\${p.entryCount}/5)</span>
-              <span>Harga: \$\${p.lastObservedPriceUsd}</span>
+              <span>Stake: $${p.remainingCostBasisUsd.toFixed(2)}</span>
+              <span>Harga: $${p.lastObservedPriceUsd || p.avgEntryPriceUsd}</span>
             </div>
           </div>
-          \`;
+          `;
         }).join('');
       } else {
         posPanel.style.display = 'none';
       }
 
-      allEvents = data.recentEvents || [];
+      allEvents = curEvents;
       renderEvents();
     }
 

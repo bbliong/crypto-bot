@@ -19,7 +19,6 @@ test('WalletFollowerLane: Entry #1 allowed with $2.0 stake', () => {
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxTotalStakeUsd: 10.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
   });
@@ -151,7 +150,6 @@ test('WalletFollowerLane: Proportional Sell calculation (Target sells 30%)', () 
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxTotalStakeUsd: 10.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
   });
@@ -222,7 +220,6 @@ test('WalletFollowerLane: Blocks entry when target already held pre-existing bag
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxTotalStakeUsd: 10.0,
     onlyNewTokens: true,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
@@ -276,7 +273,6 @@ test('WalletFollowerLane: Target Full Exit (100% or Dust remaining)', () => {
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxTotalStakeUsd: 10.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
   });

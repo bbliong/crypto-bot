@@ -2,6 +2,7 @@ import { chromium, type Browser, type Page, type CDPSession } from 'playwright';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
+import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
 
@@ -41,7 +42,8 @@ export class WalletFollowerRunner {
   private cdpEndpoint: string;
   private targetWallet: string;
   private dryRun: boolean;
-  private lane: WalletFollowerLane;
+  public readonly lane: WalletFollowerLane;
+  public readonly smartDipLane: SmartDipFollowerLane;
   private browser: Browser | null = null;
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
@@ -335,6 +337,15 @@ export class WalletFollowerRunner {
       tradesFilePath: path.resolve(process.cwd(), 'data/wallet-follower-trades.json'),
       eventsFilePath: path.resolve(process.cwd(), 'data/wallet-follower-events.json'),
     });
+
+    this.smartDipLane = new SmartDipFollowerLane({
+      targetWallet: this.targetWallet,
+      stakePerTradeUsd: 5.0,
+      maxCapitalExposureUsd: 20.0,
+      positionsFilePath: path.resolve(process.cwd(), 'data/smart-dip-positions.json'),
+      tradesFilePath: path.resolve(process.cwd(), 'data/smart-dip-trades.json'),
+      eventsFilePath: path.resolve(process.cwd(), 'data/smart-dip-events.json'),
+    });
   }
 
   public async start(durationSeconds: number = 0): Promise<void> {
@@ -473,6 +484,7 @@ export class WalletFollowerRunner {
           if (stat.a && stat.p) {
             const price = Number(stat.p) || 0;
             this.lane.updateTokenTick(stat.a, price);
+            await this.handleSmartDipPriceTick(stat.a, price);
           }
         }
       }
@@ -620,6 +632,9 @@ export class WalletFollowerRunner {
 
     if (!evalBuy.canEnter) {
       console.log(`[FOLLOW BUY SKIP] Alasan: ${evalBuy.reason}`);
+      // Evaluasi Lane 2 (Smart Dip $5)
+      await this.evaluateSmartDipBuy(signal, isFresh, tokenAgeMinutes);
+
       // Jangan spam dashboard komparasi jika target memperdagangkan koin lama / akumulasi kedaluwarsa
       if (
         evalBuy.reason.startsWith('REJECT_PRE_EXISTING_BAG') ||
@@ -788,6 +803,9 @@ export class WalletFollowerRunner {
     } catch (err: any) {
       console.error(`[EXEC-BUY-ERR] ${err?.message}`);
     }
+
+    // Evaluasi Lane 2 (Smart Dip $5) setelah Lane 1
+    await this.evaluateSmartDipBuy(signal, isFresh, tokenAgeMinutes);
   }
 
   private async handleTargetSell(signal: WalletTradeSignal): Promise<void> {
@@ -797,11 +815,13 @@ export class WalletFollowerRunner {
     const eventId = `ev_${nowMs}_${Math.random().toString(36).slice(2, 6)}`;
 
     if (!evalSell.canSell) {
-      console.log(`[FOLLOW SELL SKIP] Tidak ada open position pada token ini.`);
-      // Jangan spam dashboard komparasi jika bot memang tidak pernah masuk token lama ini
-      if (evalSell.reason === 'NO_OPEN_POSITION') {
-        return;
+      console.log(`[FOLLOW SELL SKIP] Tidak ada open position pada token ini di Lane 1.`);
+      const evalSmartSell = this.smartDipLane.evaluateTargetSellSignal(signal);
+      if (evalSmartSell.shouldSell && evalSmartSell.tokensToSell > 0) {
+        await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell);
       }
+      return;
+    }
       this.lane.appendComparisonEvent({
         id: eventId,
         timestamp: nowMs,
@@ -976,6 +996,186 @@ export class WalletFollowerRunner {
     } catch (err: any) {
       console.error(`[EXEC-SELL-ERR] ${err?.message}`);
     }
+
+    // Evaluasi Lane 2 (Smart Dip $5) Target Exit
+    const evalSmartSell = this.smartDipLane.evaluateTargetSellSignal(signal);
+    if (evalSmartSell.shouldSell && evalSmartSell.tokensToSell > 0) {
+      await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell);
+    }
+  }
+
+  /**
+   * Helper: Evaluasi BUY Lane 2 (Smart Dip $5 Stake)
+   */
+  private async evaluateSmartDipBuy(signal: WalletTradeSignal, isFresh: boolean, tokenAgeMinutes: number | null): Promise<void> {
+    const evalSmart = this.smartDipLane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
+    if (!evalSmart.canBuy) {
+      console.log(`[SMART DIP BUY SKIP] ${evalSmart.reason}`);
+      return;
+    }
+
+    console.log(`\n=========================================================`);
+    console.log(`[SMART DIP BUY TRIGGER] Eksekusi ${evalSmart.buyType} untuk ${signal.symbol} ($${evalSmart.stakeUsd.toFixed(2)})...`);
+    let tokensBought = 0;
+    let execPrice = signal.priceUsd;
+    let actualStakeUsd = evalSmart.stakeUsd;
+
+    if (!this.dryRun && this.page && !this.page.isClosed()) {
+      const quote = await getBrowserBuySwapRoute(
+        this.page,
+        signal.mint,
+        DEFAULT_SWAP_WALLET,
+        evalSmart.stakeUsd,
+        this.solPriceUsd,
+        15
+      );
+      if (quote.ok && quote.quote) {
+        tokensBought = Number(quote.quote.outAmount || 0) / 10 ** (quote.quote.outDecimals ?? 6);
+        actualStakeUsd = quote.quote.amountInUsd && quote.quote.amountInUsd > 0 ? quote.quote.amountInUsd : evalSmart.stakeUsd;
+        execPrice = quote.impliedPriceUsd || (tokensBought > 0 ? actualStakeUsd / tokensBought : signal.priceUsd);
+      }
+    }
+
+    if (tokensBought === 0 && signal.priceUsd > 0) {
+      tokensBought = actualStakeUsd / signal.priceUsd;
+    }
+
+    const pos = this.smartDipLane.recordBuyExecution(signal, evalSmart.buyType, actualStakeUsd, tokensBought, execPrice);
+    console.log(`[SMART DIP BUY EXECUTED] ${evalSmart.buyType} ${signal.symbol} | Stake: $${actualStakeUsd.toFixed(2)} | Tokens: ${tokensBought.toLocaleString()} @ $${execPrice}`);
+    console.log(`=========================================================\n`);
+
+    const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
+    this.smartDipLane.appendEvent({
+      id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: nowMs,
+      timeWib: formatWibDate(nowMs),
+      tokenMint: signal.mint,
+      tokenSymbol: signal.symbol,
+      tokenName: signal.tokenName,
+      action: evalSmart.buyType === 'INITIAL_BUY' ? 'BUY_INITIAL' : 'BUY_REBOUND',
+      stakeOrProceedsUsd: actualStakeUsd,
+      tokens: tokensBought,
+      executionPriceUsd: execPrice,
+      reason: evalSmart.reason,
+      positionStatus: pos.status,
+    });
+  }
+
+  /**
+   * Helper: Evaluasi Price Tick Lane 2 (TP 30%-50%, TP >50%, Rebound TP 20%)
+   */
+  private async handleSmartDipPriceTick(mint: string, currentPrice: number): Promise<void> {
+    const tick = this.smartDipLane.evaluatePriceTick(mint, currentPrice);
+    if (!tick.shouldSell || tick.tokensToSell <= 0) return;
+
+    console.log(`\n---------------------------------------------------------`);
+    console.log(`[SMART DIP TP TRIGGER] ${tick.sellType} untuk token ${mint.slice(0, 8)}... (${tick.reason})`);
+
+    let tokensSold = tick.tokensToSell;
+    let usdReceived = 0;
+    let execPrice = currentPrice;
+
+    if (!this.dryRun && this.page && !this.page.isClosed()) {
+      const baseUnits = Math.floor(tokensSold * 1e6).toString();
+      const quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 15);
+      if (quote.ok && quote.quote) {
+        usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
+        execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
+      }
+    }
+
+    if (usdReceived === 0) {
+      usdReceived = tokensSold * currentPrice;
+    }
+
+    const isFullExit = tick.sellRatioPct >= 99;
+    const res = this.smartDipLane.recordSellExecution(
+      mint,
+      tick.sellType,
+      tokensSold,
+      usdReceived,
+      execPrice,
+      isFullExit,
+      `tp_${Date.now()}`
+    );
+
+    if (res) {
+      const lastExit = res.exits[res.exits.length - 1];
+      console.log(`[SMART DIP SELL EXECUTED] ${tick.sellType} | UsdReceived: $${usdReceived.toFixed(2)} | PnL: ${lastExit.pnlUsd >= 0 ? '+' : ''}$${lastExit.pnlUsd} (${lastExit.roiPct}%) | Sisa Tokens: ${res.totalTokens.toLocaleString()}`);
+      console.log(`---------------------------------------------------------\n`);
+
+      const nowMs = Date.now();
+      this.smartDipLane.appendEvent({
+        id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: nowMs,
+        timeWib: formatWibDate(nowMs),
+        tokenMint: mint,
+        tokenSymbol: res.symbol,
+        tokenName: res.tokenName,
+        action: tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL'),
+        stakeOrProceedsUsd: usdReceived,
+        tokens: tokensSold,
+        executionPriceUsd: execPrice,
+        pnlUsd: lastExit.pnlUsd,
+        roiPct: lastExit.roiPct,
+        reason: tick.reason,
+        positionStatus: res.status,
+      });
+    }
+  }
+
+  /**
+   * Helper: Evaluasi Target Exit Lane 2 (Target Full Exit Safety Close)
+   */
+  private async executeSmartDipTargetExit(signal: WalletTradeSignal, tokensToSell: number): Promise<void> {
+    console.log(`[SMART DIP SAFETY EXIT] Target keluar penuh! Menjual seluruh sisa token ${signal.symbol} (${tokensToSell.toLocaleString()})...`);
+    let usdReceived = 0;
+    let execPrice = signal.priceUsd;
+
+    if (!this.dryRun && this.page && !this.page.isClosed()) {
+      const baseUnits = Math.floor(tokensToSell * 1e6).toString();
+      const quote = await getBrowserSellSwapRoute(this.page, signal.mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 15);
+      if (quote.ok && quote.quote) {
+        usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensToSell * (quote.impliedPriceUsd || signal.priceUsd));
+        execPrice = quote.impliedPriceUsd || (tokensToSell > 0 ? usdReceived / tokensToSell : signal.priceUsd);
+      }
+    }
+
+    if (usdReceived === 0) {
+      usdReceived = tokensToSell * signal.priceUsd;
+    }
+
+    const res = this.smartDipLane.recordSellExecution(
+      signal.mint,
+      'TARGET_EXIT',
+      tokensToSell,
+      usdReceived,
+      execPrice,
+      true,
+      signal.txHash
+    );
+
+    if (res) {
+      const lastExit = res.exits[res.exits.length - 1];
+      console.log(`[SMART DIP SAFETY EXIT EXECUTED] PnL: ${lastExit.pnlUsd >= 0 ? '+' : ''}$${lastExit.pnlUsd} (${lastExit.roiPct}%) | Posisi CLOSED`);
+      const nowMs = Date.now();
+      this.smartDipLane.appendEvent({
+        id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: nowMs,
+        timeWib: formatWibDate(nowMs),
+        tokenMint: signal.mint,
+        tokenSymbol: signal.symbol,
+        tokenName: signal.tokenName,
+        action: 'SELL_TARGET_EXIT',
+        stakeOrProceedsUsd: usdReceived,
+        tokens: tokensToSell,
+        executionPriceUsd: execPrice,
+        pnlUsd: lastExit.pnlUsd,
+        roiPct: lastExit.roiPct,
+        reason: 'TARGET_FULL_EXIT_SAFETY_CLOSE',
+        positionStatus: res.status,
+      });
+    }
   }
 
   private async ensureTokenSubscribed(mint: string): Promise<void> {
@@ -1075,12 +1275,28 @@ export class WalletFollowerRunner {
         }
       } catch {}
 
-      console.log(`\n[HEARTBEAT] Follower Aktif | Open Positions: ${openPositions.length} | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
+      console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
+      console.log(`--- LANE 1 (Direct Scalper $20 Pool, $2/buy) ---`);
       for (const p of openPositions) {
         const curValue = p.totalTokens * p.lastObservedPriceUsd;
         const unPnl = curValue - p.remainingCostBasisUsd;
         const roi = p.remainingCostBasisUsd > 0 ? (unPnl / p.remainingCostBasisUsd) * 100 : 0;
         console.log(`  -> ${p.symbol}: Stake $${p.remainingCostBasisUsd.toFixed(2)} (${p.entryCount}/5) | CurValue: $${curValue.toFixed(2)} | UnPnl: ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)`);
+      }
+
+      const smartOpen = this.smartDipLane.getOpenPositions();
+      const smartSum = this.smartDipLane.getSummary();
+      console.log(`--- LANE 2 (Smart Dip TP + Rebound, $5 Stake) | Invested: $${smartSum.totalCapitalInvested.toFixed(2)} | Realized: $${smartSum.totalRealizedPnlUsd.toFixed(2)} ---`);
+      for (const sp of smartOpen) {
+        const curValue = sp.totalTokens * sp.lastObservedPriceUsd;
+        const unPnl = curValue - sp.remainingCostBasisUsd;
+        const roi = sp.remainingCostBasisUsd > 0 ? (unPnl / sp.remainingCostBasisUsd) * 100 : 0;
+        console.log(`  -> ${sp.symbol} [${sp.phase}]: Stake $${sp.remainingCostBasisUsd.toFixed(2)} | Tokens: ${sp.totalTokens.toLocaleString()} | Entry: $${sp.avgEntryPriceUsd} | CurPrice: $${sp.lastObservedPriceUsd} | UnPnl: ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)`);
+
+        // Trigger TP check jika harga update
+        if (sp.lastObservedPriceUsd > 0) {
+          await this.handleSmartDipPriceTick(sp.mint, sp.lastObservedPriceUsd);
+        }
       }
     }
   }
