@@ -45,9 +45,33 @@ export class WalletFollowerRunner {
   private cdp: CDPSession | null = null;
   private isRunning = false;
   private currentSubscribedToken: string | null = null;
-  private solPriceUsd = 145.0;
+  private solPriceUsd = 101.5;
   private lastMtmLogAt = 0;
   private processedTxHashes: Set<string> = new Set();
+
+  private async refreshSolPrice(): Promise<void> {
+    try {
+      const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT', {
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await res.json() as any;
+      if (data && data.price) {
+        this.solPriceUsd = Number(data.price);
+        console.log(`[SOL PRICE] Live SOL Price: $${this.solPriceUsd.toFixed(2)} USD`);
+        return;
+      }
+    } catch {}
+    try {
+      const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', {
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await res.json() as any;
+      if (data?.solana?.usd) {
+        this.solPriceUsd = Number(data.solana.usd);
+        console.log(`[SOL PRICE] Live SOL Price (CG): $${this.solPriceUsd.toFixed(2)} USD`);
+      }
+    } catch {}
+  }
 
   constructor(options: RunnerOptions = {}) {
     this.cdpEndpoint = options.cdpEndpoint || CDP_ENDPOINT;
@@ -74,6 +98,8 @@ export class WalletFollowerRunner {
     if (this.dryRun) console.log(`[FOLLOWER] MODE: DRY-RUN (Tidak mengubah posisi file)`);
 
     this.isRunning = true;
+    await this.refreshSolPrice();
+    setInterval(() => this.refreshSolPrice(), 60000);
     await this.connectAndSetup();
 
     if (durationSeconds > 0) {
@@ -256,6 +282,10 @@ export class WalletFollowerRunner {
 
     if (!evalBuy.canEnter) {
       console.log(`[FOLLOW BUY SKIP] Alasan: ${evalBuy.reason}`);
+      // Jangan spam dashboard komparasi jika target memperdagangkan kantong koin lama
+      if (evalBuy.reason.startsWith('REJECT_PRE_EXISTING_BAG')) {
+        return;
+      }
       this.lane.appendComparisonEvent({
         id: eventId,
         timestamp: nowMs,
@@ -335,11 +365,15 @@ export class WalletFollowerRunner {
       );
 
       if (quote.ok && quote.quote) {
+        if (quote.solPriceUsd && quote.solPriceUsd > 0) {
+          this.solPriceUsd = quote.solPriceUsd;
+        }
         const tokensBought = Number(quote.quote.outAmount || 0) / 10 ** (quote.quote.outDecimals ?? 6);
-        const execPrice = quote.impliedPriceUsd || signal.priceUsd;
-        console.log(`[SWAP AMM QUOTE SUCCESSS] Diterima ${tokensBought.toLocaleString()} token ${signal.symbol} | Implied: $${execPrice}`);
+        const actualStakeUsd = quote.quote.amountInUsd && quote.quote.amountInUsd > 0 ? quote.quote.amountInUsd : evalBuy.stakeUsd;
+        const execPrice = quote.impliedPriceUsd || (tokensBought > 0 ? actualStakeUsd / tokensBought : signal.priceUsd);
+        console.log(`[SWAP AMM QUOTE SUCCESSS] Diterima ${tokensBought.toLocaleString()} token ${signal.symbol} | ActualStake: $${actualStakeUsd.toFixed(2)} | Implied: $${execPrice}`);
 
-        const pos = this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, tokensBought, execPrice);
+        const pos = this.lane.recordBuyExecution(signal, actualStakeUsd, tokensBought, execPrice);
         console.log(`[POSITION UPDATED] Total Stake: $${pos.totalStakeUsd.toFixed(2)} (${pos.entryCount}/5) | Tokens: ${pos.totalTokens.toLocaleString()}`);
 
         this.lane.appendComparisonEvent({
@@ -362,12 +396,12 @@ export class WalletFollowerRunner {
           bot: {
             action: 'BUY',
             entryNum: evalBuy.entryNum,
-            stakeUsd: evalBuy.stakeUsd,
+            stakeUsd: actualStakeUsd,
             tokensBoughtOrSold: tokensBought,
             tokensFormatted: formatAmount(tokensBought),
             executionPriceUsd: execPrice,
             swapAmm: {
-              inAmount: quote.quote.inAmount || `${evalBuy.stakeUsd} USD`,
+              inAmount: quote.quote.inAmount || `${actualStakeUsd.toFixed(2)} USD`,
               outAmount: quote.quote.outAmount || `${tokensBought}`,
               exchange: quote.quote.exchange || 'Raydium/Pump',
               priceImpactPct: quote.quote.priceImpactPct || 0,
@@ -422,6 +456,10 @@ export class WalletFollowerRunner {
 
     if (!evalSell.canSell) {
       console.log(`[FOLLOW SELL SKIP] Tidak ada open position pada token ini.`);
+      // Jangan spam dashboard komparasi jika bot memang tidak pernah masuk token lama ini
+      if (evalSell.reason === 'NO_OPEN_POSITION') {
+        return;
+      }
       this.lane.appendComparisonEvent({
         id: eventId,
         timestamp: nowMs,
@@ -506,8 +544,13 @@ export class WalletFollowerRunner {
       );
 
       if (quote.ok && quote.quote) {
-        const usdReceived = quote.quote.amountOutUsd || (evalSell.botTokensToSell * signal.priceUsd);
-        const execPrice = quote.impliedPriceUsd || signal.priceUsd;
+        if (quote.solPriceUsd && quote.solPriceUsd > 0) {
+          this.solPriceUsd = quote.solPriceUsd;
+        }
+        const usdReceived = (quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0)
+          ? quote.quote.amountOutUsd
+          : (evalSell.botTokensToSell * (quote.impliedPriceUsd || signal.priceUsd));
+        const execPrice = quote.impliedPriceUsd || (evalSell.botTokensToSell > 0 ? usdReceived / evalSell.botTokensToSell : signal.priceUsd);
 
         const res = this.lane.recordSellExecution(signal, evalSell.botTokensToSell, usdReceived, execPrice, evalSell.isFullExit);
         if (res) {

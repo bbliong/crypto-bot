@@ -18,6 +18,7 @@ export interface SwapRouteResult {
     amountOutUsd: number | null;
   } | null;
   impliedPriceUsd?: number | null;
+  solPriceUsd?: number | null;
 }
 
 export const DEFAULT_SWAP_WALLET = 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
@@ -73,6 +74,7 @@ export async function getBrowserBuySwapRoute(
             const amountInUsd = Number(data.amount_in_usd ?? 0);
             const amountOutUsd = Number(data.amount_out_usd ?? 0);
             const impliedPrice = tokens > 0 && amountInUsd > 0 ? amountInUsd / tokens : null;
+            const solPrice = Number(data.token_in_price ?? 0) || null;
 
             return {
               status: res.status,
@@ -90,6 +92,7 @@ export async function getBrowserBuySwapRoute(
                 amountOutUsd,
               },
               impliedPriceUsd: impliedPrice,
+              solPriceUsd: solPrice,
             };
           }
           return {
@@ -163,6 +166,7 @@ export async function getBrowserSellSwapRoute(
             const amountOutUsd = Number(data.amount_out_usd ?? 0);
             // Nilai token per unit saat sell = amountOutUsd / tokens
             const impliedPrice = tokens > 0 && amountOutUsd > 0 ? amountOutUsd / tokens : null;
+            const solPrice = Number(data.token_out_price ?? 0) || null;
 
             return {
               status: res.status,
@@ -180,6 +184,7 @@ export async function getBrowserSellSwapRoute(
                 amountOutUsd,
               },
               impliedPriceUsd: impliedPrice,
+              solPriceUsd: solPrice,
             };
           }
           return {
