@@ -14,6 +14,27 @@ export interface RunnerOptions {
   onceSeconds?: number;
 }
 
+function formatWibDate(dateMs: number): string {
+  const d = new Date(dateMs);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  // Format WIB (UTC+7)
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const wib = new Date(utc + 7 * 3600000);
+  const year = wib.getFullYear();
+  const month = pad(wib.getMonth() + 1);
+  const day = pad(wib.getDate());
+  const hours = pad(wib.getHours());
+  const minutes = pad(wib.getMinutes());
+  const seconds = pad(wib.getSeconds());
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} WIB`;
+}
+
+function formatAmount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toFixed(2);
+}
+
 export class WalletFollowerRunner {
   private cdpEndpoint: string;
   private targetWallet: string;
@@ -214,9 +235,40 @@ export class WalletFollowerRunner {
 
   private async handleTargetBuy(signal: WalletTradeSignal): Promise<void> {
     const evalBuy = this.lane.evaluateBuySignal(signal);
+    const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
+    const timeWib = formatWibDate(nowMs);
+    const eventId = `ev_${nowMs}_${Math.random().toString(36).slice(2, 6)}`;
 
     if (!evalBuy.canEnter) {
       console.log(`[FOLLOW BUY SKIP] Alasan: ${evalBuy.reason}`);
+      this.lane.appendComparisonEvent({
+        id: eventId,
+        timestamp: nowMs,
+        timeWib,
+        tokenMint: signal.mint,
+        tokenSymbol: signal.symbol,
+        tokenName: signal.tokenName,
+        target: {
+          action: 'BUY',
+          tokenAmount: signal.tokenAmount,
+          tokenAmountFormatted: formatAmount(signal.tokenAmount),
+          usdAmount: signal.usdAmount,
+          priceUsd: signal.priceUsd,
+          remainingHolding: signal.remainingHolding,
+          remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+          txHash: signal.txHash,
+        },
+        bot: {
+          action: 'HOLD_MAX_CAP',
+          entryNum: evalBuy.entryNum,
+          stakeUsd: 0,
+          tokensBoughtOrSold: 0,
+          tokensFormatted: '0',
+          executionPriceUsd: signal.priceUsd,
+          positionStatus: 'OPEN',
+          reason: evalBuy.reason,
+        },
+      });
       return;
     }
 
@@ -225,7 +277,35 @@ export class WalletFollowerRunner {
     if (this.dryRun || !this.page) {
       console.log(`[DRY-RUN] Simulasi Buy $2.00 pada harga $${signal.priceUsd}`);
       const estTokens = signal.priceUsd > 0 ? evalBuy.stakeUsd / signal.priceUsd : 0;
-      this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, estTokens, signal.priceUsd);
+      const pos = this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, estTokens, signal.priceUsd);
+      this.lane.appendComparisonEvent({
+        id: eventId,
+        timestamp: nowMs,
+        timeWib,
+        tokenMint: signal.mint,
+        tokenSymbol: signal.symbol,
+        tokenName: signal.tokenName,
+        target: {
+          action: 'BUY',
+          tokenAmount: signal.tokenAmount,
+          tokenAmountFormatted: formatAmount(signal.tokenAmount),
+          usdAmount: signal.usdAmount,
+          priceUsd: signal.priceUsd,
+          remainingHolding: signal.remainingHolding,
+          remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+          txHash: signal.txHash,
+        },
+        bot: {
+          action: 'BUY',
+          entryNum: evalBuy.entryNum,
+          stakeUsd: evalBuy.stakeUsd,
+          tokensBoughtOrSold: estTokens,
+          tokensFormatted: formatAmount(estTokens),
+          executionPriceUsd: signal.priceUsd,
+          positionStatus: pos.status,
+          reason: `DRY_RUN_ENTRY_${evalBuy.entryNum}`,
+        },
+      });
       return;
     }
 
@@ -246,11 +326,73 @@ export class WalletFollowerRunner {
 
         const pos = this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, tokensBought, execPrice);
         console.log(`[POSITION UPDATED] Total Stake: $${pos.totalStakeUsd.toFixed(2)} (${pos.entryCount}/5) | Tokens: ${pos.totalTokens.toLocaleString()}`);
+
+        this.lane.appendComparisonEvent({
+          id: eventId,
+          timestamp: nowMs,
+          timeWib,
+          tokenMint: signal.mint,
+          tokenSymbol: signal.symbol,
+          tokenName: signal.tokenName,
+          target: {
+            action: 'BUY',
+            tokenAmount: signal.tokenAmount,
+            tokenAmountFormatted: formatAmount(signal.tokenAmount),
+            usdAmount: signal.usdAmount,
+            priceUsd: signal.priceUsd,
+            remainingHolding: signal.remainingHolding,
+            remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+            txHash: signal.txHash,
+          },
+          bot: {
+            action: 'BUY',
+            entryNum: evalBuy.entryNum,
+            stakeUsd: evalBuy.stakeUsd,
+            tokensBoughtOrSold: tokensBought,
+            tokensFormatted: formatAmount(tokensBought),
+            executionPriceUsd: execPrice,
+            swapAmm: {
+              inAmount: quote.quote.inAmount || `${evalBuy.stakeUsd} USD`,
+              outAmount: quote.quote.outAmount || `${tokensBought}`,
+              exchange: quote.quote.exchange || 'Raydium/Pump',
+              priceImpactPct: quote.quote.priceImpactPct || 0,
+            },
+            positionStatus: pos.status,
+            reason: `ENTRY_${evalBuy.entryNum}`,
+          },
+        });
       } else {
         console.warn(`[SWAP AMM QUOTE FAILED] Gagal mendapatkan quote buy swap: ${quote.error}`);
-        // Fallback paper fill dengan harga spot
         const estTokens = signal.priceUsd > 0 ? evalBuy.stakeUsd / signal.priceUsd : 0;
-        this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, estTokens, signal.priceUsd);
+        const pos = this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, estTokens, signal.priceUsd);
+        this.lane.appendComparisonEvent({
+          id: eventId,
+          timestamp: nowMs,
+          timeWib,
+          tokenMint: signal.mint,
+          tokenSymbol: signal.symbol,
+          tokenName: signal.tokenName,
+          target: {
+            action: 'BUY',
+            tokenAmount: signal.tokenAmount,
+            tokenAmountFormatted: formatAmount(signal.tokenAmount),
+            usdAmount: signal.usdAmount,
+            priceUsd: signal.priceUsd,
+            remainingHolding: signal.remainingHolding,
+            remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+            txHash: signal.txHash,
+          },
+          bot: {
+            action: 'BUY',
+            entryNum: evalBuy.entryNum,
+            stakeUsd: evalBuy.stakeUsd,
+            tokensBoughtOrSold: estTokens,
+            tokensFormatted: formatAmount(estTokens),
+            executionPriceUsd: signal.priceUsd,
+            positionStatus: pos.status,
+            reason: `SPOT_FALLBACK_ENTRY_${evalBuy.entryNum}`,
+          },
+        });
       }
     } catch (err: any) {
       console.error(`[EXEC-BUY-ERR] ${err?.message}`);
@@ -259,9 +401,39 @@ export class WalletFollowerRunner {
 
   private async handleTargetSell(signal: WalletTradeSignal): Promise<void> {
     const evalSell = this.lane.evaluateSellSignal(signal);
+    const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
+    const timeWib = formatWibDate(nowMs);
+    const eventId = `ev_${nowMs}_${Math.random().toString(36).slice(2, 6)}`;
 
     if (!evalSell.canSell) {
       console.log(`[FOLLOW SELL SKIP] Tidak ada open position pada token ini.`);
+      this.lane.appendComparisonEvent({
+        id: eventId,
+        timestamp: nowMs,
+        timeWib,
+        tokenMint: signal.mint,
+        tokenSymbol: signal.symbol,
+        tokenName: signal.tokenName,
+        target: {
+          action: 'SELL',
+          tokenAmount: signal.tokenAmount,
+          tokenAmountFormatted: formatAmount(signal.tokenAmount),
+          usdAmount: signal.usdAmount,
+          priceUsd: signal.priceUsd,
+          remainingHolding: signal.remainingHolding,
+          remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+          sellRatioPct: evalSell.sellRatioPct,
+          txHash: signal.txHash,
+        },
+        bot: {
+          action: 'SKIP_NO_POSITION',
+          tokensBoughtOrSold: 0,
+          tokensFormatted: '0',
+          executionPriceUsd: signal.priceUsd,
+          positionStatus: 'CLOSED',
+          reason: 'NO_OPEN_POSITION',
+        },
+      });
       return;
     }
 
@@ -273,12 +445,41 @@ export class WalletFollowerRunner {
       const res = this.lane.recordSellExecution(signal, evalSell.botTokensToSell, usdReceived, signal.priceUsd, evalSell.isFullExit);
       if (res) {
         console.log(`[DRY-RUN EXIT] PnL: ${res.exitRecord.pnlUsd >= 0 ? '+' : ''}$${res.exitRecord.pnlUsd} (${res.exitRecord.roiPct}%)`);
+        this.lane.appendComparisonEvent({
+          id: eventId,
+          timestamp: nowMs,
+          timeWib,
+          tokenMint: signal.mint,
+          tokenSymbol: signal.symbol,
+          tokenName: signal.tokenName,
+          target: {
+            action: 'SELL',
+            tokenAmount: signal.tokenAmount,
+            tokenAmountFormatted: formatAmount(signal.tokenAmount),
+            usdAmount: signal.usdAmount,
+            priceUsd: signal.priceUsd,
+            remainingHolding: signal.remainingHolding,
+            remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+            sellRatioPct: evalSell.sellRatioPct,
+            txHash: signal.txHash,
+          },
+          bot: {
+            action: 'SELL',
+            tokensBoughtOrSold: evalSell.botTokensToSell,
+            tokensFormatted: formatAmount(evalSell.botTokensToSell),
+            executionPriceUsd: signal.priceUsd,
+            pnlUsd: res.exitRecord.pnlUsd,
+            roiPct: res.exitRecord.roiPct,
+            isFullExit: evalSell.isFullExit,
+            positionStatus: res.position.status,
+            reason: `DRY_RUN_SELL_${evalSell.sellRatioPct}%`,
+          },
+        });
       }
       return;
     }
 
     try {
-      // 6 decimals default for Solana SPL
       const baseUnits = Math.floor(evalSell.botTokensToSell * 1_000_000).toString();
       const quote = await getBrowserSellSwapRoute(
         this.page,
@@ -297,11 +498,80 @@ export class WalletFollowerRunner {
         if (res) {
           console.log(`[SWAP SELL EXECUTED] UsdReceived: $${usdReceived.toFixed(2)} | Realized PnL: ${res.exitRecord.pnlUsd >= 0 ? '+' : ''}$${res.exitRecord.pnlUsd} (${res.exitRecord.roiPct}%)`);
           console.log(`[POSITION STATE] Status: ${res.position.status} | Sisa Koin: ${res.position.totalTokens.toLocaleString()}`);
+
+          this.lane.appendComparisonEvent({
+            id: eventId,
+            timestamp: nowMs,
+            timeWib,
+            tokenMint: signal.mint,
+            tokenSymbol: signal.symbol,
+            tokenName: signal.tokenName,
+            target: {
+              action: 'SELL',
+              tokenAmount: signal.tokenAmount,
+              tokenAmountFormatted: formatAmount(signal.tokenAmount),
+              usdAmount: signal.usdAmount,
+              priceUsd: signal.priceUsd,
+              remainingHolding: signal.remainingHolding,
+              remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+              sellRatioPct: evalSell.sellRatioPct,
+              txHash: signal.txHash,
+            },
+            bot: {
+              action: 'SELL',
+              tokensBoughtOrSold: evalSell.botTokensToSell,
+              tokensFormatted: formatAmount(evalSell.botTokensToSell),
+              executionPriceUsd: execPrice,
+              swapAmm: {
+                inAmount: quote.quote.inAmount || `${evalSell.botTokensToSell}`,
+                outAmount: quote.quote.outAmount || `${usdReceived}`,
+                exchange: quote.quote.exchange || 'Raydium/Pump',
+                priceImpactPct: quote.quote.priceImpactPct || 0,
+              },
+              pnlUsd: res.exitRecord.pnlUsd,
+              roiPct: res.exitRecord.roiPct,
+              isFullExit: evalSell.isFullExit,
+              positionStatus: res.position.status,
+              reason: evalSell.isFullExit ? 'FULL_EXIT' : `PARTIAL_SELL_${evalSell.sellRatioPct}%`,
+            },
+          });
         }
       } else {
         console.warn(`[SWAP SELL QUOTE FAILED] Gagal route sell: ${quote.error}. Fallback spot.`);
         const usdReceived = evalSell.botTokensToSell * signal.priceUsd;
-        this.lane.recordSellExecution(signal, evalSell.botTokensToSell, usdReceived, signal.priceUsd, evalSell.isFullExit);
+        const res = this.lane.recordSellExecution(signal, evalSell.botTokensToSell, usdReceived, signal.priceUsd, evalSell.isFullExit);
+        if (res) {
+          this.lane.appendComparisonEvent({
+            id: eventId,
+            timestamp: nowMs,
+            timeWib,
+            tokenMint: signal.mint,
+            tokenSymbol: signal.symbol,
+            tokenName: signal.tokenName,
+            target: {
+              action: 'SELL',
+              tokenAmount: signal.tokenAmount,
+              tokenAmountFormatted: formatAmount(signal.tokenAmount),
+              usdAmount: signal.usdAmount,
+              priceUsd: signal.priceUsd,
+              remainingHolding: signal.remainingHolding,
+              remainingHoldingFormatted: formatAmount(signal.remainingHolding),
+              sellRatioPct: evalSell.sellRatioPct,
+              txHash: signal.txHash,
+            },
+            bot: {
+              action: 'SELL',
+              tokensBoughtOrSold: evalSell.botTokensToSell,
+              tokensFormatted: formatAmount(evalSell.botTokensToSell),
+              executionPriceUsd: signal.priceUsd,
+              pnlUsd: res.exitRecord.pnlUsd,
+              roiPct: res.exitRecord.roiPct,
+              isFullExit: evalSell.isFullExit,
+              positionStatus: res.position.status,
+              reason: 'SPOT_FALLBACK_SELL',
+            },
+          });
+        }
       }
     } catch (err: any) {
       console.error(`[EXEC-SELL-ERR] ${err?.message}`);

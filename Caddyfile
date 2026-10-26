@@ -11,6 +11,11 @@ cr.bbliong.io {
         reverse_proxy 127.0.0.1:4188
     }
 
+    # Dedicated Smart Wallet Follower Dashboard
+    handle_path /add-fol* {
+        reverse_proxy 127.0.0.1:4192
+    }
+
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }

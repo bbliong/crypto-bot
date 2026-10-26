@@ -1,6 +1,45 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+export interface ComparisonEvent {
+  id: string;
+  timestamp: number;
+  timeWib: string;
+  tokenMint: string;
+  tokenSymbol: string;
+  tokenName: string;
+  target: {
+    action: 'BUY' | 'SELL';
+    tokenAmount: number;
+    tokenAmountFormatted: string;
+    usdAmount: number;
+    priceUsd: number;
+    remainingHolding: number;
+    remainingHoldingFormatted: string;
+    sellRatioPct?: number;
+    txHash: string;
+  };
+  bot: {
+    action: 'BUY' | 'SELL' | 'HOLD_MAX_CAP' | 'SKIP_NO_POSITION';
+    entryNum?: number;
+    stakeUsd?: number;
+    tokensBoughtOrSold: number;
+    tokensFormatted: string;
+    executionPriceUsd: number;
+    swapAmm?: {
+      inAmount: string;
+      outAmount: string;
+      exchange?: string;
+      priceImpactPct?: number | string;
+    } | null;
+    pnlUsd?: number;
+    roiPct?: number;
+    isFullExit?: boolean;
+    positionStatus: 'OPEN' | 'CLOSED';
+    reason: string;
+  };
+}
+
 export interface FollowerEntry {
   entryNum: number;
   stakeUsd: number;
@@ -64,6 +103,7 @@ export interface FollowerLaneConfig {
   maxTotalStakeUsd: number; // default $10.0
   positionsFilePath?: string;
   tradesFilePath?: string;
+  eventsFilePath?: string;
 }
 
 export class WalletFollowerLane {
@@ -73,9 +113,11 @@ export class WalletFollowerLane {
   public readonly maxTotalStakeUsd: number;
   private positionsFilePath: string;
   private tradesFilePath: string;
+  private eventsFilePath: string;
 
   // Active positions keyed by mint
   private positions = new Map<string, FollowerPosition>();
+  private events: ComparisonEvent[] = [];
 
   constructor(config: FollowerLaneConfig) {
     this.targetWallet = config.targetWallet;
@@ -84,6 +126,7 @@ export class WalletFollowerLane {
     this.maxTotalStakeUsd = config.maxTotalStakeUsd ?? 10.0;
     this.positionsFilePath = config.positionsFilePath || path.resolve(process.cwd(), 'data/wallet-follower-positions.json');
     this.tradesFilePath = config.tradesFilePath || path.resolve(process.cwd(), 'data/wallet-follower-trades.json');
+    this.eventsFilePath = config.eventsFilePath || path.resolve(process.cwd(), 'data/wallet-follower-events.json');
 
     this.loadState();
   }
@@ -350,6 +393,28 @@ export class WalletFollowerLane {
     }
   }
 
+  public appendComparisonEvent(event: ComparisonEvent): void {
+    this.events.unshift(event);
+    if (this.events.length > 250) {
+      this.events = this.events.slice(0, 250);
+    }
+    this.saveEvents();
+  }
+
+  public getRecentEvents(limit: number = 100): ComparisonEvent[] {
+    return this.events.slice(0, limit);
+  }
+
+  private saveEvents(): void {
+    try {
+      const dir = path.dirname(this.eventsFilePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.eventsFilePath, JSON.stringify(this.events, null, 2), 'utf8');
+    } catch (err: any) {
+      console.error(`[FOLLOWER-EVENTS-ERR] Gagal simpan events: ${err?.message}`);
+    }
+  }
+
   private loadState(): void {
     try {
       if (fs.existsSync(this.positionsFilePath)) {
@@ -359,6 +424,13 @@ export class WalletFollowerLane {
           for (const item of parsed) {
             if (item.mint) this.positions.set(item.mint, item);
           }
+        }
+      }
+      if (fs.existsSync(this.eventsFilePath)) {
+        const rawEv = fs.readFileSync(this.eventsFilePath, 'utf8');
+        const parsedEv = JSON.parse(rawEv);
+        if (Array.isArray(parsedEv)) {
+          this.events = parsedEv;
         }
       }
     } catch (err: any) {
