@@ -82,7 +82,10 @@ function loadState() {
                 w.negDays60d = a.negative_days;
                 w.pnl60d = a.total_net_pnl;
                 w.isUltra = a.is_ultra === 1;
-                if (a.is_ultra === 1) {
+                if (a.tier_at_audit === "SUPERULTRA" || w.tier === "SUPERULTRA") {
+                  w.tier = "SUPERULTRA";
+                  w.isSuperUltra = true;
+                } else if (a.is_ultra === 1) {
                   w.tier = "ULTRA";
                 }
               }
@@ -90,8 +93,8 @@ function loadState() {
             db.close();
           } catch {}
         }
-        // Recount tierBreakdown including ULTRA
-        const tb = { ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+        // Recount tierBreakdown including SUPERULTRA & ULTRA
+        const tb = { SUPERULTRA: 0, ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
         for (const w of cleanWallets) {
           const t = w.tier || 'D';
           if (tb[t] !== undefined) tb[t]++;
@@ -473,6 +476,7 @@ function getDashboardHtml() {
       font-weight: 700;
       letter-spacing: 0.3px;
     }
+    .tier-badge-superultra { background: linear-gradient(135deg, rgba(6, 182, 212, 0.4), rgba(236, 72, 153, 0.4), rgba(245, 158, 11, 0.4)); color: #38bdf8; border: 1px solid #38bdf8; box-shadow: 0 0 12px rgba(56, 189, 248, 0.7); font-weight: 800; letter-spacing: 0.5px; }
     .tier-badge-ultra { background: linear-gradient(135deg, rgba(236, 72, 153, 0.4), rgba(168, 85, 247, 0.4)); color: #f472b6; border: 1px solid #ec4899; box-shadow: 0 0 10px rgba(236, 72, 153, 0.5); font-weight: 800; }
     .tier-badge-sss { background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(245, 158, 11, 0.3)); color: #fbbf24; border: 1px solid #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); font-weight: 800; }
     .tier-badge-ss { background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 800; }
@@ -908,6 +912,11 @@ function getDashboardHtml() {
     <div id="panel-wallets" class="panel">
       <!-- Tier Overview Cards -->
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        <div class="stat-card" style="border-left: 4px solid #38bdf8; padding: 14px; background: linear-gradient(180deg, rgba(6,182,212,0.12), rgba(15,23,42,0.8)); box-shadow: 0 0 12px rgba(56,189,248,0.2);">
+          <div style="font-size: 11px; color: #38bdf8; font-weight: 800;">⚡ TIER SUPERULTRA (God Scalper)</div>
+          <div id="tierCountSUPERULTRA" style="font-size: 22px; font-weight: 800; margin-top: 4px; color: #38bdf8;">0</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Win-Day &ge; 98% &bull; Pure AMM Scalper &bull; Cuan &ge; $500k</div>
+        </div>
         <div class="stat-card" style="border-left: 4px solid #ec4899; padding: 14px;">
           <div style="font-size: 11px; color: #ec4899; font-weight: 700;">🌟 TIER ULTRA (Elite Consistency)</div>
           <div id="tierCountULTRA" style="font-size: 22px; font-weight: 800; margin-top: 4px; color: #f472b6;">0</div>
@@ -965,6 +974,7 @@ function getDashboardHtml() {
             <!-- Filter Buttons -->
             <div style="display: flex; flex-wrap: wrap; gap: 6px;">
               <button class="tier-filter-btn active" onclick="filterWallets('ALL', this)">Semua (<span id="btnCountAll">0</span>)</button>
+              <button class="tier-filter-btn" onclick="filterWallets('SUPERULTRA', this)">⚡ Tier SUPERULTRA (<span id="btnCountSUPERULTRA">0</span>)</button>
               <button class="tier-filter-btn" onclick="filterWallets('ULTRA', this)">🌟 Tier ULTRA (<span id="btnCountULTRA">0</span>)</button>
               <button class="tier-filter-btn" onclick="filterWallets('SSS', this)">👑 Tier SSS (<span id="btnCountSSS">0</span>)</button>
               <button class="tier-filter-btn" onclick="filterWallets('SS', this)">💎 Tier SS (<span id="btnCountSS">0</span>)</button>
@@ -1473,6 +1483,7 @@ function getDashboardHtml() {
     function getTierBadgeHtml(tier) {
       const t = (tier || 'D').toUpperCase();
       const map = {
+        SUPERULTRA: '<span class="tier-badge tier-badge-superultra">⚡ SUPERULTRA</span>',
         ULTRA: '<span class="tier-badge tier-badge-ultra">🌟 TIER ULTRA</span>',
         SSS: '<span class="tier-badge tier-badge-sss">👑 TIER SSS</span>',
         SS: '<span class="tier-badge tier-badge-ss">💎 TIER SS</span>',
@@ -1495,7 +1506,7 @@ function getDashboardHtml() {
       }
 
       // Update Tier counts in header and filter buttons
-      const counts = state.tierBreakdown || { ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+      const counts = state.tierBreakdown || { SUPERULTRA: 0, ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
       if (!state.tierBreakdown) {
         allList.forEach(w => {
           const t = w.tier || 'D';
@@ -1508,6 +1519,7 @@ function getDashboardHtml() {
         if (el) el.innerText = Number(val || 0).toLocaleString();
       };
 
+      updateEl('tierCountSUPERULTRA', counts.SUPERULTRA);
       updateEl('tierCountULTRA', counts.ULTRA);
       updateEl('tierCountSSS', counts.SSS);
       updateEl('tierCountSS', counts.SS);
@@ -1519,6 +1531,7 @@ function getDashboardHtml() {
       updateEl('tierCountE', counts.E);
 
       updateEl('btnCountAll', allList.length);
+      updateEl('btnCountSUPERULTRA', counts.SUPERULTRA);
       updateEl('btnCountULTRA', counts.ULTRA);
       updateEl('btnCountSSS', counts.SSS);
       updateEl('btnCountSS', counts.SS);

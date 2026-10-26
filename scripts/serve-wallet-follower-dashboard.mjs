@@ -444,6 +444,7 @@ function renderHtmlDashboard() {
         </h1>
         <div class="header-sub">
           Target: <a href="https://gmgn.ai/sol/address/${TARGET_WALLET}" target="_blank"><strong>${TARGET_WALLET}</strong></a>
+          <span class="badge" style="background: linear-gradient(135deg, rgba(6,182,212,0.3), rgba(236,72,153,0.3)); color: #38bdf8; border: 1px solid #38bdf8; box-shadow: 0 0 10px rgba(56,189,248,0.5); font-weight: 800; font-size: 11px; padding: 2px 8px; border-radius: 6px; margin-left: 6px;">⚡ TIER SUPERULTRA</span>
           &nbsp;|&nbsp;
           Bot Wallet: <strong>${SWAP_WALLET}</strong>
         </div>
@@ -581,7 +582,7 @@ function renderHtmlDashboard() {
           <!-- Kolom 2: TARGET WALLET (KIRI) -->
           <div class="col-target">
             <div class="side-header">
-              <span>Sisi Kiri: Target Smart Wallet</span>
+              <span>Sisi Kiri: Target Smart Wallet <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: linear-gradient(135deg, rgba(6,182,212,0.3), rgba(236,72,153,0.3)); color: #38bdf8; border: 1px solid #38bdf8; font-weight: 800;">⚡ SUPERULTRA</span></span>
               \${targetBadge}
             </div>
             <div class="trade-row">

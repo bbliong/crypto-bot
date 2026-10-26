@@ -122,15 +122,15 @@ async function main() {
     const w1 = report.walletEntries[0];
 
     // Strict Anti-Syndicate & Quality Gates:
-    // 0. Quality Tier Consensus Gate: Wajib melibatkan Smart Money nyata (min 1x Tier ULTRA/SSS/SS/S/A atau 2x Tier B)
+    // 0. Quality Tier Consensus Gate: Wajib melibatkan Smart Money nyata (min 1x Tier SUPERULTRA/ULTRA/SSS/SS/S/A atau 2x Tier B)
     const tiers = (report.walletEntries || []).map((w: any) => w.tier || "D");
-    const hasTierWhale = tiers.some((t: string) => ["ULTRA", "SSS", "SS", "S"].includes(t));
+    const hasTierWhale = tiers.some((t: string) => ["SUPERULTRA", "ULTRA", "SSS", "SS", "S"].includes(t));
     const hasTierA = tiers.includes("A");
     const tierBCount = tiers.filter((t: string) => t === "B").length;
     const isQualityConvergence = hasTierWhale || hasTierA || (tierBCount >= 2);
 
     if (!isQualityConvergence) {
-      console.log(`[GATE-REJECT] 🎯 Sinyal ${report.symbol} ditolak: Kombinasi Tier [${tiers.join("+")}] belum memenuhi standar (min 1x Tier ULTRA/SSS/SS/S/A atau 2x Tier B)`);
+      console.log(`[GATE-REJECT] 🎯 Sinyal ${report.symbol} ditolak: Kombinasi Tier [${tiers.join("+")}] belum memenuhi standar (min 1x Tier SUPERULTRA/ULTRA/SSS/SS/S/A atau 2x Tier B)`);
       return false;
     }
 
@@ -152,10 +152,10 @@ async function main() {
     }
 
     // 3. Breadth & Heavyweight Confirmation Gate:
-    // Sinyal lolos jika ada Paus Jumbo Tier ULTRA/SSS/SS/S/A (modal >= $1,500 / >= 7 SOL) ATAU didukung minimal 3 smart wallet unik (breadth >= 3)
+    // Sinyal lolos jika ada Paus Jumbo Tier SUPERULTRA/ULTRA/SSS/SS/S/A (modal >= $1,500 / >= 7 SOL) ATAU didukung minimal 3 smart wallet unik (breadth >= 3)
     const smartEntries = (report.walletEntries || []);
     const heavyWhale = smartEntries.find((w: any) => {
-      const isQuality = ["ULTRA", "SSS", "SS", "S", "A"].includes(w.tier);
+      const isQuality = ["SUPERULTRA", "ULTRA", "SSS", "SS", "S", "A"].includes(w.tier);
       const cost = w.totalCostUsd || (w.solAmount ? w.solAmount * 180 : 0);
       return isQuality && (cost >= 1500 || (w.solAmount || 0) >= 7.0);
     });
@@ -164,21 +164,21 @@ async function main() {
     const hasSufficientBreadth = smartEntries.length >= 3;
 
     if (!isHeavyWhale && !hasSufficientBreadth) {
-      console.log(`[GATE-REJECT] ⚠️ Sinyal ${report.symbol} ditolak: Hanya didukung ${smartEntries.length} wallet tanpa Paus Jumbo Tier ULTRA/SSS/SS/S/A (butuh min 3 wallet unik atau Tier ULTRA/SSS/SS/S/A modal >= $1,500)`);
+      console.log(`[GATE-REJECT] ⚠️ Sinyal ${report.symbol} ditolak: Hanya didukung ${smartEntries.length} wallet tanpa Paus Jumbo Tier SUPERULTRA/ULTRA/SSS/SS/S/A (butuh min 3 wallet unik atau Tier SUPERULTRA/ULTRA/SSS/SS/S/A modal >= $1,500)`);
       return false;
     }
 
     // 4. Whale Capital Ratio Gate:
-    // Jika W1 adalah scout (Tier C/D/E), konfirmasi Tier ULTRA/SSS/SS/S/A wajib membawa komitmen dana nyata (>= 1.5 SOL atau >= $300)
-    const isW1Scout = w1.tier && !["ULTRA", "SSS", "SS", "S", "A"].includes(w1.tier);
+    // Jika W1 adalah scout (Tier C/D/E), konfirmasi Tier SUPERULTRA/ULTRA/SSS/SS/S/A wajib membawa komitmen dana nyata (>= 1.5 SOL atau >= $300)
+    const isW1Scout = w1.tier && !["SUPERULTRA", "ULTRA", "SSS", "SS", "S", "A"].includes(w1.tier);
     if (isW1Scout) {
-      const qualityConfirmers = smartEntries.slice(1).filter((w: any) => ["ULTRA", "SSS", "SS", "S", "A"].includes(w.tier));
+      const qualityConfirmers = smartEntries.slice(1).filter((w: any) => ["SUPERULTRA", "ULTRA", "SSS", "SS", "S", "A"].includes(w.tier));
       const hasSignificantCapital = qualityConfirmers.some((w: any) => {
         const cost = w.totalCostUsd || (w.solAmount ? w.solAmount * 180 : 0);
         return cost >= 300 || (w.solAmount || 0) >= 1.5;
       });
       if (qualityConfirmers.length > 0 && !hasSignificantCapital && !isHeavyWhale) {
-        console.log(`[GATE-REJECT] ⚠️ Sinyal ${report.symbol} ditolak: Tier ULTRA/SSS/SS/S/A pengkonfirmasi hanya membawa modal kecil (< $300 / < 1.5 SOL), berisiko jadi exit liquidity bagi pioneer`);
+        console.log(`[GATE-REJECT] ⚠️ Sinyal ${report.symbol} ditolak: Tier SUPERULTRA/ULTRA/SSS/SS/S/A pengkonfirmasi hanya membawa modal kecil (< $300 / < 1.5 SOL), berisiko jadi exit liquidity bagi pioneer`);
         return false;
       }
     }
@@ -605,7 +605,7 @@ async function main() {
           const { isNew, wallet } = snowball.ingestTrader(tr, item.symbol, item.mint);
           if (wallet) {
             detector.addMonitoredWallet(wallet.address, wallet.tier);
-            if (["ULTRA", "SSS", "SS", "S", "A", "B"].includes(wallet.tier)) {
+            if (["SUPERULTRA", "ULTRA", "SSS", "SS", "S", "A", "B"].includes(wallet.tier)) {
               smartWalletsFound++;
             }
             const tradeTime = tr.start_holding_at || tr.last_active_timestamp || Math.floor(Date.now() / 1000);

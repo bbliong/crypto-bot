@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export type WalletTier = "ULTRA" | "SSS" | "SS" | "S" | "A" | "B" | "C" | "D" | "E";
+export type WalletTier = "SUPERULTRA" | "ULTRA" | "SSS" | "SS" | "S" | "A" | "B" | "C" | "D" | "E";
 
 export function computeWalletTier(wallet: {
   source?: string;
@@ -12,8 +12,12 @@ export function computeWalletTier(wallet: {
   score?: number;
   tier?: WalletTier;
   isUltra?: boolean;
+  isSuperUltra?: boolean;
 }): WalletTier {
-  // Tier ULTRA: Preserved if already qualified by consistency audit
+  // Tier SUPERULTRA & ULTRA: Preserved if already qualified by consistency audit
+  if (wallet.tier === "SUPERULTRA" || wallet.isSuperUltra) {
+    return "SUPERULTRA";
+  }
   if (wallet.tier === "ULTRA" || wallet.isUltra) {
     return "ULTRA";
   }
@@ -244,7 +248,7 @@ export class SnowballCollector {
     if (existsSync(dbPath)) {
       try {
         const db = new DatabaseSync(dbPath);
-        const audits = db.prepare("SELECT address, win_day_rate, positive_days, negative_days, total_net_pnl, is_ultra, status, audited_at FROM wallet_daily_profit_audits WHERE status = 'PROCESSED'").all() as any[];
+        const audits = db.prepare("SELECT address, tier_at_audit, win_day_rate, positive_days, negative_days, total_net_pnl, is_ultra, status, audited_at FROM wallet_daily_profit_audits WHERE status = 'PROCESSED'").all() as any[];
         const auditMap = new Map(audits.map(a => [a.address, a]));
         for (const w of list) {
           const a = auditMap.get(w.address);
@@ -256,7 +260,10 @@ export class SnowballCollector {
             w.negDays60d = a.negative_days;
             w.pnl60d = a.total_net_pnl;
             w.isUltra = a.is_ultra === 1;
-            if (a.is_ultra === 1) {
+            if (a.tier_at_audit === "SUPERULTRA" || w.tier === "SUPERULTRA") {
+              w.tier = "SUPERULTRA";
+              w.isSuperUltra = true;
+            } else if (a.is_ultra === 1) {
               w.tier = "ULTRA";
             }
           }
@@ -266,14 +273,14 @@ export class SnowballCollector {
     }
 
     // Refresh tiers for all wallets
-    const tierCounts: Record<WalletTier, number> = { ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+    const tierCounts: Record<WalletTier, number> = { SUPERULTRA: 0, ULTRA: 0, SSS: 0, SS: 0, S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
     for (const w of list) {
       w.tier = computeWalletTier(w);
       tierCounts[w.tier]++;
     }
 
     // Sort by tier weight, hit count, and score
-    const tierWeight: Record<WalletTier, number> = { ULTRA: 8, SSS: 7, SS: 6, S: 5, A: 4, B: 3, C: 2, D: 1, E: 0 };
+    const tierWeight: Record<WalletTier, number> = { SUPERULTRA: 10, ULTRA: 8, SSS: 7, SS: 6, S: 5, A: 4, B: 3, C: 2, D: 1, E: 0 };
     list.sort((a, b) => {
       const wa = tierWeight[a.tier] || 0;
       const wb = tierWeight[b.tier] || 0;
