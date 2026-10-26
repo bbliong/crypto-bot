@@ -161,17 +161,17 @@ export class WalletFollowerLane {
       const isGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
       
       // Jika mode onlyNewTokens aktif:
-      // 1. Tolak jika umur koin diketahui dan sudah tua (> 60 menit)
-      if (this.onlyNewTokens && typeof opts?.tokenAgeMinutes === 'number' && opts.tokenAgeMinutes > 60) {
+      // 1. Tolak jika umur koin diketahui dan sudah tua (> 10 menit)
+      if (this.onlyNewTokens && typeof opts?.tokenAgeMinutes === 'number' && opts.tokenAgeMinutes > 10) {
         return {
           canEnter: false,
           stakeUsd: 0,
           entryNum: 0,
-          reason: `REJECT_OLD_TOKEN_AGE_${Math.round(opts.tokenAgeMinutes)}M (Batas token baru: <= 60m)`,
+          reason: `REJECT_OLD_TOKEN_AGE_${Math.round(opts.tokenAgeMinutes)}M (Batas token baru: <= 10m)`,
         };
       }
 
-      // 2. Jika bukan ground zero, wajib lolos verifikasi fresh pool (umur koin <= 60m)
+      // 2. Jika bukan ground zero, wajib lolos verifikasi fresh pool (umur koin <= 10m)
       if (this.onlyNewTokens && !isGroundZero && !opts?.isFreshToken) {
         return {
           canEnter: false,
@@ -187,6 +187,17 @@ export class WalletFollowerLane {
         stakeUsd: this.stakePerEntryUsd,
         entryNum: 1,
         reason,
+      };
+    }
+
+    // Untuk akumulasi (posisi yang sudah terbuka):
+    // Tolak akumulasi baru jika umur token sudah melebihi 10 menit ("hanya lakukan buy jika dibawah 10 menit")
+    if (typeof opts?.tokenAgeMinutes === 'number' && opts.tokenAgeMinutes > 10) {
+      return {
+        canEnter: false,
+        stakeUsd: 0,
+        entryNum: existing.entryCount,
+        reason: `REJECT_ACCUMULATE_TOKEN_AGE_${Math.round(opts.tokenAgeMinutes)}M (Hanya buy jika umur token <= 10m)`,
       };
     }
 

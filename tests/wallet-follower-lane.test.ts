@@ -19,7 +19,6 @@ test('WalletFollowerLane: Entry #1 allowed with $2.0 stake', () => {
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxEntriesPerToken: 5,
     maxTotalStakeUsd: 10.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
@@ -152,7 +151,6 @@ test('WalletFollowerLane: Proportional Sell calculation (Target sells 30%)', () 
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxEntriesPerToken: 5,
     maxTotalStakeUsd: 10.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
@@ -224,7 +222,6 @@ test('WalletFollowerLane: Blocks entry when target already held pre-existing bag
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxEntriesPerToken: 5,
     maxTotalStakeUsd: 10.0,
     onlyNewTokens: true,
     positionsFilePath: POS_FILE,
@@ -279,7 +276,6 @@ test('WalletFollowerLane: Target Full Exit (100% or Dust remaining)', () => {
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxEntriesPerToken: 5,
     maxTotalStakeUsd: 10.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
@@ -374,14 +370,14 @@ test('WalletFollowerLane: Fresh pool entry allowed despite initial bag when isFr
   assert.equal(evalWithoutFresh.canEnter, false);
   assert.match(evalWithoutFresh.reason, /REJECT_PRE_EXISTING_BAG/);
 
-  // 2. With isFreshToken: true (verified token age <= 60m) -> allowed entry!
+  // 2. With isFreshToken: true (verified token age <= 10m) -> allowed entry!
   const evalWithFresh = lane.evaluateBuySignal(signalLag, { isFreshToken: true, tokenAgeMinutes: 8.5 });
   assert.equal(evalWithFresh.canEnter, true);
   assert.equal(evalWithFresh.stakeUsd, 2.0);
   assert.equal(evalWithFresh.entryNum, 1);
   assert.match(evalWithFresh.reason, /NEW_TOKEN_YOUNG_POOL_ENTRY_1/);
 
-  // 3. Old token (> 60m) -> rejected even if ground zero
+  // 3. Old token (> 10m) -> rejected even if ground zero
   const signalOldZero: WalletTradeSignal = {
     action: 'buy',
     mint: 'TokenOldZero222222222222222222222222222222222',
@@ -398,6 +394,17 @@ test('WalletFollowerLane: Fresh pool entry allowed despite initial bag when isFr
   const evalOldZero = lane.evaluateBuySignal(signalOldZero, { isFreshToken: false, tokenAgeMinutes: 120 });
   assert.equal(evalOldZero.canEnter, false);
   assert.match(evalOldZero.reason, /REJECT_OLD_TOKEN_AGE_120M/);
+
+  // 4. Token age 15m (> 10m) -> rejected
+  const eval15m = lane.evaluateBuySignal(signalLag, { isFreshToken: false, tokenAgeMinutes: 15.2 });
+  assert.equal(eval15m.canEnter, false);
+  assert.match(eval15m.reason, /REJECT_OLD_TOKEN_AGE_15M/);
+
+  // 5. Accumulation blocked if token age > 10m
+  lane.recordBuyExecution(signalLag, 2.0, 1000, 0.002);
+  const evalAccumulateOld = lane.evaluateBuySignal(signalLag, { tokenAgeMinutes: 14 });
+  assert.equal(evalAccumulateOld.canEnter, false);
+  assert.match(evalAccumulateOld.reason, /REJECT_ACCUMULATE_TOKEN_AGE_14M/);
 
   cleanup();
 });

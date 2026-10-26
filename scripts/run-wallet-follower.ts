@@ -1,7 +1,9 @@
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright';
 import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
+import { getSolanaRpcUrl } from './solana-rpc-config.mjs';
 
 const TARGET_WALLET = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 const CDP_ENDPOINT = process.env.CDP_ENDPOINT || 'http://127.0.0.1:9223';
@@ -48,6 +50,121 @@ export class WalletFollowerRunner {
   private solPriceUsd = 101.5;
   private lastMtmLogAt = 0;
   private processedTxHashes: Set<string> = new Set();
+  private heliusApiKey = '';
+  private heliusPollInterval: NodeJS.Timeout | null = null;
+  private isPollingHelius = false;
+
+  private initHeliusKey(): void {
+    if (process.env.HELIUS_API_KEY) {
+      this.heliusApiKey = process.env.HELIUS_API_KEY.trim();
+      return;
+    }
+    try {
+      const envPath = path.resolve(process.cwd(), '.env');
+      if (existsSync(envPath)) {
+        const content = readFileSync(envPath, 'utf8');
+        const m = content.match(/HELIUS_API_KEY=([^\s\r\n]+)/);
+        if (m) this.heliusApiKey = m[1].trim();
+      }
+    } catch {}
+  }
+
+  private startHeliusPoller(): void {
+    this.initHeliusKey();
+    if (!this.heliusApiKey) {
+      console.log('[HELIUS] HELIUS_API_KEY tidak ditemukan, poller on-chain dinonaktifkan.');
+      return;
+    }
+    console.log('[HELIUS] On-chain transaction stream/poller aktif (interval: 3.5s)');
+    this.heliusPollInterval = setInterval(async () => {
+      if (!this.isRunning || this.isPollingHelius) return;
+      this.isPollingHelius = true;
+      try {
+        await this.pollHeliusTransactions();
+      } catch {} finally {
+        this.isPollingHelius = false;
+      }
+    }, 3500);
+  }
+
+  private async pollHeliusTransactions(): Promise<void> {
+    const url = `https://api.helius.xyz/v0/addresses/${this.targetWallet}/transactions?api-key=${this.heliusApiKey}&limit=4`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    const txs = await res.json() as any[];
+    if (!Array.isArray(txs)) return;
+
+    for (const tx of txs) {
+      const sig = tx.signature;
+      if (!sig || this.processedTxHashes.has(sig)) continue;
+
+      if (tx.type !== 'SWAP' && !tx.events?.swap) {
+        this.processedTxHashes.add(sig);
+        continue;
+      }
+
+      let tokenMint = null;
+      let tokenDiff = 0;
+      let decimals = 6;
+      for (const acc of tx.accountData || []) {
+        for (const ch of acc.tokenBalanceChanges || []) {
+          if (ch.userAccount === this.targetWallet && ch.mint !== 'So11111111111111111111111111111111111111112') {
+            tokenMint = ch.mint;
+            decimals = ch.rawTokenAmount?.decimals ?? 6;
+            tokenDiff += Number(ch.rawTokenAmount?.tokenAmount || 0) / (10 ** decimals);
+          }
+        }
+      }
+
+      if (!tokenMint || tokenDiff === 0) {
+        this.processedTxHashes.add(sig);
+        continue;
+      }
+
+      this.processedTxHashes.add(sig);
+      if (this.processedTxHashes.size > 2000) {
+        const first = this.processedTxHashes.values().next().value;
+        if (first) this.processedTxHashes.delete(first);
+      }
+
+      const action: 'buy' | 'sell' = tokenDiff > 0 ? 'buy' : 'sell';
+      const tokenAmount = Math.abs(tokenDiff);
+
+      let solDiff = 0;
+      for (const acc of tx.accountData || []) {
+        if (acc.account === this.targetWallet) {
+          solDiff = (acc.nativeBalanceChange || 0) / 1e9;
+          break;
+        }
+      }
+      const solAmount = Math.abs(solDiff);
+      const usdAmount = solAmount * this.solPriceUsd;
+      const priceUsd = tokenAmount > 0 ? usdAmount / tokenAmount : 0;
+
+      console.log(`\n---------------------------------------------------------`);
+      console.log(`[HELIUS ON-CHAIN DETECTED] ${action.toUpperCase()} ${tokenMint.slice(0, 8)}... (${tokenAmount.toLocaleString()} tokens, ${solAmount.toFixed(3)} SOL) [sig: ${sig.slice(0, 10)}...]`);
+
+      const signal: WalletTradeSignal = {
+        action,
+        mint: tokenMint,
+        symbol: 'TOKEN',
+        tokenName: '',
+        tokenAmount,
+        remainingHolding: tokenAmount,
+        solAmount,
+        usdAmount,
+        priceUsd,
+        txHash: sig,
+        timestamp: tx.timestamp || Math.floor(Date.now() / 1000),
+      };
+
+      if (action === 'buy') {
+        await this.handleTargetBuy(signal);
+      } else {
+        await this.handleTargetSell(signal);
+      }
+    }
+  }
 
   private async refreshSolPrice(): Promise<void> {
     try {
@@ -100,6 +217,7 @@ export class WalletFollowerRunner {
     this.isRunning = true;
     await this.refreshSolPrice();
     setInterval(() => this.refreshSolPrice(), 60000);
+    this.startHeliusPoller();
     await this.connectAndSetup();
 
     if (durationSeconds > 0) {
@@ -118,6 +236,10 @@ export class WalletFollowerRunner {
   public async stop(): Promise<void> {
     console.log(`[FOLLOWER] Menghentikan Wallet Follower...`);
     this.isRunning = false;
+    if (this.heliusPollInterval) {
+      clearInterval(this.heliusPollInterval);
+      this.heliusPollInterval = null;
+    }
     if (this.browser) {
       await this.browser.close().catch(() => {});
       this.browser = null;
@@ -274,39 +396,81 @@ export class WalletFollowerRunner {
     }
   }
 
-  private async getTokenAgeMinutes(mint: string): Promise<number | null> {
+  private async getTokenAgeMinutes(mint: string): Promise<{ ageMinutes: number | null; source: string; pairData?: any }> {
+    // 1. Cek via DexScreener API
     try {
       const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
-        signal: AbortSignal.timeout(2500),
+        signal: AbortSignal.timeout(2000),
       });
-      if (!res.ok) return null;
-      const data = await res.json() as any;
-      const pair = data.pairs?.[0];
-      if (pair?.pairCreatedAt) {
-        return (Date.now() - pair.pairCreatedAt) / 60000;
-      }
-      if (Array.isArray(data.pairs) && data.pairs.length === 0) {
-        return 0; // Fresh token pool not yet indexed on DexScreener
+      if (res.ok) {
+        const data = await res.json() as any;
+        const pair = data.pairs?.[0];
+        if (pair?.pairCreatedAt) {
+          const age = (Date.now() - pair.pairCreatedAt) / 60000;
+          return { ageMinutes: age, source: 'dexscreener', pairData: pair };
+        }
+        if (Array.isArray(data.pairs) && data.pairs.length === 0) {
+          return { ageMinutes: 0.5, source: 'dexscreener_unindexed_fresh' };
+        }
       }
     } catch {}
-    return null;
+
+    // 2. Fallback: Helius RPC Earliest Signature BlockTime
+    try {
+      const rpcUrl = getSolanaRpcUrl();
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getSignaturesForAddress',
+          params: [mint, { limit: 100 }],
+        }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        const sigs = data.result;
+        if (Array.isArray(sigs) && sigs.length > 0) {
+          const oldest = sigs[sigs.length - 1];
+          if (oldest.blockTime) {
+            const age = (Date.now() / 1000 - oldest.blockTime) / 60;
+            return { ageMinutes: age, source: 'helius_rpc' };
+          }
+        }
+      }
+    } catch {}
+
+    return { ageMinutes: null, source: 'unknown' };
   }
 
   private async handleTargetBuy(signal: WalletTradeSignal): Promise<void> {
     const existing = this.lane.getPosition(signal.mint);
     let isFresh = false;
     let tokenAgeMinutes: number | null = null;
+    let ageSource = 'none';
 
-    if (!existing || existing.status === 'CLOSED') {
-      tokenAgeMinutes = await this.getTokenAgeMinutes(signal.mint);
-      if (tokenAgeMinutes !== null) {
-        if (tokenAgeMinutes <= 60) {
-          isFresh = true;
-          console.log(`[FRESH TOKEN DETECTED] Pool ${signal.symbol} baru berumur ${tokenAgeMinutes.toFixed(1)} menit (<= 60m). Lolos seleksi token baru!`);
-        } else {
-          console.log(`[OLD TOKEN FILTER] Pool ${signal.symbol} berumur ${tokenAgeMinutes.toFixed(1)} menit (> 60m). Dianggap koin lama.`);
-        }
+    // Periksa umur koin via DexScreener & Helius RPC
+    const ageRes = await this.getTokenAgeMinutes(signal.mint);
+    tokenAgeMinutes = ageRes.ageMinutes;
+    ageSource = ageRes.source;
+
+    // Jika symbol masih default TOKEN (dari Helius on-chain), lengkapi dari DexScreener
+    if (signal.symbol === 'TOKEN' && ageRes.pairData?.baseToken?.symbol) {
+      signal.symbol = ageRes.pairData.baseToken.symbol;
+      signal.tokenName = ageRes.pairData.baseToken.name || '';
+    }
+
+    if (tokenAgeMinutes !== null) {
+      if (tokenAgeMinutes <= 10) {
+        isFresh = true;
+        console.log(`[FRESH TOKEN DETECTED via ${ageSource}] Pool ${signal.symbol} baru berumur ${tokenAgeMinutes.toFixed(1)} menit (<= 10m). Lolos seleksi token baru!`);
+      } else {
+        console.log(`[OLD TOKEN FILTER via ${ageSource}] Pool ${signal.symbol} berumur ${tokenAgeMinutes.toFixed(1)} menit (> 10m). Ditolak (hanya boleh <= 10m).`);
       }
+    } else {
+      console.log(`[TOKEN AGE UNKNOWN] Umur pool ${signal.symbol} tidak dapat diverifikasi via DexScreener/Helius.`);
     }
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
@@ -316,8 +480,12 @@ export class WalletFollowerRunner {
 
     if (!evalBuy.canEnter) {
       console.log(`[FOLLOW BUY SKIP] Alasan: ${evalBuy.reason}`);
-      // Jangan spam dashboard komparasi jika target memperdagangkan kantong koin lama
-      if (evalBuy.reason.startsWith('REJECT_PRE_EXISTING_BAG') || evalBuy.reason.startsWith('REJECT_OLD_TOKEN')) {
+      // Jangan spam dashboard komparasi jika target memperdagangkan koin lama / akumulasi kedaluwarsa
+      if (
+        evalBuy.reason.startsWith('REJECT_PRE_EXISTING_BAG') ||
+        evalBuy.reason.startsWith('REJECT_OLD_TOKEN') ||
+        evalBuy.reason.startsWith('REJECT_ACCUMULATE_TOKEN_AGE')
+      ) {
         return;
       }
       this.lane.appendComparisonEvent({
