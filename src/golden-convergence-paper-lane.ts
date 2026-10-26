@@ -11,6 +11,8 @@ export type ExitReason =
   | "TP1_50_TP2_120_HIT"
   | "TP1_50_TRAILING_10"
   | "STOP_LOSS_15"
+  | "STOP_LOSS_18"
+  | "STOP_LOSS_18_WHALE_LIMIT"
   | "TIMEOUT_60M"
   | "TAKE_PROFIT_15"
   | "TRAILING_STOP_FROM_10"
@@ -435,21 +437,27 @@ export class GoldenConvergencePaperLane {
       }
 
       // 5. Dynamic Whale-Backed Stop Loss before TP1:
-      // Catastrophe Floor (-40% emergency hard stop if token is completely dumped/abandoned)
+      // Hard max loss limit for Moonbag: Max -18% even if whale is still holding dust/bag!
       if (!pos.tp1Hit) {
+        if (curLoss <= -0.18) {
+          const exitPrice = pos.entryPriceUsd * 0.82;
+          const reason: ExitReason = marketData.whaleStillHolding ? "STOP_LOSS_18_WHALE_LIMIT" : "STOP_LOSS_18";
+          this.closePosition(pos, exitPrice, reason, tickTime, pos.entryMcapUsd * 0.82, 0.82);
+          return { closed: true, reason };
+        }
+
+        // Jika Smart Wallet SUDAH JUAL atau TIDAK HOLD: Cut loss ketat di -15%
+        if (!marketData.whaleStillHolding && curLoss <= -0.15) {
+          const exitPrice = pos.entryPriceUsd * 0.85;
+          this.closePosition(pos, exitPrice, "STOP_LOSS_15", tickTime, pos.entryMcapUsd * 0.85, 0.85);
+          return { closed: true, reason: "STOP_LOSS_15" };
+        }
+
+        // Catastrophe Floor (-40% emergency hard stop fallback)
         if (curLoss <= -0.40) {
           const exitPrice = pos.entryPriceUsd * 0.60;
           this.closePosition(pos, exitPrice, "CATASTROPHE_STOP_40", tickTime, pos.entryMcapUsd * 0.60, 0.60);
           return { closed: true, reason: "CATASTROPHE_STOP_40" };
-        }
-
-        // Jika Smart Wallet MASIH HOLD: Jangan Sell! Tahan posisi bersama Paus
-        if (marketData.whaleStillHolding) {
-          // Keep holding
-        } else if (curLoss <= -0.15) {
-          const exitPrice = pos.entryPriceUsd * 0.85;
-          this.closePosition(pos, exitPrice, "STOP_LOSS_15", tickTime, pos.entryMcapUsd * 0.85, 0.85);
-          return { closed: true, reason: "STOP_LOSS_15" };
         }
       }
 
@@ -546,10 +554,22 @@ export class GoldenConvergencePaperLane {
       pos.exitPriceUsd = exitPrice;
     }
 
-    const mult = realizedMultiplier !== undefined ? realizedMultiplier : (exitPrice / pos.entryPriceUsd);
-    const grossReturnPct = Number(((mult - 1) * 100).toFixed(2));
-    const netReturnPct = Number((grossReturnPct - GoldenConvergencePaperLane.FEE_RATE).toFixed(2));
-    const pnlUsd = Number(((pos.stakeUsd * netReturnPct) / 100).toFixed(2));
+    let grossReturnPct = 0;
+    let netReturnPct = 0;
+    let pnlUsd = 0;
+
+    if (realSell?.amountOutUsd && realSell.amountOutUsd > 0) {
+      pnlUsd = Number((realSell.amountOutUsd - pos.stakeUsd).toFixed(2));
+      netReturnPct = Number(((pnlUsd / pos.stakeUsd) * 100).toFixed(2));
+      grossReturnPct = netReturnPct;
+    } else {
+      const mult = (realSell?.impliedPriceUsd && realSell.impliedPriceUsd > 0)
+        ? (exitPrice / pos.entryPriceUsd)
+        : (realizedMultiplier !== undefined ? realizedMultiplier : (exitPrice / pos.entryPriceUsd));
+      grossReturnPct = Number(((mult - 1) * 100).toFixed(2));
+      netReturnPct = Number((grossReturnPct - GoldenConvergencePaperLane.FEE_RATE).toFixed(2));
+      pnlUsd = Number(((pos.stakeUsd * netReturnPct) / 100).toFixed(2));
+    }
 
     pos.grossReturnPct = grossReturnPct;
     pos.netReturnPct = netReturnPct;

@@ -194,31 +194,40 @@ async function main() {
       return false;
     }
 
-    // Dynamic Real-Time Age Gate:
-    // Rules 20 menit & 10 menit DIHILANGKAN untuk Tier S, A, B sesuai arahan user!
+    // 5. Max Co-Entry Spacing Gate: Akumulasi multi-wallet harus terjadi dalam kurun waktu masuk akal (maksimal 30 menit / 1800s)
+    const maxAllowedDeltaSec = 1800; // 30 menit
+    if (delta > maxAllowedDeltaSec) {
+      console.log(`[GATE-REJECT] ⏳ Sinyal ${report.symbol} ditolak: Jeda masuk W1 ke W2 terlalu renggang (${delta}s / ${Math.round(delta / 60)}m > 30m). Bukan akumulasi bersama!`);
+      return false;
+    }
+
+    // 6. Hard Freshness Gate: Sinyal W2 harus segar (maksimal 15 menit / 900s untuk Tier Mutu, 180s untuk scout)
     const nowSec = Math.floor(Date.now() / 1000);
     const signalAgeSec = nowSec - (w2.timestamp || 0);
+    const maxAllowedAgeSec = isQualityConvergence ? 900 : 180;
 
-    if (!isQualityConvergence) {
-      let maxAllowedAgeSec = 180;
-      if (signalAgeSec > maxAllowedAgeSec) {
-        console.log(`[GATE-REJECT] ⏱️ Sinyal ${report.symbol} ditolak: Usia sinyal W2 ${signalAgeSec}s (> ${maxAllowedAgeSec}s batas toleransi)`);
-        return false;
-      }
-      if (signalAgeSec > 180) {
-        const liq = report.dexInfo?.liquidityUsd || 0;
-        if (liq < 5000) {
-          console.log(`[GATE-REJECT] 💧 Sinyal ${report.symbol} ditolak: Usia ${signalAgeSec}s butuh likuiditas solid >= $5k (saat ini $${liq})`);
-          return false;
-        }
-        if (report.maxDropPercent && report.maxDropPercent > 25) {
-          console.log(`[GATE-REJECT] 📉 Sinyal ${report.symbol} ditolak: Token mengalami koreksi drop -${report.maxDropPercent.toFixed(1)}% (> 25%)`);
-          return false;
-        }
-      }
-    } else {
-      console.log(`[GATE-PASS] 🚀 Sinyal ${report.symbol} Tier S/A/B lolos: Aturan 20m & Delta 45s di-bypass (Age: ${signalAgeSec}s | Delta: ${delta}s)`);
+    if (signalAgeSec > maxAllowedAgeSec) {
+      console.log(`[GATE-REJECT] ⏱️ Sinyal ${report.symbol} ditolak: Usia sinyal W2 ${signalAgeSec}s (> ${maxAllowedAgeSec}s batas toleransi ${isQualityConvergence ? "15m Tier Mutu" : "3m Scout"}). Sinyal sudah basi!`);
+      return false;
     }
+
+    // 7. Mandatory Pre-Buy Retrace Gate: Koin yang sedang drop tajam (> 20% dari puncak) wajib ditolak di SEMUA Tier!
+    if (report.maxDropPercent && report.maxDropPercent > 20) {
+      console.log(`[GATE-REJECT] 📉 Sinyal ${report.symbol} ditolak: Token mengalami koreksi drop -${report.maxDropPercent.toFixed(1)}% (> 20% batas aman). Berisiko tangkap pisau jatuh!`);
+      return false;
+    }
+
+    // 8. Whale Unrealized Profit Ceiling: Tolak jika smart wallet sudah cuan ratusan persen saat bot mendeteksi
+    const walletList = report.walletEntries || [];
+    const maxWalletPnl = Math.max(...walletList.map((w: any) => w.pnlPercent || 0));
+    const avgWalletPnl = walletList.reduce((s: number, w: any) => s + (w.pnlPercent || 0), 0) / (walletList.length || 1);
+
+    if (maxWalletPnl >= 120 || avgWalletPnl >= 75) {
+      console.log(`[GATE-REJECT] 🏔️ Sinyal ${report.symbol} ditolak: Smart wallet sudah cuan besar sebelum bot masuk (Peak: +${maxWalletPnl.toFixed(1)}%, Rata-rata: +${avgWalletPnl.toFixed(1)}%). Risiko bot jadi exit liquidity di pucuk!`);
+      return false;
+    }
+
+    console.log(`[GATE-PASS] 🚀 Sinyal ${report.symbol} LOLOS SEMUA GATE (Age: ${signalAgeSec}s | Delta: ${delta}s | Drop: -${report.maxDropPercent || 0}% | Smart PnL: Peak +${maxWalletPnl.toFixed(1)}%, Avg +${avgWalletPnl.toFixed(1)}%)`);
 
     // Hit real GMGN swap route API (/txproxy/v1/get_swap_route) via CDP
     let realBuyRoute: any = null;
@@ -637,7 +646,10 @@ async function main() {
         if (smartWalletsFound > 0) {
           console.log(`[TRENCHES-SMART] 🎯 ${item.symbol} (${item.mint.slice(0, 8)}...): ${smartWalletsFound} Smart Wallet (S/A/B) terdeteksi! [${item.category.toUpperCase()}] MC: $${Math.round(item.marketCap).toLocaleString()}`);
           allTrades.sort((a, b) => a.timestamp - b.timestamp);
-          for (const t of allTrades) {
+          const currentWallSec = Math.floor(Date.now() / 1000);
+          // Hanya rekam transaksi 2 jam terakhir ke detektor konvergensi agar tidak mencampuradukkan holder purba
+          const recentTrades = allTrades.filter(t => (currentWallSec - t.timestamp) <= 7200);
+          for (const t of recentTrades) {
             await detector.recordTrade(t);
           }
           snowball.saveSnowball();
