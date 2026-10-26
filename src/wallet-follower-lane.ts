@@ -321,7 +321,14 @@ export class WalletFollowerLane {
     }
 
     // Jika target menyisakan dust (sisa token < 0.1% atau < 100 token) atau menjual >= 99%
-    if (sellRatio >= 0.99 || targetRemaining < 100 || (targetBefore > 0 && targetRemaining / targetBefore < 0.005)) {
+    // ATAU jika sisa koin bot sudah di level dust (< 50 token atau sisa cost basis < $0.05 USD)
+    if (
+      sellRatio >= 0.99 ||
+      targetRemaining < 100 ||
+      (targetBefore > 0 && targetRemaining / targetBefore < 0.005) ||
+      pos.totalTokens < 50 ||
+      pos.remainingCostBasisUsd < 0.05
+    ) {
       sellRatio = 1.0;
       isFullExit = true;
     }
@@ -353,8 +360,14 @@ export class WalletFollowerLane {
     // Kalkulasi cost basis proporsional untuk token yang dijual
     const sellPortionOfRemaining = pos.totalTokens > 0 ? Math.min(1.0, tokensSold / pos.totalTokens) : 1.0;
     const costBasisPortion = pos.remainingCostBasisUsd * sellPortionOfRemaining;
-    const pnlUsd = usdReceived - costBasisPortion;
-    const roiPct = costBasisPortion > 0 ? (pnlUsd / costBasisPortion) * 100 : 0;
+    let pnlUsd = usdReceived - costBasisPortion;
+    let roiPct = costBasisPortion > 0.001 ? (pnlUsd / costBasisPortion) * 100 : 0;
+
+    // Normalisasi dust exit: jika transaksi senilai debu mikro (< $0.005 USD)
+    if (usdReceived < 0.001 && costBasisPortion < 0.01) {
+      pnlUsd = 0;
+      roiPct = 0;
+    }
 
     const targetSold = signal.tokenAmount;
     const targetRemaining = signal.remainingHolding;
@@ -383,7 +396,7 @@ export class WalletFollowerLane {
     pos.lastObservedTargetHolding = signal.remainingHolding;
     pos.updatedAt = signal.timestamp || Date.now();
 
-    if (isFullExit || pos.totalTokens <= 0.000001) {
+    if (isFullExit || pos.totalTokens < 1 || pos.remainingCostBasisUsd < 0.01) {
       pos.status = 'CLOSED';
       pos.totalTokens = 0;
       pos.remainingCostBasisUsd = 0;
@@ -453,6 +466,11 @@ export class WalletFollowerLane {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
+            if (item.totalTokens < 1 || item.remainingCostBasisUsd < 0.01) {
+              item.status = 'CLOSED';
+              item.totalTokens = 0;
+              item.remainingCostBasisUsd = 0;
+            }
             if (item.mint) this.positions.set(item.mint, item);
           }
         }

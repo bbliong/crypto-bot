@@ -596,7 +596,11 @@ function renderHtmlDashboard(initialState = {}) {
             <div class="trade-row">
               <span style="color: var(--text-muted);">Realized PnL:</span>
               <span class="\${(ev.bot.pnlUsd || 0) >= 0 ? 'bot-pnl-win' : 'bot-pnl-loss'}">
-                \${(ev.bot.pnlUsd || 0) >= 0 ? '+' : ''}\$\${(ev.bot.pnlUsd || 0).toFixed(4)} (\${ev.bot.roiPct || 0}%)
+                \${
+                  Math.abs(ev.bot.tokensBoughtOrSold || 0) < 0.01 && Math.abs(ev.bot.pnlUsd || 0) < 0.001
+                    ? '+$0.0000 (Dust Cleanup)'
+                    : ((ev.bot.pnlUsd || 0) >= 0 ? '+' : '') + '\$' + (ev.bot.pnlUsd || 0).toFixed(4) + ' (' + (ev.bot.roiPct || 0) + '%)'
+                }
               </span>
             </div>
             \` : \`
