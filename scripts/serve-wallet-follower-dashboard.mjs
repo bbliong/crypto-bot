@@ -670,8 +670,10 @@ function renderHtmlDashboard(initialState = {}) {
 
     // Polling HTTP berkala dari disk data yang disimpan (setiap 3 detik)
     function pollStoredData() {
+      const curPath = window.location.pathname;
+      const cleanPath = curPath.endsWith('/') ? curPath.slice(0, -1) : curPath;
       const pathsToTry = [
-        window.location.pathname.replace(/\/+$/, '') + '/api/status',
+        cleanPath + '/api/status',
         '/add-fol/api/status',
         '/api/status'
       ];
