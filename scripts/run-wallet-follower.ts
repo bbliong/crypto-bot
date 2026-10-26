@@ -274,8 +274,42 @@ export class WalletFollowerRunner {
     }
   }
 
+  private async getTokenAgeMinutes(mint: string): Promise<number | null> {
+    try {
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!res.ok) return null;
+      const data = await res.json() as any;
+      const pair = data.pairs?.[0];
+      if (pair?.pairCreatedAt) {
+        return (Date.now() - pair.pairCreatedAt) / 60000;
+      }
+      if (Array.isArray(data.pairs) && data.pairs.length === 0) {
+        return 0; // Fresh token pool not yet indexed on DexScreener
+      }
+    } catch {}
+    return null;
+  }
+
   private async handleTargetBuy(signal: WalletTradeSignal): Promise<void> {
-    const evalBuy = this.lane.evaluateBuySignal(signal);
+    const existing = this.lane.getPosition(signal.mint);
+    let isFresh = false;
+    let tokenAgeMinutes: number | null = null;
+
+    if (!existing || existing.status === 'CLOSED') {
+      tokenAgeMinutes = await this.getTokenAgeMinutes(signal.mint);
+      if (tokenAgeMinutes !== null) {
+        if (tokenAgeMinutes <= 60) {
+          isFresh = true;
+          console.log(`[FRESH TOKEN DETECTED] Pool ${signal.symbol} baru berumur ${tokenAgeMinutes.toFixed(1)} menit (<= 60m). Lolos seleksi token baru!`);
+        } else {
+          console.log(`[OLD TOKEN FILTER] Pool ${signal.symbol} berumur ${tokenAgeMinutes.toFixed(1)} menit (> 60m). Dianggap koin lama.`);
+        }
+      }
+    }
+
+    const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
     const timeWib = formatWibDate(nowMs);
     const eventId = `ev_${nowMs}_${Math.random().toString(36).slice(2, 6)}`;
@@ -283,7 +317,7 @@ export class WalletFollowerRunner {
     if (!evalBuy.canEnter) {
       console.log(`[FOLLOW BUY SKIP] Alasan: ${evalBuy.reason}`);
       // Jangan spam dashboard komparasi jika target memperdagangkan kantong koin lama
-      if (evalBuy.reason.startsWith('REJECT_PRE_EXISTING_BAG')) {
+      if (evalBuy.reason.startsWith('REJECT_PRE_EXISTING_BAG') || evalBuy.reason.startsWith('REJECT_OLD_TOKEN')) {
         return;
       }
       this.lane.appendComparisonEvent({
@@ -719,6 +753,20 @@ export class WalletFollowerRunner {
 
     if (now - this.lastMtmLogAt > 30000) {
       this.lastMtmLogAt = now;
+      // Cek kesehatan WebSocket di dalam tab GMGN
+      try {
+        if (this.page && !this.page.isClosed()) {
+          const wsReady = await this.page.evaluate(() => {
+            const ws = (window as any).__gmgnWs;
+            return ws ? ws.readyState : -1;
+          }).catch(() => -1);
+          if (wsReady !== 1 && wsReady !== -1) {
+            console.warn(`[WATCHDOG] ⚠️ WebSocket GMGN di tab target terputus (readyState: ${wsReady}). Merefresh tab...`);
+            await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          }
+        }
+      } catch {}
+
       console.log(`\n[HEARTBEAT] Follower Aktif | Open Positions: ${openPositions.length} | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       for (const p of openPositions) {
         const curValue = p.totalTokens * p.lastObservedPriceUsd;

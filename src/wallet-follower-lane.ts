@@ -147,7 +147,7 @@ export class WalletFollowerLane {
    * Evaluasi sinyal BUY dari target wallet.
    * Return stake yang diizinkan untuk dieksekusi ($2.0 atau 0 jika sudah mencapai batas akumulasi).
    */
-  public evaluateBuySignal(signal: WalletTradeSignal): {
+  public evaluateBuySignal(signal: WalletTradeSignal, opts?: { isFreshToken?: boolean; tokenAgeMinutes?: number | null }): {
     canEnter: boolean;
     stakeUsd: number;
     entryNum: number;
@@ -158,9 +158,21 @@ export class WalletFollowerLane {
     if (!existing || existing.status === 'CLOSED') {
       // Hitung saldo target sebelum transaksi buy ini
       const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
+      const isGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
       
-      // Jika mode onlyNewTokens aktif: target harus beli dari ground zero (saldo awal <= 5% dari pembelian atau <= 1,000 token)
-      if (this.onlyNewTokens && targetBalanceBefore > 0.05 * signal.tokenAmount && targetBalanceBefore > 1000) {
+      // Jika mode onlyNewTokens aktif:
+      // 1. Tolak jika umur koin diketahui dan sudah tua (> 60 menit)
+      if (this.onlyNewTokens && typeof opts?.tokenAgeMinutes === 'number' && opts.tokenAgeMinutes > 60) {
+        return {
+          canEnter: false,
+          stakeUsd: 0,
+          entryNum: 0,
+          reason: `REJECT_OLD_TOKEN_AGE_${Math.round(opts.tokenAgeMinutes)}M (Batas token baru: <= 60m)`,
+        };
+      }
+
+      // 2. Jika bukan ground zero, wajib lolos verifikasi fresh pool (umur koin <= 60m)
+      if (this.onlyNewTokens && !isGroundZero && !opts?.isFreshToken) {
         return {
           canEnter: false,
           stakeUsd: 0,
@@ -169,11 +181,12 @@ export class WalletFollowerLane {
         };
       }
 
+      const reason = isGroundZero ? 'NEW_TOKEN_FRESH_ENTRY_1' : 'NEW_TOKEN_YOUNG_POOL_ENTRY_1';
       return {
         canEnter: true,
         stakeUsd: this.stakePerEntryUsd,
         entryNum: 1,
-        reason: 'NEW_TOKEN_FRESH_ENTRY_1',
+        reason,
       };
     }
 
