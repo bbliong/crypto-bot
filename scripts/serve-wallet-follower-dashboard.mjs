@@ -627,28 +627,28 @@ function renderHtmlDashboard(initialState = {}) {
           const dateStr = dateParts[0] || '';
           const timeSecStr = (dateParts[1] || '') + ' ' + (dateParts[2] || '');
 
-          return `
+          return \`
           <div class="compare-card">
             <div class="col-meta">
-              <div class="meta-time">${dateStr}</div>
-              <div class="meta-time-sec">${timeSecStr}</div>
-              <div class="meta-symbol">${ev.tokenSymbol || 'TOKEN'}</div>
-              <a href="https://solscan.io/token/${ev.tokenMint}" target="_blank" class="meta-mint">
-                ${ev.tokenMint ? ev.tokenMint.slice(0, 6) + '...' + ev.tokenMint.slice(-4) : ''}
+              <div class="meta-time">\${dateStr}</div>
+              <div class="meta-time-sec">\${timeSecStr}</div>
+              <div class="meta-symbol">\${ev.tokenSymbol || 'TOKEN'}</div>
+              <a href="https://solscan.io/token/\${ev.tokenMint}" target="_blank" class="meta-mint">
+                \${ev.tokenMint ? ev.tokenMint.slice(0, 6) + '...' + ev.tokenMint.slice(-4) : ''}
               </a>
             </div>
             <div class="col-side col-target" style="border-right: 1px solid var(--card-border);">
               <div class="side-header">
                 <span>🎯 Lane 2: Smart Rule Trigger</span>
-                ${actionBadge}
+                \${actionBadge}
               </div>
               <div class="trade-row">
                 <span style="color: var(--text-muted);">Alasan Trigger:</span>
-                <span class="trade-val" style="color: #a5b4fc;">${ev.reason || '-'}</span>
+                <span class="trade-val" style="color: #a5b4fc;">\${ev.reason || '-'}</span>
               </div>
               <div class="trade-row">
                 <span style="color: var(--text-muted);">Nilai Transaksi:</span>
-                <span class="trade-val">$${(ev.stakeOrProceedsUsd || 0).toFixed(2)} USD</span>
+                <span class="trade-val">\$\${(ev.stakeOrProceedsUsd || 0).toFixed(2)} USD</span>
               </div>
             </div>
             <div class="col-side col-bot">
@@ -658,28 +658,28 @@ function renderHtmlDashboard(initialState = {}) {
               </div>
               <div class="trade-row">
                 <span style="color: var(--text-muted);">Tokens:</span>
-                <span class="trade-val">${(ev.tokens || 0).toLocaleString()} ${ev.tokenSymbol || ''}</span>
+                <span class="trade-val">\${(ev.tokens || 0).toLocaleString()} \${ev.tokenSymbol || ''}</span>
               </div>
               <div class="trade-row">
                 <span style="color: var(--text-muted);">Harga Eksekusi:</span>
-                <span class="trade-val">$${ev.executionPriceUsd || 0}</span>
+                <span class="trade-val">\$\${ev.executionPriceUsd || 0}</span>
               </div>
-              ${isSell ? `
+              \${isSell ? \`
               <div class="trade-row">
                 <span style="color: var(--text-muted);">Realized PnL:</span>
-                <span class="${(ev.pnlUsd || 0) >= 0 ? 'bot-pnl-win' : 'bot-pnl-loss'}">
-                  ${(ev.pnlUsd || 0) >= 0 ? '+' : ''}$${(ev.pnlUsd || 0).toFixed(4)} (${ev.roiPct || 0}%)
+                <span class="\${(ev.pnlUsd || 0) >= 0 ? 'bot-pnl-win' : 'bot-pnl-loss'}">
+                  \${(ev.pnlUsd || 0) >= 0 ? '+' : ''}\$\${(ev.pnlUsd || 0).toFixed(4)} (\${ev.roiPct || 0}%)
                 </span>
               </div>
-              ` : `
+              \` : \`
               <div class="trade-row">
                 <span style="color: var(--text-muted);">Status Posisi:</span>
-                <span style="color: var(--emerald); font-weight: 700;">${ev.positionStatus || 'OPEN'}</span>
+                <span style="color: var(--emerald); font-weight: 700;">\${ev.positionStatus || 'OPEN'}</span>
               </div>
-              `}
+              \`}
             </div>
           </div>
-          `;
+          \`;
         }).join('');
         return;
       }
@@ -828,20 +828,20 @@ function renderHtmlDashboard(initialState = {}) {
           const curVal = p.totalTokens * (p.lastObservedPriceUsd || p.avgEntryPriceUsd);
           const unPnl = curVal - p.remainingCostBasisUsd;
           const roi = p.remainingCostBasisUsd > 0 ? (unPnl / p.remainingCostBasisUsd) * 100 : 0;
-          return `
+          return \`
           <div class="pos-chip">
             <div class="pos-chip-top">
-              <span>${p.symbol} ${p.phase ? '<small style="color: #f59e0b; margin-left: 4px;">[' + p.phase + ']</small>' : ''}</span>
-              <span style="color: ${unPnl >= 0 ? 'var(--emerald)' : 'var(--rose)'};">
-                ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)
+              <span>\${p.symbol} \${p.phase ? '<small style="color: #f59e0b; margin-left: 4px;">[' + p.phase + ']</small>' : ''}</span>
+              <span style="color: \${unPnl >= 0 ? 'var(--emerald)' : 'var(--rose)'};">
+                \${unPnl >= 0 ? '+' : ''}\$\${unPnl.toFixed(2)} (\${roi.toFixed(1)}%)
               </span>
             </div>
             <div class="pos-chip-sub">
-              <span>Stake: $${p.remainingCostBasisUsd.toFixed(2)}</span>
-              <span>Harga: $${p.lastObservedPriceUsd || p.avgEntryPriceUsd}</span>
+              <span>Stake: \$\${p.remainingCostBasisUsd.toFixed(2)}</span>
+              <span>Harga: \$\${p.lastObservedPriceUsd || p.avgEntryPriceUsd}</span>
             </div>
           </div>
-          `;
+          \`;
         }).join('');
       } else {
         posPanel.style.display = 'none';

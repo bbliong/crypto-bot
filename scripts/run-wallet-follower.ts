@@ -463,7 +463,7 @@ export class WalletFollowerRunner {
     }
   }
 
-  private handleIncomingWsFrame(payload: string): void {
+  private async handleIncomingWsFrame(payload: string): Promise<void> {
     if (!payload || !payload.startsWith('{')) return;
 
     try {
@@ -473,7 +473,7 @@ export class WalletFollowerRunner {
       if (msg.channel === 'wallet_activity_info' && Array.isArray(msg.data)) {
         for (const item of msg.data) {
           if (item.m === this.targetWallet || !item.m) {
-            this.processWalletTradeItem(item);
+            await this.processWalletTradeItem(item);
           }
         }
       }
