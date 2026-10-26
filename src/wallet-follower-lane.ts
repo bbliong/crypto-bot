@@ -98,9 +98,8 @@ export interface WalletTradeSignal {
 
 export interface FollowerLaneConfig {
   targetWallet: string;
-  stakePerEntryUsd: number; // default $2.0
-  maxEntriesPerToken: number; // default 5
-  maxTotalStakeUsd: number; // default $10.0
+  stakePerEntryUsd?: number; // default $2.0
+  maxCapitalExposureUsd?: number; // default $20.0 (bebas beli sampai modal habis, ~8-10 buy bersamaan tanpa sell)
   onlyNewTokens?: boolean; // default true: hanya ikuti saat target mulai beli token baru dari 0
   positionsFilePath?: string;
   tradesFilePath?: string;
@@ -110,8 +109,7 @@ export interface FollowerLaneConfig {
 export class WalletFollowerLane {
   public readonly targetWallet: string;
   public readonly stakePerEntryUsd: number;
-  public readonly maxEntriesPerToken: number;
-  public readonly maxTotalStakeUsd: number;
+  public readonly maxCapitalExposureUsd: number;
   public readonly onlyNewTokens: boolean;
   private positionsFilePath: string;
   private tradesFilePath: string;
@@ -124,8 +122,7 @@ export class WalletFollowerLane {
   constructor(config: FollowerLaneConfig) {
     this.targetWallet = config.targetWallet;
     this.stakePerEntryUsd = config.stakePerEntryUsd ?? 2.0;
-    this.maxEntriesPerToken = config.maxEntriesPerToken ?? 5;
-    this.maxTotalStakeUsd = config.maxTotalStakeUsd ?? 10.0;
+    this.maxCapitalExposureUsd = config.maxCapitalExposureUsd ?? 20.0;
     this.onlyNewTokens = config.onlyNewTokens ?? true;
     this.positionsFilePath = config.positionsFilePath || path.resolve(process.cwd(), 'data/wallet-follower-positions.json');
     this.tradesFilePath = config.tradesFilePath || path.resolve(process.cwd(), 'data/wallet-follower-trades.json');
@@ -180,21 +177,15 @@ export class WalletFollowerLane {
       };
     }
 
-    if (existing.entryCount >= this.maxEntriesPerToken) {
+    // Sistem Modal Kas $20 (Rotating Capital Pool):
+    // Cek apakah modal aktif yang sedang tertahan (remaining cost basis) + stake $2.0 melebihi plafon modal $20
+    const nextCostBasis = existing.remainingCostBasisUsd + this.stakePerEntryUsd;
+    if (nextCostBasis > this.maxCapitalExposureUsd + 0.001) {
       return {
         canEnter: false,
         stakeUsd: 0,
         entryNum: existing.entryCount,
-        reason: `CAP_REACHED_MAX_ENTRIES_${this.maxEntriesPerToken}`,
-      };
-    }
-
-    if (existing.totalStakeUsd + this.stakePerEntryUsd > this.maxTotalStakeUsd + 0.001) {
-      return {
-        canEnter: false,
-        stakeUsd: 0,
-        entryNum: existing.entryCount,
-        reason: `CAP_REACHED_MAX_STAKE_$${this.maxTotalStakeUsd}`,
+        reason: `CAPITAL_EXHAUSTED_MAX_EXPOSURE_$${this.maxCapitalExposureUsd} (Modal Tertahan: $${existing.remainingCostBasisUsd.toFixed(2)})`,
       };
     }
 
@@ -202,7 +193,7 @@ export class WalletFollowerLane {
       canEnter: true,
       stakeUsd: this.stakePerEntryUsd,
       entryNum: existing.entryCount + 1,
-      reason: `ACCUMULATE_ENTRY_${existing.entryCount + 1}`,
+      reason: `ACCUMULATE_ENTRY_${existing.entryCount + 1} (Eksposur: $${nextCostBasis.toFixed(2)} / $${this.maxCapitalExposureUsd})`,
     };
   }
 

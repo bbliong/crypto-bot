@@ -56,8 +56,7 @@ export class WalletFollowerRunner {
     this.lane = new WalletFollowerLane({
       targetWallet: this.targetWallet,
       stakePerEntryUsd: 2.0,
-      maxEntriesPerToken: 5,
-      maxTotalStakeUsd: 10.0,
+      maxCapitalExposureUsd: 20.0,
       onlyNewTokens: true,
       positionsFilePath: path.resolve(process.cwd(), 'data/wallet-follower-positions.json'),
       tradesFilePath: path.resolve(process.cwd(), 'data/wallet-follower-trades.json'),
@@ -68,7 +67,7 @@ export class WalletFollowerRunner {
   public async start(durationSeconds: number = 0): Promise<void> {
     console.log(`[FOLLOWER] Memulai Dedicated Wallet Follower...`);
     console.log(`[FOLLOWER] Target Wallet: ${this.targetWallet}`);
-    console.log(`[FOLLOWER] Rule: Buy $2.0/entry (Maks 5x = $10 cap per token) | Sell Proporsional`);
+    console.log(`[FOLLOWER] Rule: Buy $2.0/entry (Modal Kas $20 Pool, Max 10 buy tanpa sell, modal didaur ulang saat sell)`);
     console.log(`[FOLLOWER] Mode: APPLE-TO-APPLE (Hanya ikut saat target mulai beli token baru dari 0)`);
     console.log(`[FOLLOWER] Chrome CDP: ${this.cdpEndpoint}`);
     if (this.dryRun) console.log(`[FOLLOWER] MODE: DRY-RUN (Tidak mengubah posisi file)`);

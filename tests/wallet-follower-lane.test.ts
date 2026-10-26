@@ -54,19 +54,19 @@ test('WalletFollowerLane: Entry #1 allowed with $2.0 stake', () => {
   cleanup();
 });
 
-test('WalletFollowerLane: Accumulation up to 5x ($10 cap) and 6th entry blocked', () => {
+test('WalletFollowerLane: Accumulation up to $20 capital (10x buys without sell), 11th blocked, sell frees up capital', () => {
   cleanup();
   const lane = new WalletFollowerLane({
     targetWallet: '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34',
     stakePerEntryUsd: 2.0,
-    maxEntriesPerToken: 5,
-    maxTotalStakeUsd: 10.0,
+    maxCapitalExposureUsd: 20.0,
     positionsFilePath: POS_FILE,
     tradesFilePath: TRADES_FILE,
   });
 
   const mint = 'TokenTest2222222222222222222222222222222222';
-  for (let i = 1; i <= 5; i++) {
+  // 10 entries without sell -> $20 capital consumed
+  for (let i = 1; i <= 10; i++) {
     const signal: WalletTradeSignal = {
       action: 'buy',
       mint,
@@ -91,29 +91,59 @@ test('WalletFollowerLane: Accumulation up to 5x ($10 cap) and 6th entry blocked'
 
   const pos = lane.getPosition(mint);
   assert.ok(pos);
-  assert.equal(pos.entryCount, 5);
-  assert.equal(pos.totalStakeUsd, 10.0);
-  assert.equal(pos.remainingCostBasisUsd, 10.0);
+  assert.equal(pos.entryCount, 10);
+  assert.equal(pos.totalStakeUsd, 20.0);
+  assert.equal(pos.remainingCostBasisUsd, 20.0);
 
-  // Attempt 6th entry
-  const sixthSignal: WalletTradeSignal = {
+  // Attempt 11th entry without any sell -> Should be blocked!
+  const eleventhSignal: WalletTradeSignal = {
     action: 'buy',
     mint,
     symbol: 'TEST2',
     tokenName: 'Test Token 2',
     tokenAmount: 5000,
-    remainingHolding: 30000,
+    remainingHolding: 55000,
     solAmount: 0.1,
     usdAmount: 15,
     priceUsd: 0.003,
-    txHash: 'tx_6',
-    timestamp: 1700000060,
+    txHash: 'tx_11',
+    timestamp: 1700000110,
   };
 
-  const evalSixth = lane.evaluateBuySignal(sixthSignal);
-  assert.equal(evalSixth.canEnter, false);
-  assert.equal(evalSixth.stakeUsd, 0);
-  assert.match(evalSixth.reason, /CAP_REACHED/);
+  const evalEleventh = lane.evaluateBuySignal(eleventhSignal);
+  assert.equal(evalEleventh.canEnter, false);
+  assert.equal(evalEleventh.stakeUsd, 0);
+  assert.match(evalEleventh.reason, /CAPITAL_EXHAUSTED_MAX_EXPOSURE/);
+
+  // Target sells 50% -> Bot sells 50% of tokens -> Cost basis drops to $10!
+  const sellSignal: WalletTradeSignal = {
+    action: 'sell',
+    mint,
+    symbol: 'TEST2',
+    tokenName: 'Test Token 2',
+    tokenAmount: 25000,
+    remainingHolding: 25000, // 50% sold
+    solAmount: 0.5,
+    usdAmount: 75,
+    priceUsd: 0.003,
+    txHash: 'tx_sell_50',
+    timestamp: 1700000120,
+  };
+
+  const evalSell = lane.evaluateSellSignal(sellSignal);
+  assert.equal(evalSell.canSell, true);
+  lane.recordSellExecution(sellSignal, evalSell.botTokensToSell, 10.0, 0.003, false);
+
+  const posAfterSell = lane.getPosition(mint);
+  assert.ok(posAfterSell);
+  assert.equal(posAfterSell.remainingCostBasisUsd, 10.0);
+
+  // Now, 11th entry (with freed capital) SUCCEEDS!
+  const evalEleventhRetry = lane.evaluateBuySignal(eleventhSignal);
+  assert.equal(evalEleventhRetry.canEnter, true);
+  assert.equal(evalEleventhRetry.stakeUsd, 2.0);
+  assert.equal(evalEleventhRetry.entryNum, 11);
+
   cleanup();
 });
 

@@ -451,8 +451,8 @@ function renderHtmlDashboard() {
       <div class="header-badges">
         <span class="badge" style="background: rgba(236, 72, 153, 0.2); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.4);">🍎 Apple to Apple: Fresh Tokens Only</span>
         <span class="badge badge-rule">Stake: $2.00 / Entry</span>
-        <span class="badge badge-rule">Cap: 5x ($10 Maks/Token)</span>
-        <span class="badge badge-rule">Sell: Proporsional %</span>
+        <span class="badge badge-rule" style="border-color: rgba(99, 102, 241, 0.5); color: #a5b4fc;">Modal Pool: $20.00 (Max 10x Buy Bersamaan)</span>
+        <span class="badge badge-rule">Sell: Proporsional & Daur Ulang Modal</span>
         <span class="badge badge-live">Live CDP 9223</span>
       </div>
     </header>
