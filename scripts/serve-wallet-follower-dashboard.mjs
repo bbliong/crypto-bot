@@ -54,8 +54,8 @@ function loadDashboardState() {
       lastEventTime: events.length > 0 ? events[0].timeWib : '-',
     },
     openPositions,
-    recentEvents: events.slice(0, 100),
-    closedTrades: closedTrades.slice(0, 20),
+    recentEvents: events.slice(0, 300),
+    closedTrades: closedTrades.slice(0, 50),
   };
 }
 
@@ -63,7 +63,7 @@ const server = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
-  // API Status JSON endpoint
+  // API Status JSON endpoint (support /api/status, /add-fol/api/status, etc.)
   if (pathname.includes('/api/status')) {
     const data = loadDashboardState();
     res.writeHead(200, {
@@ -74,36 +74,14 @@ const server = createServer((req, res) => {
     return res.end(JSON.stringify(data));
   }
 
-  // Server-Sent Events (SSE) stream
-  if (pathname.includes('/events')) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-    });
-    res.write('\n');
-
-    const interval = setInterval(() => {
-      try {
-        const state = loadDashboardState();
-        res.write(`data: ${JSON.stringify(state)}\n\n`);
-      } catch {
-        clearInterval(interval);
-      }
-    }, 1500);
-
-    req.on('close', () => clearInterval(interval));
-    return;
-  }
-
-  // Default: HTML Dashboard (handles /, /add-fol, /add-fol/, etc.)
-  const html = renderHtmlDashboard();
+  // Default: HTML Dashboard pre-rendered with stored data (handles /, /add-fol, etc.)
+  const state = loadDashboardState();
+  const html = renderHtmlDashboard(state);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
 });
 
-function renderHtmlDashboard() {
+function renderHtmlDashboard(initialState = {}) {
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -503,7 +481,7 @@ function renderHtmlDashboard() {
 
     <div class="events-list" id="events-list">
       <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-        Menghubungkan ke live data stream WebSocket GMGN...
+        Memuat riwayat transaksi komparasi tersimpan...
       </div>
     </div>
 
@@ -684,28 +662,37 @@ function renderHtmlDashboard() {
       renderEvents();
     }
 
-    // Connect to SSE stream
-    function connectSse() {
-      const evtSource = new EventSource('events');
-      evtSource.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          updateDashboard(data);
-        } catch {}
-      };
-      evtSource.onerror = () => {
-        evtSource.close();
-        setTimeout(connectSse, 3000);
-      };
+    // Render data langsung dari initial state yang disimpan di server (tanpa websocket)
+    const INITIAL_STATE = ${JSON.stringify(initialState)};
+    if (INITIAL_STATE && INITIAL_STATE.summary) {
+      updateDashboard(INITIAL_STATE);
     }
 
-    // Initial Fetch & SSE setup
-    fetch('api/status')
-      .then(r => r.json())
-      .then(updateDashboard)
-      .catch(() => {});
+    // Polling HTTP berkala dari disk data yang disimpan (setiap 3 detik)
+    function pollStoredData() {
+      const pathsToTry = [
+        window.location.pathname.replace(/\/+$/, '') + '/api/status',
+        '/add-fol/api/status',
+        '/api/status'
+      ];
 
-    connectSse();
+      function tryFetch(idx) {
+        if (idx >= pathsToTry.length) return;
+        fetch(pathsToTry[idx])
+          .then(r => {
+            if (!r.ok) throw new Error('Not ok');
+            return r.json();
+          })
+          .then(data => {
+            if (data && data.summary) updateDashboard(data);
+          })
+          .catch(() => tryFetch(idx + 1));
+      }
+
+      tryFetch(0);
+    }
+
+    setInterval(pollStoredData, 3000);
   </script>
 </body>
 </html>`;
