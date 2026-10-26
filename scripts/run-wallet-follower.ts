@@ -47,6 +47,7 @@ export class WalletFollowerRunner {
   private currentSubscribedToken: string | null = null;
   private solPriceUsd = 145.0;
   private lastMtmLogAt = 0;
+  private processedTxHashes: Set<string> = new Set();
 
   constructor(options: RunnerOptions = {}) {
     this.cdpEndpoint = options.cdpEndpoint || CDP_ENDPOINT;
@@ -206,6 +207,18 @@ export class WalletFollowerRunner {
     const mint = item.a;
     if (!mint) return;
 
+    const txHash = item.h || '';
+    if (txHash && this.processedTxHashes.has(txHash)) {
+      return; // Skip duplicate transaction event
+    }
+    if (txHash) {
+      this.processedTxHashes.add(txHash);
+      if (this.processedTxHashes.size > 2000) {
+        const first = this.processedTxHashes.values().next().value;
+        if (first) this.processedTxHashes.delete(first);
+      }
+    }
+
     const signal: WalletTradeSignal = {
       action,
       mint,
@@ -216,7 +229,7 @@ export class WalletFollowerRunner {
       solAmount: Number(item.qa) || 0,
       usdAmount: Number(item.au) || 0,
       priceUsd: Number(item.pu) || 0,
-      txHash: item.h || '',
+      txHash,
       timestamp: Number(item.t) || Math.floor(Date.now() / 1000),
     };
 
