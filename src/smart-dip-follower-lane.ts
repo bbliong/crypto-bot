@@ -506,7 +506,7 @@ export class SmartDipFollowerLane {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
-            if (item.totalTokens < 1 || item.remainingCostBasisUsd < 0.01) {
+            if ((item.totalTokens < 1 || item.remainingCostBasisUsd < 0.01) && item.phase !== 'WAITING_DIP') {
               item.status = 'CLOSED';
             }
             if (item.mint) this.positions.set(item.mint, item);

@@ -49,6 +49,7 @@ export class WalletFollowerRunner {
   private cdp: CDPSession | null = null;
   private isRunning = false;
   private subscribedTokens: Set<string> = new Set();
+  private inFlightBuyMints: Set<string> = new Set();
   private solPriceUsd = 101.5;
   private lastMtmLogAt = 0;
   private processedTxHashes: Set<string> = new Set();
@@ -983,59 +984,67 @@ export class WalletFollowerRunner {
    * Helper: Evaluasi BUY Lane 2 (Smart Dip $5 Stake)
    */
   private async evaluateSmartDipBuy(signal: WalletTradeSignal, isFresh: boolean, tokenAgeMinutes: number | null): Promise<void> {
+    if (this.inFlightBuyMints.has(signal.mint)) {
+      return;
+    }
     const evalSmart = this.smartDipLane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     if (!evalSmart.canBuy) {
       console.log(`[SMART DIP BUY SKIP] ${evalSmart.reason}`);
       return;
     }
 
-    console.log(`\n=========================================================`);
-    console.log(`[SMART DIP BUY TRIGGER] Eksekusi ${evalSmart.buyType} untuk ${signal.symbol} ($${evalSmart.stakeUsd.toFixed(2)})...`);
-    let tokensBought = 0;
-    let execPrice = signal.priceUsd;
-    let actualStakeUsd = evalSmart.stakeUsd;
+    this.inFlightBuyMints.add(signal.mint);
+    try {
+      console.log(`\n=========================================================`);
+      console.log(`[SMART DIP BUY TRIGGER] Eksekusi ${evalSmart.buyType} untuk ${signal.symbol} ($${evalSmart.stakeUsd.toFixed(2)})...`);
+      let tokensBought = 0;
+      let execPrice = signal.priceUsd;
+      let actualStakeUsd = evalSmart.stakeUsd;
 
-    if (!this.dryRun && this.page && !this.page.isClosed()) {
-      const quote = await getBrowserBuySwapRoute(
-        this.page,
-        signal.mint,
-        DEFAULT_SWAP_WALLET,
-        evalSmart.stakeUsd,
-        this.solPriceUsd,
-        15
-      );
-      if (quote.ok && quote.quote) {
-        tokensBought = Number(quote.quote.outAmount || 0) / 10 ** (quote.quote.outDecimals ?? 6);
-        actualStakeUsd = quote.quote.amountInUsd && quote.quote.amountInUsd > 0 ? quote.quote.amountInUsd : evalSmart.stakeUsd;
-        execPrice = quote.impliedPriceUsd || (tokensBought > 0 ? actualStakeUsd / tokensBought : signal.priceUsd);
+      if (!this.dryRun && this.page && !this.page.isClosed()) {
+        const quote = await getBrowserBuySwapRoute(
+          this.page,
+          signal.mint,
+          DEFAULT_SWAP_WALLET,
+          evalSmart.stakeUsd,
+          this.solPriceUsd,
+          15
+        );
+        if (quote.ok && quote.quote) {
+          tokensBought = Number(quote.quote.outAmount || 0) / 10 ** (quote.quote.outDecimals ?? 6);
+          actualStakeUsd = quote.quote.amountInUsd && quote.quote.amountInUsd > 0 ? quote.quote.amountInUsd : evalSmart.stakeUsd;
+          execPrice = quote.impliedPriceUsd || (tokensBought > 0 ? actualStakeUsd / tokensBought : signal.priceUsd);
+        }
       }
+
+      if (tokensBought === 0 && signal.priceUsd > 0) {
+        tokensBought = actualStakeUsd / signal.priceUsd;
+      }
+
+      const pos = this.smartDipLane.recordBuyExecution(signal, evalSmart.buyType, actualStakeUsd, tokensBought, execPrice);
+      console.log(`[SMART DIP BUY EXECUTED] ${evalSmart.buyType} ${signal.symbol} | Stake: $${actualStakeUsd.toFixed(2)} | Tokens: ${tokensBought.toLocaleString()} @ $${execPrice}`);
+      console.log(`=========================================================\n`);
+
+      await this.ensureTokenSubscribed(signal.mint);
+
+      const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
+      this.smartDipLane.appendEvent({
+        id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: nowMs,
+        timeWib: formatWibDate(nowMs),
+        tokenMint: signal.mint,
+        tokenSymbol: signal.symbol,
+        tokenName: signal.tokenName,
+        action: evalSmart.buyType === 'INITIAL_BUY' ? 'BUY_INITIAL' : 'BUY_REBOUND',
+        stakeOrProceedsUsd: actualStakeUsd,
+        tokens: tokensBought,
+        executionPriceUsd: execPrice,
+        reason: evalSmart.reason,
+        positionStatus: pos.status,
+      });
+    } finally {
+      this.inFlightBuyMints.delete(signal.mint);
     }
-
-    if (tokensBought === 0 && signal.priceUsd > 0) {
-      tokensBought = actualStakeUsd / signal.priceUsd;
-    }
-
-    const pos = this.smartDipLane.recordBuyExecution(signal, evalSmart.buyType, actualStakeUsd, tokensBought, execPrice);
-    console.log(`[SMART DIP BUY EXECUTED] ${evalSmart.buyType} ${signal.symbol} | Stake: $${actualStakeUsd.toFixed(2)} | Tokens: ${tokensBought.toLocaleString()} @ $${execPrice}`);
-    console.log(`=========================================================\n`);
-
-    await this.ensureTokenSubscribed(signal.mint);
-
-    const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
-    this.smartDipLane.appendEvent({
-      id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
-      timestamp: nowMs,
-      timeWib: formatWibDate(nowMs),
-      tokenMint: signal.mint,
-      tokenSymbol: signal.symbol,
-      tokenName: signal.tokenName,
-      action: evalSmart.buyType === 'INITIAL_BUY' ? 'BUY_INITIAL' : 'BUY_REBOUND',
-      stakeOrProceedsUsd: actualStakeUsd,
-      tokens: tokensBought,
-      executionPriceUsd: execPrice,
-      reason: evalSmart.reason,
-      positionStatus: pos.status,
-    });
   }
 
   /**

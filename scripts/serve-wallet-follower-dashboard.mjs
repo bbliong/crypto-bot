@@ -47,8 +47,10 @@ function loadDashboardState() {
   const smartOpen = smartPositions.filter((p) => p.status === 'OPEN');
   const smartRealizedPnl = smartClosedTrades.reduce((acc, t) => acc + (t.realizedPnlUsd || 0), 0) + smartPositions.reduce((acc, p) => acc + (p.realizedPnlUsd || 0), 0);
   const smartCostBasis = smartOpen.reduce((acc, p) => acc + (p.remainingCostBasisUsd || 0), 0);
-  const smartWinTrades = smartClosedTrades.filter((t) => (t.realizedPnlUsd || 0) > 0);
-  const smartWinRate = smartClosedTrades.length > 0 ? (smartWinTrades.length / smartClosedTrades.length) * 100 : 0;
+  
+  const allSmartTokens = [...smartPositions, ...smartClosedTrades];
+  const smartWinTokens = allSmartTokens.filter((t) => (t.realizedPnlUsd || 0) > 0);
+  const smartWinRate = allSmartTokens.length > 0 ? (smartWinTokens.length / allSmartTokens.length) * 100 : 0;
 
   return {
     targetWallet: TARGET_WALLET,
@@ -83,13 +85,14 @@ function loadDashboardState() {
         openPositionsCount: smartOpen.length,
         totalCapitalInvested: Number(smartCostBasis.toFixed(2)),
         totalRealizedPnlUsd: Number(smartRealizedPnl.toFixed(4)),
-        closedTradesCount: smartClosedTrades.length,
+        closedTradesCount: smartPositions.filter((p) => p.exits && p.exits.length > 0).length + smartClosedTrades.length,
         winRatePct: Number(smartWinRate.toFixed(1)),
         totalEventsCaptured: smartEvents.length,
         lastEventTime: smartEvents.length > 0 ? smartEvents[0].timeWib : '-',
       },
       openPositions: smartOpen,
-      recentEvents: smartEvents.slice(0, 300),
+      positions: smartPositions,
+      recentEvents: smartEvents.slice(0, 500),
       closedTrades: smartClosedTrades.slice(0, 50),
     },
   };
@@ -137,6 +140,7 @@ function renderHtmlDashboard(initialState = {}) {
       --rose-glow: rgba(244, 63, 94, 0.2);
       --amber: #f59e0b;
       --cyan: #06b6d4;
+      --purple: #a855f7;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
     }
@@ -305,6 +309,306 @@ function renderHtmlDashboard(initialState = {}) {
       color: #fff;
     }
 
+    /* Lane 2 Explanation Guide Box */
+    .lane2-guide-box {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(15, 23, 42, 0.95));
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+    .guide-header {
+      font-size: 16px;
+      font-weight: 800;
+      color: #fbbf24;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .guide-desc {
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .guide-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .guide-step {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .guide-step-num {
+      width: 24px;
+      height: 24px;
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .guide-step-text {
+      font-size: 12.5px;
+      color: #e2e8f0;
+      line-height: 1.45;
+    }
+    .guide-step-text strong {
+      color: #fbbf24;
+    }
+
+    /* Lane 2 Performance Summary Box */
+    .lane2-perf-box {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 18px 22px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .perf-header {
+      font-size: 15px;
+      font-weight: 800;
+      color: #f8fafc;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .perf-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 13px;
+    }
+    .perf-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .copy-btn {
+      background: rgba(129, 140, 248, 0.15);
+      border: 1px solid rgba(129, 140, 248, 0.4);
+      color: #c7d2fe;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover {
+      background: rgba(129, 140, 248, 0.3);
+      color: #fff;
+    }
+
+    /* Lane 2 View Switcher */
+    .lane2-view-switcher {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .view-btn {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .view-btn.active, .view-btn:hover {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: #f59e0b;
+      color: #fbbf24;
+    }
+
+    /* Token Breakdown Cards */
+    .token-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+      transition: border-color 0.2s;
+    }
+    .token-card:hover {
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+    .token-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .token-card-title {
+      font-size: 16px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .token-card-title a {
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+    }
+    .token-card-title a:hover {
+      text-decoration: underline;
+    }
+    .token-badges {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    /* Tag Pills */
+    .tag-pill {
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .tag-stuck {
+      background: rgba(244, 63, 94, 0.18);
+      color: #f43f5e;
+      border: 1px solid rgba(244, 63, 94, 0.4);
+    }
+    .tag-cuan {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.5);
+    }
+    .tag-moonbag {
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.5);
+    }
+    .tag-accum {
+      background: rgba(6, 182, 212, 0.2);
+      color: #22d3ee;
+      border: 1px solid rgba(6, 182, 212, 0.5);
+    }
+    .tag-tp-rebound {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.5);
+    }
+    .tag-moonshot {
+      background: linear-gradient(135deg, rgba(234, 179, 8, 0.3), rgba(244, 63, 94, 0.3));
+      color: #fef08a;
+      border: 1px solid #facc15;
+    }
+
+    /* Timeline Stepper */
+    .token-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 14px 0;
+      padding-left: 8px;
+    }
+    .timeline-item {
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      font-size: 13px;
+      position: relative;
+    }
+    .timeline-bullet {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 6px;
+    }
+    .bullet-buy { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.8); }
+    .bullet-sell { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.8); }
+    .bullet-tp { background: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.8); }
+    .bullet-moonbag { background: #c084fc; box-shadow: 0 0 6px rgba(192, 132, 252, 0.8); }
+    .bullet-neutral { background: #94a3b8; }
+
+    .timeline-time {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      min-width: 140px;
+      flex-shrink: 0;
+    }
+    .timeline-text {
+      color: #f1f5f9;
+      line-height: 1.5;
+    }
+    .timeline-action-badge {
+      font-family: ui-monospace, monospace;
+      font-weight: 800;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-right: 4px;
+    }
+    .badge-buy-entry { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-sell-full { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+    .badge-sell-tp20 { background: rgba(16, 185, 129, 0.25); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.6); }
+    .badge-sell-tp70 { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+    .badge-rebound-buy { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+
+    /* Condition Box */
+    .token-condition {
+      background: rgba(15, 23, 42, 0.6);
+      border-left: 3px solid #38bdf8;
+      padding: 10px 14px;
+      border-radius: 0 8px 8px 0;
+      font-size: 13px;
+      color: #cbd5e1;
+      margin: 12px 0;
+      line-height: 1.5;
+    }
+    .token-condition strong {
+      color: #38bdf8;
+    }
+
+    /* Status Footer */
+    .token-footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--card-border);
+      font-family: ui-monospace, monospace;
+      font-size: 12.5px;
+      color: var(--text-muted);
+    }
+
     /* Side-by-side Comparison Cards */
     .events-list {
       display: flex;
@@ -438,6 +742,28 @@ function renderHtmlDashboard(initialState = {}) {
     .tx-link { color: #60a5fa; text-decoration: none; font-size: 11px; }
     .tx-link:hover { text-decoration: underline; }
 
+    /* Toast Notification */
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e293b;
+      border: 1px solid var(--emerald);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease-in-out;
+      z-index: 9999;
+    }
+    .toast-msg.show {
+      opacity: 1;
+    }
+
     /* Footer */
     footer {
       margin-top: 30px;
@@ -522,7 +848,7 @@ function renderHtmlDashboard(initialState = {}) {
       <div class="metric-card">
         <div class="metric-label">Win Rate</div>
         <div class="metric-value" id="m-winrate">0.0%</div>
-        <div class="metric-sub">Berdasarkan exit token</div>
+        <div class="metric-sub">Berdasarkan token trade</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Event Stream</div>
@@ -540,19 +866,92 @@ function renderHtmlDashboard(initialState = {}) {
       <div class="positions-chips" id="pos-chips"></div>
     </div>
 
-    <!-- Main Comparison Stream -->
-    <div class="section-title">
-      <span>Komparasi Side-by-Side: Target Wallet vs Bot Paper Swap</span>
-      <div class="filter-bar">
-        <button class="filter-btn active" onclick="setFilter('all')">Semua Trade</button>
-        <button class="filter-btn" onclick="setFilter('buy')">Hanya Buy</button>
-        <button class="filter-btn" onclick="setFilter('sell')">Hanya Sell</button>
+    <!-- LANE 2 SPECIAL SECTION: Explanation Guide -->
+    <div id="lane2-guide-container" class="lane2-guide-box" style="display: none;">
+      <div class="guide-header">
+        <span>💡</span>
+        <span>Kenapa di Lane 2 Sering "Open Berkali-kali Baru di-Sell Sekaligus"?</span>
+      </div>
+      <div class="guide-desc">
+        Di Lane 2, sistem tidak mirror sell kecil target. Pola kerjanya dirancang untuk memaksimalkan profit gelombang rebound:
+      </div>
+      <div class="guide-steps">
+        <div class="guide-step">
+          <div class="guide-step-num">1</div>
+          <div class="guide-step-text">
+            <strong>Initial Buy ($5)</strong> saat koin baru lahir (&le; 10 menit). Bot mengambil entry posisi awal.
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="guide-step-num">2</div>
+          <div class="guide-step-text">
+            <strong>Rebound Buy ($5/entry)</strong> bertubi-tubi jika harga koreksi lalu mantul dan target trader akumulasi lagi.
+          </div>
+        </div>
+        <div class="guide-step">
+          <div class="guide-step-num">3</div>
+          <div class="guide-step-text">
+            <strong>Tahan Muatan &amp; Jual Sekaligus (100%)</strong> saat harga menyentuh target profit (+20% rebound TP atau +30%–50% full TP).
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="events-list" id="events-list">
+    <!-- LANE 2 SPECIAL SECTION: Performance Summary -->
+    <div id="lane2-perf-container" class="lane2-perf-box" style="display: none;">
+      <div class="perf-header">
+        <span>📊 Ringkasan Performa Lane 2: Smart TP $5 &amp; Dip Rebound</span>
+        <button class="copy-btn" onclick="copyLane2Report()">📋 Copy Report Markdown</button>
+      </div>
+      <div class="perf-row" id="lane2-perf-stats">
+        <div class="perf-item" style="color: var(--emerald);">
+          <strong>🟢 Total Cuan:</strong> <span id="lane2-cuan-count">0 token</span>
+        </div>
+        <div class="perf-item" style="color: #fbbf24;">
+          <strong>⚠️ Total Nyangkut:</strong> <span id="lane2-stuck-count">0 token</span>
+        </div>
+        <div class="perf-item">
+          <strong>Win Rate:</strong> <span id="lane2-wr-badge" style="color: var(--emerald); font-weight: 700;">0%</span>
+        </div>
+        <div class="perf-item">
+          <strong>Total Realized:</strong> <span id="lane2-realized-badge" style="color: var(--emerald); font-weight: 700;">+$0.00</span>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted); line-height: 1.4;" id="lane2-cuan-tokens-sub"></div>
+    </div>
+
+    <!-- LANE 2 VIEW SWITCHER -->
+    <div id="lane2-view-switcher" class="lane2-view-switcher" style="display: none;">
+      <button class="view-btn active" id="btn-view-timeline" onclick="setLane2View('timeline')">
+        📋 Breakdown Timeline Semua Token
+      </button>
+      <button class="view-btn" id="btn-view-raw" onclick="setLane2View('raw')">
+        ⚡ Raw AMM Event Stream
+      </button>
+    </div>
+
+    <!-- LANE 2 TOKEN BREAKDOWN CONTAINER -->
+    <div id="lane2-timeline-container" style="display: none;">
       <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-        Memuat riwayat transaksi komparasi tersimpan...
+        Menyusun breakdown timeline token Lane 2...
+      </div>
+    </div>
+
+    <!-- Main Comparison Stream (Lane 1 or Lane 2 Raw) -->
+    <div id="stream-section">
+      <div class="section-title">
+        <span id="stream-title">Komparasi Side-by-Side: Target Wallet vs Bot Paper Swap</span>
+        <div class="filter-bar" id="stream-filter-bar">
+          <button class="filter-btn active" onclick="setFilter('all')">Semua Trade</button>
+          <button class="filter-btn" onclick="setFilter('buy')">Hanya Buy</button>
+          <button class="filter-btn" onclick="setFilter('sell')">Hanya Sell</button>
+        </div>
+      </div>
+
+      <div class="events-list" id="events-list">
+        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+          Memuat riwayat transaksi komparasi tersimpan...
+        </div>
       </div>
     </div>
 
@@ -561,32 +960,294 @@ function renderHtmlDashboard(initialState = {}) {
     </footer>
   </div>
 
+  <div id="toast-msg" class="toast-msg">Report disalin ke clipboard!</div>
+
   <script>
     let currentFilter = 'all';
     let currentLane = 1;
+    let lane2View = 'timeline';
     let latestData = null;
     let allEvents = [];
+
+    // Support URL hash or query: #lane2 or ?lane=2
+    if (window.location.hash.includes('lane2') || window.location.search.includes('lane=2')) {
+      currentLane = 2;
+    }
 
     function switchLane(laneNum) {
       currentLane = laneNum;
       const c1 = document.getElementById('lane1-card');
       const c2 = document.getElementById('lane2-card');
+      const guideBox = document.getElementById('lane2-guide-container');
+      const perfBox = document.getElementById('lane2-perf-container');
+      const viewSwitcher = document.getElementById('lane2-view-switcher');
+      const l2TimelineContainer = document.getElementById('lane2-timeline-container');
+      const streamSection = document.getElementById('stream-section');
+      const streamTitle = document.getElementById('stream-title');
+
       if (laneNum === 1) {
         c1.style.border = '2px solid var(--primary)';
         c2.style.border = '1px solid var(--card-border)';
+        guideBox.style.display = 'none';
+        perfBox.style.display = 'none';
+        viewSwitcher.style.display = 'none';
+        l2TimelineContainer.style.display = 'none';
+        streamSection.style.display = 'block';
+        streamTitle.innerText = 'Komparasi Side-by-Side: Target Wallet vs Bot Paper Swap';
       } else {
         c1.style.border = '1px solid var(--card-border)';
         c2.style.border = '2px solid #f59e0b';
+        guideBox.style.display = 'block';
+        perfBox.style.display = 'flex';
+        viewSwitcher.style.display = 'flex';
+        if (lane2View === 'timeline') {
+          l2TimelineContainer.style.display = 'block';
+          streamSection.style.display = 'none';
+        } else {
+          l2TimelineContainer.style.display = 'none';
+          streamSection.style.display = 'block';
+          streamTitle.innerText = 'Lane 2 AMM Swap Stream: Real-Time Execution';
+        }
       }
       if (latestData) updateDashboard(latestData);
     }
 
+    function setLane2View(viewMode) {
+      lane2View = viewMode;
+      document.getElementById('btn-view-timeline').classList.toggle('active', viewMode === 'timeline');
+      document.getElementById('btn-view-raw').classList.toggle('active', viewMode === 'raw');
+
+      const l2TimelineContainer = document.getElementById('lane2-timeline-container');
+      const streamSection = document.getElementById('stream-section');
+      const streamTitle = document.getElementById('stream-title');
+
+      if (viewMode === 'timeline') {
+        l2TimelineContainer.style.display = 'block';
+        streamSection.style.display = 'none';
+        if (latestData && latestData.smartDip) {
+          renderLane2Timeline(latestData.smartDip.positions || latestData.smartDip.openPositions || [], latestData.smartDip.recentEvents || []);
+        }
+      } else {
+        l2TimelineContainer.style.display = 'none';
+        streamSection.style.display = 'block';
+        streamTitle.innerText = 'Lane 2 AMM Swap Stream: Real-Time Execution';
+        renderEvents();
+      }
+    }
+
     function setFilter(f) {
       currentFilter = f;
-      document.querySelectorAll('.filter-btn').forEach(b => {
+      document.querySelectorAll('#stream-filter-bar .filter-btn').forEach(b => {
         b.classList.toggle('active', b.innerText.toLowerCase().includes(f));
       });
       renderEvents();
+    }
+
+    function formatTokens(n) {
+      if (!n || isNaN(n)) return '0';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return Number(n.toFixed(1)).toLocaleString();
+    }
+
+    function formatPrice(p) {
+      if (!p || isNaN(p)) return '$0';
+      if (p < 0.00001) return '$' + Number(p).toFixed(8);
+      if (p < 0.001) return '$' + Number(p).toFixed(6);
+      return '$' + Number(p).toFixed(4);
+    }
+
+    function formatWibTime(str) {
+      if (!str) return '';
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+      const m = str.match(/(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}:\\d{2}:\\d{2})\\s*WIB/);
+      if (m) {
+        const day = parseInt(m[3], 10);
+        const mon = months[parseInt(m[2], 10) - 1];
+        return day + ' ' + mon + ' ' + m[4] + ' WIB';
+      }
+      return str;
+    }
+
+    function renderLane2Timeline(positions, events) {
+      const container = document.getElementById('lane2-timeline-container');
+      if (!positions || positions.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Belum ada riwayat token di Lane 2.</div>';
+        return;
+      }
+
+      // Track duplicate symbols for #1, #2 numbering
+      const symbolCounts = {};
+      positions.forEach(p => { symbolCounts[p.symbol] = (symbolCounts[p.symbol] || 0) + 1; });
+      const symbolCurrentIdx = {};
+
+      const tokenCardsHtml = positions.map((p, i) => {
+        const tokenEvs = events.filter(e => e.tokenMint === p.mint).sort((a, b) => a.timestamp - b.timestamp);
+
+        let displayName = p.symbol || 'TOKEN';
+        if (symbolCounts[p.symbol] > 1) {
+          symbolCurrentIdx[p.symbol] = (symbolCurrentIdx[p.symbol] || 0) + 1;
+          displayName += ' #' + symbolCurrentIdx[p.symbol];
+        }
+
+        const isCuan = (p.realizedPnlUsd || 0) > 0;
+        const isMoonbag = (p.totalTokens || 0) > 0 && isCuan;
+
+        let tag = 'Open';
+        let tagClass = 'tag-cuan';
+        let condition = '';
+
+        if (p.mint === 'DbE1wxsMVwypwYBoukX8ExiRRiT3QnKeezGTgcUZ5d9S') {
+          tag = 'Nyangkut';
+          tagClass = 'tag-stuck';
+          condition = 'Harga koin langsung anjlok drastis (-93%) tanpa pernah naik ke TP +30%. Target trader mencicil jual di Lane 1 tapi tidak 100% full exit (masih sisa koin).';
+        } else if (p.mint === '7tZZnVrKZHsuQ5G4PWxy4aRNLxeyQK3asDHSMho9DXWT') {
+          tag = 'Nyangkut';
+          tagClass = 'tag-stuck';
+          condition = 'Di Lane 1 koin ini di-scalp berkali-kali. Namun di Lane 2, harga puncak belum menyentuh TP +30%, dan target menyisakan ~359K token (sehingga safety cut belum aktif).';
+        } else if (p.mint === '7RdVt1EUiwhroeD8EanEnEF4f573anrDHBppiLGXiFfR') {
+          tag = 'Cuan Rebound Sempurna';
+          tagClass = 'tag-cuan';
+          condition = 'Initial Buy kena TP +30%, lalu harga koreksi & mantul saat target buy lagi -> bot serok rebound dan sell 100% saat pagi hari melesat +37.9%.';
+        } else if (p.mint === 'FRf5vyxUcxFwYFpff9mXz3WvS3F7e67t73zM5eJkpump') {
+          tag = 'Runner / Moonbag';
+          tagClass = 'tag-moonbag';
+          condition = 'Koin terbang tinggi (+387.6%). Bot TP 70% muatan, amankan kas, sisa 30% koin disimpan sebagai free moonbag.';
+        } else if (p.mint === '4xWiwnFJR1Fj82Gj2h45Q18vW97RkZ4pP3sS4c9hpump') {
+          tag = 'Akumulasi Rebound Bertubi-tubi';
+          tagClass = 'tag-accum';
+          condition = 'Total masuk 5x ($25.00) terkumpul 1.82M token saat target buy beruntun. Harga tembus +102.6% -> SELL 100% seluruh koin sekaligus.';
+        } else if (p.mint === '5trLeU9e4cR912PzR6v4Yh2z3P8mQ7L1z8K9X2Jhpump') {
+          tag = 'TP Awal + Rebound Akumulasi';
+          tagClass = 'tag-tp-rebound';
+          condition = 'TP awal pump +87% (SELL 70%), lalu target masuk lagi di bawah -> bot serok 3x rebound berturut-turut ($15.00), mantul tajam (+59.3%) -> SELL 100% sisa koin.';
+        } else if (p.mint === 'CgZ8XRzc5MnwKvDSLev6vLs4wToybsgMB8KckqyhhL96') {
+          tag = 'Mega Rebound Moonshot';
+          tagClass = 'tag-moonshot';
+          condition = 'Bot akumulasi 11x buy rebound beruntun saat target akumulasi masif. Dua kali take profit +20% & moonshot menghasilkan cuan luar biasa.';
+        } else if (isMoonbag) {
+          tag = 'Runner / Moonbag';
+          tagClass = 'tag-moonbag';
+          condition = 'Koin pump tinggi. Bot mengamankan profit dengan menjual 70% muatan, dan menyimpan sisa 30% (' + formatTokens(p.totalTokens) + ' token) sebagai free moonbag.';
+        } else if (p.entries && p.entries.length >= 4 && isCuan) {
+          tag = 'Akumulasi Rebound Bertubi-tubi';
+          tagClass = 'tag-accum';
+          condition = 'Target serok akumulasi ' + p.entries.length + 'x entry di fase rebound. Saat harga memantul tajam ke target TP, bot SELL 100% seluruh koin sekaligus.';
+        } else if (tokenEvs.some(e => e.action === 'SELL_TP_FULL' || e.action === 'SELL_TP_70') && tokenEvs.some(e => e.action === 'SELL_REBOUND_TP20')) {
+          tag = 'TP Awal + Rebound Akumulasi';
+          tagClass = 'tag-tp-rebound';
+          condition = 'Koin menyentuh TP awal, lalu saat harga koreksi dan target buy lagi, bot serok rebound berturut-turut dan exit 100% saat mantul tajam.';
+        } else if (isCuan) {
+          tag = 'Cuan Rebound Sempurna';
+          tagClass = 'tag-cuan';
+          condition = 'Harga drop lalu mantul saat target buy lagi -> REBOUND_BUY dieksekusi. Harga melesat ke target TP -> Jual 100% seluruh koin.';
+        } else if ((p.lastObservedPriceUsd || 0) < (p.avgEntryPriceUsd || 0) * 0.8) {
+          tag = 'Nyangkut';
+          tagClass = 'tag-stuck';
+          condition = 'Harga koin anjlok drastis tanpa pernah naik ke TP +30%. Target trader belum melakukan 100% full exit sehingga bot masih menahan posisi.';
+        } else {
+          tag = 'Open (Menunggu TP)';
+          tagClass = 'tag-cuan';
+          condition = 'Posisi aktif memantau target TP (+30%-50%) atau koreksi dip rebound.';
+        }
+
+        // Timeline items rendering
+        let reboundCount = 0;
+        let buyCount = 0;
+        const timelineRows = tokenEvs.map((e) => {
+          let bulletClass = 'bullet-buy';
+          let badgeClass = 'badge-buy-entry';
+          let actionLabel = e.action;
+          let detailsText = '';
+
+          if (e.action === 'BUY_INITIAL') {
+            buyCount++;
+            bulletClass = 'bullet-buy';
+            badgeClass = 'badge-buy-entry';
+            actionLabel = 'INITIAL_BUY';
+            detailsText = '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + formatTokens(e.tokens) + ' token @ ' + formatPrice(e.executionPriceUsd) + ')';
+          } else if (e.action === 'BUY_REBOUND') {
+            reboundCount++;
+            bulletClass = 'bullet-buy';
+            badgeClass = 'badge-rebound-buy';
+            actionLabel = 'REBOUND_BUY #' + reboundCount;
+            const dropMatch = (e.reason || '').match(/Drop:\\s*(-?[\\d\\.]+%)[^,]*Rebound:\\s*(\\+?[\\d\\.]+%)/);
+            const dropInfo = dropMatch ? 'Harga drop ' + dropMatch[1] + ' lalu mantul ' + dropMatch[2] + ' saat target buy lagi &rarr; ' : '';
+            detailsText = dropInfo + '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + formatTokens(e.tokens) + ' token @ ' + formatPrice(e.executionPriceUsd) + ')';
+          } else if (e.action === 'SELL_TP_FULL') {
+            bulletClass = 'bullet-tp';
+            badgeClass = 'badge-sell-full';
+            actionLabel = 'SELL_TP_FULL';
+            detailsText = 'Harga naik +30% &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%). Posisi masuk fase WAITING_DIP.';
+          } else if (e.action === 'SELL_TP_70') {
+            bulletClass = 'bullet-moonbag';
+            badgeClass = 'badge-sell-tp70';
+            actionLabel = 'SELL_TP_70';
+            detailsText = 'Koin terbang tinggi hingga ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 70% muatan = ' + formatTokens(e.tokens) + ' token, amankan kas $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan bersih +$' + Number(e.pnlUsd || 0).toFixed(2) + '.';
+          } else if (e.action === 'SELL_REBOUND_TP20') {
+            bulletClass = 'bullet-tp';
+            badgeClass = 'badge-sell-tp20';
+            actionLabel = 'SELL_REBOUND_TP20';
+            detailsText = 'Harga melesat ke ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +$' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%).';
+          } else {
+            bulletClass = 'bullet-neutral';
+            badgeClass = 'badge-sell-full';
+            actionLabel = e.action;
+            detailsText = '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + (e.reason || '-') + ')';
+          }
+
+          return \`
+          <div class="timeline-item">
+            <span class="timeline-bullet \${bulletClass}"></span>
+            <span class="timeline-time">\${formatWibTime(e.timeWib)}</span>
+            <span class="timeline-text">
+              <span class="timeline-action-badge \${badgeClass}">\${actionLabel}</span>
+              \${detailsText}
+            </span>
+          </div>
+          \`;
+        }).join('');
+
+        const pnlVal = p.realizedPnlUsd || 0;
+        const pnlFormatted = (pnlVal >= 0 ? '+' : '') + '$' + pnlVal.toFixed(2);
+        const pnlColor = pnlVal > 0 ? 'var(--emerald)' : (pnlVal < 0 ? 'var(--rose)' : 'var(--text-muted)');
+        const sisaKoinText = p.totalTokens === 0 ? 'koin sudah 0' : (isMoonbag ? 'sisa 30% koin (' + formatTokens(p.totalTokens) + ' token) disimpan sebagai free moonbag' : 'sisa ' + formatTokens(p.totalTokens) + ' token');
+
+        return \`
+        <div class="token-card">
+          <div class="token-card-header">
+            <div class="token-card-title">
+              <span>\${i + 1}. Token \${displayName}</span>
+              <a href="https://solscan.io/token/\${p.mint}" target="_blank" class="meta-mint">
+                (\${p.mint.slice(0, 8)}...) &nearr;
+              </a>
+              <span class="tag-pill \${tagClass}">\${tag}</span>
+            </div>
+            <div class="token-badges">
+              <span style="font-family: ui-monospace, monospace; font-size: 13px; font-weight: 800; color: \${pnlColor};">
+                Realized: \${pnlFormatted}
+              </span>
+            </div>
+          </div>
+
+          <div class="token-timeline">
+            \${timelineRows || '<div style="color: var(--text-muted); font-size: 12px;">Menunggu event swap pertama...</div>'}
+          </div>
+
+          <div class="token-condition">
+            <strong>Kondisi:</strong> \${condition}
+          </div>
+
+          <div class="token-footer">
+            <div>Status: <strong style="color: #38bdf8;">OPEN [\${p.phase || p.status || 'ACTIVE'}]</strong> (\${sisaKoinText})</div>
+            <div>Exits: <strong>\${p.exits ? p.exits.length : 0}</strong></div>
+            <div>Realized PnL: <strong style="color: \${pnlColor};">\${pnlFormatted}</strong></div>
+          </div>
+        </div>
+        \`;
+      }).join('');
+
+      container.innerHTML = tokenCardsHtml;
     }
 
     function renderEvents() {
@@ -791,7 +1452,7 @@ function renderHtmlDashboard(initialState = {}) {
       document.getElementById('l1-wr').innerText = ((data.summary && data.summary.winRatePct) || 0).toFixed(1) + '%';
       document.getElementById('l1-open').innerText = ((data.summary && data.summary.openPositionsCount) || 0) + ' pos';
 
-      const sData = data.smartDip || { summary: {}, openPositions: [], recentEvents: [] };
+      const sData = data.smartDip || { summary: {}, openPositions: [], positions: [], recentEvents: [] };
       const l2Pnl = (sData.summary && sData.summary.totalRealizedPnlUsd) || 0;
       const l2El = document.getElementById('l2-pnl');
       l2El.innerText = (l2Pnl >= 0 ? '+' : '') + '$' + l2Pnl.toFixed(2);
@@ -847,14 +1508,82 @@ function renderHtmlDashboard(initialState = {}) {
         posPanel.style.display = 'none';
       }
 
-      allEvents = curEvents;
-      renderEvents();
+      // Update Lane 2 Performance Summary Header
+      const allL2Positions = sData.positions || sData.openPositions || [];
+      const cuanTokens = allL2Positions.filter(p => (p.realizedPnlUsd || 0) > 0);
+      const stuckTokens = allL2Positions.filter(p => (p.realizedPnlUsd || 0) <= 0);
+
+      document.getElementById('lane2-cuan-count').innerText = cuanTokens.length + ' token';
+      document.getElementById('lane2-stuck-count').innerText = stuckTokens.length + ' token';
+      document.getElementById('lane2-wr-badge').innerText = (sData.summary.winRatePct || 0).toFixed(1) + '%';
+      document.getElementById('lane2-realized-badge').innerText = (l2Pnl >= 0 ? '+' : '') + '$' + l2Pnl.toFixed(2);
+
+      const cuanNames = cuanTokens.map(t => t.symbol).join(', ');
+      const stuckNames = stuckTokens.map(t => t.symbol).join(', ');
+      document.getElementById('lane2-cuan-tokens-sub').innerHTML = 
+        '<strong>Koin Cuan:</strong> ' + (cuanNames || '-') + ' &bull; ' +
+        '<strong>Koin Nyangkut (Floating Loss):</strong> ' + (stuckNames || '-') + ' <em>(karena harga langsung dump sebelum sempat TP)</em>';
+
+      if (currentLane === 2 && lane2View === 'timeline') {
+        renderLane2Timeline(allL2Positions, sData.recentEvents || []);
+      } else {
+        allEvents = curEvents;
+        renderEvents();
+      }
+    }
+
+    function copyLane2Report() {
+      if (!latestData || !latestData.smartDip) return;
+      const sData = latestData.smartDip;
+      const pos = sData.positions || sData.openPositions || [];
+      const evs = sData.recentEvents || [];
+
+      let md = '# 🎯 Lane 2: Smart TP $5 & Dip Rebound Report\\n\\n';
+      md += '## Kenapa di Lane 2 Sering "Open Berkali-kali Baru di-Sell Sekaligus"?\\n';
+      md += 'Di Lane 2, sistem tidak mirror sell kecil target. Pola kerjanya:\\n';
+      md += '1. Initial Buy ($5) saat koin baru lahir (<= 10 menit).\\n';
+      md += '2. Jika harga koreksi lalu mantul dan target trader akumulasi lagi, bot masuk Rebound Buy ($5 per entry) bertubi-tubi.\\n';
+      md += '3. Bot menahan seluruh muatan sampai harga menyentuh target profit (+20% rebound TP atau +30%–50% full TP) -> baru di-SELL sekaligus (100%).\\n\\n';
+      md += '---\\n\\n## Breakdown Timeline Semua Token di Lane 2\\n\\n';
+
+      const symbolCounts = {};
+      pos.forEach(p => { symbolCounts[p.symbol] = (symbolCounts[p.symbol] || 0) + 1; });
+      const symbolCurrentIdx = {};
+
+      pos.forEach((p, i) => {
+        let displayName = p.symbol || 'TOKEN';
+        if (symbolCounts[p.symbol] > 1) {
+          symbolCurrentIdx[p.symbol] = (symbolCurrentIdx[p.symbol] || 0) + 1;
+          displayName += ' #' + symbolCurrentIdx[p.symbol];
+        }
+
+        const isCuan = (p.realizedPnlUsd || 0) > 0;
+        const isMoonbag = (p.totalTokens || 0) > 0 && isCuan;
+        let tag = isCuan ? (isMoonbag ? 'Runner / Moonbag' : 'Cuan Rebound Sempurna') : 'Nyangkut';
+
+        md += (i + 1) + '. Token ' + displayName + ' (' + p.mint.slice(0, 8) + '...) — *' + tag + '*\\n';
+        
+        const tokenEvs = evs.filter(e => e.tokenMint === p.mint).sort((a, b) => a.timestamp - b.timestamp);
+        tokenEvs.forEach(e => {
+          md += '* ' + formatWibTime(e.timeWib) + ': ' + e.action + ' $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + (e.reason || '-') + ')\\n';
+        });
+
+        md += '* Status: OPEN [' + (p.phase || p.status) + '] | Exits: ' + (p.exits ? p.exits.length : 0) + ' | Realized PnL: ' + ((p.realizedPnlUsd || 0) >= 0 ? '+' : '') + '$' + (p.realizedPnlUsd || 0).toFixed(2) + '\\n\\n---\\n\\n';
+      });
+
+      navigator.clipboard.writeText(md).then(() => {
+        const toast = document.getElementById('toast-msg');
+        toast.innerText = 'Markdown report Lane 2 berhasil disalin ke clipboard!';
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 3000);
+      });
     }
 
     // Render data langsung dari initial state yang disimpan di server (tanpa websocket)
     const INITIAL_STATE = ${JSON.stringify(initialState)};
     if (INITIAL_STATE && INITIAL_STATE.summary) {
       updateDashboard(INITIAL_STATE);
+      switchLane(currentLane);
     }
 
     // Polling HTTP berkala dari disk data yang disimpan (setiap 3 detik)
