@@ -26,8 +26,27 @@ export interface SubmitOrderResult {
 export class FollowerLiveAdapter {
   private cachedAuth: string = '';
   private cachedWallet: string | null = null;
+  private isListenerAttached: boolean = false;
 
   constructor() {}
+
+  /**
+   * Mengikat interceptor event network Playwright untuk menangkap live Authorization Bearer token secara otomatis.
+   */
+  public attachPageListeners(page: Page): void {
+    if (this.isListenerAttached || page.isClosed()) return;
+    this.isListenerAttached = true;
+
+    try {
+      const context = page.context();
+      context.on('request', (req) => {
+        const headers = req.headers();
+        if (headers.authorization && headers.authorization.startsWith('Bearer ')) {
+          this.cachedAuth = headers.authorization;
+        }
+      });
+    } catch {}
+  }
 
   /**
    * Deteksi alamat wallet aktif dan Authorization Bearer token dari sesi GMGN di browser.
@@ -36,6 +55,8 @@ export class FollowerLiveAdapter {
     if (page.isClosed()) {
       return { wallet: this.cachedWallet, auth: this.cachedAuth || null };
     }
+
+    this.attachPageListeners(page);
 
     try {
       const detected = await page.evaluate(() => {

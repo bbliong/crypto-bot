@@ -135,6 +135,26 @@ export async function scanEmptyTokenAccounts(connection, walletAddress = WALLET_
 }
 
 /**
+ * Mendapatkan saldo token aktual di blockchain untuk alamat mint tertentu (Tokenkeg atau Token-2022).
+ */
+export async function getOnChainTokenBalance(mintAddress, walletAddress = WALLET_ADDRESS) {
+  try {
+    const scan = await scanEmptyTokenAccounts(null, walletAddress);
+    const target = scan.activeAccounts.find(a => a.mint === mintAddress);
+    if (!target) return null;
+    return {
+      amount: target.tokenAmount,
+      uiAmount: target.uiAmount,
+      pubkey: target.pubkey,
+      program: target.program
+    };
+  } catch (err) {
+    console.warn(`[getOnChainTokenBalance-err] ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Reclaim rent untuk token mint tertentu (biasanya dipanggil sesaat setelah Sell selesai).
  */
 export async function reclaimRentForMint(mintAddress, options = {}) {
