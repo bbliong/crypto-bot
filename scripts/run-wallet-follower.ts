@@ -1331,6 +1331,7 @@ export class WalletFollowerRunner {
       }
 
       // 2. Heartbeat batch price polling via DexScreener API (fallback 30s)
+      const bestPrices = new Map<string, number>();
       if (allOpenMints.length > 0) {
         try {
           const mintsQuery = allOpenMints.slice(0, 30).join(',');
@@ -1340,7 +1341,6 @@ export class WalletFollowerRunner {
           if (res.ok) {
             const data = await res.json() as any;
             const pairs = data.pairs || [];
-            const bestPrices = new Map<string, number>();
             for (const pair of pairs) {
               const baseMint = pair.baseToken?.address;
               const price = parseFloat(pair.priceUsd) || 0;
