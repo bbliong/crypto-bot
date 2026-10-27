@@ -26,7 +26,7 @@ export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 /**
  * Panggil GMGN Swap Route API untuk BUY token menggunakan SOL.
- * Dilakukan di dalam browser context page token GMGN.
+ * Dilakukan di dalam browser context page token GMGN dengan retry berulang jika gagal.
  */
 export async function getBrowserBuySwapRoute(
   page: Page,
@@ -34,93 +34,113 @@ export async function getBrowserBuySwapRoute(
   fromAddress: string = DEFAULT_SWAP_WALLET,
   stakeUsd: number = 5.0,
   solPriceUsd: number = 145.0,
-  slippage: number = 15
+  slippage: number = 15,
+  maxRetries: number = 3
 ): Promise<SwapRouteResult> {
-  if (page.isClosed()) {
-    return { status: 499, latencyMs: 0, ok: false, error: 'PAGE_CLOSED' };
-  }
-
   // Hitung lamports berdasarkan stakeUsd / solPriceUsd
   const inputLamports = Math.floor((stakeUsd / (solPriceUsd > 0 ? solPriceUsd : 145.0)) * 1_000_000_000).toString();
 
-  try {
-    return await page.evaluate(
-      async ({ mint, fromAddress, inputLamports, slippage, SOL_MINT }) => {
-        const params = new URLSearchParams({
-          web_from_source: 'token_poll',
-          token_in_chain: 'sol',
-          token_out_chain: 'sol',
-          from_address: fromAddress,
-          token_in_address: SOL_MINT,
-          token_out_address: mint,
-          in_amount: inputLamports,
-          slippage: String(slippage),
-          is_anti_mev: 'false',
-          fee: '0.0002',
-          tip_fee: '0.0001',
-          priority_fee: '0.0001',
-          legacy: 'true',
-        });
-        const t0 = performance.now();
-        try {
-          const res = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
-          const latency = Math.round(performance.now() - t0);
-          const body = await res.json().catch(() => null);
-          if (res.status === 200 && body?.code === 0 && body?.data?.quote) {
-            const data = body.data;
-            const q = data.quote;
-            const outDecimals = q.outDecimals ?? 6;
-            const tokens = q.outAmount ? Number(q.outAmount) / 10 ** outDecimals : 0;
-            const amountInUsd = Number(data.amount_in_usd ?? 0);
-            const amountOutUsd = Number(data.amount_out_usd ?? 0);
-            const impliedPrice = tokens > 0 && amountInUsd > 0 ? amountInUsd / tokens : null;
-            const solPrice = Number(data.token_in_price ?? 0) || null;
+  let lastResult: SwapRouteResult = { status: null, latencyMs: 0, ok: false, error: 'NOT_ATTEMPTED' };
 
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (page.isClosed()) {
+      return { status: 499, latencyMs: 0, ok: false, error: 'PAGE_CLOSED' };
+    }
+
+    // Naikkan toleransi slippage sedikit jika retry (misal 15% -> 18% -> 22%)
+    const curSlippage = attempt === 1 ? slippage : Math.min(30, slippage + (attempt - 1) * 5);
+
+    try {
+      lastResult = await page.evaluate(
+        async ({ mint, fromAddress, inputLamports, curSlippage, SOL_MINT }) => {
+          const params = new URLSearchParams({
+            web_from_source: 'token_poll',
+            token_in_chain: 'sol',
+            token_out_chain: 'sol',
+            from_address: fromAddress,
+            token_in_address: SOL_MINT,
+            token_out_address: mint,
+            in_amount: inputLamports,
+            slippage: String(curSlippage),
+            is_anti_mev: 'false',
+            fee: '0.0002',
+            tip_fee: '0.0001',
+            priority_fee: '0.0001',
+            legacy: 'true',
+          });
+          const t0 = performance.now();
+          try {
+            const res = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
+            const latency = Math.round(performance.now() - t0);
+            const body = await res.json().catch(() => null);
+            if (res.status === 200 && body?.code === 0 && body?.data?.quote) {
+              const data = body.data;
+              const q = data.quote;
+              const outDecimals = q.outDecimals ?? 6;
+              const tokens = q.outAmount ? Number(q.outAmount) / 10 ** outDecimals : 0;
+              const amountInUsd = Number(data.amount_in_usd ?? 0);
+              const amountOutUsd = Number(data.amount_out_usd ?? 0);
+              const impliedPrice = tokens > 0 && amountInUsd > 0 ? amountInUsd / tokens : null;
+              const solPrice = Number(data.token_in_price ?? 0) || null;
+
+              return {
+                status: res.status,
+                latencyMs: latency,
+                ok: true,
+                routeData: data,
+                quote: {
+                  inAmount: q.inAmount ?? null,
+                  outAmount: q.outAmount ?? null,
+                  inDecimals: q.inDecimals ?? null,
+                  outDecimals: q.outDecimals ?? null,
+                  priceImpactPct: q.priceImpactPct ?? null,
+                  exchange: data.exchange ?? null,
+                  amountInUsd,
+                  amountOutUsd,
+                },
+                impliedPriceUsd: impliedPrice,
+                solPriceUsd: solPrice,
+              };
+            }
             return {
               status: res.status,
               latencyMs: latency,
-              ok: true,
-              routeData: data,
-              quote: {
-                inAmount: q.inAmount ?? null,
-                outAmount: q.outAmount ?? null,
-                inDecimals: q.inDecimals ?? null,
-                outDecimals: q.outDecimals ?? null,
-                priceImpactPct: q.priceImpactPct ?? null,
-                exchange: data.exchange ?? null,
-                amountInUsd,
-                amountOutUsd,
-              },
-              impliedPriceUsd: impliedPrice,
-              solPriceUsd: solPrice,
+              ok: false,
+              error: body?.msg || body?.message || `HTTP_${res.status}`,
+              routeData: body?.data ?? null,
+            };
+          } catch (e: any) {
+            return {
+              status: null,
+              latencyMs: Math.round(performance.now() - t0),
+              ok: false,
+              error: e?.message || 'NETWORK_FETCH_ERROR',
             };
           }
-          return {
-            status: res.status,
-            latencyMs: latency,
-            ok: false,
-            error: body?.msg || body?.message || `HTTP_${res.status}`,
-            routeData: body?.data ?? null,
-          };
-        } catch (e: any) {
-          return {
-            status: null,
-            latencyMs: Math.round(performance.now() - t0),
-            ok: false,
-            error: e?.message || 'NETWORK_FETCH_ERROR',
-          };
-        }
-      },
-      { mint, fromAddress, inputLamports, slippage, SOL_MINT }
-    );
-  } catch (err: any) {
-    return { status: 500, latencyMs: 0, ok: false, error: err?.message || 'EVALUATE_EXCEPTION' };
+        },
+        { mint, fromAddress, inputLamports, curSlippage, SOL_MINT }
+      );
+
+      if (lastResult.ok) {
+        return lastResult;
+      }
+    } catch (err: any) {
+      lastResult = { status: 500, latencyMs: 0, ok: false, error: err?.message || 'EVALUATE_EXCEPTION' };
+    }
+
+    if (attempt < maxRetries) {
+      const waitMs = attempt * 350;
+      console.warn(`[SWAP BUY RETRY] Attempt #${attempt}/${maxRetries} gagal (${lastResult.error}). Mencoba ulang slippage=${Math.min(30, slippage + attempt * 5)}% dalam ${waitMs}ms...`);
+      await delay(waitMs);
+    }
   }
+
+  return lastResult;
 }
 
 /**
  * Panggil GMGN Swap Route API untuk SELL token ke SOL.
- * Dilakukan di dalam browser context page token GMGN.
+ * Dilakukan di dalam browser context page token GMGN dengan retry berulang jika gagal.
  */
 export async function getBrowserSellSwapRoute(
   page: Page,
@@ -128,86 +148,106 @@ export async function getBrowserSellSwapRoute(
   fromAddress: string = DEFAULT_SWAP_WALLET,
   inputTokenAmountBaseUnits: string,
   tokenDecimals: number = 6,
-  slippage: number = 15
+  slippage: number = 15,
+  maxRetries: number = 3
 ): Promise<SwapRouteResult> {
-  if (page.isClosed()) {
-    return { status: 499, latencyMs: 0, ok: false, error: 'PAGE_CLOSED' };
-  }
+  let lastResult: SwapRouteResult = { status: null, latencyMs: 0, ok: false, error: 'NOT_ATTEMPTED' };
 
-  try {
-    return await page.evaluate(
-      async ({ mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, slippage, SOL_MINT }) => {
-        const params = new URLSearchParams({
-          web_from_source: 'token_poll',
-          token_in_chain: 'sol',
-          token_out_chain: 'sol',
-          from_address: fromAddress,
-          token_in_address: mint,
-          token_out_address: SOL_MINT,
-          in_amount: inputTokenAmountBaseUnits,
-          slippage: String(slippage),
-          is_anti_mev: 'false',
-          fee: '0.0002',
-          tip_fee: '0.0001',
-          priority_fee: '0.0001',
-          legacy: 'true',
-        });
-        const t0 = performance.now();
-        try {
-          const res = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
-          const latency = Math.round(performance.now() - t0);
-          const body = await res.json().catch(() => null);
-          if (res.status === 200 && body?.code === 0 && body?.data?.quote) {
-            const data = body.data;
-            const q = data.quote;
-            const inDecimals = q.inDecimals ?? tokenDecimals;
-            const tokens = Number(inputTokenAmountBaseUnits) / 10 ** inDecimals;
-            const amountInUsd = Number(data.amount_in_usd ?? 0);
-            const amountOutUsd = Number(data.amount_out_usd ?? 0);
-            // Nilai token per unit saat sell = amountOutUsd / tokens
-            const impliedPrice = tokens > 0 && amountOutUsd > 0 ? amountOutUsd / tokens : null;
-            const solPrice = Number(data.token_out_price ?? 0) || null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (page.isClosed()) {
+      return { status: 499, latencyMs: 0, ok: false, error: 'PAGE_CLOSED' };
+    }
 
+    // Naikkan toleransi slippage jika retry (15% -> 20% -> 25%)
+    const curSlippage = attempt === 1 ? slippage : Math.min(35, slippage + (attempt - 1) * 5);
+
+    try {
+      lastResult = await page.evaluate(
+        async ({ mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT }) => {
+          const params = new URLSearchParams({
+            web_from_source: 'token_poll',
+            token_in_chain: 'sol',
+            token_out_chain: 'sol',
+            from_address: fromAddress,
+            token_in_address: mint,
+            token_out_address: SOL_MINT,
+            in_amount: inputTokenAmountBaseUnits,
+            slippage: String(curSlippage),
+            is_anti_mev: 'false',
+            fee: '0.0002',
+            tip_fee: '0.0001',
+            priority_fee: '0.0001',
+            legacy: 'true',
+          });
+          const t0 = performance.now();
+          try {
+            const res = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
+            const latency = Math.round(performance.now() - t0);
+            const body = await res.json().catch(() => null);
+            if (res.status === 200 && body?.code === 0 && body?.data?.quote) {
+              const data = body.data;
+              const q = data.quote;
+              const inDecimals = q.inDecimals ?? tokenDecimals;
+              const tokens = Number(inputTokenAmountBaseUnits) / 10 ** inDecimals;
+              const amountInUsd = Number(data.amount_in_usd ?? 0);
+              const amountOutUsd = Number(data.amount_out_usd ?? 0);
+              // Nilai token per unit saat sell = amountOutUsd / tokens
+              const impliedPrice = tokens > 0 && amountOutUsd > 0 ? amountOutUsd / tokens : null;
+              const solPrice = Number(data.token_out_price ?? 0) || null;
+
+              return {
+                status: res.status,
+                latencyMs: latency,
+                ok: true,
+                routeData: data,
+                quote: {
+                  inAmount: q.inAmount ?? null,
+                  outAmount: q.outAmount ?? null,
+                  inDecimals: q.inDecimals ?? null,
+                  outDecimals: q.outDecimals ?? null,
+                  priceImpactPct: q.priceImpactPct ?? null,
+                  exchange: data.exchange ?? null,
+                  amountInUsd,
+                  amountOutUsd,
+                },
+                impliedPriceUsd: impliedPrice,
+                solPriceUsd: solPrice,
+              };
+            }
             return {
               status: res.status,
               latencyMs: latency,
-              ok: true,
-              routeData: data,
-              quote: {
-                inAmount: q.inAmount ?? null,
-                outAmount: q.outAmount ?? null,
-                inDecimals: q.inDecimals ?? null,
-                outDecimals: q.outDecimals ?? null,
-                priceImpactPct: q.priceImpactPct ?? null,
-                exchange: data.exchange ?? null,
-                amountInUsd,
-                amountOutUsd,
-              },
-              impliedPriceUsd: impliedPrice,
-              solPriceUsd: solPrice,
+              ok: false,
+              error: body?.msg || body?.message || `HTTP_${res.status}`,
+              routeData: body?.data ?? null,
+            };
+          } catch (e: any) {
+            return {
+              status: null,
+              latencyMs: Math.round(performance.now() - t0),
+              ok: false,
+              error: e?.message || 'NETWORK_FETCH_ERROR',
             };
           }
-          return {
-            status: res.status,
-            latencyMs: latency,
-            ok: false,
-            error: body?.msg || body?.message || `HTTP_${res.status}`,
-            routeData: body?.data ?? null,
-          };
-        } catch (e: any) {
-          return {
-            status: null,
-            latencyMs: Math.round(performance.now() - t0),
-            ok: false,
-            error: e?.message || 'NETWORK_FETCH_ERROR',
-          };
-        }
-      },
-      { mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, slippage, SOL_MINT }
-    );
-  } catch (err: any) {
-    return { status: 500, latencyMs: 0, ok: false, error: err?.message || 'EVALUATE_EXCEPTION' };
+        },
+        { mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT }
+      );
+
+      if (lastResult.ok) {
+        return lastResult;
+      }
+    } catch (err: any) {
+      lastResult = { status: 500, latencyMs: 0, ok: false, error: err?.message || 'EVALUATE_EXCEPTION' };
+    }
+
+    if (attempt < maxRetries) {
+      const waitMs = attempt * 350;
+      console.warn(`[SWAP SELL RETRY] Attempt #${attempt}/${maxRetries} gagal (${lastResult.error}). Mencoba ulang slippage=${Math.min(35, slippage + attempt * 5)}% dalam ${waitMs}ms...`);
+      await delay(waitMs);
+    }
   }
+
+  return lastResult;
 }
 
 export interface DualSellSwapResult {
