@@ -223,6 +223,7 @@ const server = createServer((req, res) => {
 });
 
 function renderHtmlDashboard(initialState = {}) {
+  const abCfg = initialState.autobuy?.config || {};
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -975,36 +976,41 @@ function renderHtmlDashboard(initialState = {}) {
           <div style="margin-bottom: 8px;">
             <label style="font-size: 11px; color: var(--text-muted);">Active Lane</label>
             <select id="ab-lane-select" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 6px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
-              <option value="LANE_2">Lane 2: Smart TP $5 (Recommended)</option>
-              <option value="LANE_1">Lane 1: Direct Scalper ($2/Buy)</option>
-              <option value="BOTH">Keduanya (Lane 1 & Lane 2)</option>
+              <option value="LANE_2" ${abCfg.activeLane === 'LANE_2' ? 'selected' : ''}>Lane 2: Smart TP $5 (Recommended)</option>
+              <option value="LANE_1" ${abCfg.activeLane === 'LANE_1' ? 'selected' : ''}>Lane 1: Direct Scalper ($2/Buy)</option>
+              <option value="BOTH" ${abCfg.activeLane === 'BOTH' ? 'selected' : ''}>Keduanya (Lane 1 & Lane 2)</option>
             </select>
           </div>
           <div style="display: flex; gap: 8px;">
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Modal L1 ($)</label>
-              <input type="number" id="ab-stake-l1" step="0.5" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <input type="number" id="ab-stake-l1" step="0.5" value="${abCfg.stakeUsdLane1 || 2.0}" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Modal L2 ($)</label>
-              <input type="number" id="ab-stake-l2" step="0.5" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <input type="number" id="ab-stake-l2" step="0.5" value="${abCfg.stakeUsdLane2 || 5.0}" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
           </div>
         </div>
 
         <!-- Card Kuota & Risk -->
         <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px;">
-          <div style="font-size: 11px; font-weight: 700; color: #10b981; text-transform: uppercase; margin-bottom: 8px;">
-            🛡️ Kuota & Proteksi Slippage
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-size: 11px; font-weight: 700; color: #10b981; text-transform: uppercase;">
+              🛡️ Kuota & Proteksi
+            </div>
+            <div style="font-size: 11px; color: #38bdf8; font-weight: 700;">
+              Tersimpan: <span id="ab-quota-display">${abCfg.maxBuysQuota || 3}</span> BUY
+            </div>
           </div>
           <div style="display: flex; gap: 8px; margin-bottom: 8px;">
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Max Buys</label>
-              <input type="number" id="ab-max-buys" min="1" max="100" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <input type="number" id="ab-max-buys" min="1" max="1000" value="${abCfg.maxBuysQuota || 3}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Slip Buy %</label>
-              <input type="number" id="ab-slip-buy" min="5" max="35" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <input type="number" id="ab-slip-buy" min="5" max="35" value="${abCfg.buySlippagePercent || 15}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
@@ -1818,6 +1824,11 @@ function renderHtmlDashboard(initialState = {}) {
         }
       }
 
+      // Update display label kuota
+      if (document.getElementById('ab-quota-display')) {
+        document.getElementById('ab-quota-display').innerText = cfg.maxBuysQuota || 3;
+      }
+
       // Pre-fill inputs on initial load
       if (!hasLoadedAutobuyForm) {
         document.getElementById('ab-lane-select').value = cfg.activeLane || 'LANE_2';
@@ -1861,7 +1872,8 @@ function renderHtmlDashboard(initialState = {}) {
       const activeLane = document.getElementById('ab-lane-select').value;
       const stakeUsdLane1 = parseFloat(document.getElementById('ab-stake-l1').value) || 2.0;
       const stakeUsdLane2 = parseFloat(document.getElementById('ab-stake-l2').value) || 5.0;
-      const maxBuysQuota = parseInt(document.getElementById('ab-max-buys').value, 10) || 3;
+      const maxBuysInput = parseInt(document.getElementById('ab-max-buys').value, 10);
+      const maxBuysQuota = Number.isInteger(maxBuysInput) && maxBuysInput >= 0 ? maxBuysInput : 3;
       const buySlippagePercent = parseFloat(document.getElementById('ab-slip-buy').value) || 15;
 
       saveAutobuyConfig({
@@ -1891,8 +1903,12 @@ function renderHtmlDashboard(initialState = {}) {
       })
       .then(r => r.json())
       .then(res => {
-        if (res.ok) {
-          showToast('Pengaturan Auto-Buy berhasil disimpan!');
+        if (res.ok && res.config) {
+          showToast('Pengaturan Auto-Buy berhasil disimpan (Max Buys: ' + res.config.maxBuysQuota + ')!');
+          document.getElementById('ab-max-buys').value = res.config.maxBuysQuota;
+          if (document.getElementById('ab-quota-display')) {
+            document.getElementById('ab-quota-display').innerText = res.config.maxBuysQuota;
+          }
           pollStoredData();
         } else {
           alert('Gagal menyimpan: ' + (res.error || 'Server error'));
