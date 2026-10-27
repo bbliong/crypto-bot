@@ -232,10 +232,15 @@ export function sanitizeAudit(value: any, key = ''): any {
 }
 
 export function getCompletedRealBuysCount(state: FollowerRealState, config: FollowerLiveConfig): number {
-  return state.positions.filter((p) => {
-    const firstBuy = p.buys.find((b) => b.status === 'CONFIRMED');
-    return firstBuy && firstBuy.confirmedAt && firstBuy.confirmedAt > config.quotaResetAt;
-  }).length;
+  let count = 0;
+  for (const p of state.positions) {
+    for (const b of p.buys) {
+      if (b.status === 'CONFIRMED' && b.confirmedAt && b.confirmedAt > config.quotaResetAt) {
+        count++;
+      }
+    }
+  }
+  return count;
 }
 
 export function generateFollowerPositionId(mint: string, lane: string, timestamp: number): string {

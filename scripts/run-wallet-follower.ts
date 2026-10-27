@@ -1476,41 +1476,53 @@ export class WalletFollowerRunner {
       const posId = generateFollowerPositionId(signal.mint, lane, Date.now());
       const tokensAcquired = Number(routeData?.quote?.outAmount || 0) / 10 ** (routeData?.quote?.outDecimals ?? 6);
 
-      const realPos: FollowerRealPosition = {
-        id: posId,
-        mint: signal.mint,
-        symbol: signal.symbol,
+      const newOrder = {
+        side: 'BUY' as const,
         lane,
-        status: res.ok ? 'HOLDING' : 'FAILED',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        wallet: state.readiness.wallet,
-        acquiredTokens: tokensAcquired,
-        remainingTokens: tokensAcquired,
-        costBasisUsd: stakeUsd,
-        realizedPnlUsd: 0,
-        entryPriceUsd: tokenPriceUsd,
-        buys: [{
-          side: 'BUY',
-          lane,
-          submittedAt: Date.now(),
-          status: res.ok ? 'CONFIRMED' : 'FAILED',
-          orderId: res.orderId,
-          hash: res.hash,
-          stakeUsd,
-          tokenAmount: routeData?.quote?.outAmount || '0',
-          decimals: routeData?.quote?.outDecimals ?? 6,
-          solUsd: this.solPriceUsd,
-          confirmedAt: res.ok ? Date.now() : undefined,
-          error: res.error,
-        }],
-        sells: [],
-        audit: [{ at: Date.now(), type: 'REAL_BUY_SUBMITTED', details: res }],
-        lastError: res.error,
+        submittedAt: Date.now(),
+        status: (res.ok ? 'CONFIRMED' : 'FAILED') as const,
+        orderId: res.orderId,
+        hash: res.hash,
+        stakeUsd,
+        tokenAmount: routeData?.quote?.outAmount || '0',
+        decimals: routeData?.quote?.outDecimals ?? 6,
+        solUsd: this.solPriceUsd,
+        confirmedAt: res.ok ? Date.now() : undefined,
+        error: res.error,
       };
 
-      state.positions.unshift(realPos);
-      auditFollowerReal(this.dataDir, state, realPos, 'REAL_BUY', { signal, res });
+      if (existingRealPos) {
+        existingRealPos.acquiredTokens += tokensAcquired;
+        existingRealPos.remainingTokens += tokensAcquired;
+        existingRealPos.costBasisUsd += stakeUsd;
+        existingRealPos.updatedAt = Date.now();
+        if (res.ok) existingRealPos.status = 'HOLDING';
+        existingRealPos.buys.push(newOrder);
+        auditFollowerReal(this.dataDir, state, existingRealPos, 'REAL_REBOUND_BUY', { signal, res });
+      } else {
+        const realPos: FollowerRealPosition = {
+          id: posId,
+          mint: signal.mint,
+          symbol: signal.symbol,
+          lane,
+          status: res.ok ? 'HOLDING' : 'FAILED',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          wallet: state.readiness.wallet,
+          acquiredTokens: tokensAcquired,
+          remainingTokens: tokensAcquired,
+          costBasisUsd: stakeUsd,
+          realizedPnlUsd: 0,
+          entryPriceUsd: tokenPriceUsd,
+          buys: [newOrder],
+          sells: [],
+          audit: [{ at: Date.now(), type: 'REAL_BUY_SUBMITTED', details: res }],
+          lastError: res.error,
+        };
+        state.positions.unshift(realPos);
+        auditFollowerReal(this.dataDir, state, realPos, 'REAL_BUY', { signal, res });
+      }
+
       console.log(`[REAL AUTO-BUY RESULT] Status: ${res.ok ? 'SUCCESS' : 'FAILED'} | OrderId: ${res.orderId || '-'} | Hash: ${res.hash || '-'}`);
       console.log(`=========================================================\n`);
     } catch (err: any) {
