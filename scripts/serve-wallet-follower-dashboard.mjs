@@ -204,6 +204,28 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // API Reclaim Rent endpoint
+  if (pathname.includes('/api/autobuy/reclaim-rent') && req.method === 'POST') {
+    (async () => {
+      try {
+        const { reclaimAllEmptyAccounts } = await import('./solana-rent-reclaimer.mjs');
+        const result = await reclaimAllEmptyAccounts();
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    })();
+    return;
+  }
+
   // API Status JSON endpoint (support /api/status, /add-fol/api/status, etc.)
   if (pathname.includes('/api/status')) {
     const data = loadDashboardState();
@@ -962,6 +984,15 @@ function renderHtmlDashboard(initialState = {}) {
           <div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px;">
             <span style="color: var(--text-muted);">Cadangan Gas (Min):</span>
             <span style="color: var(--text-muted);">0.025 SOL</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.08);">
+            <span style="color: var(--text-muted);">Rent Tersandera:</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <strong id="ab-rent-sol" style="color: #fef08a;">0.0000 SOL</strong>
+              <button id="ab-btn-reclaim" onclick="triggerReclaimRent()" style="background: #eab308; border: none; color: #000; border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 800; cursor: pointer;" title="Tutup akun token kosong dan tarik kembali SOL rent">
+                ♻️ Reclaim
+              </button>
+            </div>
           </div>
           <div id="ab-sol-warning" style="display: none; margin-top: 8px; font-size: 11px; color: #f87171; background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3); padding: 6px; border-radius: 6px;">
             ⚠️ Saldo SOL di bawah cadangan gas minimum. Top up SOL untuk transaksi riil.
@@ -1864,6 +1895,11 @@ function renderHtmlDashboard(initialState = {}) {
         }
       }
 
+      const rentSolEl = document.getElementById('ab-rent-sol');
+      if (rentSolEl && ready.reclaimableRentSol !== undefined) {
+        rentSolEl.innerText = Number(ready.reclaimableRentSol || 0).toFixed(4) + ' SOL';
+      }
+
       // Update display label kuota
       if (document.getElementById('ab-quota-display')) {
         document.getElementById('ab-quota-display').innerText = cfg.maxBuysQuota || 3;
@@ -1929,6 +1965,39 @@ function renderHtmlDashboard(initialState = {}) {
       if (confirm('Reset kuota hitungan transaksi riil?')) {
         saveAutobuyConfig({ resetQuota: true });
       }
+    }
+
+    function triggerReclaimRent() {
+      const btn = document.getElementById('ab-btn-reclaim');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Processing...';
+      }
+      const curPath = window.location.pathname;
+      const cleanPath = curPath.endsWith('/') ? curPath.slice(0, -1) : curPath;
+      const ep = cleanPath.includes('/add-fol') ? '/add-fol/api/autobuy/reclaim-rent' : '/api/autobuy/reclaim-rent';
+
+      fetch(ep, { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerText = '♻️ Reclaim';
+          }
+          if (res.ok && res.reclaimedSol > 0) {
+            showToast('🎉 Berhasil reclaim +' + Number(res.reclaimedSol).toFixed(4) + ' SOL (' + res.reclaimedCount + ' akun token ditutup)!');
+            pollStoredData();
+          } else {
+            showToast(res.message || 'Semua akun token bersih. Tidak ada rent yang dapat ditarik.');
+          }
+        })
+        .catch(err => {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerText = '♻️ Reclaim';
+          }
+          alert('Gagal reclaim rent: ' + err.message);
+        });
     }
 
     function saveAutobuyConfig(patch) {

@@ -32,7 +32,7 @@ export function loadEnv() {
 
 loadEnv();
 
-const DEFAULT_RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const DEFAULT_RPC = (process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('helius')) ? process.env.SOLANA_RPC_URL : 'https://api.mainnet-beta.solana.com';
 const WALLET_ADDRESS = process.env.SOLANA_WALLET_ADDRESS || 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
 
 /**
@@ -70,38 +70,54 @@ export async function scanEmptyTokenAccounts(connection, walletAddress = WALLET_
   const emptyAccounts = [];
   const activeAccounts = [];
 
+  const fallbackRpcs = [
+    connection?.rpcEndpoint,
+    'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana',
+    'https://solana-mainnet.g.alchemy.com/v2/demo'
+  ].filter(Boolean);
+
   for (const prog of programs) {
-    try {
-      const response = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
-        programId: prog.id
-      }, 'confirmed');
+    let succeeded = false;
+    for (const rpc of fallbackRpcs) {
+      try {
+        const conn = (rpc === connection?.rpcEndpoint) ? connection : new Connection(rpc, 'confirmed');
+        const response = await conn.getParsedTokenAccountsByOwner(walletPubkey, {
+          programId: prog.id
+        }, 'confirmed');
 
-      for (const item of response.value) {
-        const info = item.account.data.parsed.info;
-        const amount = info.tokenAmount?.amount ?? '0';
-        const uiAmount = info.tokenAmount?.uiAmount ?? 0;
-        const lamports = item.account.lamports;
-        const rentSol = lamports / 1e9;
+        for (const item of response.value) {
+          const info = item.account.data.parsed.info;
+          const amount = info.tokenAmount?.amount ?? '0';
+          const uiAmount = info.tokenAmount?.uiAmount ?? 0;
+          const lamports = item.account.lamports;
+          const rentSol = lamports / 1e9;
 
-        const record = {
-          pubkey: item.pubkey.toBase58(),
-          mint: info.mint,
-          program: prog.name,
-          programId: prog.id.toBase58(),
-          tokenAmount: amount,
-          uiAmount,
-          lamports,
-          rentSol
-        };
+          const record = {
+            pubkey: item.pubkey.toBase58(),
+            mint: info.mint,
+            program: prog.name,
+            programId: prog.id.toBase58(),
+            tokenAmount: amount,
+            uiAmount,
+            lamports,
+            rentSol
+          };
 
-        if (amount === '0' || uiAmount === 0) {
-          emptyAccounts.push(record);
-        } else {
-          activeAccounts.push(record);
+          if (amount === '0' || uiAmount === 0) {
+            emptyAccounts.push(record);
+          } else {
+            activeAccounts.push(record);
+          }
         }
+        succeeded = true;
+        break;
+      } catch (e) {
+        // Coba RPC berikutnya jika 429 atau error
       }
-    } catch (e) {
-      console.warn(`[scan-accounts] Error querying ${prog.name}:`, e.message);
+    }
+    if (!succeeded) {
+      console.warn(`[scan-accounts] Seluruh RPC gagal untuk ${prog.name}`);
     }
   }
 

@@ -96,6 +96,8 @@ export interface FollowerLiveReadiness {
   wallet: string | null;
   balanceSol: number | null;
   solUsd: number | null;
+  reclaimableRentSol?: number;
+  emptyAccountsCount?: number;
   observedAt: number;
   workerPid?: number;
   error?: string;

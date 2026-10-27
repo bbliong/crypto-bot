@@ -1371,12 +1371,25 @@ export class WalletFollowerRunner {
           const sess = await this.liveAdapter.detectWalletAndAuth(this.page);
           if (sess.wallet) {
             const bal = await this.liveAdapter.getWalletBalance(sess.wallet);
+            let reclaimableRentSol = 0;
+            let emptyAccountsCount = 0;
+            try {
+              const { scanEmptyTokenAccounts } = await import('./solana-rent-reclaimer.mjs');
+              const { Connection } = await import('@solana/web3.js');
+              const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+              const scan = await scanEmptyTokenAccounts(conn, sess.wallet);
+              reclaimableRentSol = scan.totalReclaimableSol;
+              emptyAccountsCount = scan.emptyCount;
+            } catch {}
+
             const state = readFollowerRealState(this.dataDir);
             state.readiness = {
               sessionReady: !!sess.wallet,
               wallet: sess.wallet,
               balanceSol: bal.balanceSol,
               solUsd: bal.solUsd || this.solPriceUsd,
+              reclaimableRentSol,
+              emptyAccountsCount,
               observedAt: Date.now(),
               workerPid: process.pid,
               error: bal.error,
@@ -1554,6 +1567,24 @@ export class WalletFollowerRunner {
         openPos.remainingTokens = 0;
         openPos.realizedPnlUsd = pnlUsd;
         openPos.exitPriceUsd = tokenPriceUsd;
+
+        // Auto-reclaim rent SOL dari token account yang sudah kosong setelah sell
+        setTimeout(async () => {
+          try {
+            const { reclaimRentForMint } = await import('./solana-rent-reclaimer.mjs');
+            console.log(`[AUTO-RECLAIM-RENT] Memeriksa akun kosong untuk reclaim rent token ${mint}...`);
+            const reclaimRes = await reclaimRentForMint(mint);
+            if (reclaimRes.ok && reclaimRes.reclaimedSol > 0) {
+              console.log(`[AUTO-RECLAIM-RENT] ✅ Berhasil me-reclaim +${reclaimRes.reclaimedSol.toFixed(6)} SOL untuk mint ${mint}! Tx: ${reclaimRes.signatures?.[0]}`);
+              auditFollowerReal(this.dataDir, state, openPos, 'RENT_RECLAIMED', {
+                reclaimedSol: reclaimRes.reclaimedSol,
+                signatures: reclaimRes.signatures,
+              });
+            }
+          } catch (err: any) {
+            console.warn(`[AUTO-RECLAIM-RENT-WARN] ${err?.message}`);
+          }
+        }, 4000);
       } else {
         openPos.lastError = res.error;
       }
