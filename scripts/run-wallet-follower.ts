@@ -1355,6 +1355,16 @@ export class WalletFollowerRunner {
         } catch {}
       }
 
+      // 2.1 Periksa inaktivitas pasar (stagnant timeout 5m) untuk seluruh token Lane 2 yang terbuka
+      // Ini memastikan token yang likuiditasnya mati/unindexed di DEX tetap dievaluasi untuk auto-sell & reclaim rent
+      for (const sp of smartOpen) {
+        const lastActivity = sp.lastTradeActivityAt || sp.updatedAt || (sp.openedAt * 1000);
+        const inactiveMin = (Date.now() - lastActivity) / 60000;
+        if (inactiveMin >= 5.0 && sp.totalTokens > 0) {
+          await this.handleSmartDipPriceTick(sp.mint, sp.lastObservedPriceUsd || 0);
+        }
+      }
+
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       console.log(`--- LANE 1 (Direct Scalper $20 Pool, $2/buy) ---`);
       for (const p of openPositions) {
