@@ -1336,6 +1336,14 @@ export class WalletFollowerRunner {
         }
       }
 
+      // Unsubscribe koin-koin lama yang posisinya sudah CLOSED di Lane 1 dan Lane 2
+      // agar tidak membanjiri memory dan event loop dengan websocket tick yang tidak terpakai
+      for (const subbedMint of Array.from(this.subscribedTokens)) {
+        if (!allOpenMints.includes(subbedMint)) {
+          await this.unsubscribeToken(subbedMint);
+        }
+      }
+
       // 2. Heartbeat batch price polling via DexScreener API (fallback 30s)
       const bestPrices = new Map<string, number>();
       if (allOpenMints.length > 0) {
