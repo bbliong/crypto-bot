@@ -22,6 +22,8 @@ export interface SmartDipPosition {
   peakPriceUsd: number;
   lowestPriceSincePeakUsd: number;
   realizedPnlUsd: number;
+  lastTradeActivityAt?: number;
+  isMoonbagActive?: boolean;
   
   // History
   entries: Array<{
@@ -281,6 +283,8 @@ export class SmartDipFollowerLane {
         peakPriceUsd: executionPriceUsd,
         lowestPriceSincePeakUsd: executionPriceUsd,
         realizedPnlUsd: 0,
+        lastTradeActivityAt: now * 1000,
+        isMoonbagActive: false,
         entries: [
           {
             type: 'INITIAL_BUY',
@@ -302,6 +306,7 @@ export class SmartDipFollowerLane {
       pos.totalTokens += tokensBought;
       pos.reboundEntryPriceUsd = executionPriceUsd;
       pos.lastObservedPriceUsd = executionPriceUsd;
+      pos.lastTradeActivityAt = now * 1000;
       pos.avgEntryPriceUsd = pos.totalTokens > 0 ? pos.remainingCostBasisUsd / pos.totalTokens : executionPriceUsd;
       pos.updatedAt = now;
       pos.entries.push({
@@ -318,12 +323,18 @@ export class SmartDipFollowerLane {
     return pos;
   }
 
+  public recordTokenActivity(mint: string, timestampMs?: number): void {
+    const pos = this.positions.get(mint);
+    if (!pos) return;
+    pos.lastTradeActivityAt = timestampMs || Date.now();
+  }
+
   /**
    * Update tick harga live untuk mendeteksi:
    * - TP 30%-50% (jual 100%)
-   * - TP >50% (jual 70%)
+   * - TP >50% (jual 70%, 30% Free Moonbag)
    * - Rebound TP 20% (jual 100%)
-   * - Trailing bottom untuk dip tracking
+   * - Inactivity Exit 5m jika tidak ada buy & sell sama sekali di pasar
    */
   public evaluatePriceTick(mint: string, currentPrice: number): {
     shouldSell: boolean;
@@ -340,8 +351,8 @@ export class SmartDipFollowerLane {
     pos.lastObservedPriceUsd = currentPrice;
     if (currentPrice > pos.peakPriceUsd) pos.peakPriceUsd = currentPrice;
 
-    // Track lowest price saat fase koreksi (meskipun koin 0 pasca Full TP)
-    if (pos.phase === 'WAITING_DIP') {
+    // Track lowest price saat fase koreksi (jika koin 0 pasca Full TP)
+    if (pos.phase === 'WAITING_DIP' && pos.totalTokens <= 0) {
       const waitMinutes = (Date.now() - (pos.updatedAt || pos.openedAt * 1000)) / 60000;
       if (waitMinutes >= 10.0) {
         pos.status = 'CLOSED';
@@ -359,18 +370,31 @@ export class SmartDipFollowerLane {
       return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'NO_TOKENS' };
     }
 
-    // 1. Evaluasi Fase INITIAL BUY (Hapus moonbag: TP >= 30% jual FULL 100%)
+    // 1. Evaluasi Fase INITIAL BUY
     if (pos.phase === 'INITIAL') {
       const entryPrice = pos.initialEntryPriceUsd;
       const gainPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
 
+      // Jika gain > 50%: Jual 70% muatan, 30% koin disimpan sebagai Free Moonbag!
+      if (gainPct >= 50.0) {
+        const tokensToSell = pos.totalTokens * 0.70;
+        return {
+          shouldSell: true,
+          sellType: 'TP_OVER_50_PARTIAL_70',
+          sellRatioPct: 70,
+          tokensToSell,
+          reason: `TP_OVER_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%, Amankan 70% kas, simpan 30% free moonbag)`,
+        };
+      }
+
+      // Jika gain antara 30% s/d 50%: Jual FULL 100%
       if (gainPct >= 30.0) {
         return {
           shouldSell: true,
           sellType: 'TP_30_50_FULL',
           sellRatioPct: 100,
           tokensToSell: pos.totalTokens,
-          reason: `TP_FULL_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
+          reason: `TP_30_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
         };
       }
     }
@@ -391,18 +415,20 @@ export class SmartDipFollowerLane {
       }
     }
 
-    // 3. Stagnant / Time-based Exit: Jika sudah di-hold >= 5 menit tanpa ada pergerakan ke target TP
-    const lastEntry = (pos.entries || []).at(-1);
-    const holdDurationMs = Date.now() - (lastEntry ? lastEntry.timestamp * 1000 : pos.openedAt * 1000);
-    const holdMinutes = holdDurationMs / 60000;
+    // 3. Pengecekan Inaktivitas Pasar: Jika dalam 5 menit TIDAK ADA aktivitas buy & sell sama sekali
+    const lastActivity = pos.lastTradeActivityAt || pos.updatedAt || (pos.openedAt * 1000);
+    const inactiveMinutes = (Date.now() - lastActivity) / 60000;
 
-    if (holdMinutes >= 5.0) {
+    if (inactiveMinutes >= 5.0) {
+      const isMoonbag = !!pos.isMoonbagActive || (pos.phase === 'WAITING_DIP' && pos.totalTokens > 0);
       return {
         shouldSell: true,
         sellType: 'STAGNANT_TIMEOUT_EXIT',
         sellRatioPct: 100,
         tokensToSell: pos.totalTokens,
-        reason: `STAGNANT_TIMEOUT_${holdMinutes.toFixed(0)}M (Hold >= 5 menit tanpa pergerakan ke TP, auto-sell exit)`,
+        reason: isMoonbag
+          ? `MOONBAG_INACTIVITY_EXIT (Free moonbag dijual 100% karena tidak ada aktivitas buy/sell pasar selama ${inactiveMinutes.toFixed(0)}m)`
+          : `NO_ACTIVITY_5M (Tidak ada aktivitas buy/sell pasar selama ${inactiveMinutes.toFixed(0)}m, auto-sell exit)`,
       };
     }
 
@@ -489,7 +515,9 @@ export class SmartDipFollowerLane {
         pos.lowestPriceSincePeakUsd = executionPriceUsd;
       }
     } else {
+      // Partial TP 70% -> Sisa 30% koin masuk fase WAITING_DIP sebagai Free Moonbag
       pos.phase = 'WAITING_DIP';
+      pos.isMoonbagActive = true;
       pos.lowestPriceSincePeakUsd = executionPriceUsd;
     }
 

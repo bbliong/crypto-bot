@@ -494,8 +494,20 @@ export class WalletFollowerRunner {
       // 1. Tangkap aktivitas Buy / Sell dari target wallet
       if (msg.channel === 'wallet_activity_info' && Array.isArray(msg.data)) {
         for (const item of msg.data) {
+          if (item.a) {
+            this.smartDipLane.recordTokenActivity(item.a);
+          }
           if (item.m === this.targetWallet || !item.m) {
             await this.processWalletTradeItem(item);
+          }
+        }
+      }
+
+      // 1.1 Tangkap token_activity (transaksi buy / sell umum di koin yang dipantau)
+      if (msg.channel === 'token_activity' && Array.isArray(msg.data)) {
+        for (const act of msg.data) {
+          if (act.a) {
+            this.smartDipLane.recordTokenActivity(act.a);
           }
         }
       }
@@ -505,6 +517,7 @@ export class WalletFollowerRunner {
         for (const stat of msg.data) {
           if (stat.a && stat.p) {
             const price = Number(stat.p) || 0;
+            this.smartDipLane.recordTokenActivity(stat.a);
             this.lane.updateTokenTick(stat.a, price);
             await this.handleSmartDipPriceTick(stat.a, price);
           }
@@ -1090,7 +1103,7 @@ export class WalletFollowerRunner {
           tokenMint: mint,
           tokenSymbol: res.symbol,
           tokenName: res.tokenName,
-          action: tick.sellType === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL'),
+          action: tick.sellType === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : (tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL')),
           stakeOrProceedsUsd: usdReceived,
           tokens: tokensSold,
           executionPriceUsd: execPrice,
@@ -1311,9 +1324,16 @@ export class WalletFollowerRunner {
               const baseMint = pair.baseToken?.address;
               const price = parseFloat(pair.priceUsd) || 0;
               const liq = pair.liquidity?.usd || 0;
+              const m5Buys = pair.txns?.m5?.buys || 0;
+              const m5Sells = pair.txns?.m5?.sells || 0;
+
               if (baseMint && price > 0) {
                 if (!bestPrices.has(baseMint) || liq > 1000) {
                   bestPrices.set(baseMint, price);
+                }
+                // Jika dalam 5 menit terakhir ada transaksi buy atau sell di DEX
+                if (m5Buys > 0 || m5Sells > 0) {
+                  this.smartDipLane.recordTokenActivity(baseMint);
                 }
               }
             }
