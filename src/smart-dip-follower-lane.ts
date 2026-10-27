@@ -205,6 +205,12 @@ export class SmartDipFollowerLane {
 
       // Jika fase WAITING_DIP: Cek apakah target menunjukkan conviction & harga rebound
       if (pos.phase === 'WAITING_DIP') {
+        // Limit ketat: Rebound buy hanya boleh maksimal 1 kali saja per token
+        const reboundBuyCount = (pos.entries || []).filter(e => e.type === 'REBOUND_BUY').length;
+        if (reboundBuyCount >= 1) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: 'REBOUND_BUY_MAX_1X_REACHED' };
+        }
+
         const history = this.targetBuyHistory.get(signal.mint) || [];
         const isConsecutiveBuys = history.length >= 2;
         const isLargeBuy = signal.usdAmount >= 100 || signal.solAmount >= 1.0;
@@ -464,13 +470,13 @@ export class SmartDipFollowerLane {
     });
 
     if (isFullExit || pos.totalTokens < 1 || pos.remainingCostBasisUsd < 0.01) {
-      if (sellType === 'TARGET_EXIT' || sellType === 'STOP_LOSS') {
+      if (sellType === 'TARGET_EXIT' || sellType === 'STOP_LOSS' || sellType === 'REBOUND_TP_20_FULL') {
         pos.status = 'CLOSED';
         pos.totalTokens = 0;
         pos.remainingCostBasisUsd = 0;
         this.archiveClosedTrade(pos);
       } else {
-        // TP 100% atau Rebound TP 20% -> Masuk fase WAITING_DIP untuk mencari setup rebound berikutnya
+        // TP 100% Initial -> Masuk fase WAITING_DIP untuk mencari 1x setup rebound
         pos.phase = 'WAITING_DIP';
         pos.lowestPriceSincePeakUsd = executionPriceUsd;
       }

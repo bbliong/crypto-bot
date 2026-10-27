@@ -50,6 +50,7 @@ export class WalletFollowerRunner {
   private isRunning = false;
   private subscribedTokens: Set<string> = new Set();
   private inFlightBuyMints: Set<string> = new Set();
+  private inFlightSellMints: Set<string> = new Set();
   private solPriceUsd = 101.5;
   private lastMtmLogAt = 0;
   private processedTxHashes: Set<string> = new Set();
@@ -987,14 +988,14 @@ export class WalletFollowerRunner {
     if (this.inFlightBuyMints.has(signal.mint)) {
       return;
     }
-    const evalSmart = this.smartDipLane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
-    if (!evalSmart.canBuy) {
-      console.log(`[SMART DIP BUY SKIP] ${evalSmart.reason}`);
-      return;
-    }
-
     this.inFlightBuyMints.add(signal.mint);
     try {
+      const evalSmart = this.smartDipLane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
+      if (!evalSmart.canBuy) {
+        console.log(`[SMART DIP BUY SKIP] ${evalSmart.reason}`);
+        return;
+      }
+
       console.log(`\n=========================================================`);
       console.log(`[SMART DIP BUY TRIGGER] Eksekusi ${evalSmart.buyType} untuk ${signal.symbol} ($${evalSmart.stakeUsd.toFixed(2)})...`);
       let tokensBought = 0;
@@ -1051,62 +1052,69 @@ export class WalletFollowerRunner {
    * Helper: Evaluasi Price Tick Lane 2 (TP 30%-50%, TP >50%, Rebound TP 20%)
    */
   private async handleSmartDipPriceTick(mint: string, currentPrice: number): Promise<void> {
+    if (this.inFlightSellMints.has(mint)) return;
+
     const tick = this.smartDipLane.evaluatePriceTick(mint, currentPrice);
     if (!tick.shouldSell || tick.tokensToSell <= 0) return;
 
-    console.log(`\n---------------------------------------------------------`);
-    console.log(`[SMART DIP TP TRIGGER] ${tick.sellType} untuk token ${mint.slice(0, 8)}... (${tick.reason})`);
+    this.inFlightSellMints.add(mint);
+    try {
+      console.log(`\n---------------------------------------------------------`);
+      console.log(`[SMART DIP TP TRIGGER] ${tick.sellType} untuk token ${mint.slice(0, 8)}... (${tick.reason})`);
 
-    let tokensSold = tick.tokensToSell;
-    let usdReceived = 0;
-    let execPrice = currentPrice;
+      let tokensSold = tick.tokensToSell;
+      let usdReceived = 0;
+      let execPrice = currentPrice;
 
-    if (!this.dryRun && this.page && !this.page.isClosed()) {
-      const baseUnits = Math.floor(tokensSold * 1e6).toString();
-      const quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 15);
-      if (quote.ok && quote.quote) {
-        usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
-        execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
+      if (!this.dryRun && this.page && !this.page.isClosed()) {
+        const baseUnits = Math.floor(tokensSold * 1e6).toString();
+        const quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 15);
+        if (quote.ok && quote.quote) {
+          usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
+          execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
+        }
       }
-    }
 
-    if (usdReceived === 0) {
-      usdReceived = tokensSold * currentPrice;
-    }
+      if (usdReceived === 0) {
+        usdReceived = tokensSold * currentPrice;
+      }
 
-    const isFullExit = tick.sellRatioPct >= 99;
-    const res = this.smartDipLane.recordSellExecution(
-      mint,
-      tick.sellType,
-      tokensSold,
-      usdReceived,
-      execPrice,
-      isFullExit,
-      `tp_${Date.now()}`
-    );
+      const isFullExit = tick.sellRatioPct >= 99;
+      const res = this.smartDipLane.recordSellExecution(
+        mint,
+        tick.sellType,
+        tokensSold,
+        usdReceived,
+        execPrice,
+        isFullExit,
+        `tp_${Date.now()}`
+      );
 
-    if (res) {
-      const lastExit = res.exits[res.exits.length - 1];
-      console.log(`[SMART DIP SELL EXECUTED] ${tick.sellType} | UsdReceived: $${usdReceived.toFixed(2)} | PnL: ${lastExit.pnlUsd >= 0 ? '+' : ''}$${lastExit.pnlUsd} (${lastExit.roiPct}%) | Sisa Tokens: ${res.totalTokens.toLocaleString()}`);
-      console.log(`---------------------------------------------------------\n`);
+      if (res) {
+        const lastExit = res.exits[res.exits.length - 1];
+        console.log(`[SMART DIP SELL EXECUTED] ${tick.sellType} | UsdReceived: $${usdReceived.toFixed(2)} | PnL: ${lastExit.pnlUsd >= 0 ? '+' : ''}$${lastExit.pnlUsd} (${lastExit.roiPct}%) | Sisa Tokens: ${res.totalTokens.toLocaleString()}`);
+        console.log(`---------------------------------------------------------\n`);
 
-      const nowMs = Date.now();
-      this.smartDipLane.appendEvent({
-        id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: nowMs,
-        timeWib: formatWibDate(nowMs),
-        tokenMint: mint,
-        tokenSymbol: res.symbol,
-        tokenName: res.tokenName,
-        action: tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL'),
-        stakeOrProceedsUsd: usdReceived,
-        tokens: tokensSold,
-        executionPriceUsd: execPrice,
-        pnlUsd: lastExit.pnlUsd,
-        roiPct: lastExit.roiPct,
-        reason: tick.reason,
-        positionStatus: res.status,
-      });
+        const nowMs = Date.now();
+        this.smartDipLane.appendEvent({
+          id: `sd_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: nowMs,
+          timeWib: formatWibDate(nowMs),
+          tokenMint: mint,
+          tokenSymbol: res.symbol,
+          tokenName: res.tokenName,
+          action: tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL'),
+          stakeOrProceedsUsd: usdReceived,
+          tokens: tokensSold,
+          executionPriceUsd: execPrice,
+          pnlUsd: lastExit.pnlUsd,
+          roiPct: lastExit.roiPct,
+          reason: tick.reason,
+          positionStatus: res.status,
+        });
+      }
+    } finally {
+      this.inFlightSellMints.delete(mint);
     }
   }
 
