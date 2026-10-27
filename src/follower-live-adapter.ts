@@ -1,4 +1,6 @@
 import type { Page } from 'playwright';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { readProfit4WalletBalance } from './profit4-wallet-balance.js';
 import { SOL_MINT } from './browser-swap-route.js';
 import type { FollowerLiveConfig } from './follower-live-store.js';
@@ -28,7 +30,28 @@ export class FollowerLiveAdapter {
   private cachedWallet: string | null = null;
   private isListenerAttached: boolean = false;
 
-  constructor() {}
+  constructor() {
+    this.loadPersistedAuth();
+  }
+
+  private loadPersistedAuth(): void {
+    try {
+      const p = join(process.cwd(), 'data/gmgn-auth.json');
+      if (existsSync(p)) {
+        const raw = JSON.parse(readFileSync(p, 'utf8'));
+        if (raw?.authorization) {
+          this.cachedAuth = raw.authorization;
+        }
+      }
+    } catch {}
+  }
+
+  private savePersistedAuth(auth: string): void {
+    try {
+      const p = join(process.cwd(), 'data/gmgn-auth.json');
+      writeFileSync(p, JSON.stringify({ authorization: auth, updatedAt: Date.now() }, null, 2));
+    } catch {}
+  }
 
   /**
    * Mengikat interceptor event network Playwright untuk menangkap live Authorization Bearer token secara otomatis.
@@ -43,6 +66,7 @@ export class FollowerLiveAdapter {
         const headers = req.headers();
         if (headers.authorization && headers.authorization.startsWith('Bearer ')) {
           this.cachedAuth = headers.authorization;
+          this.savePersistedAuth(this.cachedAuth);
         }
       });
     } catch {}
@@ -52,6 +76,10 @@ export class FollowerLiveAdapter {
    * Deteksi alamat wallet aktif dan Authorization Bearer token dari sesi GMGN di browser.
    */
   public async detectWalletAndAuth(page: Page): Promise<{ wallet: string | null; auth: string | null }> {
+    if (!this.cachedAuth) {
+      this.loadPersistedAuth();
+    }
+
     if (page.isClosed()) {
       return { wallet: this.cachedWallet, auth: this.cachedAuth || null };
     }
@@ -137,7 +165,12 @@ export class FollowerLiveAdapter {
       return { ok: false, status: 499, orderId: null, hash: null, error: 'PAGE_CLOSED' };
     }
 
-    const auth = params.authorization || this.cachedAuth;
+    let auth = params.authorization || this.cachedAuth;
+    if (!auth) {
+      this.loadPersistedAuth();
+      auth = this.cachedAuth;
+    }
+
     if (!auth) {
       return { ok: false, status: 401, orderId: null, hash: null, error: 'MISSING_GMGN_AUTH_SESSION' };
     }
