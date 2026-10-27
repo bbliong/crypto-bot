@@ -107,7 +107,7 @@ function loadDashboardState() {
         lastEventTime: smartEvents.length > 0 ? smartEvents[0].timeWib : '-',
       },
       openPositions: smartOpen,
-      positions: smartPositions,
+      positions: allDistinctSmart.sort((a, b) => a.openedAt - b.openedAt),
       recentEvents: smartEvents.slice(0, 500),
       closedTrades: smartClosedTrades.slice(0, 50),
     },
@@ -1304,6 +1304,16 @@ function renderHtmlDashboard(initialState = {}) {
       return str;
     }
 
+    function formatWibTimeFromMs(ms) {
+      if (!ms) return '';
+      const d = new Date(ms);
+      const pad = (n) => String(n).padStart(2, '0');
+      const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+      const wib = new Date(utc + 7 * 3600000);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+      return wib.getDate() + ' ' + months[wib.getMonth()] + ' ' + pad(wib.getHours()) + ':' + pad(wib.getMinutes()) + ':' + pad(wib.getSeconds()) + ' WIB';
+    }
+
     function renderLane2Timeline(positions, events) {
       const container = document.getElementById('lane2-timeline-container');
       if (!positions || positions.length === 0) {
@@ -1317,7 +1327,32 @@ function renderHtmlDashboard(initialState = {}) {
       const symbolCurrentIdx = {};
 
       const tokenCardsHtml = positions.map((p, i) => {
-        const tokenEvs = events.filter(e => e.tokenMint === p.mint).sort((a, b) => a.timestamp - b.timestamp);
+        let tokenEvs = [];
+        if (p.entries && p.entries.length > 0) {
+          const entryItems = (p.entries || []).map((e) => ({
+            action: e.type === 'INITIAL_BUY' ? 'BUY_INITIAL' : 'BUY_REBOUND',
+            stakeOrProceedsUsd: e.stakeUsd,
+            tokens: e.tokensBought,
+            executionPriceUsd: e.priceUsd,
+            timestamp: e.timestamp * 1000,
+            timeWib: formatWibTimeFromMs(e.timestamp * 1000),
+            reason: e.type,
+          }));
+          const exitItems = (p.exits || []).map((x) => ({
+            action: x.type === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (x.type === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : (x.type === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : 'SELL_TP_FULL')),
+            stakeOrProceedsUsd: x.usdReceived,
+            tokens: x.tokensSold,
+            executionPriceUsd: x.priceUsd,
+            pnlUsd: x.pnlUsd,
+            roiPct: x.roiPct,
+            timestamp: x.timestamp,
+            timeWib: formatWibTimeFromMs(x.timestamp),
+            reason: x.type,
+          }));
+          tokenEvs = [...entryItems, ...exitItems].sort((a, b) => a.timestamp - b.timestamp);
+        } else {
+          tokenEvs = events.filter(e => e.tokenMint === p.mint).sort((a, b) => a.timestamp - b.timestamp);
+        }
 
         let displayName = p.symbol || 'TOKEN';
         if (symbolCounts[p.symbol] > 1) {
