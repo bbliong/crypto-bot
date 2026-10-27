@@ -148,14 +148,22 @@ export async function reclaimRentForMint(mintAddress, options = {}) {
   const walletPubkey = keypair.publicKey;
 
   console.log(`[reclaim-rent] Memeriksa akun kosong untuk mint: ${mintAddress}...`);
-  const scan = await scanEmptyTokenAccounts(connection, walletPubkey);
-  const targetAccounts = scan.emptyAccounts.filter(a => a.mint === mintAddress);
+  
+  // Lakukan pengecekan hingga 2 kali dengan jeda jika RPC butuh waktu propagasi
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const scan = await scanEmptyTokenAccounts(connection, walletPubkey);
+    const targetAccounts = scan.emptyAccounts.filter(a => a.mint === mintAddress);
 
-  if (targetAccounts.length === 0) {
-    return { ok: true, reclaimedCount: 0, reclaimedSol: 0, message: 'Tidak ada akun kosong yang ditemukan untuk mint ini (mungkin saldo belum 0 atau sudah di-close).' };
+    if (targetAccounts.length > 0) {
+      return closeAccountsBatch(connection, keypair, targetAccounts);
+    }
+
+    if (attempt < 2) {
+      await new Promise(r => setTimeout(r, 3000));
+    }
   }
 
-  return closeAccountsBatch(connection, keypair, targetAccounts);
+  return { ok: true, reclaimedCount: 0, reclaimedSol: 0, message: 'Tidak ada akun kosong yang ditemukan untuk mint ini (mungkin saldo belum 0 atau sudah di-close).' };
 }
 
 /**
