@@ -822,11 +822,23 @@ export class WalletFollowerRunner {
       console.error(`[EXEC-BUY-ERR] ${err?.message}`);
     }
 
+    // Update live price tick ke Lane 1 & Lane 2 setiap kali ada aktivitas buy target
+    if (signal.priceUsd > 0) {
+      this.lane.updateTokenTick(signal.mint, signal.priceUsd);
+      await this.handleSmartDipPriceTick(signal.mint, signal.priceUsd);
+    }
+
     // Evaluasi Lane 2 (Smart Dip $5) setelah Lane 1
     await this.evaluateSmartDipBuy(signal, isFresh, tokenAgeMinutes);
   }
 
   private async handleTargetSell(signal: WalletTradeSignal): Promise<void> {
+    // Update live price tick ke Lane 1 & Lane 2 setiap kali target menjual token
+    if (signal.priceUsd > 0) {
+      this.lane.updateTokenTick(signal.mint, signal.priceUsd);
+      await this.handleSmartDipPriceTick(signal.mint, signal.priceUsd);
+    }
+
     const evalSell = this.lane.evaluateSellSignal(signal);
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
     const timeWib = formatWibDate(nowMs);
@@ -1355,7 +1367,22 @@ export class WalletFollowerRunner {
         } catch {}
       }
 
-      // 2.1 Periksa inaktivitas pasar (stagnant timeout 5m) untuk seluruh token Lane 2 yang terbuka
+      // 2.1 Polling harga live via AMM swap route untuk token unindexed (yang belum muncul di DexScreener)
+      for (const sp of smartOpen) {
+        if (!bestPrices.has(sp.mint) && this.page && !this.page.isClosed()) {
+          try {
+            const baseUnits = Math.floor(sp.totalTokens * 1e6).toString();
+            const q = await getBrowserSellSwapRoute(this.page, sp.mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 20);
+            if (q.ok && q.impliedPriceUsd && q.impliedPriceUsd > 0) {
+              bestPrices.set(sp.mint, q.impliedPriceUsd);
+              this.lane.updateTokenTick(sp.mint, q.impliedPriceUsd);
+              await this.handleSmartDipPriceTick(sp.mint, q.impliedPriceUsd);
+            }
+          } catch {}
+        }
+      }
+
+      // 2.2 Periksa inaktivitas pasar (stagnant timeout 5m) untuk seluruh token Lane 2 yang terbuka
       // Ini memastikan token yang likuiditasnya mati/unindexed di DEX tetap dievaluasi untuk auto-sell & reclaim rent
       for (const sp of smartOpen) {
         const lastActivity = sp.lastTradeActivityAt || sp.updatedAt || (sp.openedAt * 1000);
