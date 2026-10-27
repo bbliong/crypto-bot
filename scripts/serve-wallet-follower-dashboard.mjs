@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const PORT = 4192;
@@ -12,6 +12,9 @@ const SMART_DIP_POS_FILE = join(ROOT, 'data', 'smart-dip-positions.json');
 const SMART_DIP_TRADES_FILE = join(ROOT, 'data', 'smart-dip-trades.json');
 const SMART_DIP_EVENTS_FILE = join(ROOT, 'data', 'smart-dip-events.json');
 
+const FOLLOWER_SETTINGS_FILE = join(ROOT, 'data', 'follower-autobuy-settings.json');
+const FOLLOWER_REAL_STATE_FILE = join(ROOT, 'data', 'follower-real-state.json');
+
 const TARGET_WALLET = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 const SWAP_WALLET = 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
 
@@ -23,6 +26,12 @@ function safeReadJson(filePath, fallback = []) {
     } catch {}
   }
   return fallback;
+}
+
+function atomicWriteJson(filePath, value) {
+  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
+  renameSync(tmp, filePath);
 }
 
 function loadDashboardState() {
@@ -102,12 +111,98 @@ function loadDashboardState() {
       recentEvents: smartEvents.slice(0, 500),
       closedTrades: smartClosedTrades.slice(0, 50),
     },
+    autobuy: {
+      config: safeReadJson(FOLLOWER_SETTINGS_FILE, {
+        enabled: false,
+        activeLane: 'LANE_2',
+        stakeUsdLane1: 2.0,
+        stakeUsdLane2: 5.0,
+        maxBuysQuota: 3,
+        maxActiveRealPositions: 1,
+        buySlippagePercent: 15,
+        sellSlippagePercent: 20,
+        priorityFeeSol: 0.0001,
+        tipFeeSol: 0.0001,
+        minSolReserve: 0.025,
+        autoSell: true,
+        quotaResetAt: 0,
+        updatedAt: 0,
+      }),
+      readiness: safeReadJson(FOLLOWER_REAL_STATE_FILE, {}).readiness || {
+        sessionReady: false,
+        wallet: null,
+        balanceSol: null,
+        solUsd: null,
+        observedAt: 0,
+      },
+      positions: safeReadJson(FOLLOWER_REAL_STATE_FILE, {}).positions || [],
+    },
   };
 }
 
 const server = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
+
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    return res.end();
+  }
+
+  // API Auto-Buy Config update endpoint
+  if (pathname.includes('/api/autobuy/config') && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const patch = JSON.parse(body || '{}');
+        const current = safeReadJson(FOLLOWER_SETTINGS_FILE, {
+          enabled: false,
+          activeLane: 'LANE_2',
+          stakeUsdLane1: 2.0,
+          stakeUsdLane2: 5.0,
+          maxBuysQuota: 3,
+          maxActiveRealPositions: 1,
+          buySlippagePercent: 15,
+          sellSlippagePercent: 20,
+          priorityFeeSol: 0.0001,
+          tipFeeSol: 0.0001,
+          minSolReserve: 0.025,
+          autoSell: true,
+          quotaResetAt: 0,
+        });
+
+        const updated = {
+          ...current,
+          ...patch,
+          updatedAt: Date.now(),
+        };
+
+        if (patch.resetQuota) {
+          updated.quotaResetAt = Date.now();
+        }
+
+        atomicWriteJson(FOLLOWER_SETTINGS_FILE, updated);
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify({ ok: true, config: updated }));
+      } catch (err) {
+        res.writeHead(400, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    });
+    return;
+  }
 
   // API Status JSON endpoint (support /api/status, /add-fol/api/status, etc.)
   if (pathname.includes('/api/status')) {
@@ -771,6 +866,22 @@ function renderHtmlDashboard(initialState = {}) {
       opacity: 1;
     }
 
+    /* Toggle Switch & Auto-Buy */
+    .switch {
+      position: relative; display: inline-block; width: 48px; height: 26px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #334155; transition: .25s; border-radius: 26px;
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px;
+      background-color: white; transition: .25s; border-radius: 50%;
+    }
+    .switch input:checked + .slider { background-color: #10b981; }
+    .switch input:checked + .slider:before { transform: translateX(22px); }
+
     /* Footer */
     footer {
       margin-top: 30px;
@@ -804,6 +915,117 @@ function renderHtmlDashboard(initialState = {}) {
         <span class="badge badge-live">Live CDP 9223</span>
       </div>
     </header>
+
+    <!-- Real Auto-Buy Engine Control Card -->
+    <div style="background: var(--bg-panel); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 12px; padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">⚡</span>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <strong style="font-size: 16px; color: #fff;">Real Auto-Buy On-Chain Engine</strong>
+              <span id="ab-status-badge" class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8; border: 1px solid #475569; font-weight: 800;">
+                AUTO-BUY: DISABLED (PAPER ONLY)
+              </span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              Eksekusi swap riil ke blockchain Solana melalui sesi GMGN headless CDP.
+            </div>
+          </div>
+        </div>
+
+        <!-- Toggle Switch -->
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label class="switch">
+            <input type="checkbox" id="ab-enabled-toggle" onchange="toggleAutobuy(this.checked)">
+            <span class="slider"></span>
+          </label>
+          <strong id="ab-toggle-label" style="font-size: 13px; color: var(--text-muted);">Real Buy OFF</strong>
+        </div>
+      </div>
+
+      <!-- Grid Settings & Wallet Info -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+        <!-- Card Wallet Live -->
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-weight: 700; color: #818cf8; text-transform: uppercase; margin-bottom: 8px;">
+            💼 GMGN Live Wallet
+          </div>
+          <div style="font-family: ui-monospace, monospace; font-size: 13px; color: #f8fafc; margin-bottom: 6px;" id="ab-wallet-addr">
+            Detecting...
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 12px;">
+            <span style="color: var(--text-muted);">Saldo SOL:</span>
+            <strong id="ab-sol-bal" style="color: #38bdf8;">—</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px;">
+            <span style="color: var(--text-muted);">Cadangan Gas (Min):</span>
+            <span style="color: var(--text-muted);">0.025 SOL</span>
+          </div>
+          <div id="ab-sol-warning" style="display: none; margin-top: 8px; font-size: 11px; color: #f87171; background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3); padding: 6px; border-radius: 6px;">
+            ⚠️ Saldo SOL di bawah cadangan gas minimum. Top up SOL untuk transaksi riil.
+          </div>
+        </div>
+
+        <!-- Card Lane & Modal -->
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-weight: 700; color: #f59e0b; text-transform: uppercase; margin-bottom: 8px;">
+            🎯 Lane Pemicu & Modal
+          </div>
+          <div style="margin-bottom: 8px;">
+            <label style="font-size: 11px; color: var(--text-muted);">Active Lane</label>
+            <select id="ab-lane-select" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 6px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <option value="LANE_2">Lane 2: Smart TP $5 (Recommended)</option>
+              <option value="LANE_1">Lane 1: Direct Scalper ($2/Buy)</option>
+              <option value="BOTH">Keduanya (Lane 1 & Lane 2)</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: var(--text-muted);">Modal L1 ($)</label>
+              <input type="number" id="ab-stake-l1" step="0.5" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: var(--text-muted);">Modal L2 ($)</label>
+              <input type="number" id="ab-stake-l2" step="0.5" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Kuota & Risk -->
+        <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-weight: 700; color: #10b981; text-transform: uppercase; margin-bottom: 8px;">
+            🛡️ Kuota & Proteksi Slippage
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: var(--text-muted);">Max Buys</label>
+              <input type="number" id="ab-max-buys" min="1" max="100" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: var(--text-muted);">Slip Buy %</label>
+              <input type="number" id="ab-slip-buy" min="5" max="35" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+            <button onclick="saveAutobuyForm()" style="background: var(--primary); color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;">
+              💾 Simpan
+            </button>
+            <button onclick="resetAutobuyQuota()" style="background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid #475569; padding: 6px 10px; border-radius: 6px; font-size: 11px; cursor: pointer;">
+              ⟳ Reset Kuota
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real Positions Container (jika ada posisi on-chain) -->
+      <div id="ab-real-positions-panel" style="display: none; margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+        <div style="font-size: 12px; font-weight: 700; color: #38bdf8; margin-bottom: 8px;">
+          🚀 Active On-Chain Positions (Real Holdings)
+        </div>
+        <div id="ab-real-positions-chips" style="display: flex; gap: 10px; flex-wrap: wrap;"></div>
+      </div>
+    </div>
 
     <!-- Dual Lane Comparison Switcher -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px;">
@@ -1537,6 +1759,153 @@ function renderHtmlDashboard(initialState = {}) {
         allEvents = curEvents;
         renderEvents();
       }
+
+      if (data.autobuy) {
+        updateAutobuyUI(data.autobuy);
+      }
+    }
+
+    let hasLoadedAutobuyForm = false;
+
+    function updateAutobuyUI(ab) {
+      if (!ab) return;
+      const cfg = ab.config || {};
+      const ready = ab.readiness || {};
+
+      // Toggle & Status Badge
+      const toggle = document.getElementById('ab-enabled-toggle');
+      if (document.activeElement !== toggle) {
+        toggle.checked = !!cfg.enabled;
+      }
+
+      const badge = document.getElementById('ab-status-badge');
+      const toggleLabel = document.getElementById('ab-toggle-label');
+      if (cfg.enabled) {
+        badge.innerText = 'REAL AUTO-BUY: ACTIVE (ON-CHAIN)';
+        badge.style.background = 'rgba(16, 185, 129, 0.2)';
+        badge.style.color = '#34d399';
+        badge.style.borderColor = '#10b981';
+        toggleLabel.innerText = 'Real Buy ON';
+        toggleLabel.style.color = '#34d399';
+      } else {
+        badge.innerText = 'AUTO-BUY: DISABLED (PAPER ONLY)';
+        badge.style.background = 'rgba(148, 163, 184, 0.2)';
+        badge.style.color = '#94a3b8';
+        badge.style.borderColor = '#475569';
+        toggleLabel.innerText = 'Real Buy OFF';
+        toggleLabel.style.color = 'var(--text-muted)';
+      }
+
+      // Wallet & Balance
+      const wAddr = document.getElementById('ab-wallet-addr');
+      if (ready.wallet) {
+        wAddr.innerHTML = '<a href="https://solscan.io/account/' + ready.wallet + '" target="_blank" style="color: #818cf8; text-decoration: underline;">' + ready.wallet.slice(0, 6) + '...' + ready.wallet.slice(-4) + '</a>';
+      } else {
+        wAddr.innerText = 'Belum terdeteksi di CDP 9223';
+      }
+
+      const solBalEl = document.getElementById('ab-sol-bal');
+      const solWarnEl = document.getElementById('ab-sol-warning');
+      if (ready.balanceSol !== null && ready.balanceSol !== undefined) {
+        const solVal = Number(ready.balanceSol);
+        const solUsdVal = ready.solUsd ? (solVal * ready.solUsd).toFixed(2) : '0';
+        solBalEl.innerText = solVal.toFixed(4) + ' ◎ ($' + solUsdVal + ')';
+
+        if (solVal < (cfg.minSolReserve || 0.025)) {
+          solWarnEl.style.display = 'block';
+        } else {
+          solWarnEl.style.display = 'none';
+        }
+      }
+
+      // Pre-fill inputs on initial load
+      if (!hasLoadedAutobuyForm) {
+        document.getElementById('ab-lane-select').value = cfg.activeLane || 'LANE_2';
+        document.getElementById('ab-stake-l1').value = cfg.stakeUsdLane1 || 2.0;
+        document.getElementById('ab-stake-l2').value = cfg.stakeUsdLane2 || 5.0;
+        document.getElementById('ab-max-buys').value = cfg.maxBuysQuota || 3;
+        document.getElementById('ab-slip-buy').value = cfg.buySlippagePercent || 15;
+        hasLoadedAutobuyForm = true;
+      }
+
+      // Render Active Real Positions
+      const realPosPanel = document.getElementById('ab-real-positions-panel');
+      const realChips = document.getElementById('ab-real-positions-chips');
+      const activeReal = (ab.positions || []).filter(p => ['BUY_PENDING', 'HOLDING', 'SELL_PENDING', 'UNKNOWN'].includes(p.status));
+
+      if (activeReal.length > 0) {
+        realPosPanel.style.display = 'block';
+        realChips.innerHTML = activeReal.map(p => {
+          return '<div style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 8px 12px; font-size: 12px;">' +
+            '<div style="font-weight: 800; color: #fff;">' + p.symbol + ' [' + p.lane + '] - ' + p.status + '</div>' +
+            '<div style="color: var(--text-muted); font-size: 11px;">Cost Basis: $' + (p.costBasisUsd || 0).toFixed(2) + ' | Sisa: ' + Number(p.remainingTokens || 0).toLocaleString() + ' tokens</div>' +
+          '</div>';
+        }).join('');
+      } else {
+        realPosPanel.style.display = 'none';
+      }
+    }
+
+    function toggleAutobuy(enabled) {
+      if (enabled) {
+        const conf = confirm('⚠️ PERINGATAN RISIKO ON-CHAIN:\\n\\nAnda akan mengaktifkan REAL AUTO-BUY on-chain.\\nBot akan mengeksekusi swap menggunakan saldo SOL di dompet GMGN.\\n\\nApakah Anda yakin ingin mengaktifkan?');
+        if (!conf) {
+          document.getElementById('ab-enabled-toggle').checked = false;
+          return;
+        }
+      }
+      saveAutobuyConfig({ enabled });
+    }
+
+    function saveAutobuyForm() {
+      const activeLane = document.getElementById('ab-lane-select').value;
+      const stakeUsdLane1 = parseFloat(document.getElementById('ab-stake-l1').value) || 2.0;
+      const stakeUsdLane2 = parseFloat(document.getElementById('ab-stake-l2').value) || 5.0;
+      const maxBuysQuota = parseInt(document.getElementById('ab-max-buys').value, 10) || 3;
+      const buySlippagePercent = parseFloat(document.getElementById('ab-slip-buy').value) || 15;
+
+      saveAutobuyConfig({
+        activeLane,
+        stakeUsdLane1,
+        stakeUsdLane2,
+        maxBuysQuota,
+        buySlippagePercent,
+      });
+    }
+
+    function resetAutobuyQuota() {
+      if (confirm('Reset kuota hitungan transaksi riil?')) {
+        saveAutobuyConfig({ resetQuota: true });
+      }
+    }
+
+    function saveAutobuyConfig(patch) {
+      const curPath = window.location.pathname;
+      const cleanPath = curPath.endsWith('/') ? curPath.slice(0, -1) : curPath;
+      const ep = cleanPath.includes('/add-fol') ? '/add-fol/api/autobuy/config' : '/api/autobuy/config';
+
+      fetch(ep, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.ok) {
+          showToast('Pengaturan Auto-Buy berhasil disimpan!');
+          pollStoredData();
+        } else {
+          alert('Gagal menyimpan: ' + (res.error || 'Server error'));
+        }
+      })
+      .catch(err => alert('Network error: ' + err.message));
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast-msg');
+      toast.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
     function copyLane2Report() {

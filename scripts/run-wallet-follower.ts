@@ -5,6 +5,19 @@ import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follow
 import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
+import {
+  readFollowerLiveConfig,
+  saveFollowerLiveConfig,
+  readFollowerRealState,
+  auditFollowerReal,
+  atomicWriteJson,
+  getCompletedRealBuysCount,
+  generateFollowerPositionId,
+  REAL_ACTIVE_STATUSES,
+  type FollowerRealPosition,
+  type FollowerLiveConfig,
+} from '../src/follower-live-store.js';
+import { FollowerLiveAdapter } from '../src/follower-live-adapter.js';
 
 const TARGET_WALLET = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 const CDP_ENDPOINT = process.env.CDP_ENDPOINT || 'http://127.0.0.1:9223';
@@ -51,6 +64,9 @@ export class WalletFollowerRunner {
   private subscribedTokens: Set<string> = new Set();
   private inFlightBuyMints: Set<string> = new Set();
   private inFlightSellMints: Set<string> = new Set();
+  private liveAdapter: FollowerLiveAdapter = new FollowerLiveAdapter();
+  private dataDir: string = path.resolve(process.cwd(), 'data');
+  private lastReadinessCheck = 0;
   private solPriceUsd = 101.5;
   private lastMtmLogAt = 0;
   private processedTxHashes: Set<string> = new Set();
@@ -773,6 +789,9 @@ export class WalletFollowerRunner {
             reason: `ENTRY_${evalBuy.entryNum}`,
           },
         });
+
+        // Real Auto-Buy Trigger untuk Lane 1
+        await this.maybeExecuteRealBuy('LANE_1', signal, actualStakeUsd, quote.routeData, execPrice);
       } else {
         console.warn(`[SWAP AMM QUOTE FAILED] Gagal mendapatkan quote buy swap: ${quote.error}. Dilarang fallback spot, buy dibatalkan!`);
         return;
@@ -903,6 +922,9 @@ export class WalletFollowerRunner {
               reason: evalSell.isFullExit ? 'FULL_EXIT' : `PARTIAL_SELL_${evalSell.sellRatioPct}%`,
             },
           });
+
+          // Real Auto-Sell Trigger untuk Lane 1
+          await this.maybeExecuteRealSell('LANE_1', signal.mint, quote.routeData, execPrice);
         }
       } else {
         console.warn(`[SWAP SELL QUOTE FAILED] Gagal route sell: ${quote.error}. Dilarang fallback spot, sell ditolak!`);
@@ -990,6 +1012,9 @@ export class WalletFollowerRunner {
         reason: evalSmart.reason,
         positionStatus: pos.status,
       });
+
+      // Real Auto-Buy Trigger untuk Lane 2
+      await this.maybeExecuteRealBuy('LANE_2', signal, actualStakeUsd, quote.routeData, execPrice);
     } finally {
       this.inFlightBuyMints.delete(signal.mint);
     }
@@ -1068,6 +1093,9 @@ export class WalletFollowerRunner {
           reason: tick.reason,
           positionStatus: res.status,
         });
+
+        // Real Auto-Sell Trigger untuk Lane 2
+        await this.maybeExecuteRealSell('LANE_2', mint, quote.routeData, execPrice);
       }
     } finally {
       this.inFlightSellMints.delete(mint);
@@ -1134,6 +1162,9 @@ export class WalletFollowerRunner {
         reason: 'TARGET_FULL_EXIT_SAFETY_CLOSE',
         positionStatus: res.status,
       });
+
+      // Real Auto-Sell Trigger untuk Lane 2 (Safety Target Exit)
+      await this.maybeExecuteRealSell('LANE_2', signal.mint, quote.routeData, execPrice);
     }
   }
 
@@ -1306,6 +1337,207 @@ export class WalletFollowerRunner {
         const roi = sp.remainingCostBasisUsd > 0 ? (unPnl / sp.remainingCostBasisUsd) * 100 : 0;
         console.log(`  -> ${sp.symbol} [${sp.phase}]: Stake $${sp.remainingCostBasisUsd.toFixed(2)} | Tokens: ${sp.totalTokens.toLocaleString()} | Entry: $${sp.avgEntryPriceUsd} | CurPrice: $${sp.lastObservedPriceUsd} | UnPnl: ${unPnl >= 0 ? '+' : ''}$${unPnl.toFixed(2)} (${roi.toFixed(1)}%)`);
       }
+
+      // Update Auto-Buy Readiness & Live Wallet Balance
+      if (this.page && !this.page.isClosed() && (Date.now() - this.lastReadinessCheck > 15000)) {
+        this.lastReadinessCheck = Date.now();
+        try {
+          const sess = await this.liveAdapter.detectWalletAndAuth(this.page);
+          if (sess.wallet) {
+            const bal = await this.liveAdapter.getWalletBalance(sess.wallet);
+            const state = readFollowerRealState(this.dataDir);
+            state.readiness = {
+              sessionReady: !!sess.wallet,
+              wallet: sess.wallet,
+              balanceSol: bal.balanceSol,
+              solUsd: bal.solUsd || this.solPriceUsd,
+              observedAt: Date.now(),
+              workerPid: process.pid,
+              error: bal.error,
+            };
+            state.updatedAt = Date.now();
+            atomicWriteJson(path.join(this.dataDir, 'follower-real-state.json'), state);
+          }
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * Helper: Eksekusi Real Auto-Buy on-chain jika diizinkan oleh safety gates.
+   */
+  private async maybeExecuteRealBuy(
+    lane: 'LANE_1' | 'LANE_2',
+    signal: WalletTradeSignal,
+    stakeUsd: number,
+    routeData: any,
+    tokenPriceUsd: number
+  ): Promise<void> {
+    try {
+      const config = readFollowerLiveConfig(this.dataDir);
+      if (!config.enabled) return;
+
+      const laneAllowed = config.activeLane === 'BOTH' || config.activeLane === lane;
+      if (!laneAllowed) {
+        console.log(`[REAL AUTO-BUY SKIP] Lane ${lane} tidak diizinkan oleh config (Active: ${config.activeLane})`);
+        return;
+      }
+
+      const state = readFollowerRealState(this.dataDir);
+      if (!state.readiness.sessionReady || !state.readiness.wallet) {
+        console.warn(`[REAL AUTO-BUY SKIP] Wallet GMGN belum siap atau belum terdeteksi`);
+        return;
+      }
+
+      // Check Kuota
+      const completedCount = getCompletedRealBuysCount(state, config);
+      if (completedCount >= config.maxBuysQuota) {
+        console.warn(`[REAL AUTO-BUY SKIP] Kuota Max Buys tercapai (${completedCount}/${config.maxBuysQuota})`);
+        return;
+      }
+
+      // Check Active Real Positions
+      const activePositions = state.positions.filter(p => REAL_ACTIVE_STATUSES.has(p.status));
+      if (activePositions.length >= config.maxActiveRealPositions) {
+        console.warn(`[REAL AUTO-BUY SKIP] Max Active Real Positions tercapai (${activePositions.length}/${config.maxActiveRealPositions})`);
+        return;
+      }
+
+      // Check Min SOL Reserve
+      const estimatedSolNeeded = stakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 100);
+      if (state.readiness.balanceSol === null || state.readiness.balanceSol < (estimatedSolNeeded + config.minSolReserve)) {
+        console.warn(`[REAL AUTO-BUY SKIP] Saldo SOL (${state.readiness.balanceSol ?? 0} SOL) kurang dari modal (${estimatedSolNeeded.toFixed(4)}) + cadangan gas (${config.minSolReserve} SOL)`);
+        return;
+      }
+
+      if (!this.page || this.page.isClosed()) return;
+
+      console.log(`\n=========================================================`);
+      console.log(`[REAL AUTO-BUY TRIGGER] 🚀 Mengirim Real Swap BUY untuk ${signal.symbol} ($${stakeUsd.toFixed(2)}) di ${lane}...`);
+
+      const res = await this.liveAdapter.submitSwapOrder(this.page, {
+        side: 'BUY',
+        mint: signal.mint,
+        wallet: state.readiness.wallet,
+        amountBaseUnits: routeData?.quote?.inAmount || Math.floor(estimatedSolNeeded * 1e9).toString(),
+        routeData,
+        config,
+        solUsd: this.solPriceUsd,
+        tokenPriceUsd,
+      });
+
+      const posId = generateFollowerPositionId(signal.mint, lane, Date.now());
+      const tokensAcquired = Number(routeData?.quote?.outAmount || 0) / 10 ** (routeData?.quote?.outDecimals ?? 6);
+
+      const realPos: FollowerRealPosition = {
+        id: posId,
+        mint: signal.mint,
+        symbol: signal.symbol,
+        lane,
+        status: res.ok ? 'HOLDING' : 'FAILED',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        wallet: state.readiness.wallet,
+        acquiredTokens: tokensAcquired,
+        remainingTokens: tokensAcquired,
+        costBasisUsd: stakeUsd,
+        realizedPnlUsd: 0,
+        entryPriceUsd: tokenPriceUsd,
+        buys: [{
+          side: 'BUY',
+          lane,
+          submittedAt: Date.now(),
+          status: res.ok ? 'CONFIRMED' : 'FAILED',
+          orderId: res.orderId,
+          hash: res.hash,
+          stakeUsd,
+          tokenAmount: routeData?.quote?.outAmount || '0',
+          decimals: routeData?.quote?.outDecimals ?? 6,
+          solUsd: this.solPriceUsd,
+          confirmedAt: res.ok ? Date.now() : undefined,
+          error: res.error,
+        }],
+        sells: [],
+        audit: [{ at: Date.now(), type: 'REAL_BUY_SUBMITTED', details: res }],
+        lastError: res.error,
+      };
+
+      state.positions.unshift(realPos);
+      auditFollowerReal(this.dataDir, state, realPos, 'REAL_BUY', { signal, res });
+      console.log(`[REAL AUTO-BUY RESULT] Status: ${res.ok ? 'SUCCESS' : 'FAILED'} | OrderId: ${res.orderId || '-'} | Hash: ${res.hash || '-'}`);
+      console.log(`=========================================================\n`);
+    } catch (err: any) {
+      console.error(`[REAL-BUY-ERR] ${err?.message}`);
+    }
+  }
+
+  /**
+   * Helper: Eksekusi Real Auto-Sell on-chain saat TP atau target exit tersentuh.
+   */
+  private async maybeExecuteRealSell(
+    lane: 'LANE_1' | 'LANE_2',
+    mint: string,
+    routeData: any,
+    tokenPriceUsd: number
+  ): Promise<void> {
+    try {
+      const config = readFollowerLiveConfig(this.dataDir);
+      if (!config.autoSell) return;
+
+      const state = readFollowerRealState(this.dataDir);
+      const openPos = state.positions.find(p => p.mint === mint && p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
+      if (!openPos) return;
+
+      if (!this.page || this.page.isClosed()) return;
+
+      console.log(`\n---------------------------------------------------------`);
+      console.log(`[REAL AUTO-SELL TRIGGER] 🚀 Mengirim Real Swap SELL untuk ${openPos.symbol} (${openPos.remainingTokens} tokens)...`);
+
+      const baseUnits = Math.floor(openPos.remainingTokens * 1e6).toString();
+      const res = await this.liveAdapter.submitSwapOrder(this.page, {
+        side: 'SELL',
+        mint,
+        wallet: openPos.wallet,
+        amountBaseUnits: baseUnits,
+        routeData,
+        config,
+        solUsd: this.solPriceUsd,
+        tokenPriceUsd,
+      });
+
+      const usdReceived = Number(routeData?.quote?.amountOutUsd || 0);
+      const pnlUsd = usdReceived > 0 ? Number((usdReceived - openPos.costBasisUsd).toFixed(4)) : 0;
+
+      openPos.sells.push({
+        side: 'SELL',
+        lane,
+        submittedAt: Date.now(),
+        status: res.ok ? 'CONFIRMED' : 'FAILED',
+        orderId: res.orderId,
+        hash: res.hash,
+        stakeUsd: usdReceived,
+        tokenAmount: baseUnits,
+        decimals: 6,
+        solUsd: this.solPriceUsd,
+        confirmedAt: res.ok ? Date.now() : undefined,
+        error: res.error,
+      });
+
+      if (res.ok) {
+        openPos.status = 'CLOSED';
+        openPos.remainingTokens = 0;
+        openPos.realizedPnlUsd = pnlUsd;
+        openPos.exitPriceUsd = tokenPriceUsd;
+      } else {
+        openPos.lastError = res.error;
+      }
+      openPos.updatedAt = Date.now();
+
+      auditFollowerReal(this.dataDir, state, openPos, 'REAL_SELL', { res, usdReceived, pnlUsd });
+      console.log(`[REAL AUTO-SELL RESULT] Status: ${res.ok ? 'CLOSED' : 'FAILED'} | PnL: $${pnlUsd} | Hash: ${res.hash || '-'}`);
+      console.log(`---------------------------------------------------------\n`);
+    } catch (err: any) {
+      console.error(`[REAL-SELL-ERR] ${err?.message}`);
     }
   }
 }
