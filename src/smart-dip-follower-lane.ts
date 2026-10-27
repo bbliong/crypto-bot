@@ -388,6 +388,23 @@ export class SmartDipFollowerLane {
       return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'NO_TOKENS' };
     }
 
+    // 0. Evaluasi Inaktivitas Pasar: Jika dalam 5 menit TIDAK ADA aktivitas buy & sell sama sekali di pasar DEX
+    const lastActivity = pos.lastTradeActivityAt || pos.updatedAt || (pos.openedAt * 1000);
+    const inactiveMinutes = (Date.now() - lastActivity) / 60000;
+
+    if (inactiveMinutes >= 5.0) {
+      const isMoonbag = !!pos.isMoonbagActive || (pos.phase === 'WAITING_DIP' && pos.totalTokens > 0);
+      return {
+        shouldSell: true,
+        sellType: 'STAGNANT_TIMEOUT_EXIT',
+        sellRatioPct: 100,
+        tokensToSell: pos.totalTokens,
+        reason: isMoonbag
+          ? `MOONBAG_INACTIVITY_EXIT (Free moonbag dijual 100% karena tidak ada aktivitas buy/sell pasar selama ${inactiveMinutes.toFixed(0)}m)`
+          : `NO_ACTIVITY_5M (Tidak ada aktivitas buy/sell pasar selama ${inactiveMinutes.toFixed(0)}m, auto-sell exit)`,
+      };
+    }
+
     // 1. Evaluasi Fase INITIAL BUY
     if (pos.phase === 'INITIAL') {
       const entryPrice = pos.initialEntryPriceUsd;
@@ -431,23 +448,6 @@ export class SmartDipFollowerLane {
           reason: `REBOUND_TP_20%_TRIGGERED (Gain: +${reboundGainPct.toFixed(1)}%)`,
         };
       }
-    }
-
-    // 3. Pengecekan Inaktivitas Pasar: Jika dalam 5 menit TIDAK ADA aktivitas buy & sell sama sekali
-    const lastActivity = pos.lastTradeActivityAt || pos.updatedAt || (pos.openedAt * 1000);
-    const inactiveMinutes = (Date.now() - lastActivity) / 60000;
-
-    if (inactiveMinutes >= 5.0) {
-      const isMoonbag = !!pos.isMoonbagActive || (pos.phase === 'WAITING_DIP' && pos.totalTokens > 0);
-      return {
-        shouldSell: true,
-        sellType: 'STAGNANT_TIMEOUT_EXIT',
-        sellRatioPct: 100,
-        tokensToSell: pos.totalTokens,
-        reason: isMoonbag
-          ? `MOONBAG_INACTIVITY_EXIT (Free moonbag dijual 100% karena tidak ada aktivitas buy/sell pasar selama ${inactiveMinutes.toFixed(0)}m)`
-          : `NO_ACTIVITY_5M (Tidak ada aktivitas buy/sell pasar selama ${inactiveMinutes.toFixed(0)}m, auto-sell exit)`,
-      };
     }
 
     return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'HOLDING_AWAITING_TARGET' };

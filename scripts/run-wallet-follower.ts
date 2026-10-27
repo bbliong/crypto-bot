@@ -1078,8 +1078,8 @@ export class WalletFollowerRunner {
         if (quote.ok && quote.quote) {
           usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
           execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
-        } else if (tick.sellType === 'STAGNANT_TIMEOUT_EXIT') {
-          // Jika stagnant timeout dan pool AMM sudah mati/rug (misal 'no external pool found'):
+        } else if (tick.sellType === 'STAGNANT_TIMEOUT_EXIT' || (quote.error && (quote.error.includes('no route') || quote.error.includes('no external pool found')))) {
+          // Jika stagnant timeout atau pool AMM sudah mati/rug (misal 'no external pool found'):
           // Likuidasi cut-loss $0 agar posisi tertutup dan tidak macet
           console.warn(`[SMART DIP TIMEOUT LIQUIDATION] Koin stagnan/rug tanpa likuiditas AMM (${quote.error}). Cut-loss posisi ditutup dengan proceeds $0.`);
           usdReceived = 0;
