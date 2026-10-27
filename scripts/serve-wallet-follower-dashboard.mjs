@@ -174,6 +174,7 @@ const server = createServer((req, res) => {
           tipFeeSol: 0.0001,
           minSolReserve: 0.025,
           autoSell: true,
+          reboundBuyEnabled: false,
           quotaResetAt: 0,
         });
 
@@ -182,6 +183,10 @@ const server = createServer((req, res) => {
           ...patch,
           updatedAt: Date.now(),
         };
+
+        if (patch.reboundBuyEnabled !== undefined) {
+          updated.reboundBuyEnabled = Boolean(patch.reboundBuyEnabled);
+        }
 
         if (patch.resetQuota) {
           updated.quotaResetAt = Date.now();
@@ -1043,6 +1048,15 @@ function renderHtmlDashboard(initialState = {}) {
               <label style="font-size: 11px; color: var(--text-muted);">Slip Buy %</label>
               <input type="number" id="ab-slip-buy" min="5" max="35" value="${abCfg.buySlippagePercent || 15}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <input type="checkbox" id="ab-rebound-toggle" onchange="toggleReboundBuy(this.checked)" ${abCfg.reboundBuyEnabled ? 'checked' : ''} style="cursor: pointer; width: 14px; height: 14px;">
+              <label for="ab-rebound-toggle" style="font-size: 11px; font-weight: 600; color: #cbd5e1; cursor: pointer;">Buy Rebound (Lane 2)</label>
+            </div>
+            <span id="ab-rebound-badge" style="font-size: 10px; font-weight: 700; color: ${abCfg.reboundBuyEnabled ? '#34d399' : '#94a3b8'};">
+              ${abCfg.reboundBuyEnabled ? 'AKTIF' : 'OFF'}
+            </span>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
             <button onclick="saveAutobuyForm()" style="background: var(--primary); color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;">
@@ -1915,6 +1929,17 @@ function renderHtmlDashboard(initialState = {}) {
         hasLoadedAutobuyForm = true;
       }
 
+      // Rebound Buy Toggle UI
+      const rebToggle = document.getElementById('ab-rebound-toggle');
+      const rebBadge = document.getElementById('ab-rebound-badge');
+      if (rebToggle && document.activeElement !== rebToggle) {
+        rebToggle.checked = !!cfg.reboundBuyEnabled;
+      }
+      if (rebBadge) {
+        rebBadge.innerText = cfg.reboundBuyEnabled ? 'AKTIF' : 'OFF';
+        rebBadge.style.color = cfg.reboundBuyEnabled ? '#34d399' : '#94a3b8';
+      }
+
       // Render Active Real Positions
       const realPosPanel = document.getElementById('ab-real-positions-panel');
       const realChips = document.getElementById('ab-real-positions-chips');
@@ -1944,6 +1969,10 @@ function renderHtmlDashboard(initialState = {}) {
       saveAutobuyConfig({ enabled });
     }
 
+    function toggleReboundBuy(enabled) {
+      saveAutobuyConfig({ reboundBuyEnabled: enabled });
+    }
+
     function saveAutobuyForm() {
       const activeLane = document.getElementById('ab-lane-select').value;
       const stakeUsdLane1 = parseFloat(document.getElementById('ab-stake-l1').value) || 2.0;
@@ -1951,6 +1980,7 @@ function renderHtmlDashboard(initialState = {}) {
       const maxBuysInput = parseInt(document.getElementById('ab-max-buys').value, 10);
       const maxBuysQuota = Number.isInteger(maxBuysInput) && maxBuysInput >= 0 ? maxBuysInput : 3;
       const buySlippagePercent = parseFloat(document.getElementById('ab-slip-buy').value) || 15;
+      const reboundBuyEnabled = document.getElementById('ab-rebound-toggle')?.checked ?? false;
 
       saveAutobuyConfig({
         activeLane,
@@ -1958,6 +1988,7 @@ function renderHtmlDashboard(initialState = {}) {
         stakeUsdLane2,
         maxBuysQuota,
         buySlippagePercent,
+        reboundBuyEnabled,
       });
     }
 

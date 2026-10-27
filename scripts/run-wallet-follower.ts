@@ -984,7 +984,13 @@ export class WalletFollowerRunner {
     }
     this.inFlightBuyMints.add(signal.mint);
     try {
-      const evalSmart = this.smartDipLane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
+      const liveCfg = readFollowerLiveConfig(this.dataDir);
+      this.smartDipLane.setAllowReboundBuy(liveCfg.reboundBuyEnabled ?? false);
+      const evalSmart = this.smartDipLane.evaluateBuySignal(signal, {
+        isFreshToken: isFresh,
+        tokenAgeMinutes,
+        allowReboundBuy: liveCfg.reboundBuyEnabled ?? false,
+      });
       if (!evalSmart.canBuy) {
         console.log(`[SMART DIP BUY SKIP] ${evalSmart.reason}`);
         return;
@@ -1475,6 +1481,10 @@ export class WalletFollowerRunner {
 
       // Pastikan hanya masuk dari awal (Initial Entry / Token Baru dari 0), bukan koin yang sedang jalan di tengah
       const existingRealPos = state.positions.find(p => p.mint === signal.mint && p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
+      if (existingRealPos && !config.reboundBuyEnabled) {
+        console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config (reboundBuyEnabled: false)`);
+        return;
+      }
       if (!existingRealPos && !isInitialEntry) {
         console.log(`[REAL AUTO-BUY SKIP] Bukan initial entry dari 0 (token ${signal.symbol} sedang berjalan di tengah jalan). Menunggu koin baru!`);
         return;

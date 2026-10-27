@@ -24,6 +24,7 @@ export interface FollowerLiveConfig {
   tipFeeSol: number;
   minSolReserve: number;
   autoSell: boolean;
+  reboundBuyEnabled: boolean;
   quotaResetAt: number;
   updatedAt: number;
 }
@@ -41,6 +42,7 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   tipFeeSol: 0.0001,
   minSolReserve: 0.025,
   autoSell: true,
+  reboundBuyEnabled: false,
   quotaResetAt: 0,
   updatedAt: 0,
 };

@@ -103,6 +103,16 @@ export class SmartDipFollowerLane {
     return this.positions.get(mint);
   }
 
+  private allowReboundBuy: boolean = false;
+
+  public setAllowReboundBuy(allowed: boolean): void {
+    this.allowReboundBuy = allowed;
+  }
+
+  public isReboundBuyEnabled(): boolean {
+    return this.allowReboundBuy;
+  }
+
   public getAllPositions(): SmartDipPosition[] {
     return Array.from(this.positions.values());
   }
@@ -163,7 +173,7 @@ export class SmartDipFollowerLane {
    * 1. Jika token baru (fresh pool <= 10m) & belum pernah entry -> Beli Awal $5
    * 2. Jika sedang WAITING_DIP & target buy (conviction: beli besar atau 2x berturut-turut) & harga sedang rebound -> Beli Rebound $5
    */
-  public evaluateBuySignal(signal: WalletTradeSignal, opts?: { isFreshToken?: boolean; tokenAgeMinutes?: number | null }): {
+  public evaluateBuySignal(signal: WalletTradeSignal, opts?: { isFreshToken?: boolean; tokenAgeMinutes?: number | null; allowReboundBuy?: boolean }): {
     canBuy: boolean;
     buyType: 'INITIAL_BUY' | 'REBOUND_BUY' | 'NONE';
     stakeUsd: number;
@@ -207,6 +217,11 @@ export class SmartDipFollowerLane {
 
       // Jika fase WAITING_DIP: Cek apakah target menunjukkan conviction & harga rebound
       if (pos.phase === 'WAITING_DIP') {
+        const canRebound = opts?.allowReboundBuy ?? this.allowReboundBuy;
+        if (!canRebound) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: 'REBOUND_BUY_DISABLED_BY_CONFIG' };
+        }
+
         // Limit ketat: Rebound buy hanya boleh maksimal 1 kali saja per token
         const reboundBuyCount = (pos.entries || []).filter(e => e.type === 'REBOUND_BUY').length;
         if (reboundBuyCount >= 1) {
@@ -522,7 +537,7 @@ export class SmartDipFollowerLane {
     });
 
     if (isFullExit || pos.totalTokens < 1 || pos.remainingCostBasisUsd < 0.01) {
-      if (sellType === 'TARGET_EXIT' || sellType === 'STOP_LOSS' || sellType === 'REBOUND_TP_20_FULL' || sellType === 'STAGNANT_TIMEOUT_EXIT') {
+      if (sellType === 'TARGET_EXIT' || sellType === 'STOP_LOSS' || sellType === 'REBOUND_TP_20_FULL' || sellType === 'STAGNANT_TIMEOUT_EXIT' || !this.allowReboundBuy) {
         pos.status = 'CLOSED';
         pos.totalTokens = 0;
         pos.remainingCostBasisUsd = 0;
