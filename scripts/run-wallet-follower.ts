@@ -1543,6 +1543,35 @@ export class WalletFollowerRunner {
 
       console.log(`[REAL AUTO-BUY RESULT] Status: ${res.ok ? 'SUCCESS' : 'FAILED'} | OrderId: ${res.orderId || '-'} | Hash: ${res.hash || '-'}`);
       console.log(`=========================================================\n`);
+
+      if (res.ok) {
+        // Sync saldo token on-chain aktual langsung sesaat setelah buy terkonfirmasi
+        // agar saat sell tiba, bot langsung punya saldo pasti instan tanpa menunggu RPC lagi
+        setTimeout(async () => {
+          try {
+            const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              await new Promise(r => setTimeout(r, 2000));
+              const onChain = await getOnChainTokenBalance(signal.mint, state.readiness.wallet);
+              if (onChain && onChain.uiAmount > 0) {
+                const freshState = readFollowerRealState(this.dataDir);
+                const targetPos = freshState.positions.find(p => p.mint === signal.mint && p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
+                if (targetPos) {
+                  targetPos.acquiredTokens = onChain.uiAmount;
+                  targetPos.remainingTokens = onChain.uiAmount;
+                  targetPos.remainingBaseUnits = onChain.amount;
+                  targetPos.updatedAt = Date.now();
+                  writeFollowerRealState(this.dataDir, freshState);
+                  console.log(`[REAL-BUY-SYNC] ✅ Saldo on-chain tersinkronisasi cepat: ${onChain.uiAmount} tokens (${onChain.amount} base units)`);
+                }
+                break;
+              }
+            }
+          } catch (e: any) {
+            console.warn(`[REAL-BUY-SYNC-WARN] ${e?.message}`);
+          }
+        }, 1000);
+      }
     } catch (err: any) {
       console.error(`[REAL-BUY-ERR] ${err?.message}`);
     }
@@ -1569,18 +1598,8 @@ export class WalletFollowerRunner {
       console.log(`\n---------------------------------------------------------`);
       console.log(`[REAL AUTO-SELL TRIGGER] 🚀 Mengambil route quote & kirim Real Swap SELL untuk ${openPos.symbol} (${openPos.remainingTokens} tokens)...`);
 
-      let baseUnits = Math.floor(openPos.remainingTokens * 1e6).toString();
-      try {
-        const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
-        const onChain = await getOnChainTokenBalance(mint, openPos.wallet);
-        if (onChain && onChain.amount && onChain.amount !== '0') {
-          baseUnits = onChain.amount;
-          openPos.remainingTokens = onChain.uiAmount;
-          console.log(`[REAL AUTO-SELL] Saldo on-chain terverifikasi: ${onChain.uiAmount} tokens (${baseUnits} base units)`);
-        }
-      } catch (err: any) {
-        console.warn(`[REAL AUTO-SELL] Fallback ke remainingTokens internal: ${err?.message}`);
-      }
+      // Gunakan baseUnits on-chain yang sudah tersinkronisasi sejak pasca-beli agar sell instan tanpa tunggu RPC
+      const baseUnits = openPos.remainingBaseUnits || Math.floor(openPos.remainingTokens * 1e6).toString();
 
       const sellQuote = await getBrowserSellSwapRoute(
         this.page,
@@ -1593,6 +1612,26 @@ export class WalletFollowerRunner {
 
       if (!sellQuote.ok || !sellQuote.quote || !sellQuote.routeData) {
         console.warn(`[REAL AUTO-SELL ABORTED] Gagal route swap sell AMM: ${sellQuote.error}`);
+
+        // Jika likuiditas pool mati / rug / no route, otomatis burn sisa token & reclaim sewa SOL
+        if (sellQuote.error && (sellQuote.error.includes('no route') || sellQuote.error.includes('little pool hit'))) {
+          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati (${sellQuote.error}), mengeksekusi burn & reclaim rent SOL...`);
+          try {
+            const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
+            const burnRes = await burnAndCloseTokenAccount(mint);
+            if (burnRes.ok) {
+              openPos.status = 'CLOSED';
+              openPos.remainingTokens = 0;
+              openPos.updatedAt = Date.now();
+              openPos.audit.push({ at: Date.now(), type: 'RENT_RECLAIMED_BURN', details: burnRes });
+              writeFollowerRealState(this.dataDir, state);
+              console.log(`[SAFETY-RUG-RECLAIM] ✅ Berhasil burn & reclaim rent SOL: ${burnRes.tx}`);
+              return;
+            }
+          } catch (e: any) {
+            console.warn(`[SAFETY-RUG-RECLAIM-ERR] ${e?.message}`);
+          }
+        }
         return;
       }
 

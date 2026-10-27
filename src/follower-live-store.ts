@@ -81,6 +81,7 @@ export interface FollowerRealPosition {
   wallet: string;
   acquiredTokens: number;
   remainingTokens: number;
+  remainingBaseUnits?: string;
   costBasisUsd: number;
   realizedPnlUsd: number;
   entryPriceUsd: number;

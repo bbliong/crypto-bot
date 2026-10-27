@@ -155,6 +155,52 @@ export async function getOnChainTokenBalance(mintAddress, walletAddress = WALLET
 }
 
 /**
+ * Burn sisa token yang tak bernilai (misal saat pool kena rug/no-route) lalu tutup akun untuk reclaim rent SOL.
+ */
+export async function burnAndCloseTokenAccount(mintAddress, options = {}) {
+  const keypair = options.keypair || getKeypair();
+  if (!keypair) return { ok: false, message: 'SOLANA_PRIVATE_KEY tidak ditemukan di environment' };
+  const rpcUrl = options.rpcUrl || DEFAULT_RPC;
+  const connection = new Connection(rpcUrl, 'confirmed');
+
+  try {
+    const scan = await scanEmptyTokenAccounts(connection, keypair.publicKey);
+    const target = scan.activeAccounts.find(a => a.mint === mintAddress);
+    if (!target) return { ok: false, message: 'Akun tidak ditemukan atau sudah kosong' };
+
+    const progId = target.program === 'Token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    const { createBurnCheckedInstruction, createCloseAccountInstruction } = await import('@solana/spl-token');
+
+    const tx = new Transaction();
+    tx.add(
+      createBurnCheckedInstruction(
+        new PublicKey(target.pubkey),
+        new PublicKey(mintAddress),
+        keypair.publicKey,
+        BigInt(target.tokenAmount),
+        6,
+        [],
+        progId
+      )
+    );
+    tx.add(
+      createCloseAccountInstruction(
+        new PublicKey(target.pubkey),
+        keypair.publicKey,
+        keypair.publicKey,
+        [],
+        progId
+      )
+    );
+
+    const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+    return { ok: true, tx: sig, reclaimedSol: target.rentSol };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
+/**
  * Reclaim rent untuk token mint tertentu (biasanya dipanggil sesaat setelah Sell selesai).
  */
 export async function reclaimRentForMint(mintAddress, options = {}) {
