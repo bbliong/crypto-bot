@@ -45,12 +45,19 @@ function loadDashboardState() {
   const smartEvents = safeReadJson(SMART_DIP_EVENTS_FILE, []);
 
   const smartOpen = smartPositions.filter((p) => p.status === 'OPEN');
-  const smartRealizedPnl = smartClosedTrades.reduce((acc, t) => acc + (t.realizedPnlUsd || 0), 0) + smartPositions.reduce((acc, p) => acc + (p.realizedPnlUsd || 0), 0);
+  
+  // Deduplikasi trade cycle agar tidak terhitung ganda antara smartPositions dan smartClosedTrades
+  const distinctSmartMap = new Map();
+  smartClosedTrades.forEach((t) => distinctSmartMap.set(`${t.mint}_${t.openedAt}`, t));
+  smartPositions.forEach((p) => distinctSmartMap.set(`${p.mint}_${p.openedAt}`, p));
+  const allDistinctSmart = Array.from(distinctSmartMap.values());
+
+  const smartRealizedPnl = allDistinctSmart.reduce((acc, t) => acc + (t.realizedPnlUsd || 0), 0);
   const smartCostBasis = smartOpen.reduce((acc, p) => acc + (p.remainingCostBasisUsd || 0), 0);
   
-  const allSmartTokens = [...smartPositions, ...smartClosedTrades];
-  const smartWinTokens = allSmartTokens.filter((t) => (t.realizedPnlUsd || 0) > 0);
-  const smartWinRate = allSmartTokens.length > 0 ? (smartWinTokens.length / allSmartTokens.length) * 100 : 0;
+  const smartWinTokens = allDistinctSmart.filter((t) => (t.realizedPnlUsd || 0) > 0);
+  const smartWinRate = allDistinctSmart.length > 0 ? (smartWinTokens.length / allDistinctSmart.length) * 100 : 0;
+  const closedCount = allDistinctSmart.filter((t) => t.status === 'CLOSED').length;
 
   return {
     targetWallet: TARGET_WALLET,
@@ -85,7 +92,7 @@ function loadDashboardState() {
         openPositionsCount: smartOpen.length,
         totalCapitalInvested: Number(smartCostBasis.toFixed(2)),
         totalRealizedPnlUsd: Number(smartRealizedPnl.toFixed(4)),
-        closedTradesCount: smartPositions.filter((p) => p.exits && p.exits.length > 0).length + smartClosedTrades.length,
+        closedTradesCount: closedCount,
         winRatePct: Number(smartWinRate.toFixed(1)),
         totalEventsCaptured: smartEvents.length,
         lastEventTime: smartEvents.length > 0 ? smartEvents[0].timeWib : '-',

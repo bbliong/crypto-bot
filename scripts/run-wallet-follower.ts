@@ -774,37 +774,8 @@ export class WalletFollowerRunner {
           },
         });
       } else {
-        console.warn(`[SWAP AMM QUOTE FAILED] Gagal mendapatkan quote buy swap: ${quote.error}`);
-        const estTokens = signal.priceUsd > 0 ? evalBuy.stakeUsd / signal.priceUsd : 0;
-        const pos = this.lane.recordBuyExecution(signal, evalBuy.stakeUsd, estTokens, signal.priceUsd);
-        this.lane.appendComparisonEvent({
-          id: eventId,
-          timestamp: nowMs,
-          timeWib,
-          tokenMint: signal.mint,
-          tokenSymbol: signal.symbol,
-          tokenName: signal.tokenName,
-          target: {
-            action: 'BUY',
-            tokenAmount: signal.tokenAmount,
-            tokenAmountFormatted: formatAmount(signal.tokenAmount),
-            usdAmount: signal.usdAmount,
-            priceUsd: signal.priceUsd,
-            remainingHolding: signal.remainingHolding,
-            remainingHoldingFormatted: formatAmount(signal.remainingHolding),
-            txHash: signal.txHash,
-          },
-          bot: {
-            action: 'BUY',
-            entryNum: evalBuy.entryNum,
-            stakeUsd: evalBuy.stakeUsd,
-            tokensBoughtOrSold: estTokens,
-            tokensFormatted: formatAmount(estTokens),
-            executionPriceUsd: signal.priceUsd,
-            positionStatus: pos.status,
-            reason: `SPOT_FALLBACK_ENTRY_${evalBuy.entryNum}`,
-          },
-        });
+        console.warn(`[SWAP AMM QUOTE FAILED] Gagal mendapatkan quote buy swap: ${quote.error}. Dilarang fallback spot, buy dibatalkan!`);
+        return;
       }
     } catch (err: any) {
       console.error(`[EXEC-BUY-ERR] ${err?.message}`);
@@ -934,41 +905,8 @@ export class WalletFollowerRunner {
           });
         }
       } else {
-        console.warn(`[SWAP SELL QUOTE FAILED] Gagal route sell: ${quote.error}. Fallback spot.`);
-        const usdReceived = evalSell.botTokensToSell * signal.priceUsd;
-        const res = this.lane.recordSellExecution(signal, evalSell.botTokensToSell, usdReceived, signal.priceUsd, evalSell.isFullExit);
-        if (res) {
-          this.lane.appendComparisonEvent({
-            id: eventId,
-            timestamp: nowMs,
-            timeWib,
-            tokenMint: signal.mint,
-            tokenSymbol: signal.symbol,
-            tokenName: signal.tokenName,
-            target: {
-              action: 'SELL',
-              tokenAmount: signal.tokenAmount,
-              tokenAmountFormatted: formatAmount(signal.tokenAmount),
-              usdAmount: signal.usdAmount,
-              priceUsd: signal.priceUsd,
-              remainingHolding: signal.remainingHolding,
-              remainingHoldingFormatted: formatAmount(signal.remainingHolding),
-              sellRatioPct: evalSell.sellRatioPct,
-              txHash: signal.txHash,
-            },
-            bot: {
-              action: 'SELL',
-              tokensBoughtOrSold: evalSell.botTokensToSell,
-              tokensFormatted: formatAmount(evalSell.botTokensToSell),
-              executionPriceUsd: signal.priceUsd,
-              pnlUsd: res.exitRecord.pnlUsd,
-              roiPct: res.exitRecord.roiPct,
-              isFullExit: evalSell.isFullExit,
-              positionStatus: res.position.status,
-              reason: 'SPOT_FALLBACK_SELL',
-            },
-          });
-        }
+        console.warn(`[SWAP SELL QUOTE FAILED] Gagal route sell: ${quote.error}. Dilarang fallback spot, sell ditolak!`);
+        return;
       }
     } catch (err: any) {
       console.error(`[EXEC-SELL-ERR] ${err?.message}`);
@@ -1015,11 +953,20 @@ export class WalletFollowerRunner {
           tokensBought = Number(quote.quote.outAmount || 0) / 10 ** (quote.quote.outDecimals ?? 6);
           actualStakeUsd = quote.quote.amountInUsd && quote.quote.amountInUsd > 0 ? quote.quote.amountInUsd : evalSmart.stakeUsd;
           execPrice = quote.impliedPriceUsd || (tokensBought > 0 ? actualStakeUsd / tokensBought : signal.priceUsd);
+        } else {
+          console.warn(`[SMART DIP BUY ABORTED] Gagal route swap AMM buy (${quote.error || 'NO_QUOTE'}). Dilarang fallback spot! Entry dibatalkan.`);
+          return;
         }
+      } else if (this.dryRun) {
+        tokensBought = actualStakeUsd / signal.priceUsd;
+      } else {
+        console.warn(`[SMART DIP BUY ABORTED] Browser tab tidak tersedia. Dilarang fallback spot!`);
+        return;
       }
 
-      if (tokensBought === 0 && signal.priceUsd > 0) {
-        tokensBought = actualStakeUsd / signal.priceUsd;
+      if (tokensBought <= 0) {
+        console.warn(`[SMART DIP BUY ABORTED] AMM swap outAmount 0 token. Entry dibatalkan!`);
+        return;
       }
 
       const pos = this.smartDipLane.recordBuyExecution(signal, evalSmart.buyType, actualStakeUsd, tokensBought, execPrice);
@@ -1072,11 +1019,20 @@ export class WalletFollowerRunner {
         if (quote.ok && quote.quote) {
           usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
           execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
+        } else {
+          console.warn(`[SMART DIP SELL REJECTED] Gagal route swap AMM sell (${quote.error || 'NO_ROUTE'}). Dilarang fallback spot! Posisi tetap ditahan.`);
+          return;
         }
+      } else if (this.dryRun) {
+        usdReceived = tokensSold * currentPrice;
+      } else {
+        console.warn(`[SMART DIP SELL REJECTED] Browser tab tidak tersedia. Dilarang fallback spot!`);
+        return;
       }
 
-      if (usdReceived === 0) {
-        usdReceived = tokensSold * currentPrice;
+      if (usdReceived <= 0) {
+        console.warn(`[SMART DIP SELL REJECTED] UsdReceived dari swap 0. Dilarang fallback spot!`);
+        return;
       }
 
       const isFullExit = tick.sellRatioPct >= 99;
@@ -1132,11 +1088,20 @@ export class WalletFollowerRunner {
       if (quote.ok && quote.quote) {
         usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensToSell * (quote.impliedPriceUsd || signal.priceUsd));
         execPrice = quote.impliedPriceUsd || (tokensToSell > 0 ? usdReceived / tokensToSell : signal.priceUsd);
+      } else {
+        console.warn(`[SMART DIP SAFETY EXIT FAILED] Gagal swap sell route: ${quote.error}. Dilarang fallback spot! Exit ditunda.`);
+        return;
       }
+    } else if (this.dryRun) {
+      usdReceived = tokensToSell * signal.priceUsd;
+    } else {
+      console.warn(`[SMART DIP SAFETY EXIT FAILED] Browser tab tidak tersedia. Dilarang fallback spot!`);
+      return;
     }
 
-    if (usdReceived === 0) {
-      usdReceived = tokensToSell * signal.priceUsd;
+    if (usdReceived <= 0) {
+      console.warn(`[SMART DIP SAFETY EXIT FAILED] UsdReceived 0. Dilarang fallback spot!`);
+      return;
     }
 
     const res = this.smartDipLane.recordSellExecution(
