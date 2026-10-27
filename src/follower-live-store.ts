@@ -183,6 +183,12 @@ export function readFollowerRealState(dataDir: string): FollowerRealState {
   });
 }
 
+export function writeFollowerRealState(dataDir: string, state: FollowerRealState): void {
+  state.updatedAt = Date.now();
+  mkdirSync(dataDir, { recursive: true });
+  atomicWriteJson(join(dataDir, 'follower-real-state.json'), state);
+}
+
 export function auditFollowerReal(
   dataDir: string,
   state: FollowerRealState,

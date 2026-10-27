@@ -9,6 +9,7 @@ import {
   readFollowerLiveConfig,
   saveFollowerLiveConfig,
   readFollowerRealState,
+  writeFollowerRealState,
   auditFollowerReal,
   atomicWriteJson,
   getCompletedRealBuysCount,
@@ -1599,9 +1600,9 @@ export class WalletFollowerRunner {
       console.log(`[REAL AUTO-SELL TRIGGER] 🚀 Mengambil route quote & kirim Real Swap SELL untuk ${openPos.symbol} (${openPos.remainingTokens} tokens)...`);
 
       // Gunakan baseUnits on-chain yang sudah tersinkronisasi sejak pasca-beli agar sell instan tanpa tunggu RPC
-      const baseUnits = openPos.remainingBaseUnits || Math.floor(openPos.remainingTokens * 1e6).toString();
+      let baseUnits = openPos.remainingBaseUnits || Math.floor(openPos.remainingTokens * 1e6).toString();
 
-      const sellQuote = await getBrowserSellSwapRoute(
+      let sellQuote = await getBrowserSellSwapRoute(
         this.page,
         mint,
         openPos.wallet,
@@ -1609,6 +1610,32 @@ export class WalletFollowerRunner {
         6,
         config.sellSlippagePercent
       );
+
+      // Jaring Pengaman Otomatis: Jika route gagal akibat selisih desimal (token balance is less than available balance)
+      if (!sellQuote.ok && sellQuote.error && sellQuote.error.includes('token balance is less than available balance')) {
+        console.warn(`[REAL AUTO-SELL] Terdeteksi selisih saldo (${sellQuote.error}). Membaca saldo on-chain riil dari blockchain...`);
+        try {
+          const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
+          const onChain = await getOnChainTokenBalance(mint, openPos.wallet);
+          if (onChain && onChain.amount && onChain.amount !== '0') {
+            baseUnits = onChain.amount;
+            openPos.remainingTokens = onChain.uiAmount;
+            openPos.remainingBaseUnits = onChain.amount;
+            writeFollowerRealState(this.dataDir, state);
+            console.log(`[REAL AUTO-SELL] Mengulang quote sell dengan saldo on-chain riil: ${onChain.uiAmount} tokens (${baseUnits} base units)...`);
+            sellQuote = await getBrowserSellSwapRoute(
+              this.page,
+              mint,
+              openPos.wallet,
+              baseUnits,
+              6,
+              config.sellSlippagePercent
+            );
+          }
+        } catch (e: any) {
+          console.warn(`[REAL AUTO-SELL-RETRY-ERR] ${e?.message}`);
+        }
+      }
 
       if (!sellQuote.ok || !sellQuote.quote || !sellQuote.routeData) {
         console.warn(`[REAL AUTO-SELL ABORTED] Gagal route swap sell AMM: ${sellQuote.error}`);
