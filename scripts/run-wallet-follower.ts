@@ -1040,10 +1040,16 @@ export class WalletFollowerRunner {
 
       if (!this.dryRun && this.page && !this.page.isClosed()) {
         const baseUnits = Math.floor(tokensSold * 1e6).toString();
-        const quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 15);
+        const quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 20);
         if (quote.ok && quote.quote) {
           usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
           execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
+        } else if (tick.sellType === 'STAGNANT_TIMEOUT_EXIT') {
+          // Jika stagnant timeout dan pool AMM sudah mati/rug (misal 'no external pool found'):
+          // Likuidasi cut-loss $0 agar posisi tertutup dan tidak macet
+          console.warn(`[SMART DIP TIMEOUT LIQUIDATION] Koin stagnan/rug tanpa likuiditas AMM (${quote.error}). Cut-loss posisi ditutup dengan proceeds $0.`);
+          usdReceived = 0;
+          execPrice = 0;
         } else {
           console.warn(`[SMART DIP SELL REJECTED] Gagal route swap AMM sell (${quote.error || 'NO_ROUTE'}). Dilarang fallback spot! Posisi tetap ditahan.`);
           return;
@@ -1055,7 +1061,7 @@ export class WalletFollowerRunner {
         return;
       }
 
-      if (usdReceived <= 0) {
+      if (usdReceived <= 0 && tick.sellType !== 'STAGNANT_TIMEOUT_EXIT') {
         console.warn(`[SMART DIP SELL REJECTED] UsdReceived dari swap 0. Dilarang fallback spot!`);
         return;
       }
@@ -1084,7 +1090,7 @@ export class WalletFollowerRunner {
           tokenMint: mint,
           tokenSymbol: res.symbol,
           tokenName: res.tokenName,
-          action: tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL'),
+          action: tick.sellType === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL'),
           stakeOrProceedsUsd: usdReceived,
           tokens: tokensSold,
           executionPriceUsd: execPrice,

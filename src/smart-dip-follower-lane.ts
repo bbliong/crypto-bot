@@ -33,7 +33,7 @@ export interface SmartDipPosition {
     txHash: string;
   }>;
   exits: Array<{
-    type: 'TP_30_50_FULL' | 'TP_OVER_50_PARTIAL_70' | 'REBOUND_TP_20_FULL' | 'TARGET_EXIT' | 'STOP_LOSS';
+    type: 'TP_30_50_FULL' | 'TP_OVER_50_PARTIAL_70' | 'REBOUND_TP_20_FULL' | 'TARGET_EXIT' | 'STOP_LOSS' | 'STAGNANT_TIMEOUT_EXIT';
     tokensSold: number;
     usdReceived: number;
     priceUsd: number;
@@ -52,7 +52,7 @@ export interface SmartDipComparisonEvent {
   tokenMint: string;
   tokenSymbol: string;
   tokenName: string;
-  action: 'BUY_INITIAL' | 'BUY_REBOUND' | 'SELL_TP_FULL' | 'SELL_TP_70' | 'SELL_REBOUND_TP20' | 'SELL_TARGET_EXIT';
+  action: 'BUY_INITIAL' | 'BUY_REBOUND' | 'SELL_TP_FULL' | 'SELL_TP_70' | 'SELL_REBOUND_TP20' | 'SELL_TARGET_EXIT' | 'SELL_TIMEOUT';
   stakeOrProceedsUsd: number;
   tokens: number;
   executionPriceUsd: number;
@@ -327,7 +327,7 @@ export class SmartDipFollowerLane {
    */
   public evaluatePriceTick(mint: string, currentPrice: number): {
     shouldSell: boolean;
-    sellType: 'TP_30_50_FULL' | 'TP_OVER_50_PARTIAL_70' | 'REBOUND_TP_20_FULL' | 'NONE';
+    sellType: 'TP_30_50_FULL' | 'TP_OVER_50_PARTIAL_70' | 'REBOUND_TP_20_FULL' | 'TARGET_EXIT' | 'STOP_LOSS' | 'STAGNANT_TIMEOUT_EXIT' | 'NONE';
     sellRatioPct: number;
     tokensToSell: number;
     reason: string;
@@ -342,6 +342,13 @@ export class SmartDipFollowerLane {
 
     // Track lowest price saat fase koreksi (meskipun koin 0 pasca Full TP)
     if (pos.phase === 'WAITING_DIP') {
+      const waitMinutes = (Date.now() - (pos.updatedAt || pos.openedAt * 1000)) / 60000;
+      if (waitMinutes >= 10.0) {
+        pos.status = 'CLOSED';
+        this.archiveClosedTrade(pos);
+        this.saveState();
+        return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'WAITING_DIP_EXPIRED_CLOSED' };
+      }
       if (pos.lowestPriceSincePeakUsd === 0 || currentPrice < pos.lowestPriceSincePeakUsd) {
         pos.lowestPriceSincePeakUsd = currentPrice;
       }
@@ -352,41 +359,27 @@ export class SmartDipFollowerLane {
       return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'NO_TOKENS' };
     }
 
-    // 1. Evaluasi Fase INITIAL BUY
+    // 1. Evaluasi Fase INITIAL BUY (Hapus moonbag: TP >= 30% jual FULL 100%)
     if (pos.phase === 'INITIAL') {
       const entryPrice = pos.initialEntryPriceUsd;
       const gainPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
 
-      // Jika gain > 50%: Jual 70%, sisakan 30% moonbag
-      if (gainPct >= 50.0) {
-        const tokensToSell = pos.totalTokens * 0.70;
-        return {
-          shouldSell: true,
-          sellType: 'TP_OVER_50_PARTIAL_70',
-          sellRatioPct: 70,
-          tokensToSell,
-          reason: `TP_OVER_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
-        };
-      }
-
-      // Jika gain antara 30% s/d 50%: Jual FULL 100%
       if (gainPct >= 30.0) {
         return {
           shouldSell: true,
           sellType: 'TP_30_50_FULL',
           sellRatioPct: 100,
           tokensToSell: pos.totalTokens,
-          reason: `TP_30_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
+          reason: `TP_FULL_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
         };
       }
     }
 
-    // 2. Evaluasi Fase HOLDING REBOUND
+    // 2. Evaluasi Fase HOLDING REBOUND (Rebound TP >= 20% jual FULL 100%)
     if (pos.phase === 'HOLDING_REBOUND') {
       const entryPrice = pos.reboundEntryPriceUsd || pos.avgEntryPriceUsd;
       const reboundGainPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
 
-      // Cari untung 20% terus kita sell (FULL 100%)
       if (reboundGainPct >= 20.0) {
         return {
           shouldSell: true,
@@ -396,6 +389,21 @@ export class SmartDipFollowerLane {
           reason: `REBOUND_TP_20%_TRIGGERED (Gain: +${reboundGainPct.toFixed(1)}%)`,
         };
       }
+    }
+
+    // 3. Stagnant / Time-based Exit: Jika sudah di-hold >= 5 menit tanpa ada pergerakan ke target TP
+    const lastEntry = (pos.entries || []).at(-1);
+    const holdDurationMs = Date.now() - (lastEntry ? lastEntry.timestamp * 1000 : pos.openedAt * 1000);
+    const holdMinutes = holdDurationMs / 60000;
+
+    if (holdMinutes >= 5.0) {
+      return {
+        shouldSell: true,
+        sellType: 'STAGNANT_TIMEOUT_EXIT',
+        sellRatioPct: 100,
+        tokensToSell: pos.totalTokens,
+        reason: `STAGNANT_TIMEOUT_${holdMinutes.toFixed(0)}M (Hold >= 5 menit tanpa pergerakan ke TP, auto-sell exit)`,
+      };
     }
 
     return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'HOLDING_AWAITING_TARGET' };
@@ -470,7 +478,7 @@ export class SmartDipFollowerLane {
     });
 
     if (isFullExit || pos.totalTokens < 1 || pos.remainingCostBasisUsd < 0.01) {
-      if (sellType === 'TARGET_EXIT' || sellType === 'STOP_LOSS' || sellType === 'REBOUND_TP_20_FULL') {
+      if (sellType === 'TARGET_EXIT' || sellType === 'STOP_LOSS' || sellType === 'REBOUND_TP_20_FULL' || sellType === 'STAGNANT_TIMEOUT_EXIT') {
         pos.status = 'CLOSED';
         pos.totalTokens = 0;
         pos.remainingCostBasisUsd = 0;
@@ -481,7 +489,6 @@ export class SmartDipFollowerLane {
         pos.lowestPriceSincePeakUsd = executionPriceUsd;
       }
     } else {
-      // Partial TP 70% -> Sisa 30% koin masuk fase WAITING_DIP
       pos.phase = 'WAITING_DIP';
       pos.lowestPriceSincePeakUsd = executionPriceUsd;
     }

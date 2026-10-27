@@ -1424,6 +1424,11 @@ function renderHtmlDashboard(initialState = {}) {
             badgeClass = 'badge-sell-tp20';
             actionLabel = 'SELL_REBOUND_TP20';
             detailsText = 'Harga melesat ke ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +$' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%).';
+          } else if (e.action === 'SELL_TIMEOUT') {
+            bulletClass = 'bullet-neutral';
+            badgeClass = 'badge-sell-full';
+            actionLabel = 'SELL_TIMEOUT';
+            detailsText = 'Stagnan &ge; 5 menit tanpa pergerakan ke TP &rarr; Auto-sell 100% exit, modal kas dilepas kembali.';
           } else {
             bulletClass = 'bullet-neutral';
             badgeClass = 'badge-sell-full';
