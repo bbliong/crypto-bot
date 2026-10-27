@@ -603,38 +603,40 @@ export class WalletFollowerRunner {
           const age = (Date.now() - pair.pairCreatedAt) / 60000;
           return { ageMinutes: age, source: 'dexscreener', pairData: pair };
         }
-        if (Array.isArray(data.pairs) && data.pairs.length === 0) {
+        if (data.pairs === null || (Array.isArray(data.pairs) && data.pairs.length === 0)) {
           return { ageMinutes: 0.5, source: 'dexscreener_unindexed_fresh' };
         }
       }
     } catch {}
 
-    // 2. Fallback: Helius RPC Earliest Signature BlockTime
-    try {
-      const rpcUrl = getSolanaRpcUrl();
-      const res = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'getSignaturesForAddress',
-          params: [mint, { limit: 100 }],
-        }),
-        signal: AbortSignal.timeout(2500),
-      });
-      if (res.ok) {
-        const data = await res.json() as any;
-        const sigs = data.result;
-        if (Array.isArray(sigs) && sigs.length > 0) {
-          const oldest = sigs[sigs.length - 1];
-          if (oldest.blockTime) {
-            const age = (Date.now() / 1000 - oldest.blockTime) / 60;
-            return { ageMinutes: age, source: 'helius_rpc' };
+    // 2. Fallback: Solana RPC Earliest Signature BlockTime (dengan failover ke public RPC jika Helius habis kuota)
+    const fallbackRpcs = [getSolanaRpcUrl(), 'https://api.mainnet-beta.solana.com'].filter(Boolean);
+    for (const rpcUrl of fallbackRpcs) {
+      try {
+        const res = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getSignaturesForAddress',
+            params: [mint, { limit: 100 }],
+          }),
+          signal: AbortSignal.timeout(2500),
+        });
+        if (res.ok) {
+          const data = await res.json() as any;
+          const sigs = data.result;
+          if (Array.isArray(sigs) && sigs.length > 0) {
+            const oldest = sigs[sigs.length - 1];
+            if (oldest.blockTime) {
+              const age = (Date.now() / 1000 - oldest.blockTime) / 60;
+              return { ageMinutes: age, source: rpcUrl.includes('helius') ? 'helius_rpc' : 'mainnet_rpc' };
+            }
           }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     return { ageMinutes: null, source: 'unknown' };
   }
