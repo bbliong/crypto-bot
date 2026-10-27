@@ -803,8 +803,8 @@ export class WalletFollowerRunner {
           },
         });
 
-        // Real Auto-Buy Trigger untuk Lane 1
-        await this.maybeExecuteRealBuy('LANE_1', signal, actualStakeUsd, quote.routeData, execPrice);
+        // Real Auto-Buy Trigger untuk Lane 1 (hanya boleh masuk jika Entry #1 atau sudah pegang posisi riil)
+        await this.maybeExecuteRealBuy('LANE_1', signal, actualStakeUsd, quote.routeData, execPrice, evalBuy.entryNum === 1);
       } else {
         console.warn(`[SWAP AMM QUOTE FAILED] Gagal mendapatkan quote buy swap: ${quote.error}. Dilarang fallback spot, buy dibatalkan!`);
         return;
@@ -1026,8 +1026,8 @@ export class WalletFollowerRunner {
         positionStatus: pos.status,
       });
 
-      // Real Auto-Buy Trigger untuk Lane 2
-      await this.maybeExecuteRealBuy('LANE_2', signal, actualStakeUsd, quote.routeData, execPrice);
+      // Real Auto-Buy Trigger untuk Lane 2 (hanya boleh masuk jika INITIAL_BUY atau sudah pegang posisi riil)
+      await this.maybeExecuteRealBuy('LANE_2', signal, actualStakeUsd, quote.routeData, execPrice, evalSmart.buyType === 'INITIAL_BUY');
     } finally {
       this.inFlightBuyMints.delete(signal.mint);
     }
@@ -1410,7 +1410,8 @@ export class WalletFollowerRunner {
     signal: WalletTradeSignal,
     stakeUsd: number,
     routeData: any,
-    tokenPriceUsd: number
+    tokenPriceUsd: number,
+    isInitialEntry: boolean = true
   ): Promise<void> {
     try {
       const config = readFollowerLiveConfig(this.dataDir);
@@ -1425,6 +1426,13 @@ export class WalletFollowerRunner {
       const state = readFollowerRealState(this.dataDir);
       if (!state.readiness.sessionReady || !state.readiness.wallet) {
         console.warn(`[REAL AUTO-BUY SKIP] Wallet GMGN belum siap atau belum terdeteksi`);
+        return;
+      }
+
+      // Pastikan hanya masuk dari awal (Initial Entry / Token Baru dari 0), bukan koin yang sedang jalan di tengah
+      const existingRealPos = state.positions.find(p => p.mint === signal.mint && p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
+      if (!existingRealPos && !isInitialEntry) {
+        console.log(`[REAL AUTO-BUY SKIP] Bukan initial entry dari 0 (token ${signal.symbol} sedang berjalan di tengah jalan). Menunggu koin baru!`);
         return;
       }
 
