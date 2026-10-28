@@ -506,7 +506,6 @@ export class SmartDipFollowerLane {
     // Target Full Exit: Jika sisa token target < 100 atau < 5% dari holding awal sebelum sell
     const isTargetFullExit = targetRemaining < 100 || (totalHoldingBeforeSell > 0 && targetRemaining / totalHoldingBeforeSell < 0.05);
 
-    // 1. Target Full Exit: Jika sisa token target < 100 atau < 5% dari holding awal sebelum sell
     if (isTargetFullExit) {
       return {
         shouldSell: true,
@@ -516,29 +515,9 @@ export class SmartDipFollowerLane {
       };
     }
 
-    // 2. Jaring Pengaman Target Fast-Exit (Anti-Trap / Anti-Rug Sniper Shadow):
-    // Kasus A (Panic / Rapid Dump): Jika posisi baru dibuka dalam waktu singkat (<= 45 detik) dan target langsung melempar >= 35% barangnya.
-    // Kasus B (Massive Initial Dump): Jika di fase INITIAL target membuang porsi masif (>= 50% barangnya).
-    // Dalam kedua kondisi ini, bot DILARANG keras menahan koin jebakan! Bot WAJIB langsung melikuidasi 100% bersama target seketika!
-    const positionAgeSec = pos.openedAt > 0 ? (Date.now() - (pos.openedAt * 1000)) / 1000 : 999;
-    const isFastDump = positionAgeSec <= 45 && sellRatioPct >= 35.0;
-    const isMassiveInitialDump = pos.phase === 'INITIAL' && sellRatioPct >= 50.0;
-
-    if (isFastDump || isMassiveInitialDump) {
-      const dumpReason = isFastDump
-        ? `TARGET_FAST_PANIC_DUMP (Target buang ${sellRatioPct.toFixed(1)}% dalam tempo ${Math.round(positionAgeSec)}s pasca entry, bot ikut likuidasi instan 100%)`
-        : `TARGET_MASSIVE_DUMP_SHADOW_EXIT (Target buang porsi masif ${sellRatioPct.toFixed(1)}% di fase INITIAL, bot ikut likuidasi instan 100%)`;
-      return {
-        shouldSell: true,
-        isTargetFullExit: true,
-        tokensToSell: pos.totalTokens,
-        reason: dumpReason,
-      };
-    }
-
-    // 3. Shadow Target Exit HANYA untuk Fase REBOUND:
+    // Shadow Target Exit HANYA untuk Fase REBOUND:
     // Pada fase Rebound (serok koreksi dip), jika target membuang >= 25% porsi serokannya, bot ikut cut-loss.
-    // Pada fase INITIAL: Selama target masih menyimpan koinnya (partial sell < 50%), bot tetap HOLD mengikuti target!
+    // Pada fase INITIAL: Selama target masih menyimpan koinnya (partial sell), bot tetap HOLD mengikuti target!
     if (pos.phase === 'HOLDING_REBOUND' && sellRatioPct >= 25.0) {
       return {
         shouldSell: true,
