@@ -162,7 +162,8 @@ export function saveFollowerLiveConfig(
   // Sanitasi & boundary checks
   updated.stakeUsdLane1 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane1) || 2.0));
   updated.stakeUsdLane2 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane2) || 5.0));
-  updated.maxBuysQuota = Math.max(0, Math.min(1000, Number(updated.maxBuysQuota) || 3));
+  const rawQuota = Number(updated.maxBuysQuota);
+  updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;
   updated.maxActiveRealPositions = Math.max(1, Math.min(10, Number(updated.maxActiveRealPositions) || 1));
   updated.maxCyclesPerToken = Math.max(1, Math.min(10, Number(updated.maxCyclesPerToken) || 1));
   updated.buySlippagePercent = Math.max(1, Math.min(50, Number(updated.buySlippagePercent) || 15));

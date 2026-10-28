@@ -1524,9 +1524,9 @@ export class WalletFollowerRunner {
         }
       }
 
-      // Check Kuota
+      // Check Kuota (0 = Tanpa Batas / Unlimited)
       const completedCount = getCompletedRealBuysCount(state, config);
-      if (completedCount >= config.maxBuysQuota) {
+      if (config.maxBuysQuota > 0 && completedCount >= config.maxBuysQuota) {
         console.warn(`[REAL AUTO-BUY SKIP] Kuota Max Buys tercapai (${completedCount}/${config.maxBuysQuota})`);
         return;
       }

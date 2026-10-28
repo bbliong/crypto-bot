@@ -193,6 +193,11 @@ const server = createServer((req, res) => {
           updated.maxCyclesPerToken = Math.max(1, Math.min(10, parseInt(patch.maxCyclesPerToken, 10) || 1));
         }
 
+        if (patch.maxBuysQuota !== undefined) {
+          const q = parseInt(patch.maxBuysQuota, 10);
+          updated.maxBuysQuota = Number.isInteger(q) && q >= 0 ? q : 0;
+        }
+
         if (patch.resetQuota) {
           updated.quotaResetAt = Date.now();
         }
@@ -1041,13 +1046,13 @@ function renderHtmlDashboard(initialState = {}) {
               🛡️ Kuota & Proteksi
             </div>
             <div style="font-size: 11px; color: #38bdf8; font-weight: 700;">
-              Tersimpan: <span id="ab-quota-display">${abCfg.maxBuysQuota || 3}</span> BUY
+              Tersimpan: <span id="ab-quota-display">${abCfg.maxBuysQuota === 0 ? '∞ Tanpa Batas' : (abCfg.maxBuysQuota || 3)}</span> BUY
             </div>
           </div>
           <div style="display: flex; gap: 8px; margin-bottom: 8px;">
             <div style="flex: 1;">
-              <label style="font-size: 11px; color: var(--text-muted);">Max Buys</label>
-              <input type="number" id="ab-max-buys" min="1" max="1000" value="${abCfg.maxBuysQuota || 3}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <label style="font-size: 11px; color: var(--text-muted);">Max Buys (0=Unlimited)</label>
+              <input type="number" id="ab-max-buys" min="0" max="99999" value="${abCfg.maxBuysQuota !== undefined ? abCfg.maxBuysQuota : 3}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Max Siklus/Token</label>
@@ -1993,7 +1998,7 @@ function renderHtmlDashboard(initialState = {}) {
 
       // Update display label kuota
       if (document.getElementById('ab-quota-display')) {
-        document.getElementById('ab-quota-display').innerText = cfg.maxBuysQuota || 3;
+        document.getElementById('ab-quota-display').innerText = cfg.maxBuysQuota === 0 ? '∞ Tanpa Batas' : (cfg.maxBuysQuota || 3);
       }
 
       // Pre-fill inputs on initial load
@@ -2001,7 +2006,7 @@ function renderHtmlDashboard(initialState = {}) {
         document.getElementById('ab-lane-select').value = cfg.activeLane || 'LANE_2';
         document.getElementById('ab-stake-l1').value = cfg.stakeUsdLane1 || 2.0;
         document.getElementById('ab-stake-l2').value = cfg.stakeUsdLane2 || 5.0;
-        document.getElementById('ab-max-buys').value = cfg.maxBuysQuota || 3;
+        document.getElementById('ab-max-buys').value = cfg.maxBuysQuota !== undefined ? cfg.maxBuysQuota : 3;
         document.getElementById('ab-max-cycles').value = cfg.maxCyclesPerToken || 1;
         document.getElementById('ab-slip-buy').value = cfg.buySlippagePercent || 15;
         hasLoadedAutobuyForm = true;
@@ -2056,7 +2061,7 @@ function renderHtmlDashboard(initialState = {}) {
       const stakeUsdLane1 = parseFloat(document.getElementById('ab-stake-l1').value) || 2.0;
       const stakeUsdLane2 = parseFloat(document.getElementById('ab-stake-l2').value) || 5.0;
       const maxBuysInput = parseInt(document.getElementById('ab-max-buys').value, 10);
-      const maxBuysQuota = Number.isInteger(maxBuysInput) && maxBuysInput >= 0 ? maxBuysInput : 3;
+      const maxBuysQuota = Number.isInteger(maxBuysInput) && maxBuysInput >= 0 ? maxBuysInput : 0;
       const maxCyclesInput = parseInt(document.getElementById('ab-max-cycles').value, 10);
       const maxCyclesPerToken = Number.isInteger(maxCyclesInput) && maxCyclesInput >= 1 ? maxCyclesInput : 1;
       const buySlippagePercent = parseFloat(document.getElementById('ab-slip-buy').value) || 15;
