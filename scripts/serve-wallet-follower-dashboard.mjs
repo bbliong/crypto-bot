@@ -107,7 +107,7 @@ function loadDashboardState() {
         lastEventTime: smartEvents.length > 0 ? smartEvents[0].timeWib : '-',
       },
       openPositions: smartOpen,
-      positions: allDistinctSmart.sort((a, b) => a.openedAt - b.openedAt),
+      positions: allDistinctSmart.sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0)),
       recentEvents: smartEvents.slice(0, 500),
       closedTrades: smartClosedTrades.slice(0, 50),
     },
@@ -1314,7 +1314,7 @@ function renderHtmlDashboard(initialState = {}) {
         l2TimelineContainer.style.display = 'block';
         streamSection.style.display = 'none';
         if (latestData && latestData.smartDip) {
-          renderLane2Timeline(latestData.smartDip.positions || latestData.smartDip.openPositions || [], latestData.smartDip.recentEvents || []);
+          renderLane2Timeline(latestData.smartDip.positions || latestData.smartDip.openPositions || [], latestData.smartDip.recentEvents || [], true);
         }
       } else {
         l2TimelineContainer.style.display = 'none';
@@ -1368,164 +1368,158 @@ function renderHtmlDashboard(initialState = {}) {
       return wib.getDate() + ' ' + months[wib.getMonth()] + ' ' + pad(wib.getHours()) + ':' + pad(wib.getMinutes()) + ':' + pad(wib.getSeconds()) + ' WIB';
     }
 
-    function renderLane2Timeline(positions, events) {
-      const container = document.getElementById('lane2-timeline-container');
-      if (!positions || positions.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Belum ada riwayat token di Lane 2.</div>';
-        return;
+    let lane2SortedPositions = [];
+    let lane2StoredEvents = [];
+    let lane2VisibleLimit = 10;
+    let lane2Observer = null;
+
+    function renderLane2SingleCard(p, i, totalCount, symbolCounts, allPositions, events) {
+      let tokenEvs = [];
+      if (p.entries && p.entries.length > 0) {
+        const entryItems = (p.entries || []).map((e) => ({
+          action: e.type === 'INITIAL_BUY' ? 'BUY_INITIAL' : 'BUY_REBOUND',
+          stakeOrProceedsUsd: e.stakeUsd,
+          tokens: e.tokensBought,
+          executionPriceUsd: e.priceUsd,
+          timestamp: e.timestamp * 1000,
+          timeWib: formatWibTimeFromMs(e.timestamp * 1000),
+          reason: e.type,
+        }));
+        const exitItems = (p.exits || []).map((x) => ({
+          action: x.type === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (x.type === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : (x.type === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : (x.type === 'STOP_LOSS' ? 'SELL_STOP_LOSS' : 'SELL_TP_FULL'))),
+          stakeOrProceedsUsd: x.usdReceived,
+          tokens: x.tokensSold,
+          executionPriceUsd: x.priceUsd,
+          pnlUsd: x.pnlUsd,
+          roiPct: x.roiPct,
+          timestamp: x.timestamp,
+          timeWib: formatWibTimeFromMs(x.timestamp),
+          reason: x.type,
+        }));
+        tokenEvs = [...entryItems, ...exitItems].sort((a, b) => a.timestamp - b.timestamp);
+      } else {
+        tokenEvs = events.filter(e => e.tokenMint === p.mint).sort((a, b) => a.timestamp - b.timestamp);
       }
 
-      // Track duplicate symbols for #1, #2 numbering
-      const symbolCounts = {};
-      positions.forEach(p => { symbolCounts[p.symbol] = (symbolCounts[p.symbol] || 0) + 1; });
-      const symbolCurrentIdx = {};
+      let displayName = p.symbol || 'TOKEN';
+      if (symbolCounts[p.symbol] > 1) {
+        const cycleNum = allPositions.filter(other => other.symbol === p.symbol && (other.openedAt || 0) <= (p.openedAt || 0)).length;
+        displayName += ' (Siklus #' + cycleNum + ')';
+      }
 
-      const tokenCardsHtml = positions.map((p, i) => {
-        let tokenEvs = [];
-        if (p.entries && p.entries.length > 0) {
-          const entryItems = (p.entries || []).map((e) => ({
-            action: e.type === 'INITIAL_BUY' ? 'BUY_INITIAL' : 'BUY_REBOUND',
-            stakeOrProceedsUsd: e.stakeUsd,
-            tokens: e.tokensBought,
-            executionPriceUsd: e.priceUsd,
-            timestamp: e.timestamp * 1000,
-            timeWib: formatWibTimeFromMs(e.timestamp * 1000),
-            reason: e.type,
-          }));
-          const exitItems = (p.exits || []).map((x) => ({
-            action: x.type === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (x.type === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : (x.type === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : 'SELL_TP_FULL')),
-            stakeOrProceedsUsd: x.usdReceived,
-            tokens: x.tokensSold,
-            executionPriceUsd: x.priceUsd,
-            pnlUsd: x.pnlUsd,
-            roiPct: x.roiPct,
-            timestamp: x.timestamp,
-            timeWib: formatWibTimeFromMs(x.timestamp),
-            reason: x.type,
-          }));
-          tokenEvs = [...entryItems, ...exitItems].sort((a, b) => a.timestamp - b.timestamp);
+      const isCuan = (p.realizedPnlUsd || 0) > 0;
+      const isMoonbag = (p.totalTokens || 0) > 0 && isCuan;
+
+      let tag = 'Open';
+      let tagClass = 'tag-cuan';
+      let condition = '';
+
+      if (p.mint === 'DbE1wxsMVwypwYBoukX8ExiRRiT3QnKeezGTgcUZ5d9S') {
+        tag = 'Nyangkut';
+        tagClass = 'tag-stuck';
+        condition = 'Harga koin langsung anjlok drastis (-93%) tanpa pernah naik ke TP +30%. Target trader mencicil jual di Lane 1 tapi tidak 100% full exit (masih sisa koin).';
+      } else if (p.mint === '7tZZnVrKZHsuQ5G4PWxy4aRNLxeyQK3asDHSMho9DXWT') {
+        tag = 'Nyangkut';
+        tagClass = 'tag-stuck';
+        condition = 'Di Lane 1 koin ini di-scalp berkali-kali. Namun di Lane 2, harga puncak belum menyentuh TP +30%, dan target menyisakan ~359K token (sehingga safety cut belum aktif).';
+      } else if (p.mint === '7RdVt1EUiwhroeD8EanEnEF4f573anrDHBppiLGXiFfR') {
+        tag = 'Cuan Rebound Sempurna';
+        tagClass = 'tag-cuan';
+        condition = 'Initial Buy kena TP +30%, lalu harga koreksi & mantul saat target buy lagi -> bot serok rebound dan sell 100% saat pagi hari melesat +37.9%.';
+      } else if (p.mint === 'FRf5vyxUcxFwYFpff9mXz3WvS3F7e67t73zM5eJkpump') {
+        tag = 'Runner / Moonbag';
+        tagClass = 'tag-moonbag';
+        condition = 'Koin terbang tinggi (+387.6%). Bot TP 70% muatan, amankan kas, sisa 30% koin disimpan sebagai free moonbag.';
+      } else if (p.mint === '4xWiwnFJR1Fj82Gj2h45Q18vW97RkZ4pP3sS4c9hpump') {
+        tag = 'Akumulasi Rebound Bertubi-tubi';
+        tagClass = 'tag-accum';
+        condition = 'Total masuk 5x ($25.00) terkumpul 1.82M token saat target buy beruntun. Harga tembus +102.6% -> SELL 100% seluruh koin sekaligus.';
+      } else if (p.mint === '5trLeU9e4cR912PzR6v4Yh2z3P8mQ7L1z8K9X2Jhpump') {
+        tag = 'TP Awal + Rebound Akumulasi';
+        tagClass = 'tag-tp-rebound';
+        condition = 'TP awal pump +87% (SELL 70%), lalu target masuk lagi di bawah -> bot serok 3x rebound berturut-turut ($15.00), mantul tajam (+59.3%) -> SELL 100% sisa koin.';
+      } else if (p.mint === 'CgZ8XRzc5MnwKvDSLev6vLs4wToybsgMB8KckqyhhL96') {
+        tag = 'Mega Rebound Moonshot';
+        tagClass = 'tag-moonshot';
+        condition = 'Bot akumulasi 11x buy rebound beruntun saat target akumulasi masif. Dua kali take profit +20% & moonshot menghasilkan cuan luar biasa.';
+      } else if (isMoonbag) {
+        tag = 'Runner / Moonbag';
+        tagClass = 'tag-moonbag';
+        condition = 'Koin pump tinggi. Bot mengamankan profit dengan menjual 70% muatan, dan menyimpan sisa 30% (' + formatTokens(p.totalTokens) + ' token) sebagai free moonbag.';
+      } else if (p.entries && p.entries.length >= 4 && isCuan) {
+        tag = 'Akumulasi Rebound Bertubi-tubi';
+        tagClass = 'tag-accum';
+        condition = 'Target serok akumulasi ' + p.entries.length + 'x entry di fase rebound. Saat harga memantul tajam ke target TP, bot SELL 100% seluruh koin sekaligus.';
+      } else if (tokenEvs.some(e => e.action === 'SELL_TP_FULL' || e.action === 'SELL_TP_70') && tokenEvs.some(e => e.action === 'SELL_REBOUND_TP20')) {
+        tag = 'TP Awal + Rebound Akumulasi';
+        tagClass = 'tag-tp-rebound';
+        condition = 'Koin menyentuh TP awal, lalu saat harga koreksi dan target buy lagi, bot serok rebound berturut-turut dan exit 100% saat mantul tajam.';
+      } else if (isCuan) {
+        tag = 'Cuan Rebound Sempurna';
+        tagClass = 'tag-cuan';
+        condition = 'Harga drop lalu mantul saat target buy lagi -> REBOUND_BUY dieksekusi. Harga melesat ke target TP -> Jual 100% seluruh koin.';
+      } else if ((p.lastObservedPriceUsd || 0) < (p.avgEntryPriceUsd || 0) * 0.8) {
+        tag = 'Nyangkut';
+        tagClass = 'tag-stuck';
+        condition = 'Harga koin anjlok drastis tanpa pernah naik ke TP +30%. Target trader belum melakukan 100% full exit sehingga bot masih menahan posisi.';
+      } else {
+        tag = 'Open (Menunggu TP)';
+        tagClass = 'tag-cuan';
+        condition = 'Posisi aktif memantau target TP (+30%-50%) atau koreksi dip rebound.';
+      }
+
+      // Timeline items rendering
+      let reboundCount = 0;
+      let buyCount = 0;
+      const timelineRows = tokenEvs.map((e) => {
+        let bulletClass = 'bullet-buy';
+        let badgeClass = 'badge-buy-entry';
+        let actionLabel = e.action;
+        let detailsText = '';
+
+        if (e.action === 'BUY_INITIAL') {
+          buyCount++;
+          bulletClass = 'bullet-buy';
+          badgeClass = 'badge-buy-entry';
+          actionLabel = 'BUY INITIAL ($' + Number(e.stakeOrProceedsUsd).toFixed(2) + ')';
+          detailsText = '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + formatTokens(e.tokens) + ' token @ ' + formatPrice(e.executionPriceUsd) + ')';
+        } else if (e.action === 'BUY_REBOUND') {
+          reboundCount++;
+          bulletClass = 'bullet-rebound';
+          badgeClass = 'badge-buy-rebound';
+          actionLabel = 'REBOUND BUY #' + reboundCount + ' ($' + Number(e.stakeOrProceedsUsd).toFixed(2) + ')';
+          const dropInfo = (p.peakPriceUsd && p.peakPriceUsd > 0)
+            ? 'Koreksi dip -' + Number(((p.peakPriceUsd - e.executionPriceUsd) / p.peakPriceUsd) * 100).toFixed(1) + '% dari puncak ($' + formatPrice(p.peakPriceUsd) + ') &rarr; Serok '
+            : 'Serok ';
+          detailsText = dropInfo + '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + formatTokens(e.tokens) + ' token @ ' + formatPrice(e.executionPriceUsd) + ')';
+        } else if (e.action === 'SELL_TP_FULL') {
+          bulletClass = 'bullet-tp';
+          badgeClass = 'badge-sell-full';
+          actionLabel = 'SELL_TP_FULL';
+          detailsText = 'Harga naik +30% &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%). Posisi masuk fase WAITING_DIP.';
+        } else if (e.action === 'SELL_TP_70') {
+          bulletClass = 'bullet-moonbag';
+          badgeClass = 'badge-sell-tp70';
+          actionLabel = 'SELL_TP_70';
+          detailsText = 'Koin terbang tinggi hingga ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 70% muatan = ' + formatTokens(e.tokens) + ' token, amankan kas $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan bersih +$' + Number(e.pnlUsd || 0).toFixed(2) + '.';
+        } else if (e.action === 'SELL_REBOUND_TP20') {
+          bulletClass = 'bullet-tp';
+          badgeClass = 'badge-sell-tp20';
+          actionLabel = 'SELL_REBOUND_TP20';
+          detailsText = 'Harga melesat ke ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +$' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%).';
+        } else if (e.action === 'SELL_TIMEOUT') {
+          bulletClass = 'bullet-neutral';
+          badgeClass = 'badge-sell-full';
+          actionLabel = 'SELL_TIMEOUT';
+          detailsText = 'Stagnan &ge; 5 menit tanpa pergerakan ke TP &rarr; Auto-sell 100% exit, modal kas dilepas kembali.';
         } else {
-          tokenEvs = events.filter(e => e.tokenMint === p.mint).sort((a, b) => a.timestamp - b.timestamp);
+          bulletClass = 'bullet-neutral';
+          badgeClass = 'badge-sell-full';
+          actionLabel = e.action;
+          detailsText = '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + (e.reason || '-') + ')';
         }
 
-        let displayName = p.symbol || 'TOKEN';
-        if (symbolCounts[p.symbol] > 1) {
-          symbolCurrentIdx[p.symbol] = (symbolCurrentIdx[p.symbol] || 0) + 1;
-          displayName += ' #' + symbolCurrentIdx[p.symbol];
-        }
-
-        const isCuan = (p.realizedPnlUsd || 0) > 0;
-        const isMoonbag = (p.totalTokens || 0) > 0 && isCuan;
-
-        let tag = 'Open';
-        let tagClass = 'tag-cuan';
-        let condition = '';
-
-        if (p.mint === 'DbE1wxsMVwypwYBoukX8ExiRRiT3QnKeezGTgcUZ5d9S') {
-          tag = 'Nyangkut';
-          tagClass = 'tag-stuck';
-          condition = 'Harga koin langsung anjlok drastis (-93%) tanpa pernah naik ke TP +30%. Target trader mencicil jual di Lane 1 tapi tidak 100% full exit (masih sisa koin).';
-        } else if (p.mint === '7tZZnVrKZHsuQ5G4PWxy4aRNLxeyQK3asDHSMho9DXWT') {
-          tag = 'Nyangkut';
-          tagClass = 'tag-stuck';
-          condition = 'Di Lane 1 koin ini di-scalp berkali-kali. Namun di Lane 2, harga puncak belum menyentuh TP +30%, dan target menyisakan ~359K token (sehingga safety cut belum aktif).';
-        } else if (p.mint === '7RdVt1EUiwhroeD8EanEnEF4f573anrDHBppiLGXiFfR') {
-          tag = 'Cuan Rebound Sempurna';
-          tagClass = 'tag-cuan';
-          condition = 'Initial Buy kena TP +30%, lalu harga koreksi & mantul saat target buy lagi -> bot serok rebound dan sell 100% saat pagi hari melesat +37.9%.';
-        } else if (p.mint === 'FRf5vyxUcxFwYFpff9mXz3WvS3F7e67t73zM5eJkpump') {
-          tag = 'Runner / Moonbag';
-          tagClass = 'tag-moonbag';
-          condition = 'Koin terbang tinggi (+387.6%). Bot TP 70% muatan, amankan kas, sisa 30% koin disimpan sebagai free moonbag.';
-        } else if (p.mint === '4xWiwnFJR1Fj82Gj2h45Q18vW97RkZ4pP3sS4c9hpump') {
-          tag = 'Akumulasi Rebound Bertubi-tubi';
-          tagClass = 'tag-accum';
-          condition = 'Total masuk 5x ($25.00) terkumpul 1.82M token saat target buy beruntun. Harga tembus +102.6% -> SELL 100% seluruh koin sekaligus.';
-        } else if (p.mint === '5trLeU9e4cR912PzR6v4Yh2z3P8mQ7L1z8K9X2Jhpump') {
-          tag = 'TP Awal + Rebound Akumulasi';
-          tagClass = 'tag-tp-rebound';
-          condition = 'TP awal pump +87% (SELL 70%), lalu target masuk lagi di bawah -> bot serok 3x rebound berturut-turut ($15.00), mantul tajam (+59.3%) -> SELL 100% sisa koin.';
-        } else if (p.mint === 'CgZ8XRzc5MnwKvDSLev6vLs4wToybsgMB8KckqyhhL96') {
-          tag = 'Mega Rebound Moonshot';
-          tagClass = 'tag-moonshot';
-          condition = 'Bot akumulasi 11x buy rebound beruntun saat target akumulasi masif. Dua kali take profit +20% & moonshot menghasilkan cuan luar biasa.';
-        } else if (isMoonbag) {
-          tag = 'Runner / Moonbag';
-          tagClass = 'tag-moonbag';
-          condition = 'Koin pump tinggi. Bot mengamankan profit dengan menjual 70% muatan, dan menyimpan sisa 30% (' + formatTokens(p.totalTokens) + ' token) sebagai free moonbag.';
-        } else if (p.entries && p.entries.length >= 4 && isCuan) {
-          tag = 'Akumulasi Rebound Bertubi-tubi';
-          tagClass = 'tag-accum';
-          condition = 'Target serok akumulasi ' + p.entries.length + 'x entry di fase rebound. Saat harga memantul tajam ke target TP, bot SELL 100% seluruh koin sekaligus.';
-        } else if (tokenEvs.some(e => e.action === 'SELL_TP_FULL' || e.action === 'SELL_TP_70') && tokenEvs.some(e => e.action === 'SELL_REBOUND_TP20')) {
-          tag = 'TP Awal + Rebound Akumulasi';
-          tagClass = 'tag-tp-rebound';
-          condition = 'Koin menyentuh TP awal, lalu saat harga koreksi dan target buy lagi, bot serok rebound berturut-turut dan exit 100% saat mantul tajam.';
-        } else if (isCuan) {
-          tag = 'Cuan Rebound Sempurna';
-          tagClass = 'tag-cuan';
-          condition = 'Harga drop lalu mantul saat target buy lagi -> REBOUND_BUY dieksekusi. Harga melesat ke target TP -> Jual 100% seluruh koin.';
-        } else if ((p.lastObservedPriceUsd || 0) < (p.avgEntryPriceUsd || 0) * 0.8) {
-          tag = 'Nyangkut';
-          tagClass = 'tag-stuck';
-          condition = 'Harga koin anjlok drastis tanpa pernah naik ke TP +30%. Target trader belum melakukan 100% full exit sehingga bot masih menahan posisi.';
-        } else {
-          tag = 'Open (Menunggu TP)';
-          tagClass = 'tag-cuan';
-          condition = 'Posisi aktif memantau target TP (+30%-50%) atau koreksi dip rebound.';
-        }
-
-        // Timeline items rendering
-        let reboundCount = 0;
-        let buyCount = 0;
-        const timelineRows = tokenEvs.map((e) => {
-          let bulletClass = 'bullet-buy';
-          let badgeClass = 'badge-buy-entry';
-          let actionLabel = e.action;
-          let detailsText = '';
-
-          if (e.action === 'BUY_INITIAL') {
-            buyCount++;
-            bulletClass = 'bullet-buy';
-            badgeClass = 'badge-buy-entry';
-            actionLabel = 'INITIAL_BUY';
-            detailsText = '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + formatTokens(e.tokens) + ' token @ ' + formatPrice(e.executionPriceUsd) + ')';
-          } else if (e.action === 'BUY_REBOUND') {
-            reboundCount++;
-            bulletClass = 'bullet-buy';
-            badgeClass = 'badge-rebound-buy';
-            actionLabel = 'REBOUND_BUY #' + reboundCount;
-            const dropMatch = (e.reason || '').match(/Drop:\\s*(-?[\\d\\.]+%)[^,]*Rebound:\\s*(\\+?[\\d\\.]+%)/);
-            const dropInfo = dropMatch ? 'Harga drop ' + dropMatch[1] + ' lalu mantul ' + dropMatch[2] + ' saat target buy lagi &rarr; ' : '';
-            detailsText = dropInfo + '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + formatTokens(e.tokens) + ' token @ ' + formatPrice(e.executionPriceUsd) + ')';
-          } else if (e.action === 'SELL_TP_FULL') {
-            bulletClass = 'bullet-tp';
-            badgeClass = 'badge-sell-full';
-            actionLabel = 'SELL_TP_FULL';
-            detailsText = 'Harga naik +30% &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%). Posisi masuk fase WAITING_DIP.';
-          } else if (e.action === 'SELL_TP_70') {
-            bulletClass = 'bullet-moonbag';
-            badgeClass = 'badge-sell-tp70';
-            actionLabel = 'SELL_TP_70';
-            detailsText = 'Koin terbang tinggi hingga ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 70% muatan = ' + formatTokens(e.tokens) + ' token, amankan kas $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan bersih +$' + Number(e.pnlUsd || 0).toFixed(2) + '.';
-          } else if (e.action === 'SELL_REBOUND_TP20') {
-            bulletClass = 'bullet-tp';
-            badgeClass = 'badge-sell-tp20';
-            actionLabel = 'SELL_REBOUND_TP20';
-            detailsText = 'Harga melesat ke ' + formatPrice(e.executionPriceUsd) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%) &rarr; Jual 100%, terima $' + Number(e.stakeOrProceedsUsd).toFixed(2) + ', cuan +$' + Number(e.pnlUsd || 0).toFixed(2) + ' (+' + Number(e.roiPct || 0).toFixed(1) + '%).';
-          } else if (e.action === 'SELL_TIMEOUT') {
-            bulletClass = 'bullet-neutral';
-            badgeClass = 'badge-sell-full';
-            actionLabel = 'SELL_TIMEOUT';
-            detailsText = 'Stagnan &ge; 5 menit tanpa pergerakan ke TP &rarr; Auto-sell 100% exit, modal kas dilepas kembali.';
-          } else {
-            bulletClass = 'bullet-neutral';
-            badgeClass = 'badge-sell-full';
-            actionLabel = e.action;
-            detailsText = '$' + Number(e.stakeOrProceedsUsd).toFixed(2) + ' (' + (e.reason || '-') + ')';
-          }
-
-          return \`
+        return \`
           <div class="timeline-item">
             <span class="timeline-bullet \${bulletClass}"></span>
             <span class="timeline-time">\${formatWibTime(e.timeWib)}</span>
@@ -1535,22 +1529,24 @@ function renderHtmlDashboard(initialState = {}) {
             </span>
           </div>
           \`;
-        }).join('');
+      }).join('');
 
-        const pnlVal = p.realizedPnlUsd || 0;
-        const pnlFormatted = (pnlVal >= 0 ? '+' : '') + '$' + pnlVal.toFixed(2);
-        const pnlColor = pnlVal > 0 ? 'var(--emerald)' : (pnlVal < 0 ? 'var(--rose)' : 'var(--text-muted)');
-        const sisaKoinText = p.totalTokens === 0 ? 'koin sudah 0' : (isMoonbag ? 'sisa 30% koin (' + formatTokens(p.totalTokens) + ' token) disimpan sebagai free moonbag' : 'sisa ' + formatTokens(p.totalTokens) + ' token');
+      const pnlVal = p.realizedPnlUsd || 0;
+      const pnlFormatted = (pnlVal >= 0 ? '+' : '') + '$' + pnlVal.toFixed(2);
+      const pnlColor = pnlVal > 0 ? 'var(--emerald)' : (pnlVal < 0 ? 'var(--rose)' : 'var(--text-muted)');
+      const sisaKoinText = p.totalTokens === 0 ? 'koin sudah 0' : (isMoonbag ? 'sisa 30% koin (' + formatTokens(p.totalTokens) + ' token) disimpan sebagai free moonbag' : 'sisa ' + formatTokens(p.totalTokens) + ' token');
+      const openTimeText = p.openedAt ? formatWibTimeFromMs(p.openedAt * 1000) : '-';
 
-        return \`
-        <div class="token-card">
+      return \`
+        <div class="token-card" style="margin-bottom: 16px;">
           <div class="token-card-header">
             <div class="token-card-title">
-              <span>\${i + 1}. Token \${displayName}</span>
+              <span>#\${i + 1}. Token \${displayName}</span>
               <a href="https://solscan.io/token/\${p.mint}" target="_blank" class="meta-mint">
                 (\${p.mint.slice(0, 8)}...) &nearr;
               </a>
               <span class="tag-pill \${tagClass}">\${tag}</span>
+              <span style="font-size: 11px; color: var(--text-muted); font-weight: normal; margin-left: 6px;">🕒 \${openTimeText}</span>
             </div>
             <div class="token-badges">
               <span style="font-family: ui-monospace, monospace; font-size: 13px; font-weight: 800; color: \${pnlColor};">
@@ -1568,15 +1564,87 @@ function renderHtmlDashboard(initialState = {}) {
           </div>
 
           <div class="token-footer">
-            <div>Status: <strong style="color: #38bdf8;">OPEN [\${p.phase || p.status || 'ACTIVE'}]</strong> (\${sisaKoinText})</div>
+            <div>Status: <strong style="color: #38bdf8;">\${p.status || 'ACTIVE'} [\${p.phase || 'CLOSED'}]</strong> (\${sisaKoinText})</div>
             <div>Exits: <strong>\${p.exits ? p.exits.length : 0}</strong></div>
             <div>Realized PnL: <strong style="color: \${pnlColor};">\${pnlFormatted}</strong></div>
           </div>
         </div>
         \`;
+    }
+
+    function renderLane2CardsChunk() {
+      const container = document.getElementById('lane2-timeline-container');
+      if (!container) return;
+
+      const total = lane2SortedPositions.length;
+      if (total === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">Belum ada riwayat token di Lane 2.</div>';
+        return;
+      }
+
+      const symbolCounts = {};
+      lane2SortedPositions.forEach(p => { symbolCounts[p.symbol] = (symbolCounts[p.symbol] || 0) + 1; });
+
+      const visibleSlice = lane2SortedPositions.slice(0, lane2VisibleLimit);
+      const cardsHtml = visibleSlice.map((p, i) => {
+        return renderLane2SingleCard(p, i, total, symbolCounts, lane2SortedPositions, lane2StoredEvents);
       }).join('');
 
-      container.innerHTML = tokenCardsHtml;
+      const renderedCount = visibleSlice.length;
+      const hasMore = renderedCount < total;
+
+      const footerHtml = \`
+      <div id="lane2-infinite-footer" style="padding: 24px 16px; text-align: center; background: rgba(15, 23, 42, 0.4); border-radius: 12px; margin-top: 16px; border: 1px dashed #334155;">
+        <div style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px;">
+          Menampilkan <span style="color: #38bdf8; font-weight: bold;">\${renderedCount}</span> dari <span style="font-weight: bold;">\${total}</span> token Lane 2 <span style="color: #a855f7;">(Urut Paling Baru &darr;)</span>
+        </div>
+        \${hasMore ? \`
+          <button id="btn-load-more-lane2" onclick="loadMoreLane2Cards()" class="filter-btn" style="padding: 9px 24px; font-size: 12px; font-weight: 700; border-radius: 8px; cursor: pointer; background: #1e293b; color: #38bdf8; border: 1px solid #475569; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+            <span>⬇️ Muat 10 Token Lebih Lama</span>
+          </button>
+          <div id="lane2-infinite-sentinel" style="height: 30px; width: 100%; margin-top: 10px;"></div>
+        \` : \`
+          <div style="color: #10b981; font-size: 12px; font-weight: 600;">✓ Seluruh \${total} riwayat token Lane 2 telah dimuat</div>
+        \`}
+      </div>
+      \`;
+
+      container.innerHTML = cardsHtml + footerHtml;
+
+      // Pasang IntersectionObserver untuk infinite scroll otomatis
+      if (lane2Observer) {
+        lane2Observer.disconnect();
+        lane2Observer = null;
+      }
+
+      if (hasMore && 'IntersectionObserver' in window) {
+        const sentinel = document.getElementById('lane2-infinite-sentinel');
+        if (sentinel) {
+          lane2Observer = new IntersectionObserver((entries) => {
+            if (entries[0] && entries[0].isIntersecting) {
+              loadMoreLane2Cards();
+            }
+          }, { rootMargin: '300px' });
+          lane2Observer.observe(sentinel);
+        }
+      }
+    }
+
+    function loadMoreLane2Cards() {
+      if (lane2VisibleLimit >= lane2SortedPositions.length) return;
+      lane2VisibleLimit = Math.min(lane2SortedPositions.length, lane2VisibleLimit + 10);
+      renderLane2CardsChunk();
+    }
+    window.loadMoreLane2Cards = loadMoreLane2Cards;
+
+    function renderLane2Timeline(positions, events, isReset = false) {
+      if (isReset || lane2VisibleLimit < 10) {
+        lane2VisibleLimit = 10;
+      }
+      // Urutkan dari yang paling baru (openedAt terbesar / paling akhir)
+      lane2SortedPositions = (positions || []).slice().sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
+      lane2StoredEvents = events || [];
+      renderLane2CardsChunk();
     }
 
     function renderEvents() {
