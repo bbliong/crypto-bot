@@ -1408,6 +1408,24 @@ export class WalletFollowerRunner {
         }
       }
 
+      // 2.3 Auto-Retry Real Sell untuk posisi riil aktif yang belum selesai terjual (misal sempat gagal swap / little pool hit)
+      try {
+        const realState = readFollowerRealState(this.dataDir);
+        const pendingRealPositions = realState.positions.filter(p => REAL_ACTIVE_STATUSES.has(p.status) && p.remainingTokens > 0);
+        for (const rp of pendingRealPositions) {
+          const sp = smartOpen.find(s => s.mint === rp.mint);
+          // Jika posisi paper-nya sudah CLOSED (karena TP/Exit), posisi riil wajib terus dicoba sell di setiap tick
+          if (!sp || sp.status === 'CLOSED') {
+            if (!this.inFlightSellMints.has(rp.mint)) {
+              console.log(`[REAL-SELL-RETRY-LOOP] Posisi riil ${rp.symbol} (${rp.remainingTokens} tokens) belum sukses terjual. Menguji ulang rute swap sell sekarang...`);
+              await this.maybeExecuteRealSell(rp.lane, rp.mint, rp.exitPriceUsd || 0);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[REAL-SELL-RETRY-ERR] ${err?.message}`);
+      }
+
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       console.log(`--- LANE 1 (Direct Scalper $20 Pool, $2/buy) ---`);
       for (const p of openPositions) {
