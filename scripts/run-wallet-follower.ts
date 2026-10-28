@@ -1721,11 +1721,13 @@ export class WalletFollowerRunner {
       }
 
       if (!sellQuote.ok || !sellQuote.quote || !sellQuote.routeData) {
-        console.warn(`[REAL AUTO-SELL ABORTED] Gagal route swap sell AMM: ${sellQuote.error}`);
+        console.warn(`[REAL AUTO-SELL ABORTED] Gagal route swap sell AMM (${sellQuote.error || 'NO_QUOTE'}). Menahan posisi untuk retry tick berikutnya.`);
 
-        // Jika likuiditas pool mati / rug / no route, otomatis burn sisa token & reclaim sewa SOL
-        if (sellQuote.error && (sellQuote.error.includes('no route') || sellQuote.error.includes('little pool hit'))) {
-          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati (${sellQuote.error}), mengeksekusi burn & reclaim rent SOL...`);
+        // Dilarang burn saat token sedang aktif! HANYA burn jika pool benar-benar mati total (no route) SETELAH inaktivitas >= 5 menit
+        const isTrueDeadPool = sellQuote.error && (sellQuote.error.includes('no route') || sellQuote.error.includes('no external pool found'));
+        const isInactive = (Date.now() - (openPos.updatedAt || openPos.createdAt || 0)) >= 300000; // >= 5 menit
+        if (isTrueDeadPool && isInactive) {
+          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati total setelah inaktivitas (${sellQuote.error}), mengeksekusi burn & reclaim rent SOL...`);
           try {
             const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
             const burnRes = await burnAndCloseTokenAccount(mint);
