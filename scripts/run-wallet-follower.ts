@@ -1094,8 +1094,8 @@ export class WalletFollowerRunner {
         if (quote.ok && quote.quote) {
           usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
           execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
-        } else if (tick.sellType === 'STAGNANT_TIMEOUT_EXIT' || (quote.error && (quote.error.includes('no route') || quote.error.includes('no external pool found')))) {
-          // Jika stagnant timeout atau pool AMM sudah mati/rug (misal 'no external pool found'):
+        } else if (tick.sellType === 'STAGNANT_TIMEOUT_EXIT' || (quote.error && (quote.error.includes('no route') || quote.error.includes('no external pool found') || quote.error.includes('little pool hit')))) {
+          // Jika stagnant timeout atau pool AMM sudah mati/rug (misal 'no external pool found', 'no route', 'little pool hit'):
           // Likuidasi cut-loss $0 agar posisi tertutup dan tidak macet
           console.warn(`[SMART DIP TIMEOUT LIQUIDATION] Koin stagnan/rug tanpa likuiditas AMM (${quote.error}). Cut-loss posisi ditutup dengan proceeds $0.`);
           usdReceived = 0;
@@ -1111,7 +1111,13 @@ export class WalletFollowerRunner {
         return;
       }
 
-      if (usdReceived <= 0 && tick.sellType !== 'STAGNANT_TIMEOUT_EXIT') {
+      const isDeadPoolLiquidation = quote && quote.error && (
+        quote.error.includes('no route') || 
+        quote.error.includes('no external pool found') ||
+        quote.error.includes('little pool hit')
+      );
+
+      if (usdReceived <= 0 && tick.sellType !== 'STAGNANT_TIMEOUT_EXIT' && !isDeadPoolLiquidation) {
         console.warn(`[SMART DIP SELL REJECTED] UsdReceived dari swap 0. Dilarang fallback spot!`);
         return;
       }
