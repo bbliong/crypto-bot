@@ -236,22 +236,27 @@ export class SmartDipFollowerLane {
           return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: 'REBOUND_BUY_DISABLED_BY_CONFIG' };
         }
 
-        // Limit ketat: Rebound buy hanya boleh maksimal 1 kali saja per token
+        // 1. Limit ketat: Rebound buy hanya boleh maksimal 1 kali saja per token
         const reboundBuyCount = (pos.entries || []).filter(e => e.type === 'REBOUND_BUY').length;
         if (reboundBuyCount >= 1) {
           return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: 'REBOUND_BUY_MAX_1X_REACHED' };
         }
 
-        const history = this.targetBuyHistory.get(signal.mint) || [];
-        const isConsecutiveBuys = history.length >= 2;
-        const isLargeBuy = signal.usdAmount >= 100 || signal.solAmount >= 1.0;
-        const hasConviction = isConsecutiveBuys || isLargeBuy;
-
-        if (!hasConviction) {
-          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: 'AWAITING_TARGET_CONVICTION_2X_OR_LARGE' };
+        // 2. Proteksi Waktu Emas: Umur koin wajib <= 4.0 menit (atau waktu berjalan sejak initial <= 240s)
+        const tokenAge = opts?.tokenAgeMinutes;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const elapsedSinceInitialSec = pos.openedAt > 0 ? (nowSec - pos.openedAt) : 0;
+        if ((tokenAge !== undefined && tokenAge !== null && tokenAge > 4.0) || elapsedSinceInitialSec > 240) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REJECT_REBOUND_OLD_AGE (Age: ${tokenAge?.toFixed(1) || '>4'}m, Elapsed: ${elapsedSinceInitialSec}s > 240s)` };
         }
 
-        // Cek apakah harga saat ini sudah mengalami koreksi (dip) dari puncak
+        // 3. Konfirmasi Conviction Target: Wajib serokan signifikan (>= 0.8 SOL atau >= $80 USD), tolak pancingan receh
+        const isSubstantialBuy = signal.solAmount >= 0.8 || signal.usdAmount >= 80;
+        if (!isSubstantialBuy) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REJECT_REBOUND_WEAK_CONVICTION (Target buy only ${signal.solAmount.toFixed(2)} SOL / $${signal.usdAmount.toFixed(0)}, butuh >=0.8 SOL)` };
+        }
+
+        // 4. Zona Dip Emas (-15% s/d -45% dari Puncak)
         const currentPrice = signal.priceUsd;
         const peakPrice = pos.peakPriceUsd;
         const lowestPrice = pos.lowestPriceSincePeakUsd > 0 ? pos.lowestPriceSincePeakUsd : currentPrice;
@@ -259,22 +264,22 @@ export class SmartDipFollowerLane {
         const dropFromPeakPct = peakPrice > 0 ? ((peakPrice - lowestPrice) / peakPrice) * 100 : 0;
         const reboundFromLowestPct = lowestPrice > 0 ? ((currentPrice - lowestPrice) / lowestPrice) * 100 : 0;
 
-        // Syarat Dip-Rebound: koreksi minimal >= 10% dari puncak dan mulai rebound >= 2.5%
-        if (dropFromPeakPct >= 10.0 && reboundFromLowestPct >= 2.0) {
-          return {
-            canBuy: true,
-            buyType: 'REBOUND_BUY',
-            stakeUsd: this.stakePerTradeUsd,
-            reason: `DIP_REBOUND_CONFIRMED (Drop: -${dropFromPeakPct.toFixed(1)}%, Rebound: +${reboundFromLowestPct.toFixed(1)}%, Conviction: ${isLargeBuy ? 'LargeBuy' : '2xBuy'})`,
-          };
-        } else {
-          return {
-            canBuy: false,
-            buyType: 'NONE',
-            stakeUsd: 0,
-            reason: `DIP_CONDITIONS_NOT_MET (Drop: -${dropFromPeakPct.toFixed(1)}%, Rebound: +${reboundFromLowestPct.toFixed(1)}%)`,
-          };
+        if (dropFromPeakPct < 15.0) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REBOUND_DIP_TOO_SHALLOW (Drop: -${dropFromPeakPct.toFixed(1)}% < -15%)` };
         }
+        if (dropFromPeakPct > 45.0) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REJECT_FALLING_KNIFE_DIP (Drop: -${dropFromPeakPct.toFixed(1)}% > -45%)` };
+        }
+        if (reboundFromLowestPct < 2.0) {
+          return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `AWAITING_REBOUND_BOUNCE (Drop: -${dropFromPeakPct.toFixed(1)}%, Bounce: +${reboundFromLowestPct.toFixed(1)}% < +2%)` };
+        }
+
+        return {
+          canBuy: true,
+          buyType: 'REBOUND_BUY',
+          stakeUsd: this.stakePerTradeUsd,
+          reason: `GOLDEN_DIP_REBOUND_CONFIRMED (Drop: -${dropFromPeakPct.toFixed(1)}%, Bounce: +${reboundFromLowestPct.toFixed(1)}%, Target: ${signal.solAmount.toFixed(2)} SOL)`,
+        };
       }
     }
 
@@ -463,7 +468,7 @@ export class SmartDipFollowerLane {
       }
     }
 
-    // 2. Evaluasi Fase HOLDING REBOUND (Rebound TP >= 20% jual FULL 100%)
+    // 2. Evaluasi Fase HOLDING REBOUND (Rebound TP >= 20% jual FULL 100% atau Stop Loss -10%)
     if (pos.phase === 'HOLDING_REBOUND') {
       const entryPrice = pos.reboundEntryPriceUsd || pos.avgEntryPriceUsd;
       const reboundGainPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
@@ -477,13 +482,24 @@ export class SmartDipFollowerLane {
           reason: `REBOUND_TP_20%_TRIGGERED (Gain: +${reboundGainPct.toFixed(1)}%)`,
         };
       }
+
+      // Hard Stop Loss Rebound (-10% cut-loss seketika demi mengamankan modal kas)
+      if (reboundGainPct <= -10.0) {
+        return {
+          shouldSell: true,
+          sellType: 'STOP_LOSS',
+          sellRatioPct: 100,
+          tokensToSell: pos.totalTokens,
+          reason: `REBOUND_HARD_STOP_LOSS_10% (Drop: ${reboundGainPct.toFixed(1)}%, Cut-loss proteksi kas)`,
+        };
+      }
     }
 
     return { shouldSell: false, sellType: 'NONE', sellRatioPct: 0, tokensToSell: 0, reason: 'HOLDING_AWAITING_TARGET' };
   }
 
   /**
-   * Evaluasi sinyal SELL dari target (jika target Full Exit, bot juga wajib ikut Full Exit).
+   * Evaluasi sinyal SELL dari target (jika target Full Exit atau buang porsi saat rebound, bot ikut keluar).
    */
   public evaluateTargetSellSignal(signal: WalletTradeSignal): {
     shouldSell: boolean;
@@ -496,8 +512,10 @@ export class SmartDipFollowerLane {
       return { shouldSell: false, isTargetFullExit: false, tokensToSell: 0, reason: 'NO_OPEN_POSITION' };
     }
 
+    const totalHoldingBeforeSell = signal.remainingHolding + signal.tokenAmount;
+    const sellRatioPct = totalHoldingBeforeSell > 0 ? (signal.tokenAmount / totalHoldingBeforeSell) * 100 : 100;
     const targetRemaining = signal.remainingHolding;
-    const isTargetFullExit = targetRemaining < 100 || (signal.remainingHolding + signal.tokenAmount > 0 && targetRemaining / (signal.remainingHolding + signal.tokenAmount) < 0.01);
+    const isTargetFullExit = targetRemaining < 100 || (totalHoldingBeforeSell > 0 && targetRemaining / totalHoldingBeforeSell < 0.01);
 
     if (isTargetFullExit) {
       return {
@@ -508,15 +526,27 @@ export class SmartDipFollowerLane {
       };
     }
 
+    // Shadow Target Exit untuk Fase Rebound:
+    // Jika sedang memegang rebound dan target mulai membuang porsi signifikan (>= 20% sell ratio):
+    // Bot wajib langsung ikut melikuidasi seketika agar keluar di rugi receh (-2% s/d -8%) bersama target!
+    if (pos.phase === 'HOLDING_REBOUND' && sellRatioPct >= 20.0) {
+      return {
+        shouldSell: true,
+        isTargetFullExit: true,
+        tokensToSell: pos.totalTokens,
+        reason: `REBOUND_TARGET_SHADOW_EXIT (Target buang ${sellRatioPct.toFixed(1)}% saat rebound, bot ikut cut-loss darurat)`,
+      };
+    }
+
     return { shouldSell: false, isTargetFullExit: false, tokensToSell: 0, reason: 'TARGET_PARTIAL_IGNORED_SMART_LANE' };
   }
 
   /**
-   * Catat eksekusi SELL (TP 100%, TP 70%, Rebound TP 20%, atau Target Exit).
+   * Catat eksekusi SELL (TP 100%, TP 70%, Rebound TP 20%, Target Exit, Stop Loss, atau Stagnant Timeout).
    */
   public recordSellExecution(
     mint: string,
-    sellType: 'TP_30_50_FULL' | 'TP_OVER_50_PARTIAL_70' | 'REBOUND_TP_20_FULL' | 'TARGET_EXIT' | 'STOP_LOSS',
+    sellType: 'TP_30_50_FULL' | 'TP_OVER_50_PARTIAL_70' | 'REBOUND_TP_20_FULL' | 'TARGET_EXIT' | 'STOP_LOSS' | 'STAGNANT_TIMEOUT_EXIT',
     tokensSold: number,
     usdReceived: number,
     executionPriceUsd: number,

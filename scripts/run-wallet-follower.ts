@@ -848,7 +848,7 @@ export class WalletFollowerRunner {
       console.log(`[FOLLOW SELL SKIP] Tidak ada open position pada token ini di Lane 1.`);
       const evalSmartSell = this.smartDipLane.evaluateTargetSellSignal(signal);
       if (evalSmartSell.shouldSell && evalSmartSell.tokensToSell > 0) {
-        await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell);
+        await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell, evalSmartSell.reason);
       }
       return;
     }
@@ -968,10 +968,10 @@ export class WalletFollowerRunner {
       console.error(`[EXEC-SELL-ERR] ${err?.message}`);
     }
 
-    // Evaluasi Lane 2 (Smart Dip $5) Target Exit
+    // Evaluasi Lane 2 (Smart Dip $5) Target Exit / Shadow Exit
     const evalSmartSell = this.smartDipLane.evaluateTargetSellSignal(signal);
     if (evalSmartSell.shouldSell && evalSmartSell.tokensToSell > 0) {
-      await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell);
+      await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell, evalSmartSell.reason);
     }
   }
 
@@ -1151,10 +1151,10 @@ export class WalletFollowerRunner {
   }
 
   /**
-   * Helper: Evaluasi Target Exit Lane 2 (Target Full Exit Safety Close)
+   * Helper: Evaluasi Target Exit Lane 2 (Target Full Exit Safety Close / Rebound Shadow Exit)
    */
-  private async executeSmartDipTargetExit(signal: WalletTradeSignal, tokensToSell: number): Promise<void> {
-    console.log(`[SMART DIP SAFETY EXIT] Target keluar penuh! Menjual seluruh sisa token ${signal.symbol} (${tokensToSell.toLocaleString()})...`);
+  private async executeSmartDipTargetExit(signal: WalletTradeSignal, tokensToSell: number, exitReason: string = 'TARGET_FULL_EXIT_SAFETY_CLOSE'): Promise<void> {
+    console.log(`[SMART DIP SAFETY EXIT] Trigger: ${exitReason} | Menjual seluruh sisa token ${signal.symbol} (${tokensToSell.toLocaleString()})...`);
     let usdReceived = 0;
     let execPrice = signal.priceUsd;
 
@@ -1207,7 +1207,7 @@ export class WalletFollowerRunner {
         executionPriceUsd: execPrice,
         pnlUsd: lastExit.pnlUsd,
         roiPct: lastExit.roiPct,
-        reason: 'TARGET_FULL_EXIT_SAFETY_CLOSE',
+        reason: exitReason,
         positionStatus: res.status,
       });
 
@@ -1495,17 +1495,33 @@ export class WalletFollowerRunner {
         console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config (reboundBuyEnabled: false)`);
         return;
       }
-      if (!existingRealPos && !isInitialEntry) {
-        console.log(`[REAL AUTO-BUY SKIP] Bukan initial entry dari 0 (token ${signal.symbol} sedang berjalan di tengah jalan). Menunggu koin baru!`);
-        return;
-      }
 
-      // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
-      const maxCycles = config.maxCyclesPerToken ?? 1;
-      const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
-      if (!existingRealPos && closedRealCount >= maxCycles) {
-        console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
-        return;
+      // Validasi Entry:
+      if (!isInitialEntry) {
+        // Ini adalah sinyal REBOUND BUY
+        if (!config.reboundBuyEnabled) {
+          console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config`);
+          return;
+        }
+        // Pastikan kita memang memegang token ini di Initial Buy dan baru saja exit (bukan token asing acak di tengah jalan)
+        const recentClosedPos = state.positions.find(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED');
+        if (!recentClosedPos && !existingRealPos) {
+          console.log(`[REAL AUTO-BUY SKIP] Bukan token siklus kita. Rebound hanya diizinkan untuk token yang pernah lolos Initial Buy kita!`);
+          return;
+        }
+      } else {
+        // Ini adalah sinyal INITIAL BUY (Token Baru)
+        if (existingRealPos) {
+          console.log(`[REAL AUTO-BUY SKIP] Token ${signal.symbol} sudah memiliki posisi riil aktif di ${lane}`);
+          return;
+        }
+        // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
+        const maxCycles = config.maxCyclesPerToken ?? 1;
+        const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
+        if (closedRealCount >= maxCycles) {
+          console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
+          return;
+        }
       }
 
       // Check Kuota
