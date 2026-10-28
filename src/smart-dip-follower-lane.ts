@@ -466,17 +466,6 @@ export class SmartDipFollowerLane {
           reason: `TP_30_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
         };
       }
-
-      // Hard Stop Loss Initial: Jual 100% jika harga anjlok <= -15%
-      if (gainPct <= -15.0) {
-        return {
-          shouldSell: true,
-          sellType: 'STOP_LOSS',
-          sellRatioPct: 100,
-          tokensToSell: pos.totalTokens,
-          reason: `INITIAL_HARD_STOP_LOSS (Drop: ${gainPct.toFixed(1)}% <= -15%, Cut-loss proteksi kas)`,
-        };
-      }
     }
 
     // 2. Evaluasi Fase HOLDING REBOUND (Rebound TP >= 20% jual FULL 100% atau Stop Loss -10%)
@@ -526,7 +515,8 @@ export class SmartDipFollowerLane {
     const totalHoldingBeforeSell = signal.remainingHolding + signal.tokenAmount;
     const sellRatioPct = totalHoldingBeforeSell > 0 ? (signal.tokenAmount / totalHoldingBeforeSell) * 100 : 100;
     const targetRemaining = signal.remainingHolding;
-    const isTargetFullExit = targetRemaining < 100 || (totalHoldingBeforeSell > 0 && targetRemaining / totalHoldingBeforeSell < 0.01);
+    // Target Full Exit: Jika sisa token target < 100 atau < 5% dari holding awal sebelum sell
+    const isTargetFullExit = targetRemaining < 100 || (totalHoldingBeforeSell > 0 && targetRemaining / totalHoldingBeforeSell < 0.05);
 
     if (isTargetFullExit) {
       return {
@@ -537,15 +527,15 @@ export class SmartDipFollowerLane {
       };
     }
 
-    // Shadow Target Exit:
-    // Jika target mulai membuang porsi masif (>= 35% sell ratio) baik di fase INITIAL maupun REBOUND:
-    // Bot wajib langsung ikut keluar seketika agar tidak tertinggal menahan koin saat target/dev buang barang!
-    if (sellRatioPct >= 35.0) {
+    // Shadow Target Exit HANYA untuk Fase REBOUND:
+    // Pada fase Rebound (serok koreksi dip), jika target membuang >= 25% porsi serokannya, bot ikut cut-loss.
+    // Pada fase INITIAL: Selama target masih menyimpan koinnya (partial sell), bot tetap HOLD mengikuti target!
+    if (pos.phase === 'HOLDING_REBOUND' && sellRatioPct >= 25.0) {
       return {
         shouldSell: true,
         isTargetFullExit: true,
         tokensToSell: pos.totalTokens,
-        reason: `TARGET_SHADOW_EXIT (Target buang ${sellRatioPct.toFixed(1)}% barang, bot ikut cut-loss keluar)`,
+        reason: `REBOUND_TARGET_SHADOW_EXIT (Target buang ${sellRatioPct.toFixed(1)}% saat rebound, bot ikut cut-loss darurat)`,
       };
     }
 
