@@ -73,6 +73,7 @@ export class WalletFollowerRunner {
   private processedTxHashes: Set<string> = new Set();
   private heliusApiKey = '';
   private heliusPollInterval: NodeJS.Timeout | null = null;
+  private fastSellRetryInterval: NodeJS.Timeout | null = null;
   private isPollingHelius = false;
   private heliusWs: WebSocket | null = null;
   private heliusWsReconnectTimer: NodeJS.Timeout | null = null;
@@ -386,6 +387,9 @@ export class WalletFollowerRunner {
     this.startHeliusPoller();
     await this.connectAndSetup();
 
+    // Loop retry cepat (1.5 detik) khusus eksekusi Real Sell jika rute AMM sempat gagal/delay
+    this.fastSellRetryInterval = setInterval(() => this.fastRetryPendingRealSells(), 1500);
+
     if (durationSeconds > 0) {
       console.log(`[FOLLOWER] Berjalan dengan batas waktu ${durationSeconds} detik...`);
       await new Promise(r => setTimeout(r, durationSeconds * 1000));
@@ -413,6 +417,10 @@ export class WalletFollowerRunner {
     if (this.heliusPollInterval) {
       clearInterval(this.heliusPollInterval);
       this.heliusPollInterval = null;
+    }
+    if (this.fastSellRetryInterval) {
+      clearInterval(this.fastSellRetryInterval);
+      this.fastSellRetryInterval = null;
     }
     if (this.browser) {
       await this.browser.close().catch(() => {});
@@ -1283,6 +1291,31 @@ export class WalletFollowerRunner {
     } catch {}
   }
 
+  /**
+   * Fast Retry Loop (setiap 1.5 detik):
+   * Khusus mengeksekusi posisi riil yang sudah mencapai TP / exit tetapi rute AMM sempat gagal/delay.
+   */
+  private async fastRetryPendingRealSells(): Promise<void> {
+    if (!this.isRunning || !this.page || this.page.isClosed()) return;
+    try {
+      const realState = readFollowerRealState(this.dataDir);
+      const pendingRealPositions = realState.positions.filter(p => REAL_ACTIVE_STATUSES.has(p.status) && p.remainingTokens > 0);
+      if (pendingRealPositions.length === 0) return;
+
+      const smartOpen = this.smartDipLane.getOpenPositions();
+      for (const rp of pendingRealPositions) {
+        const sp = smartOpen.find(s => s.mint === rp.mint);
+        // Jika posisi paper-nya sudah CLOSED (karena TP >= 30% / exit), posisi riil wajib disikat sell setiap 1.5 detik
+        if (!sp || sp.status === 'CLOSED') {
+          if (!this.inFlightSellMints.has(rp.mint)) {
+            console.log(`[FAST SELL RETRY 1.5s] ⚡ Menjual posisi riil ${rp.symbol} (${rp.remainingTokens} tokens) untuk kunci profit +30%...`);
+            await this.maybeExecuteRealSell(rp.lane, rp.mint, rp.exitPriceUsd || 0);
+          }
+        }
+      }
+    } catch {}
+  }
+
   private async performHealthcheck(): Promise<void> {
     const now = Date.now();
     const openPositions = this.lane.getOpenPositions();
@@ -1406,24 +1439,6 @@ export class WalletFollowerRunner {
         if (inactiveMin >= 5.0 && sp.totalTokens > 0) {
           await this.handleSmartDipPriceTick(sp.mint, sp.lastObservedPriceUsd || 0);
         }
-      }
-
-      // 2.3 Auto-Retry Real Sell untuk posisi riil aktif yang belum selesai terjual (misal sempat gagal swap / little pool hit)
-      try {
-        const realState = readFollowerRealState(this.dataDir);
-        const pendingRealPositions = realState.positions.filter(p => REAL_ACTIVE_STATUSES.has(p.status) && p.remainingTokens > 0);
-        for (const rp of pendingRealPositions) {
-          const sp = smartOpen.find(s => s.mint === rp.mint);
-          // Jika posisi paper-nya sudah CLOSED (karena TP/Exit), posisi riil wajib terus dicoba sell di setiap tick
-          if (!sp || sp.status === 'CLOSED') {
-            if (!this.inFlightSellMints.has(rp.mint)) {
-              console.log(`[REAL-SELL-RETRY-LOOP] Posisi riil ${rp.symbol} (${rp.remainingTokens} tokens) belum sukses terjual. Menguji ulang rute swap sell sekarang...`);
-              await this.maybeExecuteRealSell(rp.lane, rp.mint, rp.exitPriceUsd || 0);
-            }
-          }
-        }
-      } catch (err: any) {
-        console.warn(`[REAL-SELL-RETRY-ERR] ${err?.message}`);
       }
 
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);

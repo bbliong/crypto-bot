@@ -148,8 +148,8 @@ export async function getBrowserSellSwapRoute(
   fromAddress: string = DEFAULT_SWAP_WALLET,
   inputTokenAmountBaseUnits: string,
   tokenDecimals: number = 6,
-  slippage: number = 15,
-  maxRetries: number = 3
+  slippage: number = 20,
+  maxRetries: number = 5
 ): Promise<SwapRouteResult> {
   let lastResult: SwapRouteResult = { status: null, latencyMs: 0, ok: false, error: 'NOT_ATTEMPTED' };
 
@@ -241,7 +241,7 @@ export async function getBrowserSellSwapRoute(
     }
 
     if (attempt < maxRetries) {
-      const waitMs = attempt * 350;
+      const waitMs = 250;
       console.warn(`[SWAP SELL RETRY] Attempt #${attempt}/${maxRetries} gagal (${lastResult.error}). Mencoba ulang slippage=${Math.min(35, slippage + attempt * 5)}% dalam ${waitMs}ms...`);
       await delay(waitMs);
     }
