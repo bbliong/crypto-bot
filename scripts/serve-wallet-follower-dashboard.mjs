@@ -1030,11 +1030,11 @@ function renderHtmlDashboard(initialState = {}) {
           <div style="display: flex; gap: 8px;">
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Modal L1 ($)</label>
-              <input type="number" id="ab-stake-l1" step="0.5" value="${abCfg.stakeUsdLane1 || 2.0}" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <input type="number" id="ab-stake-l1" step="any" min="0.1" value="${abCfg.stakeUsdLane1 !== undefined ? abCfg.stakeUsdLane1 : 0.25}" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Modal L2 ($)</label>
-              <input type="number" id="ab-stake-l2" step="0.5" value="${abCfg.stakeUsdLane2 || 5.0}" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+              <input type="number" id="ab-stake-l2" step="any" min="0.1" value="${abCfg.stakeUsdLane2 !== undefined ? abCfg.stakeUsdLane2 : 0.25}" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
           </div>
         </div>
