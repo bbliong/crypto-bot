@@ -187,8 +187,13 @@ function loadState() {
 
 let daemonProcess = null;
 let daemonStartTime = Date.now();
+const NO_WORKER = process.env.NO_WORKER === "true" || process.env.GOLDEN_MANAGE_WORKER === "off" || process.argv.includes("--no-worker");
 
 function startDaemon() {
+  if (NO_WORKER) {
+    log("ℹ️ Golden Daemon dinonaktifkan (NO_WORKER / GOLDEN_MANAGE_WORKER=off). Dashboard berjalan dalam mode read-only.");
+    return;
+  }
   if (daemonProcess) return;
   log("🚀 Spawning persistent Golden WebSocket + AMM Swap Daemon...");
   daemonStartTime = Date.now();
@@ -214,7 +219,7 @@ function startDaemon() {
   daemonProcess.on("close", (code) => {
     log(`⚠️ Golden Daemon exited with code ${code}. Respawning in 5s...`);
     daemonProcess = null;
-    setTimeout(startDaemon, 5000);
+    if (!NO_WORKER) setTimeout(startDaemon, 5000);
   });
 }
 
@@ -232,8 +237,10 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
-// Start daemon 2s after server boot
-setTimeout(startDaemon, 2000);
+// Start daemon 2s after server boot (jika worker diaktifkan)
+if (!NO_WORKER) {
+  setTimeout(startDaemon, 2000);
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
