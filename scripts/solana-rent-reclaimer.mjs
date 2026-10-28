@@ -90,6 +90,7 @@ export async function scanEmptyTokenAccounts(connection, walletAddress = WALLET_
           const info = item.account.data.parsed.info;
           const amount = info.tokenAmount?.amount ?? '0';
           const uiAmount = info.tokenAmount?.uiAmount ?? 0;
+          const decimals = info.tokenAmount?.decimals ?? 6;
           const lamports = item.account.lamports;
           const rentSol = lamports / 1e9;
 
@@ -100,6 +101,7 @@ export async function scanEmptyTokenAccounts(connection, walletAddress = WALLET_
             programId: prog.id.toBase58(),
             tokenAmount: amount,
             uiAmount,
+            decimals,
             lamports,
             rentSol
           };
@@ -178,7 +180,7 @@ export async function burnAndCloseTokenAccount(mintAddress, options = {}) {
         new PublicKey(mintAddress),
         keypair.publicKey,
         BigInt(target.tokenAmount),
-        6,
+        target.decimals ?? 6,
         [],
         progId
       )

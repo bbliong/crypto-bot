@@ -1756,11 +1756,25 @@ export class WalletFollowerRunner {
       if (!sellQuote.ok || !sellQuote.quote || !sellQuote.routeData) {
         console.warn(`[REAL AUTO-SELL ABORTED] Gagal route swap sell AMM (${sellQuote.error || 'NO_QUOTE'}). Menahan posisi untuk retry tick berikutnya.`);
 
-        // Dilarang burn saat token sedang aktif! HANYA burn jika pool benar-benar mati total (no route) SETELAH inaktivitas >= 5 menit
-        const isTrueDeadPool = sellQuote.error && (sellQuote.error.includes('no route') || sellQuote.error.includes('no external pool found'));
-        const isInactive = (Date.now() - (openPos.updatedAt || openPos.createdAt || 0)) >= 300000; // >= 5 menit
-        if (isTrueDeadPool && isInactive) {
-          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati total setelah inaktivitas (${sellQuote.error}), mengeksekusi burn & reclaim rent SOL...`);
+        // Catat waktu pertama kali sell terpicu tapi gagal
+        if (!(openPos as any).firstSellFailedAt) {
+          (openPos as any).firstSellFailedAt = Date.now();
+          writeFollowerRealState(this.dataDir, state);
+        }
+
+        const errStr = (sellQuote.error || '').toLowerCase();
+        const isLiquidityFailure = errStr.includes('no route') || 
+                                   errStr.includes('little pool hit') || 
+                                   errStr.includes('no external pool') || 
+                                   errStr.includes('liquidity') ||
+                                   errStr.includes('pool depleted');
+        
+        const failedDurationMs = Date.now() - ((openPos as any).firstSellFailedAt || Date.now());
+
+        // Jika rute swap gagal akibat ketiadaan likuiditas selama >= 60 detik (1 menit):
+        // Token terkonfirmasi terkena rug-pull total / kolam dikuras dev. Eksekusi burn & reclaim rent SOL agar slot tidak macet!
+        if (isLiquidityFailure && failedDurationMs >= 60000) {
+          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati / rug-pull terkonfirmasi setelah ${Math.round(failedDurationMs / 1000)}s gagal swap sell (${sellQuote.error}). Mengeksekusi burn & reclaim rent SOL...`);
           try {
             const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
             const burnRes = await burnAndCloseTokenAccount(mint);
@@ -1772,12 +1786,19 @@ export class WalletFollowerRunner {
               writeFollowerRealState(this.dataDir, state);
               console.log(`[SAFETY-RUG-RECLAIM] ✅ Berhasil burn & reclaim rent SOL: ${burnRes.tx}`);
               return;
+            } else {
+              console.warn(`[SAFETY-RUG-RECLAIM-FAIL] ${burnRes.message}`);
             }
           } catch (e: any) {
             console.warn(`[SAFETY-RUG-RECLAIM-ERR] ${e?.message}`);
           }
         }
         return;
+      }
+
+      // Reset tracking kegagalan jika sell rute berhasil didapat
+      if ((openPos as any).firstSellFailedAt) {
+        delete (openPos as any).firstSellFailedAt;
       }
 
       const res = await this.liveAdapter.submitSwapOrder(this.page, {
