@@ -175,6 +175,7 @@ const server = createServer((req, res) => {
           minSolReserve: 0.025,
           autoSell: true,
           reboundBuyEnabled: false,
+          maxCyclesPerToken: 1,
           quotaResetAt: 0,
         });
 
@@ -186,6 +187,10 @@ const server = createServer((req, res) => {
 
         if (patch.reboundBuyEnabled !== undefined) {
           updated.reboundBuyEnabled = Boolean(patch.reboundBuyEnabled);
+        }
+
+        if (patch.maxCyclesPerToken !== undefined) {
+          updated.maxCyclesPerToken = Math.max(1, Math.min(10, parseInt(patch.maxCyclesPerToken, 10) || 1));
         }
 
         if (patch.resetQuota) {
@@ -1043,6 +1048,10 @@ function renderHtmlDashboard(initialState = {}) {
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Max Buys</label>
               <input type="number" id="ab-max-buys" min="1" max="1000" value="${abCfg.maxBuysQuota || 3}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 11px; color: var(--text-muted);">Max Siklus/Token</label>
+              <input type="number" id="ab-max-cycles" min="1" max="10" value="${abCfg.maxCyclesPerToken || 1}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
             <div style="flex: 1;">
               <label style="font-size: 11px; color: var(--text-muted);">Slip Buy %</label>
@@ -1925,6 +1934,7 @@ function renderHtmlDashboard(initialState = {}) {
         document.getElementById('ab-stake-l1').value = cfg.stakeUsdLane1 || 2.0;
         document.getElementById('ab-stake-l2').value = cfg.stakeUsdLane2 || 5.0;
         document.getElementById('ab-max-buys').value = cfg.maxBuysQuota || 3;
+        document.getElementById('ab-max-cycles').value = cfg.maxCyclesPerToken || 1;
         document.getElementById('ab-slip-buy').value = cfg.buySlippagePercent || 15;
         hasLoadedAutobuyForm = true;
       }
@@ -1979,6 +1989,8 @@ function renderHtmlDashboard(initialState = {}) {
       const stakeUsdLane2 = parseFloat(document.getElementById('ab-stake-l2').value) || 5.0;
       const maxBuysInput = parseInt(document.getElementById('ab-max-buys').value, 10);
       const maxBuysQuota = Number.isInteger(maxBuysInput) && maxBuysInput >= 0 ? maxBuysInput : 3;
+      const maxCyclesInput = parseInt(document.getElementById('ab-max-cycles').value, 10);
+      const maxCyclesPerToken = Number.isInteger(maxCyclesInput) && maxCyclesInput >= 1 ? maxCyclesInput : 1;
       const buySlippagePercent = parseFloat(document.getElementById('ab-slip-buy').value) || 15;
       const reboundBuyEnabled = document.getElementById('ab-rebound-toggle')?.checked ?? false;
 
@@ -1987,6 +1999,7 @@ function renderHtmlDashboard(initialState = {}) {
         stakeUsdLane1,
         stakeUsdLane2,
         maxBuysQuota,
+        maxCyclesPerToken,
         buySlippagePercent,
         reboundBuyEnabled,
       });

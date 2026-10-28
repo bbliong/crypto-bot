@@ -104,6 +104,7 @@ export class SmartDipFollowerLane {
   }
 
   private allowReboundBuy: boolean = false;
+  private maxCyclesPerToken: number = 1;
 
   public setAllowReboundBuy(allowed: boolean): void {
     this.allowReboundBuy = allowed;
@@ -111,6 +112,14 @@ export class SmartDipFollowerLane {
 
   public isReboundBuyEnabled(): boolean {
     return this.allowReboundBuy;
+  }
+
+  public setMaxCyclesPerToken(maxCycles: number): void {
+    this.maxCyclesPerToken = Math.max(1, maxCycles || 1);
+  }
+
+  public getMaxCyclesPerToken(): number {
+    return this.maxCyclesPerToken;
   }
 
   public getAllPositions(): SmartDipPosition[] {
@@ -173,7 +182,7 @@ export class SmartDipFollowerLane {
    * 1. Jika token baru (fresh pool <= 10m) & belum pernah entry -> Beli Awal $5
    * 2. Jika sedang WAITING_DIP & target buy (conviction: beli besar atau 2x berturut-turut) & harga sedang rebound -> Beli Rebound $5
    */
-  public evaluateBuySignal(signal: WalletTradeSignal, opts?: { isFreshToken?: boolean; tokenAgeMinutes?: number | null; allowReboundBuy?: boolean }): {
+  public evaluateBuySignal(signal: WalletTradeSignal, opts?: { isFreshToken?: boolean; tokenAgeMinutes?: number | null; allowReboundBuy?: boolean; maxCyclesPerToken?: number }): {
     canBuy: boolean;
     buyType: 'INITIAL_BUY' | 'REBOUND_BUY' | 'NONE';
     stakeUsd: number;
@@ -191,6 +200,11 @@ export class SmartDipFollowerLane {
 
     // 1. Kasus Token Baru: Initial Entry
     if (!pos || pos.status === 'CLOSED') {
+      const maxCycles = opts?.maxCyclesPerToken ?? this.maxCyclesPerToken;
+      const completedCycles = this.closedTrades.filter(t => t.mint === signal.mint).length;
+      if (completedCycles >= maxCycles) {
+        return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `MAX_CYCLES_PER_TOKEN_REACHED (${completedCycles}/${maxCycles})` };
+      }
       const isFresh = opts?.isFreshToken ?? (opts?.tokenAgeMinutes !== undefined && opts.tokenAgeMinutes !== null && opts.tokenAgeMinutes <= 10);
       if (!isFresh) {
         return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REJECT_OLD_TOKEN_AGE_${opts?.tokenAgeMinutes?.toFixed(0) || '>10'}M` };

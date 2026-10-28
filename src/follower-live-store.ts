@@ -25,6 +25,7 @@ export interface FollowerLiveConfig {
   minSolReserve: number;
   autoSell: boolean;
   reboundBuyEnabled: boolean;
+  maxCyclesPerToken: number;
   quotaResetAt: number;
   updatedAt: number;
 }
@@ -43,6 +44,7 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   minSolReserve: 0.025,
   autoSell: true,
   reboundBuyEnabled: false,
+  maxCyclesPerToken: 1,
   quotaResetAt: 0,
   updatedAt: 0,
 };
@@ -162,6 +164,7 @@ export function saveFollowerLiveConfig(
   updated.stakeUsdLane2 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane2) || 5.0));
   updated.maxBuysQuota = Math.max(0, Math.min(1000, Number(updated.maxBuysQuota) || 3));
   updated.maxActiveRealPositions = Math.max(1, Math.min(10, Number(updated.maxActiveRealPositions) || 1));
+  updated.maxCyclesPerToken = Math.max(1, Math.min(10, Number(updated.maxCyclesPerToken) || 1));
   updated.buySlippagePercent = Math.max(1, Math.min(50, Number(updated.buySlippagePercent) || 15));
   updated.sellSlippagePercent = Math.max(1, Math.min(50, Number(updated.sellSlippagePercent) || 20));
   updated.minSolReserve = Math.max(0.005, Math.min(10, Number(updated.minSolReserve) || 0.025));

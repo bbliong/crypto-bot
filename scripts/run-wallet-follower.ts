@@ -986,10 +986,12 @@ export class WalletFollowerRunner {
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
       this.smartDipLane.setAllowReboundBuy(liveCfg.reboundBuyEnabled ?? false);
+      this.smartDipLane.setMaxCyclesPerToken(liveCfg.maxCyclesPerToken ?? 1);
       const evalSmart = this.smartDipLane.evaluateBuySignal(signal, {
         isFreshToken: isFresh,
         tokenAgeMinutes,
         allowReboundBuy: liveCfg.reboundBuyEnabled ?? false,
+        maxCyclesPerToken: liveCfg.maxCyclesPerToken ?? 1,
       });
       if (!evalSmart.canBuy) {
         console.log(`[SMART DIP BUY SKIP] ${evalSmart.reason}`);
@@ -1495,6 +1497,14 @@ export class WalletFollowerRunner {
       }
       if (!existingRealPos && !isInitialEntry) {
         console.log(`[REAL AUTO-BUY SKIP] Bukan initial entry dari 0 (token ${signal.symbol} sedang berjalan di tengah jalan). Menunggu koin baru!`);
+        return;
+      }
+
+      // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
+      const maxCycles = config.maxCyclesPerToken ?? 1;
+      const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
+      if (!existingRealPos && closedRealCount >= maxCycles) {
+        console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
         return;
       }
 
