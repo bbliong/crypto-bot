@@ -1087,10 +1087,11 @@ export class WalletFollowerRunner {
       let tokensSold = tick.tokensToSell;
       let usdReceived = 0;
       let execPrice = currentPrice;
+      let quote: any = null;
 
       if (!this.dryRun && this.page && !this.page.isClosed()) {
         const baseUnits = Math.floor(tokensSold * 1e6).toString();
-        const quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 20);
+        quote = await getBrowserSellSwapRoute(this.page, mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 20);
         if (quote.ok && quote.quote) {
           usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensSold * (quote.impliedPriceUsd || currentPrice));
           execPrice = quote.impliedPriceUsd || (tokensSold > 0 ? usdReceived / tokensSold : currentPrice);
