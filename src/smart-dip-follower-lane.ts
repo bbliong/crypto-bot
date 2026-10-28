@@ -439,31 +439,19 @@ export class SmartDipFollowerLane {
       };
     }
 
-    // 1. Evaluasi Fase INITIAL BUY
+    // 1. Evaluasi Fase INITIAL BUY (Jual FULL 100% begitu gain >= 30%)
     if (pos.phase === 'INITIAL') {
       const entryPrice = pos.initialEntryPriceUsd;
       const gainPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
 
-      // Jika gain > 50%: Jual 70% muatan, 30% koin disimpan sebagai Free Moonbag!
-      if (gainPct >= 50.0) {
-        const tokensToSell = pos.totalTokens * 0.70;
-        return {
-          shouldSell: true,
-          sellType: 'TP_OVER_50_PARTIAL_70',
-          sellRatioPct: 70,
-          tokensToSell,
-          reason: `TP_OVER_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%, Amankan 70% kas, simpan 30% free moonbag)`,
-        };
-      }
-
-      // Jika gain antara 30% s/d 50%: Jual FULL 100%
+      // Jual FULL 100% di semua Take Profit (Amankan kas modal + profit utuh, dilarang simpan moonbag)
       if (gainPct >= 30.0) {
         return {
           shouldSell: true,
           sellType: 'TP_30_50_FULL',
           sellRatioPct: 100,
           tokensToSell: pos.totalTokens,
-          reason: `TP_30_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
+          reason: `TP_FULL_100%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
         };
       }
     }
