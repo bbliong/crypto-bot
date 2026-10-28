@@ -1172,13 +1172,18 @@ export class WalletFollowerRunner {
     console.log(`[SMART DIP SAFETY EXIT] Trigger: ${exitReason} | Menjual seluruh sisa token ${signal.symbol} (${tokensToSell.toLocaleString()})...`);
     let usdReceived = 0;
     let execPrice = signal.priceUsd;
+    let quote: any = null;
 
     if (!this.dryRun && this.page && !this.page.isClosed()) {
       const baseUnits = Math.floor(tokensToSell * 1e6).toString();
-      const quote = await getBrowserSellSwapRoute(this.page, signal.mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 15);
+      quote = await getBrowserSellSwapRoute(this.page, signal.mint, DEFAULT_SWAP_WALLET, baseUnits, 6, 20);
       if (quote.ok && quote.quote) {
         usdReceived = quote.quote.amountOutUsd && quote.quote.amountOutUsd > 0 ? quote.quote.amountOutUsd : (tokensToSell * (quote.impliedPriceUsd || signal.priceUsd));
         execPrice = quote.impliedPriceUsd || (tokensToSell > 0 ? usdReceived / tokensToSell : signal.priceUsd);
+      } else if (quote.error && (quote.error.includes('no route') || quote.error.includes('no external pool found') || quote.error.includes('little pool hit'))) {
+        console.warn(`[SMART DIP SAFETY EXIT] Kolam likuiditas AMM mati/rug (${quote.error}). Likuidasi posisi ditutup proceeds $0.`);
+        usdReceived = 0;
+        execPrice = 0;
       } else {
         console.warn(`[SMART DIP SAFETY EXIT FAILED] Gagal swap sell route: ${quote.error}. Dilarang fallback spot! Exit ditunda.`);
         return;
@@ -1190,7 +1195,13 @@ export class WalletFollowerRunner {
       return;
     }
 
-    if (usdReceived <= 0) {
+    const isDeadPoolLiquidation = quote && quote.error && (
+      quote.error.includes('no route') || 
+      quote.error.includes('no external pool found') || 
+      quote.error.includes('little pool hit')
+    );
+
+    if (usdReceived <= 0 && !isDeadPoolLiquidation) {
       console.warn(`[SMART DIP SAFETY EXIT FAILED] UsdReceived 0. Dilarang fallback spot!`);
       return;
     }
