@@ -54,7 +54,7 @@ export interface SmartDipComparisonEvent {
   tokenMint: string;
   tokenSymbol: string;
   tokenName: string;
-  action: 'BUY_INITIAL' | 'BUY_REBOUND' | 'SELL_TP_FULL' | 'SELL_TP_70' | 'SELL_REBOUND_TP20' | 'SELL_TARGET_EXIT' | 'SELL_TIMEOUT';
+  action: 'BUY_INITIAL' | 'BUY_REBOUND' | 'SELL_TP_FULL' | 'SELL_TP_70' | 'SELL_REBOUND_TP20' | 'SELL_TARGET_EXIT' | 'SELL_TIMEOUT' | 'SELL_STOP_LOSS';
   stakeOrProceedsUsd: number;
   tokens: number;
   executionPriceUsd: number;
@@ -466,6 +466,17 @@ export class SmartDipFollowerLane {
           reason: `TP_30_50%_TRIGGERED (Gain: +${gainPct.toFixed(1)}%)`,
         };
       }
+
+      // Hard Stop Loss Initial: Jual 100% jika harga anjlok <= -15%
+      if (gainPct <= -15.0) {
+        return {
+          shouldSell: true,
+          sellType: 'STOP_LOSS',
+          sellRatioPct: 100,
+          tokensToSell: pos.totalTokens,
+          reason: `INITIAL_HARD_STOP_LOSS (Drop: ${gainPct.toFixed(1)}% <= -15%, Cut-loss proteksi kas)`,
+        };
+      }
     }
 
     // 2. Evaluasi Fase HOLDING REBOUND (Rebound TP >= 20% jual FULL 100% atau Stop Loss -10%)
@@ -526,15 +537,15 @@ export class SmartDipFollowerLane {
       };
     }
 
-    // Shadow Target Exit untuk Fase Rebound:
-    // Jika sedang memegang rebound dan target mulai membuang porsi signifikan (>= 20% sell ratio):
-    // Bot wajib langsung ikut melikuidasi seketika agar keluar di rugi receh (-2% s/d -8%) bersama target!
-    if (pos.phase === 'HOLDING_REBOUND' && sellRatioPct >= 20.0) {
+    // Shadow Target Exit:
+    // Jika target mulai membuang porsi masif (>= 35% sell ratio) baik di fase INITIAL maupun REBOUND:
+    // Bot wajib langsung ikut keluar seketika agar tidak tertinggal menahan koin saat target/dev buang barang!
+    if (sellRatioPct >= 35.0) {
       return {
         shouldSell: true,
         isTargetFullExit: true,
         tokensToSell: pos.totalTokens,
-        reason: `REBOUND_TARGET_SHADOW_EXIT (Target buang ${sellRatioPct.toFixed(1)}% saat rebound, bot ikut cut-loss darurat)`,
+        reason: `TARGET_SHADOW_EXIT (Target buang ${sellRatioPct.toFixed(1)}% barang, bot ikut cut-loss keluar)`,
       };
     }
 

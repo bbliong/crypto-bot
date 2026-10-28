@@ -1132,7 +1132,7 @@ export class WalletFollowerRunner {
           tokenMint: mint,
           tokenSymbol: res.symbol,
           tokenName: res.tokenName,
-          action: tick.sellType === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : (tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : 'SELL_TP_FULL')),
+          action: tick.sellType === 'STAGNANT_TIMEOUT_EXIT' ? 'SELL_TIMEOUT' : (tick.sellType === 'TP_OVER_50_PARTIAL_70' ? 'SELL_TP_70' : (tick.sellType === 'REBOUND_TP_20_FULL' ? 'SELL_REBOUND_TP20' : (tick.sellType === 'STOP_LOSS' ? 'SELL_STOP_LOSS' : 'SELL_TP_FULL'))),
           stakeOrProceedsUsd: usdReceived,
           tokens: tokensSold,
           executionPriceUsd: execPrice,
