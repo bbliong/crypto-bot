@@ -32,7 +32,7 @@ export function loadEnv() {
 
 loadEnv();
 
-const DEFAULT_RPC = (process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('helius')) ? process.env.SOLANA_RPC_URL : 'https://api.mainnet-beta.solana.com';
+const DEFAULT_RPC = (process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC_URL.includes('helius')) ? process.env.SOLANA_RPC_URL : 'https://solana-rpc.publicnode.com';
 const WALLET_ADDRESS = process.env.SOLANA_WALLET_ADDRESS || 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
 
 /**
@@ -72,8 +72,8 @@ export async function scanEmptyTokenAccounts(connection, walletAddress = WALLET_
 
   const fallbackRpcs = [
     connection?.rpcEndpoint,
+    'https://solana-rpc.publicnode.com',
     'https://api.mainnet-beta.solana.com',
-    'https://rpc.ankr.com/solana',
     'https://solana-mainnet.g.alchemy.com/v2/demo'
   ].filter(Boolean);
 

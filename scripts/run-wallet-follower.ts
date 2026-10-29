@@ -1892,6 +1892,17 @@ export class WalletFollowerRunner {
               return;
             } else {
               console.warn(`[SAFETY-RUG-RECLAIM-FAIL] ${burnRes.message}`);
+              if (burnRes.message && (burnRes.message.includes('Akun tidak ditemukan atau sudah kosong') || burnRes.message.includes('sudah kosong'))) {
+                openPos.status = 'CLOSED';
+                openPos.remainingTokens = 0;
+                openPos.remainingBaseUnits = '0';
+                delete openPos.pendingSellRatio;
+                openPos.updatedAt = Date.now();
+                openPos.audit.push({ at: Date.now(), type: 'RENT_ALREADY_CLOSED', details: burnRes });
+                writeFollowerRealState(this.dataDir, state);
+                console.log(`[SAFETY-RUG-RECLAIM] ✅ Akun on-chain sudah tertutup/bersih. Menutup status posisi lokal.`);
+                return;
+              }
             }
           } catch (e: any) {
             console.warn(`[SAFETY-RUG-RECLAIM-ERR] ${e?.message}`);
