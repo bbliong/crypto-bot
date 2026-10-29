@@ -1596,6 +1596,12 @@ export class WalletFollowerRunner {
             console.log(`[REAL AUTO-BUY SKIP] Token ${signal.symbol} sudah memiliki posisi riil aktif di ${lane}`);
             return;
           }
+          const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
+          const isTrueGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
+          if (!isTrueGroundZero) {
+            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} di Lane 2! (Target held: ${Math.round(targetBalanceBefore).toLocaleString()} tokens)`);
+            return;
+          }
           // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
           const maxCycles = config.maxCyclesPerToken ?? 1;
           const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
@@ -1605,21 +1611,20 @@ export class WalletFollowerRunner {
           }
         }
       } else if (lane === 'LANE_1') {
-        // Lane 1: Direct Pure Copy-Trading (Bebas Siklus / Unlimited Cycles per token)
+        // Lane 1: Direct Pure Copy-Trading (Bebas Siklus / Unlimited Cycles per token, TANPA Akumulasi)
         if (existingRealPos) {
-          const maxExposureL1 = config.stakeUsdLane1 * 5; // batas akumulasi 5x entry
-          if (existingRealPos.costBasisUsd + config.stakeUsdLane1 > maxExposureL1 + 0.001) {
-            console.log(`[REAL AUTO-BUY SKIP] Max Exposure Lane 1 tercapai ($${existingRealPos.costBasisUsd.toFixed(2)} / $${maxExposureL1.toFixed(2)})`);
-            return;
-          }
+          console.log(`[REAL AUTO-BUY SKIP] Token ${signal.symbol} sudah di-hold di Lane 1. Dilarang akumulasi buy (maksimal 1x buy per koin)!`);
+          return;
         } else {
-          // Safety Gate: Jika bot belum memegang posisi riil, DILARANG masuk di tengah jalan (wajib Initial Entry dari saldo 0)
-          if (!isInitialEntry) {
-            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} yang sedang running!`);
+          // Safety Gate Berlapis: DILARANG masuk di tengah jalan (wajib Initial Entry dari saldo 0 Ground Zero)
+          const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
+          const isTrueGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
+          if (!isInitialEntry || !isTrueGroundZero) {
+            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} yang sedang running! (Target held: ${Math.round(targetBalanceBefore).toLocaleString()} tokens)`);
             return;
           }
-          // Siklus baru diizinkan tanpa batas (unlimited cycles) di Lane 1 selama dimulai dari awal
-          console.log(`[LANE 1 UNLIMITED CYCLE] Token ${signal.symbol} membuka siklus baru dari awal (Initial Entry) mengikuti buy target.`);
+          // Siklus baru diizinkan tanpa batas (unlimited cycles) di Lane 1 selama dimulai dari awal Ground Zero
+          console.log(`[LANE 1 UNLIMITED CYCLE] Token ${signal.symbol} membuka siklus baru dari awal (Ground Zero) mengikuti buy target.`);
         }
       }
 

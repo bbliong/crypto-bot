@@ -180,22 +180,22 @@ export class WalletFollowerLane {
         };
       }
 
-      // 2. Jika bukan ground zero, wajib lolos verifikasi fresh pool (umur koin <= 10m)
-      if (this.onlyNewTokens && !isGroundZero && !opts?.isFreshToken) {
+      // 2. Wajib MUTLAK Ground Zero (Saldo target sebelum buy harus 0 / dust)
+      // Dilarang ada toleransi fresh pool jika target sudah pegang barang sebelumnya (itu mid-flight!)
+      if (!isGroundZero) {
         return {
           canEnter: false,
           stakeUsd: 0,
           entryNum: 0,
-          reason: `REJECT_PRE_EXISTING_BAG_NOT_NEW_TOKEN (Target held ${Math.round(targetBalanceBefore).toLocaleString()} tokens before)`,
+          reason: `REJECT_PRE_EXISTING_BAG_MID_FLIGHT (Target held ${Math.round(targetBalanceBefore).toLocaleString()} tokens before)`,
         };
       }
 
-      const reason = isGroundZero ? 'NEW_TOKEN_FRESH_ENTRY_1' : 'NEW_TOKEN_YOUNG_POOL_ENTRY_1';
       return {
         canEnter: true,
         stakeUsd: this.stakePerEntryUsd,
         entryNum: 1,
-        reason,
+        reason: 'NEW_TOKEN_FRESH_ENTRY_1',
       };
     }
 
