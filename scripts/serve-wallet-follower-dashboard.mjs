@@ -1051,7 +1051,7 @@ function renderHtmlDashboard(initialState = {}) {
           </div>
           <div style="display: flex; gap: 8px; margin-bottom: 8px;">
             <div style="flex: 1;">
-              <label style="font-size: 11px; color: var(--text-muted);">Max Buys (0=Unlimited)</label>
+              <label style="font-size: 11px; color: var(--text-muted);">Max Buys Lane 2 (0=Unl)</label>
               <input type="number" id="ab-max-buys" min="0" max="99999" value="${abCfg.maxBuysQuota !== undefined ? abCfg.maxBuysQuota : 3}" autocomplete="off" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 5px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
             </div>
             <div style="flex: 1;">

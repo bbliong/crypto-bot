@@ -1623,17 +1623,19 @@ export class WalletFollowerRunner {
         }
       }
 
-      // Check Kuota (0 = Tanpa Batas / Unlimited)
-      const completedCount = getCompletedRealBuysCount(state, config);
-      if (config.maxBuysQuota > 0 && completedCount >= config.maxBuysQuota) {
-        console.warn(`[REAL AUTO-BUY SKIP] Kuota Max Buys tercapai (${completedCount}/${config.maxBuysQuota})`);
-        return;
+      // Check Kuota Max Buys: Hanya berlaku untuk LANE_2 (Lane 1 murni bebas kuota / unlimited follower)
+      if (lane === 'LANE_2') {
+        const completedCount = getCompletedRealBuysCount(state, config, 'LANE_2');
+        if (config.maxBuysQuota > 0 && completedCount >= config.maxBuysQuota) {
+          console.warn(`[REAL AUTO-BUY SKIP] Kuota Max Buys Lane 2 tercapai (${completedCount}/${config.maxBuysQuota})`);
+          return;
+        }
       }
 
-      // Check Active Real Positions
-      const activePositions = state.positions.filter(p => REAL_ACTIVE_STATUSES.has(p.status));
+      // Check Active Real Positions (Diisolasi per masing-masing lane)
+      const activePositions = state.positions.filter(p => p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
       if (activePositions.length >= config.maxActiveRealPositions && !existingRealPos) {
-        console.warn(`[REAL AUTO-BUY SKIP] Max Active Real Positions tercapai (${activePositions.length}/${config.maxActiveRealPositions})`);
+        console.warn(`[REAL AUTO-BUY SKIP] Max Active Real Positions ${lane} tercapai (${activePositions.length}/${config.maxActiveRealPositions})`);
         return;
       }
 

@@ -248,9 +248,10 @@ export function sanitizeAudit(value: any, key = ''): any {
   return value;
 }
 
-export function getCompletedRealBuysCount(state: FollowerRealState, config: FollowerLiveConfig): number {
+export function getCompletedRealBuysCount(state: FollowerRealState, config: FollowerLiveConfig, lane?: 'LANE_1' | 'LANE_2'): number {
   let count = 0;
   for (const p of state.positions) {
+    if (lane && p.lane !== lane) continue;
     for (const b of p.buys) {
       if (b.status === 'CONFIRMED' && b.confirmedAt && b.confirmedAt > config.quotaResetAt) {
         count++;
