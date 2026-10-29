@@ -1613,9 +1613,13 @@ export class WalletFollowerRunner {
             return;
           }
         } else {
-          // Siklus baru diizinkan tanpa batas (unlimited cycles) di Lane 1
-          // Selama posisi sebelumnya sudah CLOSED (saldo 0) dan slot aktif tersedia, bot bebas masuk kembali
-          console.log(`[LANE 1 UNLIMITED CYCLE] Token ${signal.symbol} membuka siklus baru mengikuti buy target.`);
+          // Safety Gate: Jika bot belum memegang posisi riil, DILARANG masuk di tengah jalan (wajib Initial Entry dari saldo 0)
+          if (!isInitialEntry) {
+            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} yang sedang running!`);
+            return;
+          }
+          // Siklus baru diizinkan tanpa batas (unlimited cycles) di Lane 1 selama dimulai dari awal
+          console.log(`[LANE 1 UNLIMITED CYCLE] Token ${signal.symbol} membuka siklus baru dari awal (Initial Entry) mengikuti buy target.`);
         }
       }
 
