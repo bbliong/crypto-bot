@@ -11,6 +11,7 @@ const pending = new Map<string, Promise<Profit4WalletBalance>>();
 
 async function solBalance(wallet: string): Promise<number> {
   const endpoints = [...new Set([
+    "https://solana-rpc.publicnode.com",
     process.env.SOLANA_RPC_URL,
     "https://api.mainnet-beta.solana.com",
     "https://solana-mainnet.g.alchemy.com/v2/demo",
