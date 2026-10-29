@@ -866,7 +866,7 @@ export class WalletFollowerRunner {
     const eventId = `ev_${nowMs}_${Math.random().toString(36).slice(2, 6)}`;
 
     if (!evalSell.canSell) {
-      console.log(`[FOLLOW SELL SKIP] Tidak ada open position pada token ini di Lane 1.`);
+      console.log(`[FOLLOW SELL SKIP] Alasan: ${evalSell.reason}`);
       const evalSmartSell = this.smartDipLane.evaluateTargetSellSignal(signal);
       if (evalSmartSell.shouldSell && evalSmartSell.tokensToSell > 0) {
         await this.executeSmartDipTargetExit(signal, evalSmartSell.tokensToSell, evalSmartSell.reason);
@@ -1702,6 +1702,7 @@ export class WalletFollowerRunner {
         existingRealPos.updatedAt = Date.now();
         if (res.ok) existingRealPos.status = 'HOLDING';
         existingRealPos.buys.push(newOrder);
+        if (lane === 'LANE_1') existingRealPos.stage1Exited = false;
         auditFollowerReal(this.dataDir, state, existingRealPos, lane === 'LANE_1' ? 'REAL_ACCUMULATE_BUY' : 'REAL_REBOUND_BUY', { signal, res });
       } else {
         const realPos: FollowerRealPosition = {
@@ -1718,6 +1719,7 @@ export class WalletFollowerRunner {
           costBasisUsd: realStakeUsd,
           realizedPnlUsd: 0,
           entryPriceUsd: realQuote.impliedPriceUsd || tokenPriceUsd,
+          stage1Exited: false,
           buys: [newOrder],
           sells: [],
           audit: [{ at: Date.now(), type: 'REAL_BUY_SUBMITTED', details: res }],
@@ -1970,6 +1972,7 @@ export class WalletFollowerRunner {
           openPos.costBasisUsd = Math.max(0, openPos.costBasisUsd - costBasisSold);
           openPos.realizedPnlUsd += pnlUsd;
           openPos.exitPriceUsd = tokenPriceUsd;
+          openPos.stage1Exited = true;
           console.log(`[REAL PARTIAL SELL] ✅ Terjual ${tokensSold.toLocaleString()} token (${sellRatioPct.toFixed(1)}%). Sisa: ${openPos.remainingTokens.toLocaleString()} tokens`);
         }
       } else {

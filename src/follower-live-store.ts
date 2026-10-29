@@ -96,6 +96,8 @@ export interface FollowerRealPosition {
   lastError?: string;
   pendingSellRatio?: number;
   firstSellFailedAt?: number;
+  stage1Exited?: boolean;
+  peakTargetHolding?: number;
 }
 
 export interface FollowerLiveReadiness {

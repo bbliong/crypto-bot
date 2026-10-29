@@ -80,6 +80,8 @@ export interface FollowerPosition {
   status: 'OPEN' | 'CLOSED';
   entries: FollowerEntry[];
   exits: FollowerExit[];
+  stage1Exited?: boolean;
+  peakTargetHolding?: number;
 }
 
 export interface WalletTradeSignal {
@@ -253,6 +255,8 @@ export class WalletFollowerLane {
         avgEntryPriceUsd: executionPriceUsd > 0 ? executionPriceUsd : (tokensBought > 0 ? stakeUsd / tokensBought : 0),
         lastObservedPriceUsd: executionPriceUsd,
         lastObservedTargetHolding: signal.remainingHolding,
+        peakTargetHolding: signal.remainingHolding,
+        stage1Exited: false,
         realizedPnlUsd: 0,
         status: 'OPEN',
         entries: [
@@ -277,6 +281,7 @@ export class WalletFollowerLane {
       pos.avgEntryPriceUsd = pos.totalTokens > 0 ? pos.remainingCostBasisUsd / pos.totalTokens : pos.avgEntryPriceUsd;
       pos.lastObservedPriceUsd = executionPriceUsd;
       pos.lastObservedTargetHolding = signal.remainingHolding;
+      pos.peakTargetHolding = Math.max(pos.peakTargetHolding || 0, signal.remainingHolding);
       pos.updatedAt = signal.timestamp || Date.now();
       pos.entries.push({
         entryNum: newEntryNum,
@@ -293,14 +298,17 @@ export class WalletFollowerLane {
   }
 
   /**
-   * Evaluasi sinyal SELL dari target wallet.
-   * Menghitung rasio penjualan target dan jumlah token bot yang harus dijual.
+   * Evaluasi sinyal SELL dari target wallet (Pendekatan A: Milestone Exit Max 2 Tahap).
+   * Menghindari spam transaksi jual eceran (3%, 5%, 7%) yang membakar gas fee Solana.
+   * Tahap 1: Jual 50% saat target membuang akumulasi >= 50% barang.
+   * Tahap 2: Jual 100% saat target melakukan Full Exit (>= 85% atau sisa 0).
    */
   public evaluateSellSignal(signal: WalletTradeSignal): {
     canSell: boolean;
     sellRatioPct: number;
     botTokensToSell: number;
     isFullExit: boolean;
+    milestone: 'NONE' | 'STAGE_1_HALF' | 'STAGE_2_FULL';
     reason: string;
   } {
     const pos = this.positions.get(signal.mint);
@@ -310,44 +318,62 @@ export class WalletFollowerLane {
         sellRatioPct: 0,
         botTokensToSell: 0,
         isFullExit: false,
+        milestone: 'NONE',
         reason: 'NO_OPEN_POSITION',
       };
     }
 
-    // Formula matematis rasio jual target:
-    // Saldo target sebelum jual = sisa saldo sesudah jual + jumlah yang dijual
     const targetSold = signal.tokenAmount;
     const targetRemaining = signal.remainingHolding;
     const targetBefore = targetRemaining + targetSold;
+    const peak = Math.max(pos.peakTargetHolding || 0, targetBefore);
+    pos.peakTargetHolding = peak;
 
-    let sellRatio = 1.0;
-    let isFullExit = false;
+    const singleDumpRatio = targetBefore > 0 ? targetSold / targetBefore : 1.0;
+    const cumulativeDropRatio = peak > 0 ? (peak - targetRemaining) / peak : singleDumpRatio;
 
-    if (targetBefore > 0) {
-      sellRatio = Math.min(1.0, Math.max(0.0, targetSold / targetBefore));
-    }
-
-    // Jika target menyisakan dust (sisa token < 0.1% atau < 100 token) atau menjual >= 99%
-    // ATAU jika sisa koin bot sudah di level dust (< 50 token atau sisa cost basis < $0.05 USD)
-    if (
-      sellRatio >= 0.99 ||
+    // Milestone 2 (Full Exit):
+    // Target menjual >= 85%, saldo sisa target < 15% dari peak, saldo sisa target < 100 token,
+    // ATAU koin bot tersisa dust (< 50 token atau sisa cost basis < $0.05 USD)
+    const isTargetFullExit =
       targetRemaining < 100 ||
-      (targetBefore > 0 && targetRemaining / targetBefore < 0.005) ||
+      singleDumpRatio >= 0.85 ||
+      (peak > 0 && targetRemaining / peak <= 0.15) ||
       pos.totalTokens < 50 ||
-      pos.remainingCostBasisUsd < 0.05
-    ) {
-      sellRatio = 1.0;
-      isFullExit = true;
+      pos.remainingCostBasisUsd < 0.05;
+
+    if (isTargetFullExit) {
+      return {
+        canSell: true,
+        sellRatioPct: 100,
+        botTokensToSell: pos.totalTokens,
+        isFullExit: true,
+        milestone: 'STAGE_2_FULL',
+        reason: 'MILESTONE_2_FULL_EXIT',
+      };
     }
 
-    const botTokensToSell = isFullExit ? pos.totalTokens : pos.totalTokens * sellRatio;
+    // Milestone 1 (Tahap 1 - Jual 50% saat target buang >= 50% barang):
+    if (!pos.stage1Exited && (singleDumpRatio >= 0.49 || cumulativeDropRatio >= 0.49)) {
+      const halfTokens = Math.max(1, Math.floor(pos.totalTokens * 0.5));
+      return {
+        canSell: true,
+        sellRatioPct: 50,
+        botTokensToSell: halfTokens,
+        isFullExit: false,
+        milestone: 'STAGE_1_HALF',
+        reason: `MILESTONE_1_HALF_EXIT (Target Sold ${(cumulativeDropRatio * 100).toFixed(1)}% >= 50%)`,
+      };
+    }
 
+    // Abaikan eceran kecil target (< 50%) untuk menghemat 90% gas fee Solana!
     return {
-      canSell: botTokensToSell > 0,
-      sellRatioPct: Number((sellRatio * 100).toFixed(2)),
-      botTokensToSell,
-      isFullExit,
-      reason: isFullExit ? 'TARGET_FULL_EXIT' : `TARGET_PARTIAL_EXIT_${(sellRatio * 100).toFixed(1)}%`,
+      canSell: false,
+      sellRatioPct: 0,
+      botTokensToSell: 0,
+      isFullExit: false,
+      milestone: 'NONE',
+      reason: `IGNORE_SMALL_PARTIAL (Target sold ${(cumulativeDropRatio * 100).toFixed(1)}% < 50%, Holding with Target)`,
     };
   }
 
@@ -379,7 +405,7 @@ export class WalletFollowerLane {
     const targetSold = signal.tokenAmount;
     const targetRemaining = signal.remainingHolding;
     const targetBefore = targetRemaining + targetSold;
-    const sellRatioPct = targetBefore > 0 ? (targetSold / targetBefore) * 100 : 100;
+    const sellRatioPct = isFullExit ? 100 : 50;
 
     const exitRecord: FollowerExit = {
       targetSold,
@@ -402,6 +428,7 @@ export class WalletFollowerLane {
     pos.lastObservedPriceUsd = executionPriceUsd;
     pos.lastObservedTargetHolding = signal.remainingHolding;
     pos.updatedAt = signal.timestamp || Date.now();
+    pos.stage1Exited = true; // Tandai stage 1 selesai
 
     if (isFullExit || pos.totalTokens < 1 || pos.remainingCostBasisUsd < 0.01) {
       pos.status = 'CLOSED';
