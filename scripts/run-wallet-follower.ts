@@ -521,6 +521,7 @@ export class WalletFollowerRunner {
             this.smartDipLane.recordTokenActivity(item.a);
           }
           if (item.m === this.targetWallet || !item.m) {
+            console.log(`[GMGN WS RAW ITEM] Event: ${item.e} | Keys: ${Object.keys(item).join(',')} | Raw: ${JSON.stringify(item)}`);
             await this.processWalletTradeItem(item);
           }
         }
@@ -577,6 +578,21 @@ export class WalletFollowerRunner {
       }
     }
 
+    const isOpenOrClose = item.ooc === 1 || item.is_open_or_close === 1;
+    // Deteksi First Buy resmi dari payload GMGN (ooc = 1 pada event buy, atau hba = 0)
+    const isFirstBuy = action === 'buy' && (
+      item.ooc === 1 ||
+      item.is_open_or_close === 1 ||
+      item.event_type === 'new_holder' ||
+      (Number(item.hba || 0) === 0 && Number(item.b || 0) === Number(item.ba || 0))
+    );
+    const isSellAll = action === 'sell' && (
+      item.ooc === 1 ||
+      item.is_open_or_close === 1 ||
+      item.event_type === 'sell_all' ||
+      Number(item.b || 0) <= 0
+    );
+
     const signal: WalletTradeSignal = {
       action,
       mint,
@@ -589,11 +605,13 @@ export class WalletFollowerRunner {
       priceUsd: Number(item.pu) || 0,
       txHash,
       timestamp: Number(item.t) || Math.floor(Date.now() / 1000),
+      isOpenOrClose,
+      isFirstBuy,
     };
 
     console.log(`\n---------------------------------------------------------`);
-    console.log(`[TARGET ACTIVITY] ${signal.action.toUpperCase()} ${signal.symbol} (${signal.mint.slice(0, 8)}...)`);
-    console.log(`  Amount: ${signal.tokenAmount.toLocaleString()} tokens | Remaining: ${signal.remainingHolding.toLocaleString()} tokens`);
+    console.log(`[TARGET ACTIVITY] ${signal.action.toUpperCase()} ${signal.symbol} (${signal.mint.slice(0, 8)}...) | Tag: ${signal.isFirstBuy ? 'FIRST_BUY 🟢' : (signal.action === 'buy' ? 'BUY_MORE 🔵' : (isSellAll ? 'SELL_ALL 🔴' : 'PARTIAL_SELL 🟡'))}`);
+    console.log(`  Amount: ${signal.tokenAmount.toLocaleString()} tokens | Remaining: ${signal.remainingHolding.toLocaleString()} tokens | OOC: ${item.ooc ?? item.is_open_or_close ?? '-'}`);
     console.log(`  Target USD: $${signal.usdAmount.toFixed(2)} | Price: $${signal.priceUsd} | Age: live`);
 
     // Dynamically subscribe token to sub-second tick channel
@@ -1597,9 +1615,9 @@ export class WalletFollowerRunner {
             return;
           }
           const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
-          const isTrueGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
-          if (!isTrueGroundZero) {
-            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} di Lane 2! (Target held: ${Math.round(targetBalanceBefore).toLocaleString()} tokens)`);
+          const isTrueGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
+          if (signal.isFirstBuy === false || !isTrueGroundZero) {
+            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} di Lane 2! (Target held: ${Math.round(targetBalanceBefore).toLocaleString()} tokens | isFirstBuy: ${signal.isFirstBuy ?? 'unknown'})`);
             return;
           }
           // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
@@ -1616,11 +1634,11 @@ export class WalletFollowerRunner {
           console.log(`[REAL AUTO-BUY SKIP] Token ${signal.symbol} sudah di-hold di Lane 1. Dilarang akumulasi buy (maksimal 1x buy per koin)!`);
           return;
         } else {
-          // Safety Gate Berlapis: DILARANG masuk di tengah jalan (wajib Initial Entry dari saldo 0 Ground Zero)
+          // Safety Gate Berlapis: DILARANG masuk di tengah jalan (wajib Initial Entry dari saldo 0 Ground Zero & First Buy)
           const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
-          const isTrueGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
-          if (!isInitialEntry || !isTrueGroundZero) {
-            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} yang sedang running! (Target held: ${Math.round(targetBalanceBefore).toLocaleString()} tokens)`);
+          const isTrueGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
+          if (!isInitialEntry || signal.isFirstBuy === false || !isTrueGroundZero) {
+            console.log(`[REAL AUTO-BUY SKIP] Dilarang masuk di tengah jalan (mid-flight entry) pada token ${signal.symbol} yang sedang running! (Target held: ${Math.round(targetBalanceBefore).toLocaleString()} tokens | isFirstBuy: ${signal.isFirstBuy ?? 'unknown'})`);
             return;
           }
           // Siklus baru diizinkan tanpa batas (unlimited cycles) di Lane 1 selama dimulai dari awal Ground Zero

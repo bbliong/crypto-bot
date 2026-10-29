@@ -96,6 +96,8 @@ export interface WalletTradeSignal {
   priceUsd: number;
   txHash: string;
   timestamp: number;
+  isOpenOrClose?: boolean;
+  isFirstBuy?: boolean;
 }
 
 export interface FollowerLaneConfig {
@@ -167,7 +169,7 @@ export class WalletFollowerLane {
     if (!existing || existing.status === 'CLOSED') {
       // Hitung saldo target sebelum transaksi buy ini
       const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
-      const isGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
+      const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
       
       // Jika mode onlyNewTokens aktif:
       // 1. Tolak jika umur koin diketahui dan sudah tua (> 10 menit)
@@ -180,14 +182,14 @@ export class WalletFollowerLane {
         };
       }
 
-      // 2. Wajib MUTLAK Ground Zero (Saldo target sebelum buy harus 0 / dust)
-      // Dilarang ada toleransi fresh pool jika target sudah pegang barang sebelumnya (itu mid-flight!)
-      if (!isGroundZero) {
+      // 2. Wajib MUTLAK Ground Zero & First Buy
+      // Jika GMGN memberi tahu ini BUKAN First Buy (ooc === 0 / Buy More) ATAU target sudah pegang barang sebelumnya -> TOLAK!
+      if (signal.isFirstBuy === false || !isGroundZero) {
         return {
           canEnter: false,
           stakeUsd: 0,
           entryNum: 0,
-          reason: `REJECT_PRE_EXISTING_BAG_MID_FLIGHT (Target held ${Math.round(targetBalanceBefore).toLocaleString()} tokens before)`,
+          reason: `REJECT_PRE_EXISTING_BAG_MID_FLIGHT (Target held ${Math.round(targetBalanceBefore).toLocaleString()} tokens before | isFirstBuy: ${signal.isFirstBuy ?? 'unknown'})`,
         };
       }
 

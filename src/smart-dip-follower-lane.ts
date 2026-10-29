@@ -209,9 +209,9 @@ export class SmartDipFollowerLane {
     // 1. Kasus Token Baru: Initial Entry
     if (!pos || pos.status === 'CLOSED') {
       const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
-      const isGroundZero = targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000;
-      if (!isGroundZero) {
-        return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REJECT_MID_FLIGHT_TARGET_HELD_${Math.round(targetBalanceBefore)}` };
+      const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
+      if (signal.isFirstBuy === false || !isGroundZero) {
+        return { canBuy: false, buyType: 'NONE', stakeUsd: 0, reason: `REJECT_MID_FLIGHT_NOT_FIRST_BUY (Target held ${Math.round(targetBalanceBefore)} | isFirst: ${signal.isFirstBuy ?? 'unknown'})` };
       }
 
       const maxCycles = opts?.maxCyclesPerToken ?? this.maxCyclesPerToken;
