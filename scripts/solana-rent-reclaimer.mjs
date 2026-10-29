@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction, ComputeBudgetProgram } from '@solana/web3.js';
 import { createCloseAccountInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { existsSync, readFileSync } from 'node:fs';
@@ -174,6 +174,9 @@ export async function burnAndCloseTokenAccount(mintAddress, options = {}) {
     const { createBurnCheckedInstruction, createCloseAccountInstruction } = await import('@solana/spl-token');
 
     const tx = new Transaction();
+    if (ComputeBudgetProgram) {
+      tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 200000 }));
+    }
     tx.add(
       createBurnCheckedInstruction(
         new PublicKey(target.pubkey),
@@ -195,7 +198,26 @@ export async function burnAndCloseTokenAccount(mintAddress, options = {}) {
       )
     );
 
-    const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = keypair.publicKey;
+    tx.sign(keypair);
+
+    const sig = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+      preflightCommitment: 'confirmed'
+    });
+
+    const confirmation = await connection.confirmTransaction({
+      signature: sig,
+      blockhash,
+      lastValidBlockHeight
+    }, 'confirmed');
+
+    if (confirmation.value && confirmation.value.err) {
+      return { ok: false, message: JSON.stringify(confirmation.value.err) };
+    }
+
     return { ok: true, tx: sig, reclaimedSol: target.rentSol };
   } catch (err) {
     return { ok: false, message: err.message };

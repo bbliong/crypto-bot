@@ -1562,7 +1562,7 @@ export class WalletFollowerRunner {
         return;
       }
 
-      const state = readFollowerRealState(this.dataDir);
+      let state = readFollowerRealState(this.dataDir);
       if (!state.readiness.sessionReady || !state.readiness.wallet) {
         console.warn(`[REAL AUTO-BUY SKIP] Wallet GMGN belum siap atau belum terdeteksi`);
         return;
@@ -1632,6 +1632,29 @@ export class WalletFollowerRunner {
         }
       }
 
+      // Rotasi Modal / Target Migration:
+      // Jika target membeli koin baru, sedangkan bot masih memegang koin lama di lane ini:
+      // Langsung likuidasi 100% koin lama agar modal SOL kembali ke kas dan slot posisi terbebaskan!
+      const otherActivePositions = state.positions.filter(p => p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status) && p.mint !== signal.mint);
+      if (otherActivePositions.length > 0 && !existingRealPos) {
+        console.log(`\n=========================================================`);
+        console.log(`[CAPITAL ROTATION] 🔄 Target berpindah membeli koin baru ${signal.symbol}!`);
+        console.log(`[CAPITAL ROTATION] Melikuidasi 100% posisi lama (${otherActivePositions.map(p => p.symbol).join(', ')}) agar kas SOL & slot posisi bebas untuk koin baru...`);
+        console.log(`=========================================================\n`);
+
+        for (const oldPos of otherActivePositions) {
+          try {
+            await this.maybeExecuteRealSell(lane, oldPos.mint, oldPos.exitPriceUsd || 0, 100, true, true /* forceEmergencyClose */);
+          } catch (e: any) {
+            console.warn(`[CAPITAL-ROTATION-SELL-ERR] ${oldPos.symbol}: ${e?.message}`);
+          }
+        }
+
+        // Beri jeda 1.5 detik agar transaksi sell / reclaim rent selesai on-chain dan sinkronkan state
+        await new Promise(r => setTimeout(r, 1500));
+        state = readFollowerRealState(this.dataDir);
+      }
+
       // Check Active Real Positions (Diisolasi per masing-masing lane)
       const activePositions = state.positions.filter(p => p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
       if (activePositions.length >= config.maxActiveRealPositions && !existingRealPos) {
@@ -1639,9 +1662,17 @@ export class WalletFollowerRunner {
         return;
       }
 
-      const realStakeUsd = lane === 'LANE_1' ? config.stakeUsdLane1 : config.stakeUsdLane2;
+      let realStakeUsd = lane === 'LANE_1' ? config.stakeUsdLane1 : config.stakeUsdLane2;
       const estimatedSolNeeded = realStakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 100);
-      if (state.readiness.balanceSol === null || state.readiness.balanceSol < (estimatedSolNeeded + config.minSolReserve)) {
+      const availableSol = (state.readiness.balanceSol ?? 0) - config.minSolReserve;
+
+      // Dynamic Stake Safety: Jika kas SOL sedikit di bawah nominal stake tapi masih cukup (> 0.003 SOL / ~$0.30 USD),
+      // adaptif gunakan modal maksimum yang aman agar bot tidak terhenti akibat selisih kecil!
+      if (availableSol > 0.003 && state.readiness.balanceSol !== null && state.readiness.balanceSol < (estimatedSolNeeded + config.minSolReserve)) {
+        const maxAffordableUsd = availableSol * (this.solPriceUsd > 0 ? this.solPriceUsd : 100);
+        console.log(`[DYNAMIC STAKE] Menyesuaikan modal beli dari $${realStakeUsd.toFixed(2)} menjadi $${maxAffordableUsd.toFixed(2)} sesuai kas tersedia (${state.readiness.balanceSol.toFixed(6)} SOL)...`);
+        realStakeUsd = Math.max(0.25, Math.floor(maxAffordableUsd * 100) / 100);
+      } else if (state.readiness.balanceSol === null || state.readiness.balanceSol < (estimatedSolNeeded + config.minSolReserve)) {
         console.warn(`[REAL AUTO-BUY SKIP] Saldo SOL (${state.readiness.balanceSol ?? 0} SOL) kurang dari modal (${estimatedSolNeeded.toFixed(4)}) + cadangan gas (${config.minSolReserve} SOL)`);
         return;
       }
@@ -1775,7 +1806,8 @@ export class WalletFollowerRunner {
     mint: string,
     tokenPriceUsd: number,
     sellRatioPct: number = 100,
-    isFullExit: boolean = true
+    isFullExit: boolean = true,
+    forceEmergencyClose: boolean = false
   ): Promise<void> {
     try {
       const config = readFollowerLiveConfig(this.dataDir);
@@ -1873,10 +1905,10 @@ export class WalletFollowerRunner {
         
         const failedDurationMs = Date.now() - (openPos.firstSellFailedAt || Date.now());
 
-        // Jika rute swap gagal akibat ketiadaan likuiditas selama >= 5 menit (300 detik = 300.000 ms):
-        // Token terkonfirmasi terkena rug-pull total / kolam dikuras dev. Eksekusi burn & reclaim rent SOL agar slot tidak macet!
-        if (isLiquidityFailure && failedDurationMs >= 300000) {
-          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati / rug-pull terkonfirmasi setelah ${Math.round(failedDurationMs / 1000)}s (>= 5 menit) gagal swap sell (${sellQuote.error}). Mengeksekusi burn & reclaim rent SOL...`);
+        // Jika rute swap gagal akibat ketiadaan likuiditas selama >= 5 menit ATAU forceEmergencyClose aktif (rotasi ke koin baru):
+        // Eksekusi burn & reclaim rent SOL agar slot tidak macet dan modal sewa kembali!
+        if (forceEmergencyClose || (isLiquidityFailure && failedDurationMs >= 300000)) {
+          console.log(`[SAFETY-RUG-RECLAIM] ${forceEmergencyClose ? 'Rotasi koin baru / emergency force-close' : 'Likuiditas pool mati / rug-pull terkonfirmasi'} (${sellQuote.error}). Mengeksekusi burn & reclaim rent SOL...`);
           try {
             const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
             const burnRes = await burnAndCloseTokenAccount(mint);
@@ -1902,10 +1934,28 @@ export class WalletFollowerRunner {
                 writeFollowerRealState(this.dataDir, state);
                 console.log(`[SAFETY-RUG-RECLAIM] ✅ Akun on-chain sudah tertutup/bersih. Menutup status posisi lokal.`);
                 return;
+              } else if (forceEmergencyClose) {
+                // Saat rotasi paksa, tetap tandai posisi lokal CLOSED agar slot tidak mengunci koin baru
+                openPos.status = 'CLOSED';
+                openPos.remainingTokens = 0;
+                openPos.remainingBaseUnits = '0';
+                delete openPos.pendingSellRatio;
+                openPos.updatedAt = Date.now();
+                openPos.audit.push({ at: Date.now(), type: 'FORCE_CLOSED_ON_ROTATION', details: burnRes });
+                writeFollowerRealState(this.dataDir, state);
+                console.log(`[SAFETY-RUG-RECLAIM] Posisi lokal ditutup paksa demi rotasi koin baru.`);
+                return;
               }
             }
           } catch (e: any) {
             console.warn(`[SAFETY-RUG-RECLAIM-ERR] ${e?.message}`);
+            if (forceEmergencyClose) {
+              openPos.status = 'CLOSED';
+              openPos.remainingTokens = 0;
+              openPos.remainingBaseUnits = '0';
+              delete openPos.pendingSellRatio;
+              writeFollowerRealState(this.dataDir, state);
+            }
           }
         }
         return;

@@ -242,6 +242,32 @@ export class WalletFollowerLane {
     let pos = this.positions.get(signal.mint);
 
     if (!pos || pos.status === 'CLOSED') {
+      // Rotasi Modal Paper: Jika ada posisi koin lama yang masih OPEN, tutup agar modal berpindah ke koin baru
+      for (const [m, p] of Array.from(this.positions.entries())) {
+        if (m !== signal.mint && p.status === 'OPEN') {
+          p.status = 'CLOSED';
+          p.updatedAt = signal.timestamp || Date.now();
+          const exitPrice = p.lastObservedPriceUsd || p.avgEntryPriceUsd;
+          const valOut = p.totalTokens * exitPrice;
+          const pnl = valOut - p.remainingCostBasisUsd;
+          const roi = p.remainingCostBasisUsd > 0 ? (pnl / p.remainingCostBasisUsd) * 100 : 0;
+          p.exits.push({
+            targetSold: 0,
+            targetRemaining: 0,
+            sellRatioPct: 100,
+            tokensSold: p.totalTokens,
+            usdReceived: valOut,
+            priceUsd: exitPrice,
+            pnlUsd: pnl,
+            roiPct: roi,
+            isFullExit: true,
+            txHash: signal.txHash || 'ROTATION_EXIT',
+            timestamp: signal.timestamp || Date.now(),
+          });
+          p.realizedPnlUsd += pnl;
+        }
+      }
+
       pos = {
         mint: signal.mint,
         symbol: signal.symbol || 'UNKNOWN',
