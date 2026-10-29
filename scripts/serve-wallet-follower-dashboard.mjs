@@ -1022,8 +1022,8 @@ function renderHtmlDashboard(initialState = {}) {
           <div style="margin-bottom: 8px;">
             <label style="font-size: 11px; color: var(--text-muted);">Active Lane</label>
             <select id="ab-lane-select" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 6px 8px; border-radius: 6px; font-size: 12px; margin-top: 3px;">
-              <option value="LANE_2" ${abCfg.activeLane === 'LANE_2' ? 'selected' : ''}>Lane 2: Smart TP $5 (Recommended)</option>
-              <option value="LANE_1" ${abCfg.activeLane === 'LANE_1' ? 'selected' : ''}>Lane 1: Direct Scalper ($2/Buy)</option>
+              <option value="LANE_2" ${abCfg.activeLane === 'LANE_2' ? 'selected' : ''}>Lane 2: Smart TP ($${(abCfg.stakeUsdLane2 || 0.25).toFixed(2)}) (Recommended)</option>
+              <option value="LANE_1" ${abCfg.activeLane === 'LANE_1' ? 'selected' : ''}>Lane 1: Direct Scalper ($${(abCfg.stakeUsdLane1 || 0.25).toFixed(2)}/Buy)</option>
               <option value="BOTH" ${abCfg.activeLane === 'BOTH' ? 'selected' : ''}>Keduanya (Lane 1 & Lane 2)</option>
             </select>
           </div>
@@ -1098,7 +1098,7 @@ function renderHtmlDashboard(initialState = {}) {
       <div id="lane1-card" onclick="switchLane(1)" style="background: var(--card-bg); border: 2px solid var(--primary); border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <strong style="color: var(--primary); font-size: 16px;">🏁 Lane 1: Direct Scalper Follower</strong>
-          <span class="badge badge-rule">Pool: $20 ($2/Buy)</span>
+          <span class="badge badge-rule">Pool: $${((abCfg.stakeUsdLane1 || 0.25) * 10).toFixed(2)} ($${(abCfg.stakeUsdLane1 || 0.25).toFixed(2)}/Buy)</span>
         </div>
         <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
           Direct proportional follow, max 5x akumulasi per koin.
@@ -1113,8 +1113,8 @@ function renderHtmlDashboard(initialState = {}) {
       <!-- Lane 2 Card -->
       <div id="lane2-card" onclick="switchLane(2)" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <strong style="color: #f59e0b; font-size: 16px;">🎯 Lane 2: Smart TP $5 & Dip Rebound</strong>
-          <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4);">Modal: $5 / Trade</span>
+          <strong style="color: #f59e0b; font-size: 16px;">🎯 Lane 2: Smart TP & Dip Rebound</strong>
+          <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4);">Modal: $${(abCfg.stakeUsdLane2 || 0.25).toFixed(2)} / Trade</span>
         </div>
         <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
           TP +30%-50% (100% Sell), &gt;50% (70% Sell), Serok Dip Target 2x Buy &rarr; Quick TP +20%.
@@ -1173,13 +1173,13 @@ function renderHtmlDashboard(initialState = {}) {
         <div class="guide-step">
           <div class="guide-step-num">1</div>
           <div class="guide-step-text">
-            <strong>Initial Buy ($5)</strong> saat koin baru lahir (&le; 10 menit). Bot mengambil entry posisi awal.
+            <strong>Initial Buy ($${(abCfg.stakeUsdLane2 || 0.25).toFixed(2)})</strong> saat koin baru lahir (&le; 10 menit). Bot mengambil entry posisi awal.
           </div>
         </div>
         <div class="guide-step">
           <div class="guide-step-num">2</div>
           <div class="guide-step-text">
-            <strong>Rebound Buy ($5/entry)</strong> bertubi-tubi jika harga koreksi lalu mantul dan target trader akumulasi lagi.
+            <strong>Rebound Buy ($${(abCfg.stakeUsdLane2 || 0.25).toFixed(2)}/entry)</strong> bertubi-tubi jika harga koreksi lalu mantul dan target trader akumulasi lagi.
           </div>
         </div>
         <div class="guide-step">
@@ -1194,7 +1194,7 @@ function renderHtmlDashboard(initialState = {}) {
     <!-- LANE 2 SPECIAL SECTION: Performance Summary -->
     <div id="lane2-perf-container" class="lane2-perf-box" style="display: none;">
       <div class="perf-header">
-        <span>📊 Ringkasan Performa Lane 2: Smart TP $5 &amp; Dip Rebound</span>
+        <span>📊 Ringkasan Performa Lane 2: Smart TP ($${(abCfg.stakeUsdLane2 || 0.25).toFixed(2)}) &amp; Dip Rebound</span>
         <button class="copy-btn" onclick="copyLane2Report()">📋 Copy Report Markdown</button>
       </div>
       <div class="perf-row" id="lane2-perf-stats">
@@ -1257,6 +1257,8 @@ function renderHtmlDashboard(initialState = {}) {
   <div id="toast-msg" class="toast-msg">Report disalin ke clipboard!</div>
 
   <script>
+    window.currentL1Stake = ${abCfg.stakeUsdLane1 || 0.25};
+    window.currentL2Stake = ${abCfg.stakeUsdLane2 || 0.25};
     let currentFilter = 'all';
     let currentLane = 1;
     let lane2View = 'timeline';
@@ -1679,8 +1681,8 @@ function renderHtmlDashboard(initialState = {}) {
           const isBuy = ev.action && ev.action.includes('BUY');
           const isSell = ev.action && ev.action.includes('SELL');
           let actionBadge = '';
-          if (ev.action === 'BUY_INITIAL') actionBadge = '<span class="badge-buy">BUY INITIAL ($5.00)</span>';
-          else if (ev.action === 'BUY_REBOUND') actionBadge = '<span class="badge-buy" style="background: rgba(16,185,129,0.25);">BUY REBOUND ($5.00)</span>';
+          if (ev.action === 'BUY_INITIAL') actionBadge = \`<span class="badge-buy">BUY INITIAL (\${ev.stakeOrProceedsUsd ? '$' + ev.stakeOrProceedsUsd.toFixed(2) : '$' + (window.currentL2Stake || 0.25).toFixed(2)})</span>\`;
+          else if (ev.action === 'BUY_REBOUND') actionBadge = \`<span class="badge-buy" style="background: rgba(16,185,129,0.25);">BUY REBOUND (\${ev.stakeOrProceedsUsd ? '$' + ev.stakeOrProceedsUsd.toFixed(2) : '$' + (window.currentL2Stake || 0.25).toFixed(2)})</span>\`;
           else if (ev.action === 'SELL_TP_FULL') actionBadge = '<span class="badge-sell">TP +30%-50% (FULL 100%)</span>';
           else if (ev.action === 'SELL_TP_70') actionBadge = '<span class="badge-sell" style="background: rgba(245,158,11,0.2); color: #f59e0b;">TP >50% (SELL 70%)</span>';
           else if (ev.action === 'SELL_REBOUND_TP20') actionBadge = '<span class="badge-sell">REBOUND TP +20%</span>';

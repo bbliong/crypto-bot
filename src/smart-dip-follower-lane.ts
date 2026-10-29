@@ -75,8 +75,8 @@ export interface SmartDipConfig {
 
 export class SmartDipFollowerLane {
   public readonly targetWallet: string;
-  public readonly stakePerTradeUsd: number;
-  public readonly maxCapitalExposureUsd: number;
+  public stakePerTradeUsd: number;
+  public maxCapitalExposureUsd: number;
   private positionsFilePath: string;
   private tradesFilePath: string;
   private eventsFilePath: string;
@@ -97,6 +97,13 @@ export class SmartDipFollowerLane {
     this.eventsFilePath = config.eventsFilePath || path.resolve(process.cwd(), 'data/smart-dip-events.json');
 
     this.loadState();
+  }
+
+  public setStakePerTradeUsd(stake: number): void {
+    if (typeof stake === 'number' && stake > 0) {
+      this.stakePerTradeUsd = stake;
+      this.maxCapitalExposureUsd = stake * 10;
+    }
   }
 
   public getPosition(mint: string): SmartDipPosition | undefined {

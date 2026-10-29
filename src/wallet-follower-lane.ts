@@ -108,8 +108,8 @@ export interface FollowerLaneConfig {
 
 export class WalletFollowerLane {
   public readonly targetWallet: string;
-  public readonly stakePerEntryUsd: number;
-  public readonly maxCapitalExposureUsd: number;
+  public stakePerEntryUsd: number;
+  public maxCapitalExposureUsd: number;
   public readonly onlyNewTokens: boolean;
   private positionsFilePath: string;
   private tradesFilePath: string;
@@ -129,6 +129,13 @@ export class WalletFollowerLane {
     this.eventsFilePath = config.eventsFilePath || path.resolve(process.cwd(), 'data/wallet-follower-events.json');
 
     this.loadState();
+  }
+
+  public setStakePerEntryUsd(stake: number): void {
+    if (typeof stake === 'number' && stake > 0) {
+      this.stakePerEntryUsd = stake;
+      this.maxCapitalExposureUsd = stake * 10;
+    }
   }
 
   public getPosition(mint: string): FollowerPosition | undefined {

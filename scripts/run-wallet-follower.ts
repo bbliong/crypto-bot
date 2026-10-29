@@ -352,10 +352,14 @@ export class WalletFollowerRunner {
     this.targetWallet = options.targetWallet || TARGET_WALLET;
     this.dryRun = options.dryRun || false;
 
+    const initialCfg = readFollowerLiveConfig(this.dataDir);
+    const stakeL1 = initialCfg.stakeUsdLane1 !== undefined ? initialCfg.stakeUsdLane1 : 0.25;
+    const stakeL2 = initialCfg.stakeUsdLane2 !== undefined ? initialCfg.stakeUsdLane2 : 0.25;
+
     this.lane = new WalletFollowerLane({
       targetWallet: this.targetWallet,
-      stakePerEntryUsd: 2.0,
-      maxCapitalExposureUsd: 20.0,
+      stakePerEntryUsd: stakeL1,
+      maxCapitalExposureUsd: stakeL1 * 10,
       onlyNewTokens: true,
       positionsFilePath: path.resolve(process.cwd(), 'data/wallet-follower-positions.json'),
       tradesFilePath: path.resolve(process.cwd(), 'data/wallet-follower-trades.json'),
@@ -364,8 +368,8 @@ export class WalletFollowerRunner {
 
     this.smartDipLane = new SmartDipFollowerLane({
       targetWallet: this.targetWallet,
-      stakePerTradeUsd: 5.0,
-      maxCapitalExposureUsd: 20.0,
+      stakePerTradeUsd: stakeL2,
+      maxCapitalExposureUsd: stakeL2 * 10,
       positionsFilePath: path.resolve(process.cwd(), 'data/smart-dip-positions.json'),
       tradesFilePath: path.resolve(process.cwd(), 'data/smart-dip-trades.json'),
       eventsFilePath: path.resolve(process.cwd(), 'data/smart-dip-events.json'),
@@ -373,9 +377,13 @@ export class WalletFollowerRunner {
   }
 
   public async start(durationSeconds: number = 0): Promise<void> {
+    const curCfg = readFollowerLiveConfig(this.dataDir);
+    const curStakeL1 = curCfg.stakeUsdLane1 !== undefined ? curCfg.stakeUsdLane1 : 0.25;
+    const curStakeL2 = curCfg.stakeUsdLane2 !== undefined ? curCfg.stakeUsdLane2 : 0.25;
+
     console.log(`[FOLLOWER] Memulai Dedicated Wallet Follower...`);
     console.log(`[FOLLOWER] Target Wallet: ${this.targetWallet}`);
-    console.log(`[FOLLOWER] Rule: Buy $2.0/entry (Modal Kas $20 Pool, Max 10 buy tanpa sell, modal didaur ulang saat sell)`);
+    console.log(`[FOLLOWER] Rule: Buy $${curStakeL1.toFixed(2)}/entry di Lane 1, $${curStakeL2.toFixed(2)}/entry di Lane 2 (Sinkron Auto-Buy Config)`);
     console.log(`[FOLLOWER] Mode: APPLE-TO-APPLE (Hanya ikut saat target mulai beli token baru dari 0)`);
     console.log(`[FOLLOWER] Chrome CDP: ${this.cdpEndpoint}`);
     if (this.dryRun) console.log(`[FOLLOWER] MODE: DRY-RUN (Tidak mengubah posisi file)`);
@@ -676,6 +684,11 @@ export class WalletFollowerRunner {
     } else {
       console.log(`[TOKEN AGE UNKNOWN] Umur pool ${signal.symbol} tidak dapat diverifikasi via DexScreener/Helius.`);
     }
+
+    // Selalu sinkronkan modal stake Paper Lane 1 & Lane 2 dengan konfigurasi Auto-Buy terkini
+    const liveCfg = readFollowerLiveConfig(this.dataDir);
+    if (liveCfg.stakeUsdLane1) this.lane.setStakePerEntryUsd(liveCfg.stakeUsdLane1);
+    if (liveCfg.stakeUsdLane2) this.smartDipLane.setStakePerTradeUsd(liveCfg.stakeUsdLane2);
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
@@ -993,6 +1006,7 @@ export class WalletFollowerRunner {
     this.inFlightBuyMints.add(signal.mint);
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
+      if (liveCfg.stakeUsdLane2) this.smartDipLane.setStakePerTradeUsd(liveCfg.stakeUsdLane2);
       this.smartDipLane.setAllowReboundBuy(liveCfg.reboundBuyEnabled ?? false);
       this.smartDipLane.setMaxCyclesPerToken(liveCfg.maxCyclesPerToken ?? 1);
       const evalSmart = this.smartDipLane.evaluateBuySignal(signal, {
