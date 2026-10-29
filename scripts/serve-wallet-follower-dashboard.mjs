@@ -2006,9 +2006,9 @@ function renderHtmlDashboard(initialState = {}) {
       // Pre-fill inputs on initial load
       if (!hasLoadedAutobuyForm) {
         document.getElementById('ab-lane-select').value = cfg.activeLane || 'LANE_2';
-        document.getElementById('ab-stake-l1').value = cfg.stakeUsdLane1 || 2.0;
-        document.getElementById('ab-stake-l2').value = cfg.stakeUsdLane2 || 5.0;
-        document.getElementById('ab-max-buys').value = cfg.maxBuysQuota !== undefined ? cfg.maxBuysQuota : 3;
+        document.getElementById('ab-stake-l1').value = cfg.stakeUsdLane1 !== undefined ? cfg.stakeUsdLane1 : 0.25;
+        document.getElementById('ab-stake-l2').value = cfg.stakeUsdLane2 !== undefined ? cfg.stakeUsdLane2 : 0.25;
+        document.getElementById('ab-max-buys').value = cfg.maxBuysQuota !== undefined ? cfg.maxBuysQuota : 10;
         document.getElementById('ab-max-cycles').value = cfg.maxCyclesPerToken || 1;
         document.getElementById('ab-slip-buy').value = cfg.buySlippagePercent || 15;
         hasLoadedAutobuyForm = true;

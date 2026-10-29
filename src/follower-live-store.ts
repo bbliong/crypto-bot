@@ -94,6 +94,8 @@ export interface FollowerRealPosition {
   sells: FollowerRealOrder[];
   audit: Array<{ at: number; type: string; details: any }>;
   lastError?: string;
+  pendingSellRatio?: number;
+  firstSellFailedAt?: number;
 }
 
 export interface FollowerLiveReadiness {

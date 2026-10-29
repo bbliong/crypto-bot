@@ -978,8 +978,8 @@ export class WalletFollowerRunner {
             },
           });
 
-          // Real Auto-Sell Trigger untuk Lane 1
-          await this.maybeExecuteRealSell('LANE_1', signal.mint, execPrice);
+          // Real Auto-Sell Trigger untuk Lane 1 (mengikuti persis rasio jual target)
+          await this.maybeExecuteRealSell('LANE_1', signal.mint, execPrice, evalSell.sellRatioPct, evalSell.isFullExit);
         }
       } else {
         console.warn(`[SWAP SELL QUOTE FAILED] Gagal route sell: ${quote.error}. Dilarang fallback spot, sell ditolak!`);
@@ -1314,7 +1314,7 @@ export class WalletFollowerRunner {
 
   /**
    * Fast Retry Loop (setiap 1.5 detik):
-   * Khusus mengeksekusi posisi riil yang sudah mencapai TP / exit tetapi rute AMM sempat gagal/delay.
+   * Khusus mengeksekusi posisi riil yang order sell-nya tertunda/pending di AMM.
    */
   private async fastRetryPendingRealSells(): Promise<void> {
     if (!this.isRunning || !this.page || this.page.isClosed()) return;
@@ -1325,12 +1325,23 @@ export class WalletFollowerRunner {
 
       const smartOpen = this.smartDipLane.getOpenPositions();
       for (const rp of pendingRealPositions) {
-        const sp = smartOpen.find(s => s.mint === rp.mint);
-        // Jika posisi paper-nya sudah CLOSED (karena TP >= 30% / exit), posisi riil wajib disikat sell setiap 1.5 detik
-        if (!sp || sp.status === 'CLOSED') {
-          if (!this.inFlightSellMints.has(rp.mint)) {
-            console.log(`[FAST SELL RETRY 1.5s] ⚡ Menjual posisi riil ${rp.symbol} (${rp.remainingTokens} tokens) untuk kunci profit +30%...`);
-            await this.maybeExecuteRealSell(rp.lane, rp.mint, rp.exitPriceUsd || 0);
+        if (rp.lane === 'LANE_2') {
+          const sp = smartOpen.find(s => s.mint === rp.mint);
+          // Jika posisi paper Lane 2 sudah CLOSED (karena TP >= 30% / exit), posisi riil wajib disikat sell 100%
+          if (!sp || sp.status === 'CLOSED') {
+            if (!this.inFlightSellMints.has(rp.mint)) {
+              console.log(`[FAST SELL RETRY 1.5s] ⚡ Menjual posisi riil Lane 2 ${rp.symbol} (${rp.remainingTokens} tokens) untuk kunci profit +30%...`);
+              await this.maybeExecuteRealSell('LANE_2', rp.mint, rp.exitPriceUsd || 0, 100, true);
+            }
+          }
+        } else if (rp.lane === 'LANE_1') {
+          // Lane 1: Hanya menembak ulang sell jika sinyal sell target sebelumnya sempat tertunda/gagal
+          if (rp.pendingSellRatio && rp.pendingSellRatio > 0) {
+            if (!this.inFlightSellMints.has(rp.mint)) {
+              const isFull = rp.pendingSellRatio >= 99 || rp.remainingTokens <= 0;
+              console.log(`[FAST SELL RETRY 1.5s] ⚡ Menembak ulang sell Lane 1 ${rp.symbol} (${rp.pendingSellRatio.toFixed(1)}% porsi) mengikuti sinyal target...`);
+              await this.maybeExecuteRealSell('LANE_1', rp.mint, rp.exitPriceUsd || 0, rp.pendingSellRatio, isFull);
+            }
           }
         }
       }
@@ -1462,6 +1473,20 @@ export class WalletFollowerRunner {
         }
       }
 
+      // 2.3 Periksa inaktivitas pasar Lane 1 jika target menelantarkan koin selama >= 5 menit (300 detik)
+      // Ini memastikan jika koin terkena rug-pull dan target tidak pernah sell, koin di-burn & sewa SOL di-reclaim
+      try {
+        const realState = readFollowerRealState(this.dataDir);
+        const lane1RealOpen = realState.positions.filter(p => p.lane === 'LANE_1' && REAL_ACTIVE_STATUSES.has(p.status) && p.remainingTokens > 0);
+        for (const rp of lane1RealOpen) {
+          const inactiveMin = (now - (rp.updatedAt || rp.createdAt)) / 60000;
+          if (inactiveMin >= 5.0 && !this.inFlightSellMints.has(rp.mint)) {
+            console.log(`[LANE 1 INACTIVITY TIMEOUT 5M] Posisi riil ${rp.symbol} tidak ada aktivitas sell selama ${inactiveMin.toFixed(1)}m. Mencoba likuidasi / burn safety...`);
+            await this.maybeExecuteRealSell('LANE_1', rp.mint, rp.exitPriceUsd || 0, 100, true);
+          }
+        }
+      } catch {}
+
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       console.log(`--- LANE 1 (Direct Scalper $20 Pool, $2/buy) ---`);
       for (const p of openPositions) {
@@ -1545,36 +1570,56 @@ export class WalletFollowerRunner {
 
       // Pastikan hanya masuk dari awal (Initial Entry / Token Baru dari 0), bukan koin yang sedang jalan di tengah
       const existingRealPos = state.positions.find(p => p.mint === signal.mint && p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
-      if (existingRealPos && !config.reboundBuyEnabled) {
-        console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config (reboundBuyEnabled: false)`);
-        return;
-      }
 
-      // Validasi Entry:
-      if (!isInitialEntry) {
-        // Ini adalah sinyal REBOUND BUY
-        if (!config.reboundBuyEnabled) {
-          console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config`);
+      if (lane === 'LANE_2') {
+        if (existingRealPos && !config.reboundBuyEnabled) {
+          console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config (reboundBuyEnabled: false)`);
           return;
         }
-        // Pastikan kita memang memegang token ini di Initial Buy dan baru saja exit (bukan token asing acak di tengah jalan)
-        const recentClosedPos = state.positions.find(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED');
-        if (!recentClosedPos && !existingRealPos) {
-          console.log(`[REAL AUTO-BUY SKIP] Bukan token siklus kita. Rebound hanya diizinkan untuk token yang pernah lolos Initial Buy kita!`);
-          return;
+
+        // Validasi Entry Lane 2:
+        if (!isInitialEntry) {
+          // Ini adalah sinyal REBOUND BUY
+          if (!config.reboundBuyEnabled) {
+            console.log(`[REAL AUTO-BUY SKIP] Rebound Buy dimatikan oleh config`);
+            return;
+          }
+          // Pastikan kita memang memegang token ini di Initial Buy dan baru saja exit (bukan token asing acak di tengah jalan)
+          const recentClosedPos = state.positions.find(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED');
+          if (!recentClosedPos && !existingRealPos) {
+            console.log(`[REAL AUTO-BUY SKIP] Bukan token siklus kita. Rebound hanya diizinkan untuk token yang pernah lolos Initial Buy kita!`);
+            return;
+          }
+        } else {
+          // Ini adalah sinyal INITIAL BUY (Token Baru)
+          if (existingRealPos) {
+            console.log(`[REAL AUTO-BUY SKIP] Token ${signal.symbol} sudah memiliki posisi riil aktif di ${lane}`);
+            return;
+          }
+          // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
+          const maxCycles = config.maxCyclesPerToken ?? 1;
+          const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
+          if (closedRealCount >= maxCycles) {
+            console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
+            return;
+          }
         }
-      } else {
-        // Ini adalah sinyal INITIAL BUY (Token Baru)
+      } else if (lane === 'LANE_1') {
+        // Lane 1: Direct copy-trading akumulasi jika target menambah beli lagi pada koin yang sama
         if (existingRealPos) {
-          console.log(`[REAL AUTO-BUY SKIP] Token ${signal.symbol} sudah memiliki posisi riil aktif di ${lane}`);
-          return;
-        }
-        // Check Max Cycles per Token (default 1 siklus per koin seumur hidup)
-        const maxCycles = config.maxCyclesPerToken ?? 1;
-        const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
-        if (closedRealCount >= maxCycles) {
-          console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
-          return;
+          const maxExposureL1 = config.stakeUsdLane1 * 5; // batas akumulasi 5x entry
+          if (existingRealPos.costBasisUsd + config.stakeUsdLane1 > maxExposureL1 + 0.001) {
+            console.log(`[REAL AUTO-BUY SKIP] Max Exposure Lane 1 tercapai ($${existingRealPos.costBasisUsd.toFixed(2)} / $${maxExposureL1.toFixed(2)})`);
+            return;
+          }
+        } else {
+          // Initial entry Lane 1: periksa max cycles per token
+          const maxCycles = config.maxCyclesPerToken ?? 1;
+          const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
+          if (closedRealCount >= maxCycles) {
+            console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
+            return;
+          }
         }
       }
 
@@ -1650,11 +1695,14 @@ export class WalletFollowerRunner {
       if (existingRealPos) {
         existingRealPos.acquiredTokens += tokensAcquired;
         existingRealPos.remainingTokens += tokensAcquired;
+        const currentUnits = BigInt(existingRealPos.remainingBaseUnits || '0');
+        const addedUnits = BigInt(newOrder.tokenAmount || '0');
+        existingRealPos.remainingBaseUnits = (currentUnits + addedUnits).toString();
         existingRealPos.costBasisUsd += realStakeUsd;
         existingRealPos.updatedAt = Date.now();
         if (res.ok) existingRealPos.status = 'HOLDING';
         existingRealPos.buys.push(newOrder);
-        auditFollowerReal(this.dataDir, state, existingRealPos, 'REAL_REBOUND_BUY', { signal, res });
+        auditFollowerReal(this.dataDir, state, existingRealPos, lane === 'LANE_1' ? 'REAL_ACCUMULATE_BUY' : 'REAL_REBOUND_BUY', { signal, res });
       } else {
         const realPos: FollowerRealPosition = {
           id: posId,
@@ -1721,7 +1769,9 @@ export class WalletFollowerRunner {
   private async maybeExecuteRealSell(
     lane: 'LANE_1' | 'LANE_2',
     mint: string,
-    tokenPriceUsd: number
+    tokenPriceUsd: number,
+    sellRatioPct: number = 100,
+    isFullExit: boolean = true
   ): Promise<void> {
     try {
       const config = readFollowerLiveConfig(this.dataDir);
@@ -1733,11 +1783,31 @@ export class WalletFollowerRunner {
 
       if (!this.page || this.page.isClosed()) return;
 
-      console.log(`\n---------------------------------------------------------`);
-      console.log(`[REAL AUTO-SELL TRIGGER] 🚀 Mengambil route quote & kirim Real Swap SELL untuk ${openPos.symbol} (${openPos.remainingTokens} tokens)...`);
+      // Tentukan apakah full exit atau partial sell
+      let isActualFullExit = isFullExit || sellRatioPct >= 99;
+      let totalRemainingUnits = BigInt(openPos.remainingBaseUnits || Math.floor(openPos.remainingTokens * 1e6).toString());
+      let baseUnitsToSell: string;
 
-      // Gunakan baseUnits on-chain yang sudah tersinkronisasi sejak pasca-beli agar sell instan tanpa tunggu RPC
-      let baseUnits = openPos.remainingBaseUnits || Math.floor(openPos.remainingTokens * 1e6).toString();
+      if (lane === 'LANE_2' || isActualFullExit) {
+        baseUnitsToSell = totalRemainingUnits.toString();
+        isActualFullExit = true;
+      } else {
+        // Lane 1 partial sell
+        const ratioScaled = BigInt(Math.max(1, Math.min(10000, Math.round(sellRatioPct * 100))));
+        const calcUnits = (totalRemainingUnits * ratioScaled) / 10000n;
+        if (totalRemainingUnits - calcUnits < 100n || calcUnits <= 0n) {
+          baseUnitsToSell = totalRemainingUnits.toString();
+          isActualFullExit = true;
+        } else {
+          baseUnitsToSell = calcUnits.toString();
+        }
+      }
+
+      let baseUnits = baseUnitsToSell;
+      const tokensTargetToSell = Number(baseUnits) / 1e6;
+
+      console.log(`\n---------------------------------------------------------`);
+      console.log(`[REAL AUTO-SELL TRIGGER] 🚀 Mengambil route quote & kirim Real Swap SELL untuk ${openPos.symbol} (${tokensTargetToSell.toLocaleString()} tokens | ${sellRatioPct.toFixed(1)}% porsi | ${isActualFullExit ? 'FULL EXIT' : 'PARTIAL'}) di ${lane}...`);
 
       let sellQuote = await getBrowserSellSwapRoute(
         this.page,
@@ -1755,9 +1825,15 @@ export class WalletFollowerRunner {
           const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
           const onChain = await getOnChainTokenBalance(mint, openPos.wallet);
           if (onChain && onChain.amount && onChain.amount !== '0') {
-            baseUnits = onChain.amount;
             openPos.remainingTokens = onChain.uiAmount;
             openPos.remainingBaseUnits = onChain.amount;
+            totalRemainingUnits = BigInt(onChain.amount);
+            if (lane === 'LANE_2' || isActualFullExit) {
+              baseUnits = onChain.amount;
+            } else {
+              const ratioScaled = BigInt(Math.max(1, Math.min(10000, Math.round(sellRatioPct * 100))));
+              baseUnits = ((totalRemainingUnits * ratioScaled) / 10000n).toString();
+            }
             writeFollowerRealState(this.dataDir, state);
             console.log(`[REAL AUTO-SELL] Mengulang quote sell dengan saldo on-chain riil: ${onChain.uiAmount} tokens (${baseUnits} base units)...`);
             sellQuote = await getBrowserSellSwapRoute(
@@ -1777,11 +1853,12 @@ export class WalletFollowerRunner {
       if (!sellQuote.ok || !sellQuote.quote || !sellQuote.routeData) {
         console.warn(`[REAL AUTO-SELL ABORTED] Gagal route swap sell AMM (${sellQuote.error || 'NO_QUOTE'}). Menahan posisi untuk retry tick berikutnya.`);
 
-        // Catat waktu pertama kali sell terpicu tapi gagal
-        if (!(openPos as any).firstSellFailedAt) {
-          (openPos as any).firstSellFailedAt = Date.now();
-          writeFollowerRealState(this.dataDir, state);
+        // Catat waktu pertama kali sell terpicu tapi gagal & simpan pending sell ratio agar loop 1.5s menembak ulang
+        openPos.pendingSellRatio = sellRatioPct;
+        if (!openPos.firstSellFailedAt) {
+          openPos.firstSellFailedAt = Date.now();
         }
+        writeFollowerRealState(this.dataDir, state);
 
         const errStr = (sellQuote.error || '').toLowerCase();
         const isLiquidityFailure = errStr.includes('no route') || 
@@ -1790,18 +1867,20 @@ export class WalletFollowerRunner {
                                    errStr.includes('liquidity') ||
                                    errStr.includes('pool depleted');
         
-        const failedDurationMs = Date.now() - ((openPos as any).firstSellFailedAt || Date.now());
+        const failedDurationMs = Date.now() - (openPos.firstSellFailedAt || Date.now());
 
-        // Jika rute swap gagal akibat ketiadaan likuiditas selama >= 60 detik (1 menit):
+        // Jika rute swap gagal akibat ketiadaan likuiditas selama >= 5 menit (300 detik = 300.000 ms):
         // Token terkonfirmasi terkena rug-pull total / kolam dikuras dev. Eksekusi burn & reclaim rent SOL agar slot tidak macet!
-        if (isLiquidityFailure && failedDurationMs >= 60000) {
-          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati / rug-pull terkonfirmasi setelah ${Math.round(failedDurationMs / 1000)}s gagal swap sell (${sellQuote.error}). Mengeksekusi burn & reclaim rent SOL...`);
+        if (isLiquidityFailure && failedDurationMs >= 300000) {
+          console.log(`[SAFETY-RUG-RECLAIM] Likuiditas pool mati / rug-pull terkonfirmasi setelah ${Math.round(failedDurationMs / 1000)}s (>= 5 menit) gagal swap sell (${sellQuote.error}). Mengeksekusi burn & reclaim rent SOL...`);
           try {
             const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
             const burnRes = await burnAndCloseTokenAccount(mint);
             if (burnRes.ok) {
               openPos.status = 'CLOSED';
               openPos.remainingTokens = 0;
+              openPos.remainingBaseUnits = '0';
+              delete openPos.pendingSellRatio;
               openPos.updatedAt = Date.now();
               openPos.audit.push({ at: Date.now(), type: 'RENT_RECLAIMED_BURN', details: burnRes });
               writeFollowerRealState(this.dataDir, state);
@@ -1818,8 +1897,8 @@ export class WalletFollowerRunner {
       }
 
       // Reset tracking kegagalan jika sell rute berhasil didapat
-      if ((openPos as any).firstSellFailedAt) {
-        delete (openPos as any).firstSellFailedAt;
+      if (openPos.firstSellFailedAt) {
+        delete openPos.firstSellFailedAt;
       }
 
       const res = await this.liveAdapter.submitSwapOrder(this.page, {
@@ -1833,8 +1912,13 @@ export class WalletFollowerRunner {
         tokenPriceUsd,
       });
 
+      const tokensSold = Number(baseUnits) / 10 ** (sellQuote.quote?.inDecimals ?? 6);
       const usdReceived = Number(sellQuote.routeData?.quote?.amountOutUsd || 0);
-      const pnlUsd = usdReceived > 0 ? Number((usdReceived - openPos.costBasisUsd).toFixed(4)) : 0;
+
+      // Hitung cost basis dari porsi yang terjual
+      const soldRatioActual = openPos.remainingTokens > 0 ? Math.min(1.0, tokensSold / openPos.remainingTokens) : 1.0;
+      const costBasisSold = openPos.costBasisUsd * soldRatioActual;
+      const pnlUsd = usdReceived > 0 ? Number((usdReceived - costBasisSold).toFixed(4)) : 0;
 
       openPos.sells.push({
         side: 'SELL',
@@ -1845,42 +1929,56 @@ export class WalletFollowerRunner {
         hash: res.hash,
         stakeUsd: usdReceived,
         tokenAmount: baseUnits,
-        decimals: 6,
+        decimals: sellQuote.quote?.inDecimals ?? 6,
         solUsd: this.solPriceUsd,
         confirmedAt: res.ok ? Date.now() : undefined,
         error: res.error,
       });
 
       if (res.ok) {
-        openPos.status = 'CLOSED';
-        openPos.remainingTokens = 0;
-        openPos.realizedPnlUsd = pnlUsd;
-        openPos.exitPriceUsd = tokenPriceUsd;
+        delete openPos.pendingSellRatio;
+        if (isActualFullExit) {
+          openPos.status = 'CLOSED';
+          openPos.remainingTokens = 0;
+          openPos.remainingBaseUnits = '0';
+          openPos.realizedPnlUsd += pnlUsd;
+          openPos.exitPriceUsd = tokenPriceUsd;
 
-        // Auto-reclaim rent SOL dari token account yang sudah kosong setelah sell
-        setTimeout(async () => {
-          try {
-            const { reclaimRentForMint } = await import('./solana-rent-reclaimer.mjs');
-            console.log(`[AUTO-RECLAIM-RENT] Memeriksa akun kosong untuk reclaim rent token ${mint}...`);
-            const reclaimRes = await reclaimRentForMint(mint);
-            if (reclaimRes.ok && reclaimRes.reclaimedSol > 0) {
-              console.log(`[AUTO-RECLAIM-RENT] ✅ Berhasil me-reclaim +${reclaimRes.reclaimedSol.toFixed(6)} SOL untuk mint ${mint}! Tx: ${reclaimRes.signatures?.[0]}`);
-              auditFollowerReal(this.dataDir, state, openPos, 'RENT_RECLAIMED', {
-                reclaimedSol: reclaimRes.reclaimedSol,
-                signatures: reclaimRes.signatures,
-              });
+          // Auto-reclaim rent SOL dari token account yang sudah kosong setelah sell
+          setTimeout(async () => {
+            try {
+              const { reclaimRentForMint } = await import('./solana-rent-reclaimer.mjs');
+              console.log(`[AUTO-RECLAIM-RENT] Memeriksa akun kosong untuk reclaim rent token ${mint}...`);
+              const reclaimRes = await reclaimRentForMint(mint);
+              if (reclaimRes.ok && reclaimRes.reclaimedSol > 0) {
+                console.log(`[AUTO-RECLAIM-RENT] ✅ Berhasil me-reclaim +${reclaimRes.reclaimedSol.toFixed(6)} SOL untuk mint ${mint}! Tx: ${reclaimRes.signatures?.[0]}`);
+                auditFollowerReal(this.dataDir, state, openPos, 'RENT_RECLAIMED', {
+                  reclaimedSol: reclaimRes.reclaimedSol,
+                  signatures: reclaimRes.signatures,
+                });
+              }
+            } catch (err: any) {
+              console.warn(`[AUTO-RECLAIM-RENT-WARN] ${err?.message}`);
             }
-          } catch (err: any) {
-            console.warn(`[AUTO-RECLAIM-RENT-WARN] ${err?.message}`);
-          }
-        }, 4000);
+          }, 4000);
+        } else {
+          // Parsial sell: status tetap HOLDING, kurangi saldo tersisa
+          openPos.status = 'HOLDING';
+          openPos.remainingTokens = Math.max(0, openPos.remainingTokens - tokensSold);
+          const nextRemainingUnits = BigInt(openPos.remainingBaseUnits || '0') - BigInt(baseUnits);
+          openPos.remainingBaseUnits = (nextRemainingUnits > 0n ? nextRemainingUnits : 0n).toString();
+          openPos.costBasisUsd = Math.max(0, openPos.costBasisUsd - costBasisSold);
+          openPos.realizedPnlUsd += pnlUsd;
+          openPos.exitPriceUsd = tokenPriceUsd;
+          console.log(`[REAL PARTIAL SELL] ✅ Terjual ${tokensSold.toLocaleString()} token (${sellRatioPct.toFixed(1)}%). Sisa: ${openPos.remainingTokens.toLocaleString()} tokens`);
+        }
       } else {
         openPos.lastError = res.error;
       }
       openPos.updatedAt = Date.now();
 
       auditFollowerReal(this.dataDir, state, openPos, 'REAL_SELL', { res, usdReceived, pnlUsd });
-      console.log(`[REAL AUTO-SELL RESULT] Status: ${res.ok ? 'CLOSED' : 'FAILED'} | PnL: $${pnlUsd} | Hash: ${res.hash || '-'}`);
+      console.log(`[REAL AUTO-SELL RESULT] Status: ${res.ok ? (isActualFullExit ? 'CLOSED' : 'PARTIAL_CONFIRMED') : 'FAILED'} | PnL: $${pnlUsd} | Hash: ${res.hash || '-'}`);
       console.log(`---------------------------------------------------------\n`);
     } catch (err: any) {
       console.error(`[REAL-SELL-ERR] ${err?.message}`);
