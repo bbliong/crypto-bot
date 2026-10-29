@@ -1605,7 +1605,7 @@ export class WalletFollowerRunner {
           }
         }
       } else if (lane === 'LANE_1') {
-        // Lane 1: Direct copy-trading akumulasi jika target menambah beli lagi pada koin yang sama
+        // Lane 1: Direct Pure Copy-Trading (Bebas Siklus / Unlimited Cycles per token)
         if (existingRealPos) {
           const maxExposureL1 = config.stakeUsdLane1 * 5; // batas akumulasi 5x entry
           if (existingRealPos.costBasisUsd + config.stakeUsdLane1 > maxExposureL1 + 0.001) {
@@ -1613,13 +1613,9 @@ export class WalletFollowerRunner {
             return;
           }
         } else {
-          // Initial entry Lane 1: periksa max cycles per token
-          const maxCycles = config.maxCyclesPerToken ?? 1;
-          const closedRealCount = state.positions.filter(p => p.mint === signal.mint && p.lane === lane && p.status === 'CLOSED').length;
-          if (closedRealCount >= maxCycles) {
-            console.log(`[REAL AUTO-BUY SKIP] Max Cycles tercapai untuk ${signal.symbol} (${closedRealCount}/${maxCycles}). Dilarang membuka siklus baru pada koin yang sama!`);
-            return;
-          }
+          // Siklus baru diizinkan tanpa batas (unlimited cycles) di Lane 1
+          // Selama posisi sebelumnya sudah CLOSED (saldo 0) dan slot aktif tersedia, bot bebas masuk kembali
+          console.log(`[LANE 1 UNLIMITED CYCLE] Token ${signal.symbol} membuka siklus baru mengikuti buy target.`);
         }
       }
 
