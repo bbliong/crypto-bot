@@ -24,6 +24,7 @@ export interface SmartDipPosition {
   realizedPnlUsd: number;
   lastTradeActivityAt?: number;
   isMoonbagActive?: boolean;
+  peakTargetHolding?: number;
   
   // History
   entries: Array<{
@@ -326,6 +327,7 @@ export class SmartDipFollowerLane {
         realizedPnlUsd: 0,
         lastTradeActivityAt: now * 1000,
         isMoonbagActive: false,
+        peakTargetHolding: signal.remainingHolding,
         entries: [
           {
             type: 'INITIAL_BUY',
@@ -508,10 +510,14 @@ export class SmartDipFollowerLane {
     }
 
     const totalHoldingBeforeSell = signal.remainingHolding + signal.tokenAmount;
-    const sellRatioPct = totalHoldingBeforeSell > 0 ? (signal.tokenAmount / totalHoldingBeforeSell) * 100 : 100;
-    const targetRemaining = signal.remainingHolding;
-    // Target Full Exit: Jika sisa token target < 100 atau < 5% dari holding awal sebelum sell
-    const isTargetFullExit = targetRemaining < 100 || (totalHoldingBeforeSell > 0 && targetRemaining / totalHoldingBeforeSell < 0.05);
+    const peak = Math.max(pos.peakTargetHolding || 0, totalHoldingBeforeSell);
+    pos.peakTargetHolding = peak;
+
+    const singleDumpRatio = totalHoldingBeforeSell > 0 ? (signal.tokenAmount / totalHoldingBeforeSell) * 100 : 100;
+    const cumulativeDropRatio = peak > 0 ? ((peak - signal.remainingHolding) / peak) * 100 : singleDumpRatio;
+
+    // 1. Target Full Exit: Jika sisa token target < 100 atau < 5% dari holding awal sebelum sell
+    const isTargetFullExit = signal.remainingHolding < 100 || (totalHoldingBeforeSell > 0 && signal.remainingHolding / totalHoldingBeforeSell < 0.05);
 
     if (isTargetFullExit) {
       return {
@@ -522,15 +528,27 @@ export class SmartDipFollowerLane {
       };
     }
 
-    // Shadow Target Exit HANYA untuk Fase REBOUND:
-    // Pada fase Rebound (serok koreksi dip), jika target membuang >= 25% porsi serokannya, bot ikut cut-loss.
-    // Pada fase INITIAL: Selama target masih menyimpan koinnya (partial sell), bot tetap HOLD mengikuti target!
-    if (pos.phase === 'HOLDING_REBOUND' && sellRatioPct >= 25.0) {
+    // 2. Jaring Pengaman Anti-Rug Kumulatif (Target Cumulative Dump >= 50%):
+    // Jika target secara kumulatif telah membuang >= 50% dari total koin terbesarnya,
+    // bot DILARANG menunggu lebih lama! Langsung cut-loss darurat 100% bersama target sebelum kolam dikuras dev!
+    if (cumulativeDropRatio >= 50.0) {
       return {
         shouldSell: true,
         isTargetFullExit: true,
         tokensToSell: pos.totalTokens,
-        reason: `REBOUND_TARGET_SHADOW_EXIT (Target buang ${sellRatioPct.toFixed(1)}% saat rebound, bot ikut cut-loss darurat)`,
+        reason: `TARGET_CUMULATIVE_DUMP_50% (Target sudah buang ${cumulativeDropRatio.toFixed(1)}% >= 50% koinnya, cut-loss darurat sebelum pool dikuras)`,
+      };
+    }
+
+    // 3. Shadow Target Exit HANYA untuk Fase REBOUND:
+    // Pada fase Rebound (serok koreksi dip), jika target membuang >= 25% porsi serokannya, bot ikut cut-loss.
+    // Pada fase INITIAL: Selama target masih menyimpan koinnya (partial sell < 50%), bot tetap HOLD mengikuti target!
+    if (pos.phase === 'HOLDING_REBOUND' && singleDumpRatio >= 25.0) {
+      return {
+        shouldSell: true,
+        isTargetFullExit: true,
+        tokensToSell: pos.totalTokens,
+        reason: `REBOUND_TARGET_SHADOW_EXIT (Target buang ${singleDumpRatio.toFixed(1)}% saat rebound, bot ikut cut-loss darurat)`,
       };
     }
 
