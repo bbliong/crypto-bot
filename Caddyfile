@@ -16,6 +16,11 @@ cr.bbliong.io {
         reverse_proxy 127.0.0.1:4192
     }
 
+    # DNA Smart Wallet Clone Hunter Radar
+    handle_path /clone-radar* {
+        reverse_proxy 127.0.0.1:4196
+    }
+
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }
