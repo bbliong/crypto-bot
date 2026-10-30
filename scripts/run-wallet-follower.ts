@@ -79,6 +79,7 @@ export class WalletFollowerRunner {
   private isPollingHelius = false;
   private heliusWs: WebSocket | null = null;
   private heliusWsReconnectTimer: NodeJS.Timeout | null = null;
+  private startTimeSec: number = Math.floor(Date.now() / 1000);
 
   private initHeliusKey(): void {
     if (process.env.HELIUS_API_KEY) {
@@ -187,6 +188,7 @@ export class WalletFollowerRunner {
       if (!Array.isArray(txs) || txs.length === 0) return;
       const tx = txs[0];
       if (tx.type !== 'SWAP' && !tx.events?.swap) return;
+      if (tx.timestamp && tx.timestamp < this.startTimeSec) return;
 
       let tokenMint = null;
       let tokenDiff = 0;
@@ -250,10 +252,16 @@ export class WalletFollowerRunner {
     if (!res.ok) return;
     const txs = await res.json() as any[];
     if (!Array.isArray(txs)) return;
+    txs.reverse(); // Chronological oldest to newest
 
     for (const tx of txs) {
       const sig = tx.signature;
       if (!sig || this.processedTxHashes.has(sig)) continue;
+
+      if (tx.timestamp && tx.timestamp < this.startTimeSec) {
+        this.processedTxHashes.add(sig);
+        continue;
+      }
 
       if (tx.type !== 'SWAP' && !tx.events?.swap) {
         this.processedTxHashes.add(sig);
