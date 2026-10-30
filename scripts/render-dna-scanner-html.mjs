@@ -42,7 +42,7 @@ export function renderDnaScannerHtml() {
   const multiHit = wallets.filter(w => w.hitCount >= 2);
   const multiStep = wallets.filter(w => w.isMultiStepScalper);
   const exactClones = wallets.filter(w => w.isStrictSerial !== false && w.isMultiStepScalper);
-  const pingPongWallets = wallets.filter(w => Boolean(w.isPingPongRebuy || w.isMultiStepScalper || (w.tokensTraded && w.tokensTraded.some(t => (t.sellCount || 1) >= 2))));
+  const pingPongWallets = wallets.filter(w => w.isPingPongRebuy === true);
   const totalCuan = wallets.reduce((acc, w) => acc + (w.totalRealizedProfitUsd || 0), 0);
   const avgHold = wallets.length
     ? Math.round(wallets.reduce((acc, w) => acc + (w.avgHoldSec || 0), 0) / wallets.length)
@@ -272,7 +272,7 @@ export function renderDnaScannerHtml() {
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <button class="filter-btn active" onclick="setFilter('all', this)">Semua (${totWallets})</button>
-        <button class="filter-btn" onclick="setFilter('pingpong', this)">🏓 Ping-Pong Re-Buy (${pingPongWallets.length})</button>
+        <button class="filter-btn" onclick="setFilter('pingpong', this)">🏓 Strict Ping-Pong (${pingPongWallets.length})</button>
         <button class="filter-btn" onclick="setFilter('exact', this)">👑 Exact Clones (${exactClones.length})</button>
         <button class="filter-btn" onclick="setFilter('multi', this)">👑 Multi-Hit (${multiHit.length})</button>
         <button class="filter-btn" onclick="setFilter('twap', this)">🔁 TWAP Multi-Sell (${multiStep.length})</button>
@@ -309,8 +309,10 @@ export function renderDnaScannerHtml() {
             const maxSells = Math.max(...w.tokensTraded.map(t => t.sellCount || 1), 1);
             const twapBadge = isMultiStep ? `<span class="badge-hit badge-twap" title="TWAP Multi-Sell: Target mencicil jual berkali-kali">🔁 TWAP (${maxSells}x Sells)</span>` : `<span class="badge-hit" style="background:#1e293b;color:#64748b;">1x Sell</span>`;
             const pureDexBadge = `<span class="badge-hit badge-puredex" title="100% AMM Swaps: 0 casual Tx In/Out">💎 PURE DEX</span>`;
-            const isPingPong = Boolean(w.isPingPongRebuy === true || w.isMultiStepScalper === true || (w.tokensTraded && w.tokensTraded.some(t => (t.sellCount || 1) >= 2)));
-            const pingPongBadge = isPingPong ? `<span class="badge-hit badge-pingpong" title="Ping-Pong: Beli -> Jual -> Beli lagi koin yang sama berkali-kali">🏓 PING-PONG</span>` : ``;
+            const isPingPong = w.isPingPongRebuy === true;
+            const maxTrans = w.pingPongIntensity?.maxTransitions || 0;
+            const rebuys = w.pingPongIntensity?.rebuysAfterSell || 0;
+            const pingPongBadge = isPingPong ? `<span class="badge-hit badge-pingpong" title="Strict Ping-Pong: ${maxTrans}x B⇄S berturut-turut pada 1 token & ${rebuys}x Re-Buy setelah Sell">🏓 PING-PONG (${maxTrans}x B⇄S)</span>` : ``;
 
             const gp = w.gmgnProfile || {};
             const r7d = gp.realized7d !== undefined ? gp.realized7d : w.totalRealizedProfitUsd;
