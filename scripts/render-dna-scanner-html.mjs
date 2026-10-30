@@ -193,6 +193,7 @@ export function renderDnaScannerHtml() {
     .badge-serial { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; }
     .badge-twap { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #a855f7; }
     .badge-puredex { background: rgba(6, 182, 212, 0.18); color: #22d3ee; border: 1px solid #06b6d4; }
+    .badge-pingpong { background: rgba(236, 72, 153, 0.2); color: #f472b6; border: 1px solid #ec4899; }
 
     .token-chip-container {
       display: flex; flex-direction: column; gap: 6px; max-height: 120px; overflow-y: auto;
@@ -271,6 +272,7 @@ export function renderDnaScannerHtml() {
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="filter-btn active" onclick="setFilter('all')">Semua (${totWallets})</button>
         <button class="filter-btn" onclick="setFilter('exact')">👑 Exact Clones (${exactClones.length})</button>
+        <button class="filter-btn" onclick="setFilter('pingpong')">🏓 Ping-Pong Re-Buy (Koin Sama)</button>
         <button class="filter-btn" onclick="setFilter('multi')">👑 Multi-Hit (${multiHit.length})</button>
         <button class="filter-btn" onclick="setFilter('twap')">🔁 TWAP Multi-Sell (${multiStep.length})</button>
         <button class="filter-btn" onclick="setFilter('serial')">🎯 Strict Serial</button>
@@ -305,6 +307,8 @@ export function renderDnaScannerHtml() {
             const maxSells = Math.max(...w.tokensTraded.map(t => t.sellCount || 1), 1);
             const twapBadge = isMultiStep ? `<span class="badge-hit badge-twap" title="TWAP Multi-Sell: Target mencicil jual berkali-kali">🔁 TWAP (${maxSells}x Sells)</span>` : `<span class="badge-hit" style="background:#1e293b;color:#64748b;">1x Sell</span>`;
             const pureDexBadge = `<span class="badge-hit badge-puredex" title="100% AMM Swaps: 0 casual Tx In/Out">💎 PURE DEX</span>`;
+            const isPingPong = w.isPingPongRebuy === true;
+            const pingPongBadge = isPingPong ? `<span class="badge-hit badge-pingpong" title="Ping-Pong: Beli -> Jual -> Beli lagi koin yang sama berkali-kali">🏓 PING-PONG</span>` : ``;
 
             const gp = w.gmgnProfile || {};
             const r7d = gp.realized7d !== undefined ? gp.realized7d : w.totalRealizedProfitUsd;
@@ -314,7 +318,7 @@ export function renderDnaScannerHtml() {
             const tradeText = (tb + ts) > 0 ? `${(tb + ts).toLocaleString()} Trades` : `Fresh Scalper`;
 
             return `
-              <tr class="wallet-row" data-exact="${isExact}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
+              <tr class="wallet-row" data-exact="${isExact}" data-pingpong="${isPingPong}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
                 <td class="mono" style="color:#64748b;">${idx + 1}</td>
                 <td>
                   <strong>${w.address.slice(0, 6)}...${w.address.slice(-4)}</strong>
@@ -327,6 +331,7 @@ export function renderDnaScannerHtml() {
                     ${serialBadge}
                     ${twapBadge}
                     ${pureDexBadge}
+                    ${pingPongBadge}
                   </div>
                 </td>
                 <td class="mono font-semibold" style="color:var(--amber); font-size:1rem;">${w.score}/100</td>
@@ -388,6 +393,7 @@ export function renderDnaScannerHtml() {
         let matchSearch = !q || addr.includes(q) || toks.includes(q);
         let matchFilter = true;
         if (currentFilter === 'exact') matchFilter = (r.getAttribute('data-exact') === 'true');
+        if (currentFilter === 'pingpong') matchFilter = (r.getAttribute('data-pingpong') === 'true');
         if (currentFilter === 'multi') matchFilter = isMulti;
         if (currentFilter === 'twap') matchFilter = (r.getAttribute('data-twap') === 'true');
         if (currentFilter === 'serial') matchFilter = (r.getAttribute('data-serial') === 'true');

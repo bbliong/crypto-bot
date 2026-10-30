@@ -24,6 +24,7 @@ export interface DiscoveredCloneWallet {
   isStrictSerial: boolean; // TRUE if wallet never holds 2 tokens concurrently
   isMultiStepScalper: boolean; // TRUE if executes multiple sells/actions per token
   isPureDexTrader: boolean; // TRUE if 0 casual tx_in / tx_out during lifecycle
+  isPingPongRebuy?: boolean; // TRUE if buys, sells, and RE-BUYS the SAME token repeatedly
   tokensTraded: Array<{
     mint: string;
     symbol: string;
