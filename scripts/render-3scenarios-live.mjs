@@ -7,7 +7,7 @@ const dataDir = join(__dirname, '../data');
 
 export function render3ScenariosLiveHtml() {
   const liveFile = join(dataDir, 'dryrun-3scenarios-live.json');
-  let data = { s1: null, s2: null, s3: null };
+  let data = { s1: null, s2: null, s3: null, s4: null };
   if (existsSync(liveFile)) {
     try {
       data = JSON.parse(readFileSync(liveFile, 'utf8'));
@@ -17,6 +17,7 @@ export function render3ScenariosLiveHtml() {
   const s1 = data.s1 || { name: 'Skenario 1 (Statis $2, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s2 = data.s2 || { name: 'Skenario 2 (Dynamic V1 $1-$5, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s3 = data.s3 || { name: 'Skenario 3 (Dynamic V2 $1-$5 Bertingkat, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s4 = data.s4 || { name: 'Skenario 4 (Single Buy $5 Only, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color) {
     const isPnlPositive = s.realizedPnl >= 0;
@@ -99,7 +100,7 @@ export function render3ScenariosLiveHtml() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Dry-Run 3 Skenario Simultan (Pool $20) | cr.bbliong.io</title>
+  <title>Live Dry-Run 4 Skenario Simultan (Pool $20) | cr.bbliong.io</title>
   <style>
     :root {
       --bg-dark: #090d16;
@@ -121,7 +122,7 @@ export function render3ScenariosLiveHtml() {
       padding: 24px 16px;
       line-height: 1.5;
     }
-    .container { max-width: 1500px; margin: 0 auto; }
+    .container { max-width: 1600px; margin: 0 auto; }
     .header {
       display: flex;
       flex-wrap: wrap;
@@ -135,7 +136,7 @@ export function render3ScenariosLiveHtml() {
     .header-title h1 {
       font-size: 1.6rem;
       font-weight: 700;
-      background: linear-gradient(135deg, #a5b4fc, #38bdf8, #f472b6);
+      background: linear-gradient(135deg, #a5b4fc, #38bdf8, #f472b6, #fbbf24);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       display: flex;
@@ -165,11 +166,11 @@ export function render3ScenariosLiveHtml() {
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-    /* 3 Scenarios Grid */
+    /* 4 Scenarios Grid */
     .scenarios-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+      gap: 18px;
       margin-bottom: 24px;
     }
     .scenario-panel {
@@ -182,13 +183,13 @@ export function render3ScenariosLiveHtml() {
       gap: 16px;
     }
     .panel-header { border-bottom: 1px solid #1e293b; padding-bottom: 10px; }
-    .panel-title { font-size: 1.1rem; font-weight: 700; color: #f8fafc; }
+    .panel-title { font-size: 1.05rem; font-weight: 700; color: #f8fafc; }
     .panel-desc { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
 
     .stat-mini-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
+      gap: 8px;
     }
     .mini-stat {
       background: #0f172a;
@@ -196,9 +197,9 @@ export function render3ScenariosLiveHtml() {
       border-radius: 8px;
       padding: 10px;
     }
-    .mini-label { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; }
-    .mini-val { font-size: 1.2rem; font-weight: 700; margin-top: 2px; }
-    .mini-sub { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+    .mini-label { font-size: 0.68rem; color: #94a3b8; text-transform: uppercase; }
+    .mini-val { font-size: 1.15rem; font-weight: 700; margin-top: 2px; }
+    .mini-sub { font-size: 0.68rem; color: #64748b; margin-top: 2px; }
 
     .val-emerald { color: var(--emerald); }
     .val-rose { color: var(--rose); }
@@ -225,10 +226,10 @@ export function render3ScenariosLiveHtml() {
         <div>
           <h1>
             <span class="live-dot"></span>
-            Live 3-Way Dry-Run Comparison Radar
+            Live 4-Way Dry-Run Comparison Radar
           </h1>
           <div class="header-subtitle">
-            Simulasi Aktif Real-Time 3 Skenario Sekaligus &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong>
+            Simulasi Aktif Real-Time 4 Skenario Sekaligus &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong> &bull; Akumulasi Jual <strong>&ge; 15% &rarr; Full Exit 100%</strong>
           </div>
         </div>
       </div>
@@ -236,7 +237,7 @@ export function render3ScenariosLiveHtml() {
         <a href="/add-fol" class="nav-btn">⚡ Live Dashboard</a>
         <a href="/add-fol/backtest-dynamic" class="nav-btn">📊 Backtest V1 ($5 Cap)</a>
         <a href="/add-fol/backtest-dynamic2" class="nav-btn">🚀 Backtest V2 ($20 Pool)</a>
-        <a href="/add-fol/3scenarios" class="nav-btn active">📡 Live 3 Skenario</a>
+        <a href="/add-fol/3scenarios" class="nav-btn active">📡 Live Radar Multi-Skenario</a>
       </div>
     </header>
 
@@ -244,10 +245,11 @@ export function render3ScenariosLiveHtml() {
       ${renderScenarioCard(s1, 'var(--primary)')}
       ${renderScenarioCard(s2, 'var(--cyan)')}
       ${renderScenarioCard(s3, 'var(--purple)')}
+      ${renderScenarioCard(s4, 'var(--amber)')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 3-Way Parallel Dry-Run Engine &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 4-Way Parallel Dry-Run Engine &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 

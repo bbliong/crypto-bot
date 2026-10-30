@@ -255,8 +255,8 @@ const server = createServer((req, res) => {
     return res.end(JSON.stringify(data));
   }
 
-  // Dedicated Live 3-Way Scenario Dry-Run Dashboard
-  if (pathname.includes('/3scenarios')) {
+  // Dedicated Live Multi-Scenario Dry-Run Dashboard (/3scenarios, /4scenarios, /scenarios)
+  if (pathname.includes('/3scenarios') || pathname.includes('/4scenarios') || pathname.includes('/scenarios')) {
     const html = render3ScenariosLiveHtml();
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(html);
