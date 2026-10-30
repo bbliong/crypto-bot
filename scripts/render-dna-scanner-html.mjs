@@ -42,6 +42,7 @@ export function renderDnaScannerHtml() {
   const multiHit = wallets.filter(w => w.hitCount >= 2);
   const multiStep = wallets.filter(w => w.isMultiStepScalper);
   const exactClones = wallets.filter(w => w.isStrictSerial !== false && w.isMultiStepScalper);
+  const pingPongWallets = wallets.filter(w => Boolean(w.isPingPongRebuy || w.isMultiStepScalper || (w.tokensTraded && w.tokensTraded.some(t => (t.sellCount || 1) >= 2))));
   const totalCuan = wallets.reduce((acc, w) => acc + (w.totalRealizedProfitUsd || 0), 0);
   const avgHold = wallets.length
     ? Math.round(wallets.reduce((acc, w) => acc + (w.avgHoldSec || 0), 0) / wallets.length)
@@ -269,13 +270,14 @@ export function renderDnaScannerHtml() {
 
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="filter-btn active" onclick="setFilter('all')">Semua (${totWallets})</button>
-        <button class="filter-btn" onclick="setFilter('exact')">👑 Exact Clones (${exactClones.length})</button>
-        <button class="filter-btn" onclick="setFilter('pingpong')">🏓 Ping-Pong Re-Buy (Koin Sama)</button>
-        <button class="filter-btn" onclick="setFilter('multi')">👑 Multi-Hit (${multiHit.length})</button>
-        <button class="filter-btn" onclick="setFilter('twap')">🔁 TWAP Multi-Sell (${multiStep.length})</button>
-        <button class="filter-btn" onclick="setFilter('serial')">🎯 Strict Serial</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button class="filter-btn active" onclick="setFilter('all', this)">Semua (${totWallets})</button>
+        <button class="filter-btn" onclick="setFilter('pingpong', this)">🏓 Ping-Pong Re-Buy (${pingPongWallets.length})</button>
+        <button class="filter-btn" onclick="setFilter('exact', this)">👑 Exact Clones (${exactClones.length})</button>
+        <button class="filter-btn" onclick="setFilter('multi', this)">👑 Multi-Hit (${multiHit.length})</button>
+        <button class="filter-btn" onclick="setFilter('twap', this)">🔁 TWAP Multi-Sell (${multiStep.length})</button>
+        <button class="filter-btn" onclick="setFilter('serial', this)">🎯 Strict Serial</button>
+        <button class="filter-btn" style="background:#0284c7; color:#fff; border-color:#0284c7; margin-left:8px;" onclick="window.location.reload()">🔄 Refresh Data</button>
       </div>
     </div>
 
@@ -307,7 +309,7 @@ export function renderDnaScannerHtml() {
             const maxSells = Math.max(...w.tokensTraded.map(t => t.sellCount || 1), 1);
             const twapBadge = isMultiStep ? `<span class="badge-hit badge-twap" title="TWAP Multi-Sell: Target mencicil jual berkali-kali">🔁 TWAP (${maxSells}x Sells)</span>` : `<span class="badge-hit" style="background:#1e293b;color:#64748b;">1x Sell</span>`;
             const pureDexBadge = `<span class="badge-hit badge-puredex" title="100% AMM Swaps: 0 casual Tx In/Out">💎 PURE DEX</span>`;
-            const isPingPong = w.isPingPongRebuy === true;
+            const isPingPong = Boolean(w.isPingPongRebuy === true || w.isMultiStepScalper === true || (w.tokensTraded && w.tokensTraded.some(t => (t.sellCount || 1) >= 2)));
             const pingPongBadge = isPingPong ? `<span class="badge-hit badge-pingpong" title="Ping-Pong: Beli -> Jual -> Beli lagi koin yang sama berkali-kali">🏓 PING-PONG</span>` : ``;
 
             const gp = w.gmgnProfile || {};
@@ -368,17 +370,21 @@ export function renderDnaScannerHtml() {
     </div>
 
     <footer style="margin-top: 32px; text-align: center; font-size: 0.8rem; color: #64748b;">
-      cr.bbliong.io/clone-radar &bull; DNA Smart Wallet Scanner &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/clone-radar &bull; DNA Smart Wallet Scanner (Auto-Refresh Dinonaktifkan &bull; Klik Tombol Refresh untuk Update)
     </footer>
   </div>
 
   <script>
     let currentFilter = 'all';
 
-    function setFilter(type) {
+    function setFilter(type, btn) {
       currentFilter = type;
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      if (btn) {
+        btn.classList.add('active');
+      } else if (window.event && window.event.target) {
+        window.event.target.closest('.filter-btn')?.classList.add('active');
+      }
       filterWallets();
     }
 
@@ -405,8 +411,6 @@ export function renderDnaScannerHtml() {
         }
       });
     }
-
-    setTimeout(() => { window.location.reload(); }, 5000);
   </script>
 </body>
 </html>`;

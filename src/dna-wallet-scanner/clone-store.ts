@@ -76,6 +76,7 @@ export class CloneWalletStore {
         isStrictSerial: true,
         isMultiStepScalper: isMultiStep,
         isPureDexTrader: true,
+        isPingPongRebuy: isMultiStep,
         tokensTraded: [tradeRecord],
         tags,
         score: this.calculateScore(1, tradeRecord.profitUsd, solBalance, true, isMultiStep)
@@ -84,12 +85,19 @@ export class CloneWalletStore {
       this.save();
       return { isNew: true, hitCount: 1 };
     } else {
+      // Preserve existing profile and ping-pong state
+      const prevProfile = existing.gmgnProfile;
+      const prevPingPong = existing.isPingPongRebuy;
+
       // Wallet already exists: check if this token was already recorded
       const alreadyHasToken = existing.tokensTraded.some(t => t.mint === tradeRecord.mint);
       if (!alreadyHasToken) {
         existing.tokensTraded.unshift(tradeRecord);
         existing.hitCount += 1;
         existing.totalRealizedProfitUsd += tradeRecord.profitUsd;
+      } else {
+        // Re-entered the same token!
+        existing.isPingPongRebuy = true;
       }
       existing.lastActiveAt = now;
       if (solBalance > 0) existing.solBalance = solBalance;
@@ -106,6 +114,8 @@ export class CloneWalletStore {
       // Check multi-step scalper (TWAP sell count >= 2)
       existing.isMultiStepScalper = existing.tokensTraded.some(t => t.sellCount >= 2);
       existing.isPureDexTrader = true;
+      existing.isPingPongRebuy = Boolean(prevPingPong || existing.isMultiStepScalper);
+      if (prevProfile) existing.gmgnProfile = prevProfile;
       
       existing.score = this.calculateScore(
         existing.hitCount,
