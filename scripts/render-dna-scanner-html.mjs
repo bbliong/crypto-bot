@@ -164,6 +164,7 @@ export function renderDnaScannerHtml() {
     }
     .badge-gold { background: rgba(245, 158, 11, 0.2); color: var(--amber); border: 1px solid var(--amber); }
     .badge-single { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); }
+    .badge-serial { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; }
 
     .token-chip-container {
       display: flex; flex-direction: column; gap: 6px; max-height: 120px; overflow-y: auto;
@@ -232,7 +233,8 @@ export function renderDnaScannerHtml() {
         1. <strong>Ukuran Beli:</strong> $80 – $450 USD (~1 – 4.5 SOL) per entry.<br>
         2. <strong>Kecepatan Hold:</strong> 4 detik hingga 360 detik (keluar cepat begitu momentum pump selesai).<br>
         3. <strong>Gaya Jual:</strong> Menjual bertahap (sell count &ge; 1–2x) dengan cuan nyata (&ge; +$15 USD).<br>
-        4. <strong>Bukan Airdrop Dev:</strong> Bebas transfer-in dan bukan pencipta koin (non-dev). Dompet memiliki saldo aktif &ge; 0.3 SOL.
+        4. <strong>Fokus 1 Token (Strict Serial Execution):</strong> Tidak pernah spray banyak token sekaligus. Menahan 1 koin sampai tuntas (exit 0), baru membuka posisi di koin baru.<br>
+        5. <strong>Bukan Airdrop Dev:</strong> Bebas transfer-in dan bukan pencipta koin (non-dev). Dompet memiliki saldo aktif &ge; 0.3 SOL.
       </p>
     </div>
 
@@ -241,6 +243,7 @@ export function renderDnaScannerHtml() {
       <div style="display:flex; gap:8px;">
         <button class="filter-btn active" onclick="setFilter('all')">Semua (${totWallets})</button>
         <button class="filter-btn" onclick="setFilter('multi')">👑 Multi-Hit (${multiHit.length})</button>
+        <button class="filter-btn" onclick="setFilter('serial')">🎯 Strict Serial Only</button>
       </div>
     </div>
 
@@ -263,17 +266,22 @@ export function renderDnaScannerHtml() {
         <tbody>
           ${wallets.map((w, idx) => {
             const isMulti = w.hitCount >= 2;
+            const isSerial = w.isStrictSerial !== false;
             const badgeClass = isMulti ? 'badge-gold' : 'badge-single';
             const badgeText = isMulti ? `👑 ${w.hitCount}x HIT` : `1x Hit`;
+            const serialBadge = isSerial ? `<span class="badge-hit badge-serial" title="Strict Serial: Hanya pegang 1 koin dalam 1 waktu">🎯 SERIAL</span>` : `<span class="badge-hit" style="background:#334155;color:#94a3b8;">MULTI</span>`;
             return `
-              <tr class="wallet-row" data-multi="${isMulti}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
+              <tr class="wallet-row" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
                 <td class="mono" style="color:#64748b;">${idx + 1}</td>
                 <td>
                   <strong>${w.address.slice(0, 6)}...${w.address.slice(-4)}</strong>
                   <button class="copy-btn" onclick="navigator.clipboard.writeText('${w.address}'); alert('Address copied!');" title="Salin Address">📋</button>
                   <div class="mono" style="font-size:0.75rem; color:#64748b;">${w.address}</div>
                 </td>
-                <td><span class="badge-hit ${badgeClass}">${badgeText}</span></td>
+                <td>
+                  <span class="badge-hit ${badgeClass}">${badgeText}</span>
+                  <div style="margin-top:4px;">${serialBadge}</div>
+                </td>
                 <td class="mono font-semibold" style="color:var(--amber);">${w.score}/100</td>
                 <td class="mono font-semibold val-emerald">+$${w.totalRealizedProfitUsd.toLocaleString()}</td>
                 <td class="mono val-cyan">${w.avgHoldSec}s</td>
@@ -326,6 +334,7 @@ export function renderDnaScannerHtml() {
         let matchSearch = !q || addr.includes(q) || toks.includes(q);
         let matchFilter = true;
         if (currentFilter === 'multi') matchFilter = isMulti;
+        if (currentFilter === 'serial') matchFilter = (r.getAttribute('data-serial') === 'true');
 
         if (matchSearch && matchFilter) {
           r.style.display = '';

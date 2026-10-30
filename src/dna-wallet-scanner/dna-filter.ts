@@ -8,8 +8,25 @@ export const TARGET_DNA: TargetDnaPattern = {
   minProfitUsd: 15,        // Must be genuinely profitable on the token
   minSolBalance: 0.3,      // Must hold active SOL (not empty burner)
   disallowCreator: true,   // Exclude token dev/creator
-  disallowTransferIn: true // Exclude free token receiver
+  disallowTransferIn: true, // Exclude free token receiver
+  maxConcurrentTokens: 1   // STRICT SERIAL TRADER: Target only plays 1 token at a time
 };
+
+export function isStrictSerialTrader(tokensTraded: Array<{ timestamp: number; holdSec: number }>): boolean {
+  if (tokensTraded.length <= 1) return true;
+  for (let i = 0; i < tokensTraded.length; i++) {
+    const t1Start = tokensTraded[i].timestamp;
+    const t1End = t1Start + (tokensTraded[i].holdSec || 60);
+    for (let j = i + 1; j < tokensTraded.length; j++) {
+      const t2Start = tokensTraded[j].timestamp;
+      const t2End = t2Start + (tokensTraded[j].holdSec || 60);
+      if (Math.max(t1Start, t2Start) < Math.min(t1End, t2End)) {
+        return false; // Overlap detected
+      }
+    }
+  }
+  return true;
+}
 
 function formatWib(timestampSec: number): string {
   const d = new Date(timestampSec * 1000);

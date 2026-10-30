@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DiscoveredCloneWallet } from './types.js';
+import { isStrictSerialTrader } from './dna-filter.js';
 
 export class CloneWalletStore {
   private filePath: string;
@@ -62,9 +63,10 @@ export class CloneWalletStore {
         totalRealizedProfitUsd: tradeRecord.profitUsd,
         avgHoldSec: tradeRecord.holdSec,
         avgStakeUsd: tradeRecord.stakeUsd,
+        isStrictSerial: true,
         tokensTraded: [tradeRecord],
         tags,
-        score: this.calculateScore(1, tradeRecord.profitUsd, solBalance)
+        score: this.calculateScore(1, tradeRecord.profitUsd, solBalance, true)
       };
       this.wallets.set(address, w);
       this.save();
@@ -85,28 +87,34 @@ export class CloneWalletStore {
       
       const totStake = existing.tokensTraded.reduce((acc, t) => acc + t.stakeUsd, 0);
       existing.avgStakeUsd = Math.round(totStake / existing.tokensTraded.length);
+
+      // Check strict serial execution
+      existing.isStrictSerial = isStrictSerialTrader(existing.tokensTraded);
       
-      existing.score = this.calculateScore(existing.hitCount, existing.totalRealizedProfitUsd, existing.solBalance);
+      existing.score = this.calculateScore(existing.hitCount, existing.totalRealizedProfitUsd, existing.solBalance, existing.isStrictSerial);
       this.save();
       return { isNew: false, hitCount: existing.hitCount };
     }
   }
 
-  private calculateScore(hitCount: number, totalProfitUsd: number, solBalance: number): number {
+  private calculateScore(hitCount: number, totalProfitUsd: number, solBalance: number, isStrictSerial: boolean = true): number {
     // 0 - 100 Score:
-    // Repeat Hit (40 pts max): 1 hit = 15, 2 hits = 30, 3+ hits = 40
-    let sHit = Math.min(40, hitCount * 15);
+    // Repeat Hit (30 pts max): 1 hit = 10, 2 hits = 20, 3+ hits = 30
+    let sHit = Math.min(30, hitCount * 10);
     
-    // Profit score (40 pts max, log scaled)
+    // Profit score (30 pts max, log scaled)
     let sProf = 0;
     if (totalProfitUsd > 0) {
-      sProf = Math.min(40, Math.round((Math.log10(Math.max(10, totalProfitUsd)) / 4) * 40));
+      sProf = Math.min(30, Math.round((Math.log10(Math.max(10, totalProfitUsd)) / 4) * 30));
     }
     
-    // Balance score (20 pts max): 0.5 - 20 SOL
-    let sBal = Math.min(20, Math.round(solBalance * 2));
+    // Balance score (15 pts max): 0.5 - 20 SOL
+    let sBal = Math.min(15, Math.round(solBalance * 1.5));
+
+    // Strict Serial Trader Bonus (25 pts max) - Key Target DNA trait!
+    let sSerial = isStrictSerial ? 25 : 0;
     
-    return Math.min(100, sHit + sProf + sBal);
+    return Math.min(100, sHit + sProf + sBal + sSerial);
   }
 
   public getRankedList(): DiscoveredCloneWallet[] {

@@ -7,6 +7,7 @@ export interface TargetDnaPattern {
   minSolBalance: number;     // e.g. 0.5 SOL
   disallowCreator: boolean;  // true
   disallowTransferIn: boolean; // true
+  maxConcurrentTokens: number; // 1 (Strictly Serial Trader: 1 token at a time)
 }
 
 export interface DiscoveredCloneWallet {
@@ -19,6 +20,7 @@ export interface DiscoveredCloneWallet {
   totalRealizedProfitUsd: number;
   avgHoldSec: number;
   avgStakeUsd: number;
+  isStrictSerial: boolean; // TRUE if wallet never holds 2 tokens concurrently
   tokensTraded: Array<{
     mint: string;
     symbol: string;
