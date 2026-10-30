@@ -32,11 +32,20 @@ export class CloneWalletStore {
   public save(): void {
     try {
       const list = Array.from(this.wallets.values());
-      // Sort by hitCount desc, then score desc, then totalProfit desc
+      // Sort priority:
+      // 1. Exact Clones (Strict Serial + Multi-Sell TWAP) FIRST
+      // 2. Multi-hit count DESCENDING (Konsistensi di banyak koin)
+      // 3. Highest GMGN Total Profit / 7D Realized Profit (True Smart Money) DESCENDING
       list.sort((a, b) => {
+        const isExactA = (a.isStrictSerial !== false && a.isMultiStepScalper);
+        const isExactB = (b.isStrictSerial !== false && b.isMultiStepScalper);
+        if (isExactA !== isExactB) return isExactB ? 1 : -1;
+
         if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
-        if (b.score !== a.score) return b.score - a.score;
-        return b.totalRealizedProfitUsd - a.totalRealizedProfitUsd;
+
+        const profB = b.gmgnProfile?.totalProfit || b.gmgnProfile?.realized7d || 0;
+        const profA = a.gmgnProfile?.totalProfit || a.gmgnProfile?.realized7d || 0;
+        return profB - profA;
       });
       fs.writeFileSync(this.filePath, JSON.stringify(list, null, 2), 'utf8');
     } catch (err: any) {

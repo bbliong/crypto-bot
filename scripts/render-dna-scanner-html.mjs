@@ -14,6 +14,30 @@ export function renderDnaScannerHtml() {
     } catch {}
   }
 
+  // Filter out negative overall wallets (e.g. 6Z91 with -$4.8k loss)
+  wallets = wallets.filter(w => {
+    const tot = w.gmgnProfile?.totalProfit;
+    const r7d = w.gmgnProfile?.realized7d;
+    if (tot !== undefined && tot < 0 && r7d !== undefined && r7d < 0) return false;
+    return true;
+  });
+
+  // Strict sorting priority:
+  // 1. Exact Clones (Strict Serial + TWAP Multi-Sells) FIRST
+  // 2. Multi-hit count DESCENDING (Konsistensi di banyak koin baru)
+  // 3. Highest GMGN Total Profit / 7D Realized Profit (Smart Money Leaderboard) DESCENDING
+  wallets.sort((a, b) => {
+    const isExactA = (a.isStrictSerial !== false && a.isMultiStepScalper);
+    const isExactB = (b.isStrictSerial !== false && b.isMultiStepScalper);
+    if (isExactA !== isExactB) return isExactB ? 1 : -1;
+
+    if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
+
+    const profB = b.gmgnProfile?.totalProfit || b.gmgnProfile?.realized7d || 0;
+    const profA = a.gmgnProfile?.totalProfit || a.gmgnProfile?.realized7d || 0;
+    return profB - profA;
+  });
+
   const totWallets = wallets.length;
   const multiHit = wallets.filter(w => w.hitCount >= 2);
   const multiStep = wallets.filter(w => w.isMultiStepScalper);

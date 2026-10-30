@@ -37,6 +37,12 @@ export interface DiscoveredCloneWallet {
   }>;
   tags: string[];
   score: number; // 0 - 100
+  gmgnProfile?: {
+    realized7d: number;
+    totalProfit: number;
+    totalBuys: number;
+    totalSells: number;
+  };
 }
 
 export interface FreshTokenCandidate {
