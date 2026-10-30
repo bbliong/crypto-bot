@@ -3,6 +3,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
 import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
+import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
 import {
@@ -58,6 +59,7 @@ export class WalletFollowerRunner {
   private dryRun: boolean;
   public readonly lane: WalletFollowerLane;
   public readonly smartDipLane: SmartDipFollowerLane;
+  public readonly multiDryRunEngine: MultiScenarioDryRunEngine;
   private browser: Browser | null = null;
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
@@ -374,6 +376,8 @@ export class WalletFollowerRunner {
       tradesFilePath: path.resolve(process.cwd(), 'data/smart-dip-trades.json'),
       eventsFilePath: path.resolve(process.cwd(), 'data/smart-dip-events.json'),
     });
+
+    this.multiDryRunEngine = new MultiScenarioDryRunEngine(this.dataDir);
   }
 
   public async start(durationSeconds: number = 0): Promise<void> {
@@ -543,6 +547,7 @@ export class WalletFollowerRunner {
             const price = Number(stat.p) || 0;
             this.smartDipLane.recordTokenActivity(stat.a);
             this.lane.updateTokenTick(stat.a, price);
+            this.multiDryRunEngine.updatePriceTick(stat.a, price);
             await this.handleSmartDipPriceTick(stat.a, price);
           }
         }
@@ -708,6 +713,10 @@ export class WalletFollowerRunner {
     if (liveCfg.stakeUsdLane1) this.lane.setStakePerEntryUsd(liveCfg.stakeUsdLane1);
     if (liveCfg.stakeUsdLane2) this.smartDipLane.setStakePerTradeUsd(liveCfg.stakeUsdLane2);
 
+    const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
+    const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
+    this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
+
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
     const timeWib = formatWibDate(nowMs);
@@ -872,6 +881,9 @@ export class WalletFollowerRunner {
   }
 
   private async handleTargetSell(signal: WalletTradeSignal): Promise<void> {
+    // Jalankan eksekusi 3-way dry-run scenario simulator secara paralel
+    this.multiDryRunEngine.handleTargetSell(signal);
+
     // Update live price tick ke Lane 1 & Lane 2 setiap kali target menjual token
     if (signal.priceUsd > 0) {
       this.lane.updateTokenTick(signal.mint, signal.priceUsd);

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderBacktestDynamicHtml } from './render-backtest-dynamic.mjs';
 import { renderBacktestDynamic2Html } from './render-backtest-dynamic2.mjs';
+import { render3ScenariosLiveHtml } from './render-3scenarios-live.mjs';
 
 const PORT = 4192;
 const ROOT = process.cwd();
@@ -252,6 +253,13 @@ const server = createServer((req, res) => {
       'Cache-Control': 'no-cache',
     });
     return res.end(JSON.stringify(data));
+  }
+
+  // Dedicated Live 3-Way Scenario Dry-Run Dashboard
+  if (pathname.includes('/3scenarios')) {
+    const html = render3ScenariosLiveHtml();
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(html);
   }
 
   // Dedicated HTML Backtest Report V2 (support /backtest-dynamic2, /add-fol/backtest-dynamic2)
@@ -969,6 +977,7 @@ function renderHtmlDashboard(initialState = {}) {
         <span class="badge badge-live">Live CDP 9223</span>
         <a href="/add-fol/backtest-dynamic" class="badge" style="background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(16,185,129,0.3)); color: #a5b4fc; border: 1px solid #818cf8; text-decoration: none; font-weight: 800; padding: 4px 10px;">📊 V1 ($5 Cap) ↗</a>
         <a href="/add-fol/backtest-dynamic2" class="badge" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(168,85,247,0.3)); color: #f472b6; border: 1px solid #c084fc; text-decoration: none; font-weight: 800; padding: 4px 10px;">🚀 V2 ($20 Pool, $1-$5 Tiered) ↗</a>
+        <a href="/add-fol/3scenarios" class="badge" style="background: linear-gradient(135deg, rgba(16,185,129,0.3), rgba(6,182,212,0.3)); color: #34d399; border: 1px solid #10b981; text-decoration: none; font-weight: 800; padding: 4px 10px;">📡 Live 3 Skenario ↗</a>
       </div>
     </header>
 
