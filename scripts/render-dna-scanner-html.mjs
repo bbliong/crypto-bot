@@ -259,13 +259,13 @@ export function renderDnaScannerHtml() {
           <tr>
             <th>#</th>
             <th>Alamat Wallet</th>
-            <th>Konsistensi</th>
+            <th>Konsistensi &amp; DNA Badges</th>
             <th>Skor Conviction</th>
-            <th>Total Cuan Scalp ($)</th>
-            <th>Rata-rata Hold</th>
-            <th>Rata-rata Stake</th>
+            <th>GMGN 7D Realized ($)</th>
+            <th>GMGN Total Profit ($)</th>
+            <th>Aktivitas Trade</th>
             <th>Saldo Kas SOL</th>
-            <th>Token yang Dimasuki &amp; Hasil Trade</th>
+            <th>Koin Baru yang Dimasuki &amp; TWAP Sells</th>
             <th>Aksi</th>
           </tr>
         </thead>
@@ -281,6 +281,13 @@ export function renderDnaScannerHtml() {
             const maxSells = Math.max(...w.tokensTraded.map(t => t.sellCount || 1), 1);
             const twapBadge = isMultiStep ? `<span class="badge-hit badge-twap" title="TWAP Multi-Sell: Target mencicil jual berkali-kali">🔁 TWAP (${maxSells}x Sells)</span>` : `<span class="badge-hit" style="background:#1e293b;color:#64748b;">1x Sell</span>`;
             const pureDexBadge = `<span class="badge-hit badge-puredex" title="100% AMM Swaps: 0 casual Tx In/Out">💎 PURE DEX</span>`;
+
+            const gp = w.gmgnProfile || {};
+            const r7d = gp.realized7d !== undefined ? gp.realized7d : w.totalRealizedProfitUsd;
+            const totProf = gp.totalProfit !== undefined ? gp.totalProfit : w.totalRealizedProfitUsd;
+            const tb = gp.totalBuys || 0;
+            const ts = gp.totalSells || 0;
+            const tradeText = (tb + ts) > 0 ? `${(tb + ts).toLocaleString()} Trades` : `Fresh Scalper`;
 
             return `
               <tr class="wallet-row" data-exact="${isExact}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
@@ -298,23 +305,30 @@ export function renderDnaScannerHtml() {
                     ${pureDexBadge}
                   </div>
                 </td>
-                <td class="mono font-semibold" style="color:var(--amber);">${w.score}/100</td>
-                <td class="mono font-semibold val-emerald">+$${w.totalRealizedProfitUsd.toLocaleString()}</td>
-                <td class="mono val-cyan">${w.avgHoldSec}s</td>
-                <td class="mono">$${w.avgStakeUsd}</td>
+                <td class="mono font-semibold" style="color:var(--amber); font-size:1rem;">${w.score}/100</td>
+                <td class="mono font-semibold ${r7d >= 0 ? 'val-emerald' : 'val-rose'}">
+                  ${r7d >= 0 ? '+' : ''}$${r7d.toLocaleString()}
+                </td>
+                <td class="mono font-semibold ${totProf >= 0 ? 'val-emerald' : 'val-rose'}">
+                  ${totProf >= 0 ? '+' : ''}$${totProf.toLocaleString()}
+                </td>
+                <td>
+                  <div class="mono" style="font-size:0.8rem; font-weight:600;">${tradeText}</div>
+                  <div style="font-size:0.72rem; color:#64748b;">${tb} Buy / ${ts} Sell</div>
+                </td>
                 <td class="mono font-semibold">${w.solBalance.toFixed(2)} SOL</td>
                 <td>
                   <div class="token-chip-container">
                     ${w.tokensTraded.map(t => `
                       <div class="token-chip">
-                        <span><strong>${t.symbol}</strong> ($${t.stakeUsd} stake &bull; hold ${t.holdSec}s)</span>
+                        <span><strong>${t.symbol}</strong> ($${t.stakeUsd} stake &bull; hold ${t.holdSec}s &bull; ${t.sellCount}x sells)</span>
                         <span class="val-emerald font-semibold">+${t.roiPct}% (+$${t.profitUsd})</span>
                       </div>
                     `).join('')}
                   </div>
                 </td>
                 <td>
-                  <a href="https://gmgn.ai/sol/address/${w.address}" target="_blank" class="tx-link">GMGN ↗</a><br>
+                  <a href="https://gmgn.ai/sol/address/${w.address}" target="_blank" class="tx-link">GMGN Profile ↗</a><br>
                   <a href="https://solscan.io/account/${w.address}" target="_blank" class="tx-link">Solscan ↗</a>
                 </td>
               </tr>

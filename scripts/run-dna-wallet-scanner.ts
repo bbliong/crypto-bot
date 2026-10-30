@@ -69,12 +69,37 @@ class DnaWalletScanner {
           for (const tr of traders) {
             const evalRes = evaluateTraderDna(tr, tok.symbol, tok.mint, TARGET_DNA);
             if (evalRes.matched && evalRes.tradeRecord) {
+              // Verify GMGN overall wallet profile (Reject overall negative/losing wallets)
+              let gmgnProfile: any = null;
+              try {
+                gmgnProfile = await this.fetchWalletGmgnProfile(page, tr.address);
+                if (gmgnProfile) {
+                  const totProf = Number(gmgnProfile.total_profit || 0);
+                  const real7d = Number(gmgnProfile.realized_profit_7d || 0);
+                  if (totProf < 0 && real7d < 0) {
+                    continue; // Reject losing trader
+                  }
+                }
+              } catch {}
+
               const res = this.store.recordMatch(
                 tr.address,
                 evalRes.tradeRecord,
                 evalRes.balanceSol || 0,
                 tr.tags || []
               );
+
+              // Attach GMGN profile if available
+              const stored = this.store.wallets.get(tr.address);
+              if (stored && gmgnProfile) {
+                (stored as any).gmgnProfile = {
+                  realized7d: Math.round(Number(gmgnProfile.realized_profit_7d || 0)),
+                  totalProfit: Math.round(Number(gmgnProfile.total_profit || 0)),
+                  totalBuys: Number(gmgnProfile.buy || gmgnProfile.buy_30d || 0),
+                  totalSells: Number(gmgnProfile.sell || gmgnProfile.sell_30d || 0)
+                };
+                this.store.save();
+              }
 
               matchedCountThisCycle++;
               const flag = res.isNew ? '🌟 NEW CLONE' : `⚡ REPEAT HIT (${res.hitCount}x)`;
@@ -180,6 +205,18 @@ class DnaWalletScanner {
         return [];
       }
     }, mint);
+  }
+
+  private async fetchWalletGmgnProfile(page: Page, address: string): Promise<any> {
+    return await page.evaluate(async (addr: string) => {
+      try {
+        const res = await fetch(`https://gmgn.ai/defi/quotation/v1/smartmoney/sol/walletNew/${addr}?period=7d`, { credentials: 'include' });
+        const d = await res.json();
+        return d?.data || null;
+      } catch {
+        return null;
+      }
+    }, address);
   }
 }
 
