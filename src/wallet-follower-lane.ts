@@ -82,6 +82,7 @@ export interface FollowerPosition {
   exits: FollowerExit[];
   stage1Exited?: boolean;
   peakTargetHolding?: number;
+  targetCumulativeSellRatioPct?: number;
 }
 
 export interface WalletTradeSignal {
@@ -374,28 +375,32 @@ export class WalletFollowerLane {
       pos.totalTokens < 50 ||
       pos.remainingCostBasisUsd < 0.05;
 
-    if (isTargetFullExit) {
+    // Akumulasi persentase jual target (Anti-Fee-Churning & Anti-Rugpull Gate):
+    // Tahan jualan receh sampai target buang akumulasi >= 15% (atau Full Exit)
+    if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
+    pos.targetCumulativeSellRatioPct += (sellRatio * 100);
+
+    const isThresholdMet = pos.targetCumulativeSellRatioPct >= 15.0 || isTargetFullExit;
+
+    if (!isThresholdMet) {
       return {
-        canSell: true,
-        sellRatioPct: 100,
-        botTokensToSell: pos.totalTokens,
-        isFullExit: true,
-        milestone: 'STAGE_2_FULL',
-        reason: 'TARGET_FULL_EXIT',
+        canSell: false,
+        sellRatioPct: 0,
+        botTokensToSell: 0,
+        isFullExit: false,
+        milestone: 'NONE',
+        reason: `HOLD_ACCUMULATING (Target sold ${(sellRatio * 100).toFixed(1)}% | Cum: ${pos.targetCumulativeSellRatioPct.toFixed(1)}% < 15%)`,
       };
     }
 
-    // Pure Copy-Trading: Jual proporsional persis mengikuti porsi jual target
-    const botTokensToSell = Math.max(1, Math.floor(pos.totalTokens * sellRatio));
-    const sellRatioPct = Number((sellRatio * 100).toFixed(1));
-
+    // Ambang Batas >= 15% tercapai: Eksekusi Jual Utuh 100% (Instant Full Exit, Bebas Sisa & Hemat Fee)
     return {
-      canSell: botTokensToSell > 0,
-      sellRatioPct,
-      botTokensToSell,
-      isFullExit: false,
-      milestone: 'STAGE_1_HALF',
-      reason: `TARGET_PROPORTIONAL_SELL_${sellRatioPct}%`,
+      canSell: true,
+      sellRatioPct: 100,
+      botTokensToSell: pos.totalTokens,
+      isFullExit: true,
+      milestone: 'STAGE_2_FULL',
+      reason: isTargetFullExit ? 'TARGET_FULL_EXIT' : `TARGET_CUM_SELL_${pos.targetCumulativeSellRatioPct.toFixed(1)}%_GTE_15%_FULL_EXIT`,
     };
   }
 

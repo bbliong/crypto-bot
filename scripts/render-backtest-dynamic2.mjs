@@ -285,7 +285,7 @@ export function renderBacktestDynamic2Html() {
         <div>
           <h1>🚀 Backtest V2: Tiered Dynamic Copy-Trading</h1>
           <div class="header-subtitle">
-            Saldo Awal <strong>$20.00</strong> &bull; Saldo Dinamis Berkembang &bull; Potong Fee Riil <strong>$0.025/swap</strong> &bull; Ukuran Beli <strong>$1-$5</strong>
+            Saldo Awal <strong>$20.00</strong> &bull; Saldo Dinamis Berkembang &bull; Potong Fee Riil <strong>$0.025/swap</strong> &bull; Akumulasi Jual Target <strong>&ge; 15% &rarr; Full Exit 100%</strong>
           </div>
         </div>
       </div>
@@ -336,6 +336,7 @@ export function renderBacktestDynamic2Html() {
       <h3>🎯 Mekanisme Saldo Dinamis & Potongan Fee Riil yang Anda Minta:</h3>
       <ul>
         <li><strong>Saldo Dinamis Berjalan:</strong> Saldo kas dimulai dari <strong>$20.00 USD</strong>. Setiap kali transaksi untung, kas bertambah dan saldo berkembang (compounding). Jika rugi atau terpotong fee, saldo kas berkurang secara alami.</li>
+        <li><strong>Akumulasi Jual Target &ge; 15% (Full Exit 100% Langsung):</strong> Menghapus seluruh jebakan jual parsial receh (<20%) yang memakan fee. Bot menahan koin sampai akumulasi buang target &ge; 15% (atau Full Exit), lalu seketika menjual 100% koin bot dalam 1x swap bersih! Total fee terpangkas hemat menjadi hanya 2x swap ($0.050) per token dan kebal rugpull kilat seperti PERPETUAL.</li>
         <li><strong>Potongan Fee Swap Nyata ($0.025 / Transaksi):</strong> Berdasarkan transaksi Solana riil bot kita, gas fee on-chain + compute priority fee rata-rata <code>0.000105 SOL</code> ($0.0105) ditambah tip fee dan DEX AMM fee (~$0.0145), total fee riil ditetapkan <strong>$0.025 USD per swap</strong>. Setiap Buy memotong <code>+$0.025 fee</code> dan setiap Sell memotong <code>-$0.025 fee</code>.</li>
         <li><strong>Kapasitas Pool Dinamis:</strong> Plafon per koin adalah <code>min(Saldo Kas Berjalan, $20.00)</code>. Modal terkunci aman dan tidak akan pernah over-buying!</li>
       </ul>
