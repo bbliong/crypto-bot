@@ -33,9 +33,9 @@ export function render3ScenariosLiveHtml() {
 
         <div class="stat-mini-grid">
           <div class="mini-stat">
-            <div class="mini-label">Kas Tersedia (Pool $20)</div>
+            <div class="mini-label">Kas Tersedia (Dinamis)</div>
             <div class="mini-val" style="color:${color};">$${s.availableCash.toFixed(2)}</div>
-            <div class="mini-sub">Tertahan: $${s.investedCash.toFixed(2)}</div>
+            <div class="mini-sub">Fee Dipotong: -$${(s.totalFeesPaid || 0).toFixed(2)}</div>
           </div>
           <div class="mini-stat">
             <div class="mini-label">Realized PnL</div>

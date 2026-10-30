@@ -18,23 +18,23 @@ export function renderBacktestDynamic2Html() {
   const totSpent = data.reduce((acc, r) => acc + r.cashSpent, 0);
   const totRec = data.reduce((acc, r) => acc + r.cashReceived, 0);
   const totBurned = data.reduce((acc, r) => acc + r.burnedUsd, 0);
+  const totFees = data.reduce((acc, r) => acc + (r.feesPaid || 0), 0);
   const wins = data.filter(r => r.netPnl > 0).length;
   const losses = data.filter(r => r.netPnl < 0).length;
   const winRate = totTokens > 0 ? ((wins / totTokens) * 100).toFixed(1) : '0';
 
-  // Capped net profit (anti-outlier max +500% ROI)
-  const cappedNetPnl = data.reduce((acc, r) => {
-    const cappedRoi = Math.min(500, Math.max(-100, r.roiPct));
-    return acc + r.cashSpent * (cappedRoi / 100);
-  }, 0);
-  const avgProfitPerToken = totTokens > 0 ? (cappedNetPnl / totTokens).toFixed(2) : '0';
+  // Saldo Awal & Saldo Akhir Berjalan
+  const startingCash = 20.0;
+  // Newest record is data[0], so its cashAfter is the final ending balance
+  const endingCash = data.length > 0 ? data[0].cashAfter : startingCash;
+  const netGrowth = endingCash - startingCash;
 
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tiered Dynamic Copy-Trading Backtest (Pool $20, Buy $1-$5) | cr.bbliong.io</title>
+  <title>Tiered Dynamic Copy-Trading Backtest (Pool $20 Dinamis + Potong Fee) | cr.bbliong.io</title>
   <style>
     :root {
       --bg-dark: #090d16;
@@ -58,7 +58,7 @@ export function renderBacktestDynamic2Html() {
       padding: 24px 16px;
       line-height: 1.5;
     }
-    .container { max-width: 1400px; margin: 0 auto; }
+    .container { max-width: 1450px; margin: 0 auto; }
     .header {
       display: flex;
       flex-wrap: wrap;
@@ -285,100 +285,102 @@ export function renderBacktestDynamic2Html() {
         <div>
           <h1>🚀 Backtest V2: Tiered Dynamic Copy-Trading</h1>
           <div class="header-subtitle">
-            Alokasi Modal Pool <strong>$20.00</strong> &bull; Ukuran Beli Bertingkat <strong>$1.00 s/d $5.00</strong> Mengikuti Skala User &bull; Jual Proporsional
+            Saldo Awal <strong>$20.00</strong> &bull; Saldo Dinamis Berkembang &bull; Potong Fee Riil <strong>$0.025/swap</strong> &bull; Ukuran Beli <strong>$1-$5</strong>
           </div>
         </div>
       </div>
       <div class="nav-group">
         <a href="/add-fol" class="nav-btn">⚡ Live Dashboard</a>
         <a href="/add-fol/backtest-dynamic" class="nav-btn">📊 Backtest V1 ($5 Cap)</a>
-        <a href="/add-fol/backtest-dynamic2" class="nav-btn active">🚀 Backtest V2 ($20 Pool)</a>
+        <a href="/add-fol/backtest-dynamic2" class="nav-btn active">🚀 Backtest V2 ($20 Pool Dinamis)</a>
+        <a href="/add-fol/3scenarios" class="nav-btn">📡 Live 3 Skenario</a>
       </div>
     </header>
 
     <!-- Stats Overview -->
     <div class="stats-grid">
       <div class="stat-card">
+        <div class="stat-label">Saldo Awal Kas</div>
+        <div class="stat-val" style="color:#94a3b8;">$${startingCash.toFixed(2)}</div>
+        <div class="stat-sub">Modal Kas Pertama</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Saldo Kas Berjalan Terkini</div>
+        <div class="stat-val val-emerald">$${endingCash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        <div class="stat-sub">Cuan Bersih: +$${netGrowth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Fee Swap & Gas</div>
+        <div class="stat-val val-rose">-$${totFees.toFixed(2)}</div>
+        <div class="stat-sub">Dipenggal $0.025 / transaksi swap</div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">Win Rate</div>
         <div class="stat-val val-emerald">${winRate}%</div>
         <div class="stat-sub">${wins} Menang &bull; ${losses} Kalah</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Net Profit (Capped +500%)</div>
-        <div class="stat-val val-emerald">+$${cappedNetPnl.toFixed(2)}</div>
-        <div class="stat-sub">ROI Portofolio: +${((cappedNetPnl/totSpent)*100).toFixed(1)}%</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Rata-Rata Profit / Koin</div>
-        <div class="stat-val val-emerald">+$${avgProfitPerToken}</div>
-        <div class="stat-sub">Naik 4.2x lipat dari V1 ($3.01)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Modal Diputar</div>
+        <div class="stat-label">Total Modal Beli Diputar</div>
         <div class="stat-val val-primary">$${totSpent.toFixed(2)}</div>
-        <div class="stat-sub">Rata-rata $${(totSpent/totTokens).toFixed(2)} / koin</div>
+        <div class="stat-sub">Inc. fee buy $0.025</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Kas Masuk</div>
         <div class="stat-val val-emerald">+$${totRec.toFixed(2)}</div>
-        <div class="stat-sub">Hasil cair ke kas SOL</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Sisa Koin Terbakar (Burn)</div>
-        <div class="stat-val val-rose">-$${totBurned.toFixed(2)}</div>
-        <div class="stat-sub">Hanya ${(totBurned/totSpent*100).toFixed(2)}% dari modal</div>
+        <div class="stat-sub">Net setelah potong fee sell</div>
       </div>
     </div>
 
     <!-- Strategy Rule Banner -->
     <div class="compare-banner">
-      <h3>🎯 Aturan Skala Modal Bertingkat yang Anda Usulkan:</h3>
-      <p>Strategi ini memetakan keyakinan (*conviction*) target ke ukuran beli bot dengan rentang fleksibel:</p>
+      <h3>🎯 Mekanisme Saldo Dinamis & Potongan Fee Riil yang Anda Minta:</h3>
+      <ul>
+        <li><strong>Saldo Dinamis Berjalan:</strong> Saldo kas dimulai dari <strong>$20.00 USD</strong>. Setiap kali transaksi untung, kas bertambah dan saldo berkembang (compounding). Jika rugi atau terpotong fee, saldo kas berkurang secara alami.</li>
+        <li><strong>Potongan Fee Swap Nyata ($0.025 / Transaksi):</strong> Berdasarkan transaksi Solana riil bot kita, gas fee on-chain + compute priority fee rata-rata <code>0.000105 SOL</code> ($0.0105) ditambah tip fee dan DEX AMM fee (~$0.0145), total fee riil ditetapkan <strong>$0.025 USD per swap</strong>. Setiap Buy memotong <code>+$0.025 fee</code> dan setiap Sell memotong <code>-$0.025 fee</code>.</li>
+        <li><strong>Kapasitas Pool Dinamis:</strong> Plafon per koin adalah <code>min(Saldo Kas Berjalan, $20.00)</code>. Modal terkunci aman dan tidak akan pernah over-buying!</li>
+      </ul>
       <table class="tier-table">
         <thead>
           <tr>
             <th>Pembelian Target (USD)</th>
             <th>Pembelian Target (SOL)</th>
             <th>Ukuran Beli Bot (USD)</th>
-            <th>Tingkat Keyakinan Target</th>
+            <th>Biaya Fee per Swap</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>$200 – $250+ USD</strong></td>
             <td>&ge; 2.0 – 2.5 SOL</td>
-            <td><strong style="color:var(--emerald);">+$5.00 USD</strong> (Maksimal per klik)</td>
-            <td>🔥 Keyakinan Penuh (Heavy Buy)</td>
+            <td><strong style="color:var(--emerald);">+$5.00 USD</strong></td>
+            <td class="mono">-$0.025 USD</td>
           </tr>
           <tr>
             <td><strong>$150 – $200 USD</strong></td>
             <td>1.5 – 2.0 SOL</td>
             <td><strong style="color:var(--cyan);">+$4.00 USD</strong></td>
-            <td>🚀 Pembelian Besar</td>
+            <td class="mono">-$0.025 USD</td>
           </tr>
           <tr>
             <td><strong>$100 – $150 USD</strong></td>
             <td>1.0 – 1.5 SOL</td>
             <td><strong style="color:var(--primary);">+$3.00 USD</strong></td>
-            <td>⚖️ Pembelian Normal</td>
+            <td class="mono">-$0.025 USD</td>
           </tr>
           <tr>
             <td><strong>$50 – $100 USD</strong></td>
             <td>0.5 – 1.0 SOL</td>
             <td><strong style="color:var(--amber);">+$2.00 USD</strong></td>
-            <td>🧪 Pembelian Ringan / Cicilan</td>
+            <td class="mono">-$0.025 USD</td>
           </tr>
           <tr>
             <td><strong>&lt; $50 USD</strong></td>
             <td>&lt; 0.5 SOL</td>
-            <td><strong>+$1.00 USD</strong> (Minimal per klik)</td>
-            <td>🛡️ Uji Pasar (Hemat Fee)</td>
+            <td><strong>+$1.00 USD</strong> (Minimal)</td>
+            <td class="mono">-$0.025 USD</td>
           </tr>
         </tbody>
       </table>
-      <p style="font-size:0.85rem; color:#cbd5e1; margin-top:8px;">
-        💡 <strong>Kapasitas Pool $20:</strong> Bot bebas mengikuti akumulasi bertahap target sampai modal tertahan menyentuh $20. Setiap kali target menjual, porsi koin bot langsung ikut dicairkan ke kas SOL sehingga kapasitas pool $20 kembali lega untuk koin tersebut.
-      </p>
     </div>
 
     <!-- Table Toolbar -->
@@ -400,11 +402,12 @@ export function renderBacktestDynamic2Html() {
             <th>Token</th>
             <th>Waktu Entry (WIB)</th>
             <th>Frekuensi</th>
-            <th>Modal Diputar</th>
-            <th>Kas Masuk</th>
-            <th>Sisa Burn</th>
+            <th>Saldo Sebelum</th>
+            <th>Modal Beli (+Fee)</th>
+            <th>Kas Masuk (-Fee)</th>
+            <th>Total Fee</th>
             <th>Net PnL</th>
-            <th>ROI</th>
+            <th>Saldo Kas Sesudah</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -427,26 +430,28 @@ export function renderBacktestDynamic2Html() {
                   <span class="badge badge-entry">${r.buysCount}x Buy</span>
                   <span class="badge" style="background:#1e293b; color:#cbd5e1;">${r.sellsCount}x Sell</span>
                 </td>
+                <td class="mono font-semibold" style="color:#94a3b8;">$${r.cashBefore.toFixed(2)}</td>
                 <td class="mono font-semibold">$${r.cashSpent.toFixed(2)}</td>
                 <td class="mono font-semibold val-emerald">+$${r.cashReceived.toFixed(2)}</td>
-                <td class="mono ${r.burnedUsd > 0 ? 'val-rose' : 'text-slate-500'}">$${r.burnedUsd.toFixed(2)}</td>
+                <td class="mono val-rose">-$${r.feesPaid ? r.feesPaid.toFixed(3) : '0.050'}</td>
                 <td class="mono font-semibold ${pnlClass}">${pnlSign}$${r.netPnl.toFixed(2)}</td>
-                <td class="mono font-semibold ${pnlClass}">${pnlSign}${r.roiPct.toFixed(1)}%</td>
+                <td class="mono font-semibold" style="color:#38bdf8;">$${r.cashAfter.toFixed(2)}</td>
                 <td><span class="badge ${badgeClass}">${badgeText}</span></td>
               </tr>
               <tr class="detail-row" id="detail-${idx}">
-                <td colspan="9">
+                <td colspan="10">
                   <div class="detail-container">
                     <div class="detail-grid">
                       <!-- Buys Log -->
                       <div class="detail-box">
-                        <h4>🛒 Rincian Beli (${r.buys.length} Transaksi) &bull; Plafon Pool $20</h4>
+                        <h4>🛒 Rincian Beli (${r.buys.length} Transaksi) &bull; Dipotong Fee $0.025</h4>
                         ${r.buys.map(b => `
                           <div class="log-item">
                             <div>
                               <strong>Buy #${b.buyNum}:</strong> <span class="mono" style="color:#c084fc; font-weight:700;">$${b.stakeUsd.toFixed(2)}</span>
+                              <span style="color:#f43f5e; font-size:0.75rem;">(+$${b.feeUsd || 0.025} fee)</span>
                               <span style="color:#64748b;">(Target: ~$${b.targetUsd ? b.targetUsd.toFixed(0) : '150'} &bull; @ $${b.priceUsd < 0.0001 ? b.priceUsd.toFixed(8) : b.priceUsd.toFixed(5)})</span>
-                              <div style="font-size:0.75rem; color:#94a3b8;">Dapat: ${b.tokensBought.toLocaleString()} koin &bull; Sisa Plafon Pool: $${b.remCapAfter.toFixed(2)}</div>
+                              <div style="font-size:0.75rem; color:#94a3b8;">Dapat: ${b.tokensBought.toLocaleString()} koin &bull; Saldo Kas Sisa: $${b.cashWalletAfter.toFixed(2)}</div>
                             </div>
                             <div style="text-align:right;">
                               ${b.txHash ? `<a href="https://solscan.io/tx/${b.txHash}" target="_blank" class="tx-link">Solscan ↗</a>` : ''}
@@ -457,14 +462,15 @@ export function renderBacktestDynamic2Html() {
 
                       <!-- Sells Log -->
                       <div class="detail-box">
-                        <h4>💰 Rincian Jual (${r.sells.length} Transaksi) &bull; Proporsional</h4>
+                        <h4>💰 Rincian Jual (${r.sells.length} Transaksi) &bull; Dipotong Fee $0.025</h4>
                         ${r.sells.map(s => `
                           <div class="log-item">
                             <div>
                               <strong>Sell #${s.sellNum} (${s.sellRatioPct}% porsi):</strong>
                               <span class="val-emerald mono font-semibold">+$${s.usdReceived.toFixed(2)}</span>
+                              <span style="color:#f43f5e; font-size:0.75rem;">(-$${s.feeUsd || 0.025} fee)</span>
                               <span style="color:#64748b;">(@ $${s.priceUsd < 0.0001 ? s.priceUsd.toFixed(8) : s.priceUsd.toFixed(5)})</span>
-                              <div style="font-size:0.75rem; color:#94a3b8;">Terjual: ${s.tokensSold.toLocaleString()} koin &bull; ${s.isFullExit ? '<span style="color:#f59e0b;">Full Exit 100%</span>' : 'Parsial'}</div>
+                              <div style="font-size:0.75rem; color:#94a3b8;">Terjual: ${s.tokensSold.toLocaleString()} koin &bull; Saldo Kas Bertambah ke: $${s.cashWalletAfter.toFixed(2)}</div>
                             </div>
                             <div style="text-align:right;">
                               ${s.txHash ? `<a href="https://solscan.io/tx/${s.txHash}" target="_blank" class="tx-link">Solscan ↗</a>` : ''}
@@ -483,7 +489,7 @@ export function renderBacktestDynamic2Html() {
     </div>
 
     <footer style="margin-top: 32px; text-align: center; font-size: 0.8rem; color: #64748b;">
-      cr.bbliong.io/add-fol/backtest-dynamic2 &bull; Tiered Dynamic Proportional Copy-Trading Engine
+      cr.bbliong.io/add-fol/backtest-dynamic2 &bull; Tiered Dynamic Compounding Copy-Trading Engine
     </footer>
   </div>
 

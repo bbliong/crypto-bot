@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { WalletTradeSignal } from './wallet-follower-lane.js';
 
+// Rata-rata fee riil per swap: on-chain gas ($0.0105) + priority/tip ($0.0100) + DEX swap fee ($0.0045) = $0.025 USD
+export const REAL_SWAP_FEE_USD = 0.025;
+
 export interface ScenarioPosition {
   mint: string;
   symbol: string;
@@ -16,6 +19,7 @@ export interface ScenarioPosition {
   unrealizedPnlUsd: number;
   realizedPnlUsd: number;
   peakTargetHolding: number;
+  feesPaidUsd: number;
 }
 
 export interface ScenarioTradeRecord {
@@ -27,6 +31,7 @@ export interface ScenarioTradeRecord {
   entryCount: number;
   totalInvestedUsd: number;
   totalReturnedUsd: number;
+  totalFeesPaidUsd: number;
   realizedPnlUsd: number;
   roiPct: number;
   exitReason: string;
@@ -43,6 +48,7 @@ export interface ScenarioLogEvent {
   mint: string;
   stakeUsd?: number;
   usdReceived?: number;
+  feeUsd?: number;
   tokens?: number;
   priceUsd: number;
   pnlUsd?: number;
@@ -58,6 +64,7 @@ export interface ScenarioState {
   initialCash: number;
   availableCash: number;
   investedCash: number;
+  totalFeesPaid: number;
   realizedPnl: number;
   unrealizedPnl: number;
   totalPortfolioValue: number;
@@ -86,7 +93,6 @@ function formatWibDate(ms: number): string {
 export class MultiScenarioDryRunEngine {
   private dataDir: string;
   private filePath: string;
-  private maxPool: number = 20.0;
 
   public scenarios: {
     s1: ScenarioState;
@@ -106,10 +112,11 @@ export class MultiScenarioDryRunEngine {
       s1: {
         id: 'SCENARIO_1_STATIC_2USD',
         name: 'Skenario 1: Full Follower Statis $2',
-        description: 'Modal Pool $20. Setiap Buy statis $2.00, Sell proporsional persis target.',
+        description: 'Saldo Awal $20.00. Setiap Buy $2.00 statis, Sell proporsional, Potong Fee $0.025/swap.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
+        totalFeesPaid: 0.0,
         realizedPnl: 0.0,
         unrealizedPnl: 0.0,
         totalPortfolioValue: 20.0,
@@ -124,10 +131,11 @@ export class MultiScenarioDryRunEngine {
       s2: {
         id: 'SCENARIO_2_DYNAMIC_V1',
         name: 'Skenario 2: Dynamic V1 ($1 Flat, Max $5 / Token)',
-        description: 'Modal Pool $20. Max $5 per token, setiap buy $1.00 flat, Sell proporsional.',
+        description: 'Saldo Awal $20.00. Max $5 per token, setiap buy $1.00 flat, Sell proporsional, Fee $0.025/swap.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
+        totalFeesPaid: 0.0,
         realizedPnl: 0.0,
         unrealizedPnl: 0.0,
         totalPortfolioValue: 20.0,
@@ -141,11 +149,12 @@ export class MultiScenarioDryRunEngine {
       },
       s3: {
         id: 'SCENARIO_3_DYNAMIC_V2',
-        name: 'Skenario 3: Dynamic V2 ($1 - $5 Bertingkat, Pool $20)',
-        description: 'Modal Pool $20. Buy bertingkat $1-$5 mengikuti ukuran target, Sell proporsional.',
+        name: 'Skenario 3: Dynamic V2 ($1 - $5 Bertingkat, Saldo Dinamis)',
+        description: 'Saldo Awal $20.00 (Dinamis). Buy bertingkat $1-$5 mengikuti ukuran target, Sell proporsional, Fee $0.025/swap.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
+        totalFeesPaid: 0.0,
         realizedPnl: 0.0,
         unrealizedPnl: 0.0,
         totalPortfolioValue: 20.0,
@@ -166,6 +175,9 @@ export class MultiScenarioDryRunEngine {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed.s1 && parsed.s2 && parsed.s3) {
+          if (parsed.s1.totalFeesPaid === undefined) parsed.s1.totalFeesPaid = 0.0;
+          if (parsed.s2.totalFeesPaid === undefined) parsed.s2.totalFeesPaid = 0.0;
+          if (parsed.s3.totalFeesPaid === undefined) parsed.s3.totalFeesPaid = 0.0;
           return parsed;
         }
       } catch {}
@@ -175,11 +187,9 @@ export class MultiScenarioDryRunEngine {
 
   public saveState(): void {
     try {
-      const now = Date.now();
-      // Recalculate totals
       for (const s of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3]) {
-        s.investedCash = s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0);
-        s.unrealizedPnl = s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0);
+        s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
+        s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
         s.winRate = s.totalTrades > 0 ? Number(((s.wins / s.totalTrades) * 100).toFixed(1)) : 0.0;
       }
@@ -212,21 +222,21 @@ export class MultiScenarioDryRunEngine {
     const timeWib = formatWibDate(now);
     const targetUsd = signal.usdAmount > 0 ? signal.usdAmount : (signal.solAmount * 100);
 
-    // 1. Proses Skenario 1 (Statis $2, Pool $20)
+    // 1. Skenario 1 (Statis $2, Plafon per token = min(Kas, $20))
     this.processScenarioBuy(this.scenarios.s1, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: 20.0,
+      maxTokenExposure: Math.min(this.scenarios.s1.availableCash + this.scenarios.s1.investedCash, 20.0),
       getStake: () => 2.0,
     });
 
-    // 2. Proses Skenario 2 (Dynamic V1: $1 Flat, Max $5/token, Pool $20)
+    // 2. Skenario 2 (Dynamic V1: $1 Flat, Max $5/token)
     this.processScenarioBuy(this.scenarios.s2, signal, isGroundZero, targetUsd, now, timeWib, {
       maxTokenExposure: 5.0,
       getStake: () => 1.0,
     });
 
-    // 3. Proses Skenario 3 (Dynamic V2: $1-$5 Bertingkat, Pool $20)
+    // 3. Skenario 3 (Dynamic V2: $1-$5 Bertingkat, Saldo Dinamis)
     this.processScenarioBuy(this.scenarios.s3, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: 20.0,
+      maxTokenExposure: Math.min(this.scenarios.s3.availableCash + this.scenarios.s3.investedCash, 20.0),
       getStake: (tUsd) => this.getTieredStake(tUsd),
     });
 
@@ -267,8 +277,8 @@ export class MultiScenarioDryRunEngine {
         return;
       }
 
-      // Cek ketersediaan kas di pool $20
-      if (scenario.availableCash < 1.0) {
+      // Cek ketersediaan kas di pool (wajib cukup stake + fee $0.025)
+      if (scenario.availableCash < 1.0 + REAL_SWAP_FEE_USD) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
           timestamp: now,
@@ -280,18 +290,21 @@ export class MultiScenarioDryRunEngine {
           priceUsd: pIn,
           availableCashAfter: scenario.availableCash,
           investedCashAfter: scenario.investedCash,
-          reason: 'CASH_POOL_EXHAUSTED (Sisa kas < $1.00)',
+          reason: 'CASH_EXHAUSTED (Sisa kas < $1.00 + fee)',
         });
         if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
         return;
       }
 
       const desiredStake = rules.getStake(targetUsd);
-      const actualStake = Math.min(scenario.availableCash, Math.min(rules.maxTokenExposure, desiredStake));
+      const maxAffordableStake = Math.max(0, scenario.availableCash - REAL_SWAP_FEE_USD);
+      const actualStake = Math.min(maxAffordableStake, Math.min(rules.maxTokenExposure, desiredStake));
       if (actualStake < 1.0) return;
 
       const tokensBought = actualStake / pIn;
-      scenario.availableCash = Number((scenario.availableCash - actualStake).toFixed(2));
+      const totalCashDeducted = Number((actualStake + REAL_SWAP_FEE_USD).toFixed(2));
+      scenario.availableCash = Number((scenario.availableCash - totalCashDeducted).toFixed(2));
+      scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
 
       pos = {
         mint: signal.mint,
@@ -307,6 +320,7 @@ export class MultiScenarioDryRunEngine {
         unrealizedPnlUsd: 0.0,
         realizedPnlUsd: 0.0,
         peakTargetHolding: signal.remainingHolding,
+        feesPaidUsd: REAL_SWAP_FEE_USD,
       };
       scenario.openPositions.unshift(pos);
 
@@ -319,11 +333,12 @@ export class MultiScenarioDryRunEngine {
         symbol: signal.symbol,
         mint: signal.mint,
         stakeUsd: actualStake,
+        feeUsd: REAL_SWAP_FEE_USD,
         tokens: tokensBought,
         priceUsd: pIn,
         availableCashAfter: scenario.availableCash,
         investedCashAfter: scenario.investedCash + actualStake,
-        reason: `ENTRY_1 (Target ~$${targetUsd.toFixed(0)})`,
+        reason: `ENTRY_1 (Target ~$${targetUsd.toFixed(0)} | Fee: $${REAL_SWAP_FEE_USD})`,
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
       return;
@@ -331,7 +346,7 @@ export class MultiScenarioDryRunEngine {
 
     // Jika posisi sudah ada: Akumulasi Buy
     const remTokenCap = Math.max(0, rules.maxTokenExposure - pos.costBasisUsd);
-    if (remTokenCap < 1.0 || scenario.availableCash < 1.0) {
+    if (remTokenCap < 1.0 || scenario.availableCash < 1.0 + REAL_SWAP_FEE_USD) {
       scenario.recentEvents.unshift({
         id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
         timestamp: now,
@@ -350,15 +365,19 @@ export class MultiScenarioDryRunEngine {
     }
 
     const desiredStake = rules.getStake(targetUsd);
-    const actualStake = Math.min(scenario.availableCash, Math.min(remTokenCap, desiredStake));
+    const maxAffordableStake = Math.max(0, scenario.availableCash - REAL_SWAP_FEE_USD);
+    const actualStake = Math.min(maxAffordableStake, Math.min(remTokenCap, desiredStake));
     if (actualStake < 1.0) return;
 
     const addedTokens = actualStake / pIn;
-    scenario.availableCash = Number((scenario.availableCash - actualStake).toFixed(2));
+    const totalCashDeducted = Number((actualStake + REAL_SWAP_FEE_USD).toFixed(2));
+    scenario.availableCash = Number((scenario.availableCash - totalCashDeducted).toFixed(2));
+    scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
 
     pos.tokens += addedTokens;
     pos.costBasisUsd += actualStake;
     pos.entryCount += 1;
+    pos.feesPaidUsd += REAL_SWAP_FEE_USD;
     pos.avgEntryPriceUsd = pos.costBasisUsd / pos.tokens;
     pos.lastPriceUsd = pIn;
     pos.peakTargetHolding = Math.max(pos.peakTargetHolding, signal.remainingHolding);
@@ -373,11 +392,12 @@ export class MultiScenarioDryRunEngine {
       symbol: signal.symbol,
       mint: signal.mint,
       stakeUsd: actualStake,
+      feeUsd: REAL_SWAP_FEE_USD,
       tokens: addedTokens,
       priceUsd: pIn,
       availableCashAfter: scenario.availableCash,
       investedCashAfter: scenario.investedCash + actualStake,
-      reason: `ACCUMULATE_${pos.entryCount} (Target ~$${targetUsd.toFixed(0)})`,
+      reason: `ACCUMULATE_${pos.entryCount} (Target ~$${targetUsd.toFixed(0)} | Fee: $${REAL_SWAP_FEE_USD})`,
     });
     if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
   }
@@ -413,16 +433,19 @@ export class MultiScenarioDryRunEngine {
       if (pos.tokens <= 0) continue;
 
       const tokensToSell = pos.tokens * sellRatio;
-      const usdReceived = tokensToSell * pOut;
+      const grossReceived = tokensToSell * pOut;
+      const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
       const costBasisSold = pos.costBasisUsd * sellRatio;
-      const pnlUsd = usdReceived - costBasisSold;
+      const pnlUsd = Number((netReceived - costBasisSold).toFixed(2));
 
-      scenario.availableCash = Number((scenario.availableCash + usdReceived).toFixed(2));
+      scenario.availableCash = Number((scenario.availableCash + netReceived).toFixed(2));
+      scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
       scenario.realizedPnl = Number((scenario.realizedPnl + pnlUsd).toFixed(2));
 
       pos.tokens -= tokensToSell;
       pos.costBasisUsd = Math.max(0, pos.costBasisUsd - costBasisSold);
       pos.realizedPnlUsd += pnlUsd;
+      pos.feesPaidUsd += REAL_SWAP_FEE_USD;
       pos.lastPriceUsd = pOut;
       pos.updatedAt = now;
 
@@ -434,13 +457,14 @@ export class MultiScenarioDryRunEngine {
         action: 'SELL',
         symbol: signal.symbol,
         mint: signal.mint,
-        usdReceived: Number(usdReceived.toFixed(2)),
+        usdReceived: netReceived,
+        feeUsd: REAL_SWAP_FEE_USD,
         tokens: tokensToSell,
         priceUsd: pOut,
-        pnlUsd: Number(pnlUsd.toFixed(2)),
+        pnlUsd: pnlUsd,
         availableCashAfter: scenario.availableCash,
         investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
-        reason: isFullExit ? 'FULL_EXIT_100%' : `PARTIAL_SELL_${(sellRatio * 100).toFixed(1)}%`,
+        reason: isFullExit ? `FULL_EXIT_100% (Fee: $${REAL_SWAP_FEE_USD})` : `PARTIAL_SELL_${(sellRatio * 100).toFixed(1)}% (Fee: $${REAL_SWAP_FEE_USD})`,
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
 
@@ -464,6 +488,7 @@ export class MultiScenarioDryRunEngine {
           entryCount: pos.entryCount,
           totalInvestedUsd: Number(totalInvested.toFixed(2)),
           totalReturnedUsd: Number((totalInvested + pos.realizedPnlUsd).toFixed(2)),
+          totalFeesPaidUsd: Number(pos.feesPaidUsd.toFixed(3)),
           realizedPnlUsd: Number(pos.realizedPnlUsd.toFixed(2)),
           roiPct: Number(roi.toFixed(1)),
           exitReason: isFullExit ? 'TARGET_FULL_EXIT' : 'POSITION_CLOSED',
