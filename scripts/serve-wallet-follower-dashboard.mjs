@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderBacktestDynamicHtml } from './render-backtest-dynamic.mjs';
+import { renderBacktestDynamic2Html } from './render-backtest-dynamic2.mjs';
 
 const PORT = 4192;
 const ROOT = process.cwd();
@@ -251,6 +252,13 @@ const server = createServer((req, res) => {
       'Cache-Control': 'no-cache',
     });
     return res.end(JSON.stringify(data));
+  }
+
+  // Dedicated HTML Backtest Report V2 (support /backtest-dynamic2, /add-fol/backtest-dynamic2)
+  if (pathname.includes('/backtest-dynamic2')) {
+    const html = renderBacktestDynamic2Html();
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(html);
   }
 
   // Dedicated HTML Backtest Report (support /backtest-dynamic, /add-fol/backtest-dynamic)
@@ -959,7 +967,8 @@ function renderHtmlDashboard(initialState = {}) {
         <span class="badge badge-rule" style="border-color: rgba(99, 102, 241, 0.5); color: #a5b4fc;">Modal Pool: $20.00 (Max 10x Buy Bersamaan)</span>
         <span class="badge badge-rule">Sell: Proporsional & Daur Ulang Modal</span>
         <span class="badge badge-live">Live CDP 9223</span>
-        <a href="/add-fol/backtest-dynamic" class="badge" style="background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(16,185,129,0.3)); color: #a5b4fc; border: 1px solid #818cf8; text-decoration: none; font-weight: 800; padding: 4px 10px;">📊 Buka Backtest Dynamic ($1-$5) ↗</a>
+        <a href="/add-fol/backtest-dynamic" class="badge" style="background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(16,185,129,0.3)); color: #a5b4fc; border: 1px solid #818cf8; text-decoration: none; font-weight: 800; padding: 4px 10px;">📊 V1 ($5 Cap) ↗</a>
+        <a href="/add-fol/backtest-dynamic2" class="badge" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(168,85,247,0.3)); color: #f472b6; border: 1px solid #c084fc; text-decoration: none; font-weight: 800; padding: 4px 10px;">🚀 V2 ($20 Pool, $1-$5 Tiered) ↗</a>
       </div>
     </header>
 
