@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { renderBacktestDynamicHtml } from './render-backtest-dynamic.mjs';
 
 const PORT = 4192;
 const ROOT = process.cwd();
@@ -250,6 +251,13 @@ const server = createServer((req, res) => {
       'Cache-Control': 'no-cache',
     });
     return res.end(JSON.stringify(data));
+  }
+
+  // Dedicated HTML Backtest Report (support /backtest-dynamic, /add-fol/backtest-dynamic)
+  if (pathname.includes('/backtest-dynamic')) {
+    const html = renderBacktestDynamicHtml();
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(html);
   }
 
   // Default: HTML Dashboard pre-rendered with stored data (handles /, /add-fol, etc.)
@@ -951,6 +959,7 @@ function renderHtmlDashboard(initialState = {}) {
         <span class="badge badge-rule" style="border-color: rgba(99, 102, 241, 0.5); color: #a5b4fc;">Modal Pool: $20.00 (Max 10x Buy Bersamaan)</span>
         <span class="badge badge-rule">Sell: Proporsional & Daur Ulang Modal</span>
         <span class="badge badge-live">Live CDP 9223</span>
+        <a href="/add-fol/backtest-dynamic" class="badge" style="background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(16,185,129,0.3)); color: #a5b4fc; border: 1px solid #818cf8; text-decoration: none; font-weight: 800; padding: 4px 10px;">📊 Buka Backtest Dynamic ($1-$5) ↗</a>
       </div>
     </header>
 
