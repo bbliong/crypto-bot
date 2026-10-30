@@ -54,6 +54,7 @@ export class CloneWalletStore {
     const now = Date.now();
 
     if (!existing) {
+      const isMultiStep = tradeRecord.sellCount >= 2;
       const w: DiscoveredCloneWallet = {
         address,
         firstDiscoveredAt: now,
@@ -64,9 +65,11 @@ export class CloneWalletStore {
         avgHoldSec: tradeRecord.holdSec,
         avgStakeUsd: tradeRecord.stakeUsd,
         isStrictSerial: true,
+        isMultiStepScalper: isMultiStep,
+        isPureDexTrader: true,
         tokensTraded: [tradeRecord],
         tags,
-        score: this.calculateScore(1, tradeRecord.profitUsd, solBalance, true)
+        score: this.calculateScore(1, tradeRecord.profitUsd, solBalance, true, isMultiStep)
       };
       this.wallets.set(address, w);
       this.save();
@@ -90,31 +93,47 @@ export class CloneWalletStore {
 
       // Check strict serial execution
       existing.isStrictSerial = isStrictSerialTrader(existing.tokensTraded);
+
+      // Check multi-step scalper (TWAP sell count >= 2)
+      existing.isMultiStepScalper = existing.tokensTraded.some(t => t.sellCount >= 2);
+      existing.isPureDexTrader = true;
       
-      existing.score = this.calculateScore(existing.hitCount, existing.totalRealizedProfitUsd, existing.solBalance, existing.isStrictSerial);
+      existing.score = this.calculateScore(
+        existing.hitCount,
+        existing.totalRealizedProfitUsd,
+        existing.solBalance,
+        existing.isStrictSerial,
+        existing.isMultiStepScalper
+      );
       this.save();
       return { isNew: false, hitCount: existing.hitCount };
     }
   }
 
-  private calculateScore(hitCount: number, totalProfitUsd: number, solBalance: number, isStrictSerial: boolean = true): number {
+  private calculateScore(
+    hitCount: number,
+    totalProfitUsd: number,
+    solBalance: number,
+    isStrictSerial: boolean = true,
+    isMultiStepScalper: boolean = false
+  ): number {
     // 0 - 100 Score:
-    // Repeat Hit (30 pts max): 1 hit = 10, 2 hits = 20, 3+ hits = 30
-    let sHit = Math.min(30, hitCount * 10);
+    // Repeat Hit (25 pts max): 1 hit = 8, 2 hits = 16, 3+ hits = 25
+    let sHit = Math.min(25, hitCount * 8);
     
-    // Profit score (30 pts max, log scaled)
+    // Profit score (25 pts max, log scaled)
     let sProf = 0;
     if (totalProfitUsd > 0) {
-      sProf = Math.min(30, Math.round((Math.log10(Math.max(10, totalProfitUsd)) / 4) * 30));
+      sProf = Math.min(25, Math.round((Math.log10(Math.max(10, totalProfitUsd)) / 4) * 25));
     }
-    
-    // Balance score (15 pts max): 0.5 - 20 SOL
-    let sBal = Math.min(15, Math.round(solBalance * 1.5));
 
     // Strict Serial Trader Bonus (25 pts max) - Key Target DNA trait!
     let sSerial = isStrictSerial ? 25 : 0;
+
+    // Multi-Step TWAP Sells Bonus (25 pts max) - Target NEVER does 1 buy -> 1 sell!
+    let sMultiStep = isMultiStepScalper ? 25 : 0;
     
-    return Math.min(100, sHit + sProf + sBal + sSerial);
+    return Math.min(100, sHit + sProf + sSerial + sMultiStep);
   }
 
   public getRankedList(): DiscoveredCloneWallet[] {

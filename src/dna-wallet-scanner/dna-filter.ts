@@ -8,8 +8,9 @@ export const TARGET_DNA: TargetDnaPattern = {
   minProfitUsd: 15,        // Must be genuinely profitable on the token
   minSolBalance: 0.3,      // Must hold active SOL (not empty burner)
   disallowCreator: true,   // Exclude token dev/creator
-  disallowTransferIn: true, // Exclude free token receiver
-  maxConcurrentTokens: 1   // STRICT SERIAL TRADER: Target only plays 1 token at a time
+  disallowTransferIn: true, // Exclude free token receiver (Zero TX IN)
+  maxConcurrentTokens: 1,  // STRICT SERIAL TRADER: Target only plays 1 token at a time
+  minSellCount: 2          // Target never does 1 buy -> 1 sell. Always multiple sells (TWAP micro-sells)
 };
 
 export function isStrictSerialTrader(tokensTraded: Array<{ timestamp: number; holdSec: number }>): boolean {

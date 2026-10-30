@@ -16,6 +16,8 @@ export function renderDnaScannerHtml() {
 
   const totWallets = wallets.length;
   const multiHit = wallets.filter(w => w.hitCount >= 2);
+  const multiStep = wallets.filter(w => w.isMultiStepScalper);
+  const exactClones = wallets.filter(w => w.isStrictSerial !== false && w.isMultiStepScalper);
   const totalCuan = wallets.reduce((acc, w) => acc + (w.totalRealizedProfitUsd || 0), 0);
   const avgHold = wallets.length
     ? Math.round(wallets.reduce((acc, w) => acc + (w.avgHoldSec || 0), 0) / wallets.length)
@@ -165,6 +167,8 @@ export function renderDnaScannerHtml() {
     .badge-gold { background: rgba(245, 158, 11, 0.2); color: var(--amber); border: 1px solid var(--amber); }
     .badge-single { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); }
     .badge-serial { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; }
+    .badge-twap { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #a855f7; }
+    .badge-puredex { background: rgba(6, 182, 212, 0.18); color: #22d3ee; border: 1px solid #06b6d4; }
 
     .token-chip-container {
       display: flex; flex-direction: column; gap: 6px; max-height: 120px; overflow-y: auto;
@@ -206,24 +210,24 @@ export function renderDnaScannerHtml() {
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Total Dompet Kloningan</div>
+        <div class="stat-label">Total Dompet Terjaring</div>
         <div class="stat-val val-amber">${totWallets} Dompet</div>
-        <div class="stat-sub">Sesuai DNA Target 3azG...</div>
+        <div class="stat-sub">Sesuai Filter Sizing & Cuan</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">👑 Exact 3azG Clones</div>
+        <div class="stat-val val-emerald">${exactClones.length} Dompet</div>
+        <div class="stat-sub">Serial + Multi-Sell TWAP + Pure DEX</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🔁 Multi-Sell TWAP (&ge;2 Sells)</div>
+        <div class="stat-val" style="color:var(--purple);">${multiStep.length} Dompet</div>
+        <div class="stat-sub">Anti 1 Buy 1 Sell (Cicil Jual)</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Konsistensi Tinggi (Multi-Hit)</div>
-        <div class="stat-val val-emerald">${multiHit.length} Dompet</div>
+        <div class="stat-val val-cyan">${multiHit.length} Dompet</div>
         <div class="stat-sub">Menang di &ge; 2 Koin Berbeda</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Realized Cuan Scalping</div>
-        <div class="stat-val val-emerald">+$${totalCuan.toLocaleString('en-US', {maximumFractionDigits: 0})} USD</div>
-        <div class="stat-sub">Akumulasi laba bersih seluruh koin</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Rata-rata Waktu Hold</div>
-        <div class="stat-val val-cyan">${avgHold}s (${(avgHold / 60).toFixed(1)}m)</div>
-        <div class="stat-sub">Ultra-fast momentum scalping</div>
       </div>
     </div>
 
@@ -231,19 +235,21 @@ export function renderDnaScannerHtml() {
       <h3>🎯 Pola DNA Spesifik Target 3azG8rmt... yang Sedang Disaring Otomatis:</h3>
       <p>
         1. <strong>Ukuran Beli:</strong> $80 – $450 USD (~1 – 4.5 SOL) per entry.<br>
-        2. <strong>Kecepatan Hold:</strong> 4 detik hingga 360 detik (keluar cepat begitu momentum pump selesai).<br>
-        3. <strong>Gaya Jual:</strong> Menjual bertahap (sell count &ge; 1–2x) dengan cuan nyata (&ge; +$15 USD).<br>
-        4. <strong>Fokus 1 Token (Strict Serial Execution):</strong> Tidak pernah spray banyak token sekaligus. Menahan 1 koin sampai tuntas (exit 0), baru membuka posisi di koin baru.<br>
-        5. <strong>Bukan Airdrop Dev:</strong> Bebas transfer-in dan bukan pencipta koin (non-dev). Dompet memiliki saldo aktif &ge; 0.3 SOL.
+        2. <strong>Bermain Beberapa Kali (Anti 1 Buy 1 Sell):</strong> Target <strong>TIDAK PERNAH</strong> hanya 1 buy lalu 1 sell. Target selalu mengeksekusi multi-sell bertahap (TWAP micro-sells 5%–15% berkali-kali).<br>
+        3. <strong>Fokus 1 Token (Strict Serial Execution):</strong> Tidak pernah spray banyak token sekaligus. Menahan 1 koin sampai tuntas (exit 0), baru membuka posisi di koin baru.<br>
+        4. <strong>Murni Transaksi DEX (0 P2P Tx In/Out):</strong> Dompet murni mesin trading DEX (100% AMM swap). Tidak pernah ada transfer kas pribadi keluar/masuk (0 transfer-in).<br>
+        5. <strong>Kecepatan Hold:</strong> 4 detik hingga 360 detik (keluar cepat begitu momentum pump selesai). Saldo aktif &ge; 0.3 SOL.
       </p>
     </div>
 
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="filter-btn active" onclick="setFilter('all')">Semua (${totWallets})</button>
+        <button class="filter-btn" onclick="setFilter('exact')">👑 Exact Clones (${exactClones.length})</button>
         <button class="filter-btn" onclick="setFilter('multi')">👑 Multi-Hit (${multiHit.length})</button>
-        <button class="filter-btn" onclick="setFilter('serial')">🎯 Strict Serial Only</button>
+        <button class="filter-btn" onclick="setFilter('twap')">🔁 TWAP Multi-Sell (${multiStep.length})</button>
+        <button class="filter-btn" onclick="setFilter('serial')">🎯 Strict Serial</button>
       </div>
     </div>
 
@@ -267,11 +273,17 @@ export function renderDnaScannerHtml() {
           ${wallets.map((w, idx) => {
             const isMulti = w.hitCount >= 2;
             const isSerial = w.isStrictSerial !== false;
+            const isMultiStep = w.isMultiStepScalper === true;
+            const isExact = isSerial && isMultiStep;
             const badgeClass = isMulti ? 'badge-gold' : 'badge-single';
             const badgeText = isMulti ? `👑 ${w.hitCount}x HIT` : `1x Hit`;
             const serialBadge = isSerial ? `<span class="badge-hit badge-serial" title="Strict Serial: Hanya pegang 1 koin dalam 1 waktu">🎯 SERIAL</span>` : `<span class="badge-hit" style="background:#334155;color:#94a3b8;">MULTI</span>`;
+            const maxSells = Math.max(...w.tokensTraded.map(t => t.sellCount || 1), 1);
+            const twapBadge = isMultiStep ? `<span class="badge-hit badge-twap" title="TWAP Multi-Sell: Target mencicil jual berkali-kali">🔁 TWAP (${maxSells}x Sells)</span>` : `<span class="badge-hit" style="background:#1e293b;color:#64748b;">1x Sell</span>`;
+            const pureDexBadge = `<span class="badge-hit badge-puredex" title="100% AMM Swaps: 0 casual Tx In/Out">💎 PURE DEX</span>`;
+
             return `
-              <tr class="wallet-row" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
+              <tr class="wallet-row" data-exact="${isExact}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
                 <td class="mono" style="color:#64748b;">${idx + 1}</td>
                 <td>
                   <strong>${w.address.slice(0, 6)}...${w.address.slice(-4)}</strong>
@@ -280,7 +292,11 @@ export function renderDnaScannerHtml() {
                 </td>
                 <td>
                   <span class="badge-hit ${badgeClass}">${badgeText}</span>
-                  <div style="margin-top:4px;">${serialBadge}</div>
+                  <div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap;">
+                    ${serialBadge}
+                    ${twapBadge}
+                    ${pureDexBadge}
+                  </div>
                 </td>
                 <td class="mono font-semibold" style="color:var(--amber);">${w.score}/100</td>
                 <td class="mono font-semibold val-emerald">+$${w.totalRealizedProfitUsd.toLocaleString()}</td>
@@ -333,7 +349,9 @@ export function renderDnaScannerHtml() {
 
         let matchSearch = !q || addr.includes(q) || toks.includes(q);
         let matchFilter = true;
+        if (currentFilter === 'exact') matchFilter = (r.getAttribute('data-exact') === 'true');
         if (currentFilter === 'multi') matchFilter = isMulti;
+        if (currentFilter === 'twap') matchFilter = (r.getAttribute('data-twap') === 'true');
         if (currentFilter === 'serial') matchFilter = (r.getAttribute('data-serial') === 'true');
 
         if (matchSearch && matchFilter) {
