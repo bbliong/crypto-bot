@@ -49,6 +49,15 @@ export interface DiscoveredCloneWallet {
     calendarWinRate: number;
     totalNetPnl: number;
   };
+  recentActivityAudit?: {
+    actsCount: number;
+    winTokens: number;
+    lossTokens: number;
+    totalTokens: number;
+    recentActivityWinRate: number;
+    recentActivityNetPnl: number;
+    completedProfit: number;
+  };
   gmgnProfile?: {
     realized7d: number;
     totalProfit: number;

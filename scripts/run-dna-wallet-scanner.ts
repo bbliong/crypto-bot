@@ -106,6 +106,12 @@ class DnaWalletScanner {
                     if (cal) stored.calendarPnl = cal;
                   } catch {}
                 }
+                if (!stored.recentActivityAudit) {
+                  try {
+                    const actAudit = await this.fetchRecentActivityAudit(page, tr.address);
+                    if (actAudit) stored.recentActivityAudit = actAudit;
+                  } catch {}
+                }
                 this.store.save();
               }
 
@@ -260,6 +266,67 @@ class DnaWalletScanner {
           zeroDays: zero,
           calendarWinRate: calWinRate,
           totalNetPnl: Math.round(tot)
+        };
+      } catch {
+        return null;
+      }
+    }, address);
+  }
+
+  private async fetchRecentActivityAudit(page: Page, address: string): Promise<any> {
+    return await page.evaluate(async (addr: string) => {
+      try {
+        const swUrl = `/vas/api/v1/wallet_activity/sol?wallet=${addr}&limit=50&cost=usd`;
+        const r = await fetch(swUrl);
+        const res = await r.json();
+        const acts = res?.data?.activities || [];
+        if (acts.length < 4) return null;
+
+        const tokens: Record<string, { buyUsd: number; sellUsd: number; buys: number; sells: number }> = {};
+        let totalSpent = 0;
+        let totalReceived = 0;
+
+        for (const a of acts) {
+          const mint = a.token_address || a.token?.address || a.token?.symbol;
+          if (!mint) continue;
+          if (!tokens[mint]) tokens[mint] = { buyUsd: 0, sellUsd: 0, buys: 0, sells: 0 };
+          const vol = Number(a.amount_usd || a.cost_usd || 0);
+          if (a.event_type === "buy") {
+            tokens[mint].buyUsd += vol;
+            tokens[mint].buys++;
+            totalSpent += vol;
+          } else if (a.event_type === "sell") {
+            tokens[mint].sellUsd += vol;
+            tokens[mint].sells++;
+            totalReceived += vol;
+          }
+        }
+
+        let winTokens = 0;
+        let lossTokens = 0;
+        let completedProfit = 0;
+
+        for (const [mint, t] of Object.entries(tokens)) {
+          if (t.sells > 0 && t.buyUsd > 1) {
+            const net = t.sellUsd - t.buyUsd;
+            completedProfit += net;
+            if (net > 0) winTokens++;
+            else lossTokens++;
+          }
+        }
+
+        const totTokens = winTokens + lossTokens;
+        const actWinRate = totTokens > 0 ? (winTokens / totTokens * 100) : 0;
+        const recentNetPnl = totalReceived - totalSpent;
+
+        return {
+          actsCount: acts.length,
+          winTokens,
+          lossTokens,
+          totalTokens: totTokens,
+          recentActivityWinRate: Number(actWinRate.toFixed(1)),
+          recentActivityNetPnl: Math.round(recentNetPnl),
+          completedProfit: Math.round(completedProfit)
         };
       } catch {
         return null;

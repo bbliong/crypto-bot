@@ -92,6 +92,7 @@ export class CloneWalletStore {
       const prevWins = existing.completedWins;
       const prevLosses = existing.completedLosses;
       const prevCalendar = existing.calendarPnl;
+      const prevRecentAudit = existing.recentActivityAudit;
 
       // Wallet already exists: check if this token was already recorded
       const alreadyHasToken = existing.tokensTraded.some(t => t.mint === tradeRecord.mint);
@@ -124,6 +125,7 @@ export class CloneWalletStore {
       if (prevWins !== undefined) existing.completedWins = prevWins;
       if (prevLosses !== undefined) existing.completedLosses = prevLosses;
       if (prevCalendar !== undefined) existing.calendarPnl = prevCalendar;
+      if (prevRecentAudit !== undefined) existing.recentActivityAudit = prevRecentAudit;
       
       existing.score = this.calculateScore(
         existing.hitCount,
