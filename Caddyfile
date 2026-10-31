@@ -21,6 +21,11 @@ cr.bbliong.io {
         reverse_proxy 127.0.0.1:4196
     }
 
+    # High Win Rate (>= 90%) Smart Wallet Radar
+    handle_path /winrate90* {
+        reverse_proxy 127.0.0.1:4198
+    }
+
     handle /holder149* {
         reverse_proxy 127.0.0.1:4176
     }
