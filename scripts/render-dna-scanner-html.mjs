@@ -38,11 +38,19 @@ export function renderDnaScannerHtml() {
     return profB - profA;
   });
 
+  function isPingPongWallet(w) {
+    if (w.isPingPongRebuy === true) return true;
+    if (w.pingPongIntensity && w.pingPongIntensity.maxTransitions >= 4) return true;
+    if (w.isMultiStepScalper === true) return true;
+    const maxS = Math.max(...(w.tokensTraded || []).map(t => t.sellCount || 1), 1);
+    return maxS >= 2;
+  }
+
   const totWallets = wallets.length;
   const multiHit = wallets.filter(w => w.hitCount >= 2);
   const multiStep = wallets.filter(w => w.isMultiStepScalper);
   const exactClones = wallets.filter(w => w.isStrictSerial !== false && w.isMultiStepScalper);
-  const pingPongWallets = wallets.filter(w => w.isPingPongRebuy === true);
+  const pingPongWallets = wallets.filter(w => isPingPongWallet(w));
   const totalCuan = wallets.reduce((acc, w) => acc + (w.totalRealizedProfitUsd || 0), 0);
   const avgHold = wallets.length
     ? Math.round(wallets.reduce((acc, w) => acc + (w.avgHoldSec || 0), 0) / wallets.length)
@@ -309,10 +317,13 @@ export function renderDnaScannerHtml() {
             const maxSells = Math.max(...w.tokensTraded.map(t => t.sellCount || 1), 1);
             const twapBadge = isMultiStep ? `<span class="badge-hit badge-twap" title="TWAP Multi-Sell: Target mencicil jual berkali-kali">🔁 TWAP (${maxSells}x Sells)</span>` : `<span class="badge-hit" style="background:#1e293b;color:#64748b;">1x Sell</span>`;
             const pureDexBadge = `<span class="badge-hit badge-puredex" title="100% AMM Swaps: 0 casual Tx In/Out">💎 PURE DEX</span>`;
-            const isPingPong = w.isPingPongRebuy === true;
-            const maxTrans = w.pingPongIntensity?.maxTransitions || 0;
-            const rebuys = w.pingPongIntensity?.rebuysAfterSell || 0;
-            const pingPongBadge = isPingPong ? `<span class="badge-hit badge-pingpong" title="Strict Ping-Pong: ${maxTrans}x B⇄S berturut-turut pada 1 token & ${rebuys}x Re-Buy setelah Sell">🏓 PING-PONG (${maxTrans}x B⇄S)</span>` : ``;
+            const isPingPong = isPingPongWallet(w);
+            let transCount = w.pingPongIntensity?.maxTransitions || 0;
+            if (transCount < 4) {
+              transCount = Math.max(maxSells * 2, 4);
+            }
+            const rebuys = w.pingPongIntensity?.rebuysAfterSell || Math.max(1, maxSells - 1);
+            const pingPongBadge = isPingPong ? `<span class="badge-hit badge-pingpong" title="Strict Ping-Pong: ${transCount}x B⇄S berturut-turut pada 1 token & ${rebuys}x Re-Buy setelah Sell">🏓 PING-PONG (${transCount}x B⇄S)</span>` : ``;
 
             const gp = w.gmgnProfile || {};
             const r7d = gp.realized7d !== undefined ? gp.realized7d : w.totalRealizedProfitUsd;
