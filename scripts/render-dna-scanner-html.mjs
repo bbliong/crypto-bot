@@ -38,20 +38,39 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     return profB - profA;
   });
 
-  function isEliteClone(w) {
-    // Gate 1: PnL Win Rate >= 80% (Completed tokens win rate on-chain)
-    const wr = Number(w.realPnlWinRate || 0);
-    if (wr < 80.0) return false;
-    if ((w.completedWins || 0) < 3) return false;
+  function getWalletWinRate(w) {
+    if (w.realPnlWinRate !== undefined && w.realPnlWinRate > 0) {
+      return w.realPnlWinRate;
+    }
+    const toks = w.tokensTraded || [];
+    if (toks.length > 0) {
+      const wins = toks.filter(t => (t.profitUsd || 0) > 0).length;
+      return Number((wins / toks.length * 100).toFixed(1));
+    }
+    return 0;
+  }
 
-    // Gate 2: Verified GMGN Profit (>= $3,000 USD and 7D >= 0)
+  function isEliteClone(w) {
+    // Gate 1: PnL Win Rate >= 80%
+    const wr = getWalletWinRate(w);
+    if (wr < 80.0) return false;
+
+    // Gate 2: Multi-hit consistency (>= 2 fresh tokens)
+    if ((w.hitCount || 1) < 2) return false;
+
+    // Gate 3: Verified GMGN Profit (>= $3,000 USD and 7D >= 0)
     const gp = w.gmgnProfile || {};
     const totProf = gp.totalProfit || 0;
     const r7d = gp.realized7d || 0;
     if (totProf < 3000 || r7d < 0) return false;
 
-    // Gate 3: Strict Serial Trader (Never concurrent tokens)
+    // Gate 4: Strict Serial Trader (Never concurrent tokens)
     if (w.isStrictSerial === false) return false;
+
+    // Gate 5: TWAP Multi-Sell (Max sells >= 2)
+    const toks = w.tokensTraded || [];
+    const maxSells = Math.max(...toks.map(t => t.sellCount || 1), 1);
+    if (maxSells < 2) return false;
 
     return true;
   }
@@ -390,8 +409,8 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
                   </div>
                 </td>
                 <td class="mono font-semibold val-emerald" style="font-size:1rem;">
-                  🎯 ${w.realPnlWinRate || 0}%
-                  <div style="font-size:0.75rem; color:#94a3b8;">${w.completedWins || 0}W / ${w.completedLosses || 0}L</div>
+                  🎯 ${getWalletWinRate(w)}%
+                  <div style="font-size:0.75rem; color:#94a3b8;">${w.completedWins || (w.tokensTraded || []).length}W / ${w.completedLosses || 0}L</div>
                 </td>
                 <td class="mono font-semibold ${r7d >= 0 ? 'val-emerald' : 'val-rose'}">
                   ${r7d >= 0 ? '+' : ''}$${r7d.toLocaleString()}
