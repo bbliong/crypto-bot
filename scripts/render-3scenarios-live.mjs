@@ -18,7 +18,7 @@ export function render3ScenariosLiveHtml() {
   const s2 = data.s2 || { name: 'Skenario 2 (Dynamic V1 $1-$5, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s3 = data.s3 || { name: 'Skenario 3 (Dynamic V2 $1-$5 Bertingkat, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s4 = data.s4 || { name: 'Skenario 4 (Single Buy $5 Only, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
-  const s5 = data.s5 || { name: 'Skenario 5 (Quick Exit 5%, Statis $2)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s5 = data.s5 || { name: 'Skenario 5 (Quick Exit 5%, Statis $5)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s6 = data.s6 || { name: 'Skenario 6 (Re-Deploy Sniper: Pool 1: $5, Pool 2: $7)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color) {

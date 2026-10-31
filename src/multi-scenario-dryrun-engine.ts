@@ -198,8 +198,8 @@ export class MultiScenarioDryRunEngine {
       },
       s5: {
         id: 'SCENARIO_5_QUICK_EXIT_5PCT',
-        name: 'Skenario 5: Quick Exit 5% (Statis $2, Exit >= 5%)',
-        description: 'Saldo Awal $20.00. Buy $2.00 statis. Akumulasi Sell >= 5% -> Langsung Full Exit 100% (Anti-Rugpull Dev Kilat).',
+        name: 'Skenario 5: Quick Exit 5% (Statis $5, Exit >= 5%)',
+        description: 'Saldo Awal $20.00. Buy $5.00 statis. Akumulasi Sell >= 5% -> Langsung Full Exit 100% (Anti-Rugpull Dev Kilat).',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -330,10 +330,10 @@ export class MultiScenarioDryRunEngine {
       disallowAccumulation: true,
     });
 
-    // 5. Skenario 5 (Quick Exit 5%: Statis $2, Exit di Ambang Batas >= 5%)
+    // 5. Skenario 5 (Quick Exit 5%: Statis $5, Exit di Ambang Batas >= 5%)
     this.processScenarioBuy(this.scenarios.s5, signal, isGroundZero, targetUsd, now, timeWib, {
       maxTokenExposure: Math.min(this.scenarios.s5.availableCash + this.scenarios.s5.investedCash, 20.0),
-      getStake: () => 2.0,
+      getStake: () => 5.0,
     });
 
     // 6. Skenario 6 (Re-Deploy Sniper: Pool 1: $5, Pool 2: $7)
