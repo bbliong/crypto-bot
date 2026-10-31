@@ -585,12 +585,59 @@ export class MultiScenarioDryRunEngine {
     let changed = false;
 
     for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4]) {
-      const pos = scenario.openPositions.find(p => p.mint === mint);
-      if (pos) {
+      const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
+      if (posIdx !== -1) {
+        const pos = scenario.openPositions[posIdx];
         pos.lastPriceUsd = priceUsd;
         const curVal = pos.tokens * priceUsd;
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
         changed = true;
+
+        // Auto Liquidation Gate: Jika harga crash > 95% dari harga entry (Rugpull/Liquidity Drained)
+        if (pos.avgEntryPriceUsd > 0 && priceUsd < pos.avgEntryPriceUsd * 0.05) {
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+          scenario.openPositions.splice(posIdx, 1);
+          scenario.losses += 1;
+          scenario.totalTrades += 1;
+          scenario.realizedPnl = Number((scenario.realizedPnl - pos.costBasisUsd).toFixed(2));
+
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SELL',
+            symbol: pos.symbol,
+            mint: pos.mint,
+            usdReceived: 0,
+            feeUsd: 0,
+            tokens: pos.tokens,
+            priceUsd,
+            pnlUsd: -pos.costBasisUsd,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: Math.max(0, scenario.investedCash - pos.costBasisUsd),
+            reason: `AUTO_LIQUIDATION_CRASH (Price dropped >95% to $${priceUsd})`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+          scenario.closedTrades.unshift({
+            mint: pos.mint,
+            symbol: pos.symbol,
+            tokenName: pos.tokenName,
+            openedAt: pos.openedAt,
+            closedAt: now,
+            entryCount: pos.entryCount,
+            totalInvestedUsd: pos.costBasisUsd,
+            totalReturnedUsd: 0,
+            totalFeesPaidUsd: pos.feesPaidUsd,
+            realizedPnlUsd: -pos.costBasisUsd,
+            roiPct: -100,
+            exitReason: 'AUTO_LIQUIDATION_CRASH (>95% drop / Rugpull)',
+            isWin: false,
+          });
+          if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+        }
       }
     }
 
