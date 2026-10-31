@@ -77,6 +77,7 @@ export class WalletFollowerRunner {
   private heliusPollInterval: NodeJS.Timeout | null = null;
   private fastSellRetryInterval: NodeJS.Timeout | null = null;
   private isPollingHelius = false;
+  private isProbeRunning = false;
   private heliusWs: WebSocket | null = null;
   private heliusWsReconnectTimer: NodeJS.Timeout | null = null;
   private startTimeSec: number = Math.floor(Date.now() / 1000);
@@ -897,9 +898,6 @@ export class WalletFollowerRunner {
     // Jalankan eksekusi 3-way dry-run scenario simulator secara paralel
     this.multiDryRunEngine.handleTargetSell(signal);
 
-    // Hit API Nyata GMGN untuk verifikasi respon route & submit order SELL jika sinyal sell terpicu
-    this.executeGmgnApiProbe('SELL', signal, 5.0).catch(err => console.warn(`[GMGN SELL PROBE ERR] ${err?.message}`));
-
     // Update live price tick ke Lane 1 & Lane 2 setiap kali target menjual token
     if (signal.priceUsd > 0) {
       this.lane.updateTokenTick(signal.mint, signal.priceUsd);
@@ -1605,9 +1603,10 @@ export class WalletFollowerRunner {
     stakeUsd: number = 5.0,
     baseUnits?: string
   ): Promise<void> {
-    if (!this.page || this.page.isClosed()) {
+    if (!this.page || this.page.isClosed() || this.isProbeRunning) {
       return;
     }
+    this.isProbeRunning = true;
 
     try {
       const state = readFollowerRealState(this.dataDir);
@@ -1678,6 +1677,8 @@ export class WalletFollowerRunner {
       });
     } catch (err: any) {
       console.error(`[GMGN API HIT ERR] ${err?.message}`);
+    } finally {
+      this.isProbeRunning = false;
     }
   }
 
