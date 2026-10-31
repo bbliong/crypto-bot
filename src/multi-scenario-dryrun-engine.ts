@@ -566,6 +566,17 @@ export class MultiScenarioDryRunEngine {
       reason: `ACCUMULATE_${pos.entryCount} (Target ~$${targetUsd.toFixed(0)} | Fee: $${REAL_SWAP_FEE_USD})`,
     });
     if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+    if (this.onTradeAction) {
+      try {
+        this.onTradeAction('BUY', scenario.id, signal, {
+          stakeUsd: actualStake,
+          tokens: addedTokens,
+          priceUsd: pIn,
+          reason: `ACCUMULATE_${pos.entryCount}`,
+        });
+      } catch {}
+    }
   }
 
   /**
