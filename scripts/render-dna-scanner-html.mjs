@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const dataDir = join(__dirname, '../data');
 
-export function renderDnaScannerHtml() {
+export function renderDnaScannerHtml(activeTab = 'elite') {
   const storeFile = join(dataDir, 'dna-clone-wallets.json');
   let wallets = [];
   if (existsSync(storeFile)) {
@@ -77,6 +77,17 @@ export function renderDnaScannerHtml() {
   const multiStep = wallets.filter(w => w.isMultiStepScalper);
   const exactClones = wallets.filter(w => w.isStrictSerial !== false && w.isMultiStepScalper);
   const pingPongWallets = wallets.filter(w => isPingPongWallet(w));
+
+  // Determine wallets to display SERVER-SIDE:
+  let displayWallets = eliteClones; // Default is strictly the 29 Elite Clones!
+  if (activeTab === 'pingpong') {
+    displayWallets = pingPongWallets;
+  } else if (activeTab === 'multi') {
+    displayWallets = multiHit;
+  } else if (activeTab === 'all') {
+    displayWallets = wallets;
+  }
+
   const totalCuan = wallets.reduce((acc, w) => acc + (w.totalRealizedProfitUsd || 0), 0);
   const avgHold = wallets.length
     ? Math.round(wallets.reduce((acc, w) => acc + (w.avgHoldSec || 0), 0) / wallets.length)
@@ -305,11 +316,11 @@ export function renderDnaScannerHtml() {
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <button class="filter-btn active" onclick="setFilter('elite', this)">⭐ Elite Target Clones (${eliteClones.length})</button>
-        <button class="filter-btn" onclick="setFilter('pingpong', this)">🏓 Strict Ping-Pong (${pingPongWallets.length})</button>
-        <button class="filter-btn" onclick="setFilter('multi', this)">👑 Multi-Hit (${multiHit.length})</button>
-        <button class="filter-btn" onclick="setFilter('all', this)">Semua Unfiltered (${totWallets})</button>
-        <button class="filter-btn" style="background:#0284c7; color:#fff; border-color:#0284c7; margin-left:8px;" onclick="window.location.reload()">🔄 Refresh Data</button>
+        <a href="/clone-radar?tab=elite" class="filter-btn ${activeTab === 'elite' ? 'active' : ''}">⭐ Elite Target Clones (${eliteClones.length})</a>
+        <a href="/clone-radar?tab=pingpong" class="filter-btn ${activeTab === 'pingpong' ? 'active' : ''}">🏓 Strict Ping-Pong (${pingPongWallets.length})</a>
+        <a href="/clone-radar?tab=multi" class="filter-btn ${activeTab === 'multi' ? 'active' : ''}">👑 Multi-Hit (${multiHit.length})</a>
+        <a href="/clone-radar?tab=all" class="filter-btn ${activeTab === 'all' ? 'active' : ''}">Semua Unfiltered (${totWallets})</a>
+        <a href="javascript:location.reload()" class="filter-btn" style="background:#0284c7; color:#fff; border-color:#0284c7; margin-left:8px;">🔄 Refresh Data</a>
       </div>
     </div>
 
@@ -330,7 +341,7 @@ export function renderDnaScannerHtml() {
           </tr>
         </thead>
         <tbody>
-          ${wallets.map((w, idx) => {
+          ${displayWallets.map((w, idx) => {
             const isMulti = w.hitCount >= 2;
             const isSerial = w.isStrictSerial !== false;
             const isMultiStep = w.isMultiStepScalper === true;
@@ -415,44 +426,16 @@ export function renderDnaScannerHtml() {
   </div>
 
   <script>
-    let currentFilter = 'elite';
-
-    function setFilter(type, btn) {
-      currentFilter = type;
-      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-      if (btn) {
-        btn.classList.add('active');
-      } else if (window.event && window.event.target) {
-        window.event.target.closest('.filter-btn')?.classList.add('active');
-      }
-      filterWallets();
-    }
-
     function filterWallets() {
       const q = document.getElementById('walletSearch').value.toLowerCase().trim();
       const rows = document.querySelectorAll('.wallet-row');
       rows.forEach(r => {
-        const addr = r.getAttribute('data-addr');
-        const toks = r.getAttribute('data-tokens');
-        const isMulti = r.getAttribute('data-multi') === 'true';
-
-        let matchSearch = !q || addr.includes(q) || toks.includes(q);
-        let matchFilter = true;
-        if (currentFilter === 'elite') matchFilter = (r.getAttribute('data-elite') === 'true');
-        if (currentFilter === 'pingpong') matchFilter = (r.getAttribute('data-pingpong') === 'true');
-        if (currentFilter === 'multi') matchFilter = isMulti;
-
-        if (matchSearch && matchFilter) {
-          r.style.display = '';
-        } else {
-          r.style.display = 'none';
-        }
+        const addr = r.getAttribute('data-addr') || '';
+        const toks = r.getAttribute('data-tokens') || '';
+        const matchSearch = !q || addr.includes(q) || toks.includes(q);
+        r.style.display = matchSearch ? '' : 'none';
       });
     }
-
-    // Filter to elite clones immediately upon load
-    window.addEventListener('DOMContentLoaded', filterWallets);
-    setTimeout(filterWallets, 50);
   </script>
 </body>
 </html>`;

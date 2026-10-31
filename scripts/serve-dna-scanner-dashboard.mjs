@@ -26,7 +26,8 @@ const server = createServer((req, res) => {
   }
 
   // Handle Main HTML Dashboard (accepts /, /clone-radar, etc.)
-  const html = renderDnaScannerHtml();
+  const activeTab = url.searchParams.get('tab') || 'elite';
+  const html = renderDnaScannerHtml(activeTab);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
 });
