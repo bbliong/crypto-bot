@@ -88,6 +88,9 @@ export class CloneWalletStore {
       // Preserve existing profile and ping-pong state
       const prevProfile = existing.gmgnProfile;
       const prevPingPong = existing.isPingPongRebuy;
+      const prevWinRate = existing.realPnlWinRate;
+      const prevWins = existing.completedWins;
+      const prevLosses = existing.completedLosses;
 
       // Wallet already exists: check if this token was already recorded
       const alreadyHasToken = existing.tokensTraded.some(t => t.mint === tradeRecord.mint);
@@ -116,6 +119,9 @@ export class CloneWalletStore {
       existing.isPureDexTrader = true;
       existing.isPingPongRebuy = Boolean(prevPingPong || existing.isMultiStepScalper);
       if (prevProfile) existing.gmgnProfile = prevProfile;
+      if (prevWinRate !== undefined) existing.realPnlWinRate = prevWinRate;
+      if (prevWins !== undefined) existing.completedWins = prevWins;
+      if (prevLosses !== undefined) existing.completedLosses = prevLosses;
       
       existing.score = this.calculateScore(
         existing.hitCount,

@@ -39,27 +39,20 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
   });
 
   function isEliteClone(w) {
-    // Gate 1: Multi-Hit Consistency (At least 2 different tokens)
-    if ((w.hitCount || 1) < 2) return false;
-    
-    // Gate 2: Verified GMGN Profit (Must have real profit on GMGN profile, >= $5,000 USD and 7D >= 0)
+    // Gate 1: PnL Win Rate >= 80% (Completed tokens win rate on-chain)
+    const wr = Number(w.realPnlWinRate || 0);
+    if (wr < 80.0) return false;
+    if ((w.completedWins || 0) < 3) return false;
+
+    // Gate 2: Verified GMGN Profit (>= $3,000 USD and 7D >= 0)
     const gp = w.gmgnProfile || {};
     const totProf = gp.totalProfit || 0;
     const r7d = gp.realized7d || 0;
-    if (totProf < 5000 || r7d < 0) return false;
-    
+    if (totProf < 3000 || r7d < 0) return false;
+
     // Gate 3: Strict Serial Trader (Never concurrent tokens)
     if (w.isStrictSerial === false) return false;
-    
-    // Gate 4: TWAP Multi-Sell Intensity (Max sells >= 3)
-    const toks = w.tokensTraded || [];
-    const maxSells = Math.max(...toks.map(t => t.sellCount || 1), 1);
-    if (maxSells < 3) return false;
-    
-    // Gate 5: Stake Size Discipline ($60 - $450 USD average)
-    const avgStake = w.avgStakeUsd || 0;
-    if (avgStake < 60 || avgStake > 450) return false;
-    
+
     return true;
   }
 
@@ -79,7 +72,7 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
   const pingPongWallets = wallets.filter(w => isPingPongWallet(w));
 
   // Determine wallets to display SERVER-SIDE:
-  let displayWallets = eliteClones; // Default is strictly the 29 Elite Clones!
+  let displayWallets = eliteClones; // Default is strictly the Win Rate >= 80% Clones!
   if (activeTab === 'pingpong') {
     displayWallets = pingPongWallets;
   } else if (activeTab === 'multi') {
@@ -87,6 +80,17 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
   } else if (activeTab === 'all') {
     displayWallets = wallets;
   }
+
+  // Sort displayWallets: Win Rate desc, then GMGN profit desc
+  displayWallets.sort((a, b) => {
+    const wrB = Number(b.realPnlWinRate || 0);
+    const wrA = Number(a.realPnlWinRate || 0);
+    if (wrB !== wrA) return wrB - wrA;
+
+    const profB = b.gmgnProfile?.totalProfit || b.gmgnProfile?.realized7d || 0;
+    const profA = a.gmgnProfile?.totalProfit || a.gmgnProfile?.realized7d || 0;
+    return profB - profA;
+  });
 
   const totalCuan = wallets.reduce((acc, w) => acc + (w.totalRealizedProfitUsd || 0), 0);
   const avgHold = wallets.length
@@ -281,9 +285,9 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">⭐ Elite Target Clones</div>
+        <div class="stat-label">🎯 Win Rate &ge; 80% Clones</div>
         <div class="stat-val val-emerald">${eliteClones.length} Dompet</div>
-        <div class="stat-sub">Lolos 5 Gate Ketat Target DNA</div>
+        <div class="stat-sub">Win Rate Tinggi &bull; Minimal 3W</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">🏓 Strict Ping-Pong Scalpers</div>
@@ -303,23 +307,21 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     </div>
 
     <div class="info-banner">
-      <h3>🎯 5 Gerbang Ketat Seleksi "Elite Target Clone" (Anti-Noise & Anti-Invalid):</h3>
+      <h3>🎯 Standar Ketat: PnL Win Rate &ge; 80% &bull; Serial Execution &bull; Cuan Positif GMGN</h3>
       <p>
-        1. <strong>Konsistensi Multi-Hit:</strong> Wajib konsisten menang di minimal <strong>&ge; 2 koin baru berbeda</strong> (menolak sniper hoki 1x).<br>
-        2. <strong>Cuan Terverifikasi di Profil GMGN:</strong> Total profit resmi di GMGN wajib <strong>&ge; +$5,000 USD s/d +$1,400,000 USD</strong> dengan 7D Realized positif (menolak akun rugi/minus).<br>
-        3. <strong>Fokus 1 Token (Strict Serial Execution):</strong> Tidak pernah menahan 2 token bersamaan. Wajib 1 koin tuntas keluar (saldo 0) baru pindah.<br>
-        4. <strong>Gaya Jual TWAP Bertahap:</strong> Wajib mencicil buang <strong>&ge; 3 kali sell per koin</strong> (menolak bot yang hanya 1 buy 1 sell).<br>
-        5. <strong>Disiplin Ukuran Stake:</strong> Rata-rata belanja di kisaran <strong>$60 – $450 USD (~1 – 4.5 SOL)</strong> persis ukuran belanja target kita.
+        1. <strong>PnL Win Rate &ge; 80%:</strong> Dihitung langsung dari transaksi on-chain nyata (koin untung vs koin rugi). Menolak seluruh akun yang sering loss/cutloss.<br>
+        2. <strong>Fokus 1 Token (Strict Serial):</strong> Tidak pernah menahan 2 token bersamaan. Wajib 1 koin tuntas keluar baru pindah.<br>
+        3. <strong>Cuan Terverifikasi di Profil GMGN:</strong> Total profit resmi di GMGN wajib positif dan konsisten (hingga jutaan dollar).
       </p>
     </div>
 
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <a href="/clone-radar?tab=elite" class="filter-btn ${activeTab === 'elite' ? 'active' : ''}">⭐ Elite Target Clones (${eliteClones.length})</a>
+        <a href="/clone-radar?tab=elite" class="filter-btn ${activeTab === 'elite' ? 'active' : ''}">🎯 PnL Win Rate &ge; 80% (${eliteClones.length})</a>
         <a href="/clone-radar?tab=pingpong" class="filter-btn ${activeTab === 'pingpong' ? 'active' : ''}">🏓 Strict Ping-Pong (${pingPongWallets.length})</a>
         <a href="/clone-radar?tab=multi" class="filter-btn ${activeTab === 'multi' ? 'active' : ''}">👑 Multi-Hit (${multiHit.length})</a>
-        <a href="/clone-radar?tab=all" class="filter-btn ${activeTab === 'all' ? 'active' : ''}">Semua Unfiltered (${totWallets})</a>
+        <a href="/clone-radar?tab=all" class="filter-btn ${activeTab === 'all' ? 'active' : ''}">Semua Mentah (${totWallets})</a>
         <a href="javascript:location.reload()" class="filter-btn" style="background:#0284c7; color:#fff; border-color:#0284c7; margin-left:8px;">🔄 Refresh Data</a>
       </div>
     </div>
@@ -331,7 +333,7 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
             <th>#</th>
             <th>Alamat Wallet</th>
             <th>Konsistensi &amp; DNA Badges</th>
-            <th>Skor Conviction</th>
+            <th>🎯 PnL Win Rate</th>
             <th>GMGN 7D Realized ($)</th>
             <th>GMGN Total Profit ($)</th>
             <th>Aktivitas Trade</th>
@@ -347,7 +349,7 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
             const isMultiStep = w.isMultiStepScalper === true;
             const isExact = isSerial && isMultiStep;
             const isElite = isEliteClone(w);
-            const eliteBadge = isElite ? `<span class="badge-hit badge-gold" style="box-shadow:0 0 8px rgba(245,158,11,0.5);">⭐ ELITE CLONE</span>` : ``;
+            const eliteBadge = isElite ? `<span class="badge-hit badge-gold" style="box-shadow:0 0 8px rgba(245,158,11,0.5);">🎯 WR &ge; 80%</span>` : ``;
             const badgeClass = isMulti ? 'badge-gold' : 'badge-single';
             const badgeText = isMulti ? `👑 ${w.hitCount}x HIT` : `1x Hit`;
             const serialBadge = isSerial ? `<span class="badge-hit badge-serial" title="Strict Serial: Hanya pegang 1 koin dalam 1 waktu">🎯 SERIAL</span>` : `<span class="badge-hit" style="background:#334155;color:#94a3b8;">MULTI</span>`;
@@ -387,7 +389,10 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
                     ${pingPongBadge}
                   </div>
                 </td>
-                <td class="mono font-semibold" style="color:var(--amber); font-size:1rem;">${w.score}/100</td>
+                <td class="mono font-semibold val-emerald" style="font-size:1rem;">
+                  🎯 ${w.realPnlWinRate || 0}%
+                  <div style="font-size:0.75rem; color:#94a3b8;">${w.completedWins || 0}W / ${w.completedLosses || 0}L</div>
+                </td>
                 <td class="mono font-semibold ${r7d >= 0 ? 'val-emerald' : 'val-rose'}">
                   ${r7d >= 0 ? '+' : ''}$${r7d.toLocaleString()}
                 </td>

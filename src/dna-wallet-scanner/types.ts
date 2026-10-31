@@ -38,6 +38,9 @@ export interface DiscoveredCloneWallet {
   }>;
   tags: string[];
   score: number; // 0 - 100
+  realPnlWinRate?: number;
+  completedWins?: number;
+  completedLosses?: number;
   gmgnProfile?: {
     realized7d: number;
     totalProfit: number;
