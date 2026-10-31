@@ -100,6 +100,7 @@ export class MultiScenarioDryRunEngine {
     s2: ScenarioState;
     s3: ScenarioState;
     s4: ScenarioState;
+    s5: ScenarioState;
   };
 
   constructor(dataDir?: string) {
@@ -187,10 +188,29 @@ export class MultiScenarioDryRunEngine {
         closedTrades: [],
         recentEvents: [],
       },
+      s5: {
+        id: 'SCENARIO_5_QUICK_EXIT_5PCT',
+        name: 'Skenario 5: Quick Exit 5% (Statis $2, Exit >= 5%)',
+        description: 'Saldo Awal $20.00. Buy $2.00 statis. Akumulasi Sell >= 5% -> Langsung Full Exit 100% (Anti-Rugpull Dev Kilat).',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
     };
   }
 
-  private loadState(): { s1: ScenarioState; s2: ScenarioState; s3: ScenarioState; s4: ScenarioState } {
+  private loadState(): { s1: ScenarioState; s2: ScenarioState; s3: ScenarioState; s4: ScenarioState; s5: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
@@ -204,6 +224,11 @@ export class MultiScenarioDryRunEngine {
           } else if (parsed.s4.totalFeesPaid === undefined) {
             parsed.s4.totalFeesPaid = 0.0;
           }
+          if (!parsed.s5) {
+            parsed.s5 = this.initFreshScenarios().s5;
+          } else if (parsed.s5.totalFeesPaid === undefined) {
+            parsed.s5.totalFeesPaid = 0.0;
+          }
           return parsed;
         }
       } catch {}
@@ -213,7 +238,7 @@ export class MultiScenarioDryRunEngine {
 
   public saveState(): void {
     try {
-      for (const s of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4]) {
+      for (const s of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5]) {
         s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
         s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
@@ -271,6 +296,12 @@ export class MultiScenarioDryRunEngine {
       maxTokenExposure: 5.0,
       getStake: () => 5.0,
       disallowAccumulation: true,
+    });
+
+    // 5. Skenario 5 (Quick Exit 5%: Statis $2, Exit di Ambang Batas >= 5%)
+    this.processScenarioBuy(this.scenarios.s5, signal, isGroundZero, targetUsd, now, timeWib, {
+      maxTokenExposure: Math.min(this.scenarios.s5.availableCash + this.scenarios.s5.investedCash, 20.0),
+      getStake: () => 2.0,
     });
 
     this.saveState();
@@ -477,7 +508,7 @@ export class MultiScenarioDryRunEngine {
 
     if (isFullExit) sellRatio = 1.0;
 
-    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4]) {
+    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === signal.mint);
       if (posIdx === -1) continue;
 
@@ -489,7 +520,9 @@ export class MultiScenarioDryRunEngine {
       const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
       pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
 
-      const isThresholdMet = pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit;
+      // Ambang Batas Exit: Skenario 5 memakai >= 5.0%, skenario lainnya memakai >= 15.0%
+      const targetThresholdPct = scenario.id === 'SCENARIO_5_QUICK_EXIT_5PCT' ? 5.0 : 15.0;
+      const isThresholdMet = pos.targetCumulativeSellRatioPct >= targetThresholdPct || isFullExit;
 
       if (!isThresholdMet) {
         scenario.recentEvents.unshift({
@@ -503,13 +536,13 @@ export class MultiScenarioDryRunEngine {
           priceUsd: pOut,
           availableCashAfter: scenario.availableCash,
           investedCashAfter: scenario.investedCash,
-          reason: `HOLD_ACCUMULATING (Target sold ${currentSellRatioPct}% | Cum: ${pos.targetCumulativeSellRatioPct}% < 15%)`,
+          reason: `HOLD_ACCUMULATING (Target sold ${currentSellRatioPct}% | Cum: ${pos.targetCumulativeSellRatioPct}% < ${targetThresholdPct}%)`,
         });
         if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
         continue;
       }
 
-      // AMBANG BATAS >= 15% / FULL EXIT TERCAPAI: Jual Seluruhnya 100% (Instant Full Exit)
+      // AMBANG BATAS TERCAPAI: Jual Seluruhnya 100% (Instant Full Exit)
       const tokensToSell = pos.tokens;
       const grossReceived = tokensToSell * pOut;
       const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
@@ -542,7 +575,7 @@ export class MultiScenarioDryRunEngine {
         investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
         reason: isFullExit
           ? `FULL_EXIT_100% (Fee: $${REAL_SWAP_FEE_USD})`
-          : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_15%_FULL_EXIT (Fee: $${REAL_SWAP_FEE_USD})`,
+          : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${targetThresholdPct}%_FULL_EXIT (Fee: $${REAL_SWAP_FEE_USD})`,
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
 
@@ -568,7 +601,7 @@ export class MultiScenarioDryRunEngine {
         totalFeesPaidUsd: Number(pos.feesPaidUsd.toFixed(3)),
         realizedPnlUsd: Number(pos.realizedPnlUsd.toFixed(2)),
         roiPct: Number(roi.toFixed(1)),
-        exitReason: isFullExit ? 'TARGET_FULL_EXIT' : `CUMULATIVE_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_15%`,
+        exitReason: isFullExit ? 'TARGET_FULL_EXIT' : `CUMULATIVE_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${targetThresholdPct}%`,
         isWin,
       });
       if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
@@ -584,7 +617,7 @@ export class MultiScenarioDryRunEngine {
     if (priceUsd <= 0) return;
     let changed = false;
 
-    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4]) {
+    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
       if (posIdx !== -1) {
         const pos = scenario.openPositions[posIdx];
