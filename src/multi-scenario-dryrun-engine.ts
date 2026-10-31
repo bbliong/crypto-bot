@@ -64,6 +64,13 @@ export interface TokenGenerationInfo {
   lastMint: string;
 }
 
+export type ScenarioTradeActionCallback = (
+  action: 'BUY' | 'SELL',
+  scenarioId: string,
+  signal: WalletTradeSignal,
+  details: { stakeUsd?: number; tokens?: number; priceUsd: number; reason: string }
+) => void | Promise<void>;
+
 export interface ScenarioState {
   id: string;
   name: string;
@@ -101,6 +108,7 @@ export class MultiScenarioDryRunEngine {
   private dataDir: string;
   private filePath: string;
   private tokenGenerations: Map<string, TokenGenerationInfo> = new Map();
+  public onTradeAction?: ScenarioTradeActionCallback;
 
   public scenarios: {
     s1: ScenarioState;
@@ -468,6 +476,18 @@ export class MultiScenarioDryRunEngine {
         reason: `ENTRY_1 (Target ~$${targetUsd.toFixed(0)} | Fee: $${REAL_SWAP_FEE_USD})`,
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+      // Trigger callback tindakan trade nyata (misal untuk eksekusi/probe GMGN API terukur)
+      if (this.onTradeAction) {
+        try {
+          this.onTradeAction('BUY', scenario.id, signal, {
+            stakeUsd: actualStake,
+            tokens: tokensBought,
+            priceUsd: pIn,
+            reason: 'ENTRY_1',
+          });
+        } catch {}
+      }
       return;
     }
 
@@ -663,6 +683,18 @@ export class MultiScenarioDryRunEngine {
       if (isWin) scenario.wins += 1;
       else scenario.losses += 1;
       scenario.totalTrades += 1;
+
+      // Trigger callback tindakan trade nyata saat ambang batas exit terpenuhi (100% full exit)
+      if (this.onTradeAction) {
+        try {
+          this.onTradeAction('SELL', scenario.id, signal, {
+            stakeUsd: netReceived,
+            tokens: tokensToSell,
+            priceUsd: pOut,
+            reason: isFullExit ? 'FULL_EXIT_100%' : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${targetThresholdPct}%`,
+          });
+        } catch {}
+      }
 
       scenario.closedTrades.unshift({
         mint: pos.mint,

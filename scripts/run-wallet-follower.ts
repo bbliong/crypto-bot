@@ -387,6 +387,18 @@ export class WalletFollowerRunner {
     });
 
     this.multiDryRunEngine = new MultiScenarioDryRunEngine(this.dataDir);
+
+    // Hit API Asli GMGN HANYA ketika aturan Skenario 4 (Single Buy $5) terpenuhi:
+    // 1. Buy: Hanya 1x saat First Buy Ground Zero (label first order)
+    // 2. Sell: Hanya 1x saat akumulasi jual target >= 15% (Full Exit)
+    // -> Total per token hanya 2x hit API saja!
+    this.multiDryRunEngine.onTradeAction = async (action, scenarioId, signal, details) => {
+      if (scenarioId === 'SCENARIO_4_SINGLE_BUY_5USD') {
+        console.log(`\n[SCENARIO 4 RULE SATISFIED: ${action}] 🎯 Mengeksekusi hit API GMGN (${details.reason}) untuk ${signal.symbol}...`);
+        const stakeUsd = details.stakeUsd || 5.0;
+        await this.executeGmgnApiProbe(action, signal, stakeUsd);
+      }
+    };
   }
 
   public async start(durationSeconds: number = 0): Promise<void> {
@@ -725,11 +737,6 @@ export class WalletFollowerRunner {
     const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
-
-    // Hit API Nyata GMGN untuk verifikasi respon route & submit order BUY
-    if (isGroundZero) {
-      this.executeGmgnApiProbe('BUY', signal, 5.0).catch(err => console.warn(`[GMGN BUY PROBE ERR] ${err?.message}`));
-    }
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
