@@ -41,6 +41,14 @@ export interface DiscoveredCloneWallet {
   realPnlWinRate?: number;
   completedWins?: number;
   completedLosses?: number;
+  calendarPnl?: {
+    totalDays: number;
+    positiveDays: number;
+    negativeDays: number;
+    zeroDays: number;
+    calendarWinRate: number;
+    totalNetPnl: number;
+  };
   gmgnProfile?: {
     realized7d: number;
     totalProfit: number;

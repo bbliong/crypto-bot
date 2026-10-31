@@ -89,15 +89,23 @@ class DnaWalletScanner {
                 tr.tags || []
               );
 
-              // Attach GMGN profile if available
+              // Attach GMGN profile & calendar if available
               const stored = this.store.wallets.get(tr.address);
-              if (stored && gmgnProfile) {
-                (stored as any).gmgnProfile = {
-                  realized7d: Math.round(Number(gmgnProfile.realized_profit_7d || 0)),
-                  totalProfit: Math.round(Number(gmgnProfile.total_profit || 0)),
-                  totalBuys: Number(gmgnProfile.buy || gmgnProfile.buy_30d || 0),
-                  totalSells: Number(gmgnProfile.sell || gmgnProfile.sell_30d || 0)
-                };
+              if (stored) {
+                if (gmgnProfile) {
+                  (stored as any).gmgnProfile = {
+                    realized7d: Math.round(Number(gmgnProfile.realized_profit_7d || 0)),
+                    totalProfit: Math.round(Number(gmgnProfile.total_profit || 0)),
+                    totalBuys: Number(gmgnProfile.buy || gmgnProfile.buy_30d || 0),
+                    totalSells: Number(gmgnProfile.sell || gmgnProfile.sell_30d || 0)
+                  };
+                }
+                if (!stored.calendarPnl) {
+                  try {
+                    const cal = await this.fetchWalletDailyProfits(page, tr.address);
+                    if (cal) stored.calendarPnl = cal;
+                  } catch {}
+                }
                 this.store.save();
               }
 
@@ -213,6 +221,46 @@ class DnaWalletScanner {
         const res = await fetch(`https://gmgn.ai/defi/quotation/v1/smartmoney/sol/walletNew/${addr}?period=7d`, { credentials: 'include' });
         const d = await res.json();
         return d?.data || null;
+      } catch {
+        return null;
+      }
+    }, address);
+  }
+
+  private async fetchWalletDailyProfits(page: Page, address: string): Promise<any> {
+    return await page.evaluate(async (addr: string) => {
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const start_at = now - 60 * 86400;
+        const r = await fetch("https://gmgn.ai/pf/api/v1/wallets/sol/daily_profits", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wallet_addresses: [addr],
+            start_at,
+            end_at: now
+          })
+        });
+        const res = await r.json();
+        const list = res?.data?.list || [];
+        let pos = 0, neg = 0, zero = 0, tot = 0;
+        for (const d of list) {
+          const p = parseFloat(d.total_profit || "0");
+          tot += p;
+          if (p > 0) pos++;
+          else if (p < 0) neg++;
+          else zero++;
+        }
+        const activeDays = pos + neg;
+        const calWinRate = activeDays > 0 ? Number((pos / activeDays * 100).toFixed(1)) : 0;
+        return {
+          totalDays: list.length,
+          positiveDays: pos,
+          negativeDays: neg,
+          zeroDays: zero,
+          calendarWinRate: calWinRate,
+          totalNetPnl: Math.round(tot)
+        };
       } catch {
         return null;
       }

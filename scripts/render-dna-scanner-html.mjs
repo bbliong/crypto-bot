@@ -38,39 +38,24 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     return profB - profA;
   });
 
-  function getWalletWinRate(w) {
-    if (w.realPnlWinRate !== undefined && w.realPnlWinRate > 0) {
-      return w.realPnlWinRate;
-    }
-    const toks = w.tokensTraded || [];
-    if (toks.length > 0) {
-      const wins = toks.filter(t => (t.profitUsd || 0) > 0).length;
-      return Number((wins / toks.length * 100).toFixed(1));
-    }
-    return 0;
-  }
-
   function isEliteClone(w) {
-    // Gate 1: PnL Win Rate >= 80%
-    const wr = getWalletWinRate(w);
-    if (wr < 80.0) return false;
+    // 1. GMGN Official Daily Profit Calendar Win Rate >= 80% (Min 5 positive days)
+    const calWr = w.calendarPnl?.calendarWinRate;
+    const posDays = w.calendarPnl?.positiveDays || 0;
+    if (calWr !== undefined) {
+      if (calWr < 80.0 || posDays < 5) return false;
+    } else {
+      return false;
+    }
 
-    // Gate 2: Multi-hit consistency (>= 2 fresh tokens)
-    if ((w.hitCount || 1) < 2) return false;
+    // 2. Strict Serial Trader (Never concurrent tokens)
+    if (w.isStrictSerial === false) return false;
 
-    // Gate 3: Verified GMGN Profit (>= $3,000 USD and 7D >= 0)
+    // 3. Verified GMGN Profit (>= $3,000 USD and 7D >= 0)
     const gp = w.gmgnProfile || {};
     const totProf = gp.totalProfit || 0;
     const r7d = gp.realized7d || 0;
     if (totProf < 3000 || r7d < 0) return false;
-
-    // Gate 4: Strict Serial Trader (Never concurrent tokens)
-    if (w.isStrictSerial === false) return false;
-
-    // Gate 5: TWAP Multi-Sell (Max sells >= 2)
-    const toks = w.tokensTraded || [];
-    const maxSells = Math.max(...toks.map(t => t.sellCount || 1), 1);
-    if (maxSells < 2) return false;
 
     return true;
   }
@@ -100,10 +85,10 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     displayWallets = wallets;
   }
 
-  // Sort displayWallets: Win Rate desc, then GMGN profit desc
+  // Sort displayWallets: Calendar Win Rate desc, then GMGN profit desc
   displayWallets.sort((a, b) => {
-    const wrB = Number(b.realPnlWinRate || 0);
-    const wrA = Number(a.realPnlWinRate || 0);
+    const wrB = b.calendarPnl?.calendarWinRate || 0;
+    const wrA = a.calendarPnl?.calendarWinRate || 0;
     if (wrB !== wrA) return wrB - wrA;
 
     const profB = b.gmgnProfile?.totalProfit || b.gmgnProfile?.realized7d || 0;
@@ -337,7 +322,7 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <a href="/clone-radar?tab=elite" class="filter-btn ${activeTab === 'elite' ? 'active' : ''}">🎯 PnL Win Rate &ge; 80% (${eliteClones.length})</a>
+        <a href="/clone-radar?tab=elite" class="filter-btn ${activeTab === 'elite' ? 'active' : ''}">📅 Calendar Win Rate &ge; 80% (${eliteClones.length})</a>
         <a href="/clone-radar?tab=pingpong" class="filter-btn ${activeTab === 'pingpong' ? 'active' : ''}">🏓 Strict Ping-Pong (${pingPongWallets.length})</a>
         <a href="/clone-radar?tab=multi" class="filter-btn ${activeTab === 'multi' ? 'active' : ''}">👑 Multi-Hit (${multiHit.length})</a>
         <a href="/clone-radar?tab=all" class="filter-btn ${activeTab === 'all' ? 'active' : ''}">Semua Mentah (${totWallets})</a>
@@ -352,7 +337,7 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
             <th>#</th>
             <th>Alamat Wallet</th>
             <th>Konsistensi &amp; DNA Badges</th>
-            <th>🎯 PnL Win Rate</th>
+            <th>📅 Calendar Win Rate (60d)</th>
             <th>GMGN 7D Realized ($)</th>
             <th>GMGN Total Profit ($)</th>
             <th>Aktivitas Trade</th>
@@ -409,8 +394,8 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
                   </div>
                 </td>
                 <td class="mono font-semibold val-emerald" style="font-size:1rem;">
-                  🎯 ${getWalletWinRate(w)}%
-                  <div style="font-size:0.75rem; color:#94a3b8;">${w.completedWins || (w.tokensTraded || []).length}W / ${w.completedLosses || 0}L</div>
+                  📅 ${w.calendarPnl?.calendarWinRate !== undefined ? w.calendarPnl.calendarWinRate : 0}%
+                  <div style="font-size:0.75rem; color:#94a3b8;">${w.calendarPnl?.positiveDays || 0}d Win / ${w.calendarPnl?.negativeDays || 0}d Loss</div>
                 </td>
                 <td class="mono font-semibold ${r7d >= 0 ? 'val-emerald' : 'val-rose'}">
                   ${r7d >= 0 ? '+' : ''}$${r7d.toLocaleString()}
