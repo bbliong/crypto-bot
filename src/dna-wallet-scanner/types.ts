@@ -58,6 +58,17 @@ export interface DiscoveredCloneWallet {
     recentActivityNetPnl: number;
     completedProfit: number;
   };
+  sixtyDayAudit?: {
+    totalDays: number;
+    tradingDays: number;
+    isEverydayTrader: boolean;
+    posDays: number;
+    negDays: number;
+    zeroDays: number;
+    dayWinRate: number;
+    sellSwapWinRate: number;
+    total60dPnl: number;
+  };
   gmgnProfile?: {
     realized7d: number;
     totalProfit: number;

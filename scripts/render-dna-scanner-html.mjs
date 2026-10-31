@@ -38,20 +38,28 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     return profB - profA;
   });
 
+  function isSixtyDayEveryday90(w) {
+    const c = w.calendarPnl;
+    if (!c) return false;
+    // 1. Trading tiap hari di 2 bulan terakhir (totalDays >= 40 out of 60 days)
+    if (c.totalDays < 40) return false;
+    // 2. Win rate harus di atas 90%
+    if (c.calendarWinRate < 90.0) return false;
+    // 3. Net PnL positif (bukan minus!)
+    if (c.totalNetPnl <= 0) return false;
+    return true;
+  }
+
   function isRecentActivityWinner(w) {
     const a = w.recentActivityAudit;
     if (!a) return false;
-    // Win Rate >= 80%
     if (a.recentActivityWinRate < 80.0) return false;
-    // Net PnL POSITIF (bukan minus!)
     if (a.recentActivityNetPnl <= 0) return false;
-    // Minimal 2 token menang di recent trades
     if (a.winTokens < 2) return false;
     return true;
   }
 
   function isEliteClone(w) {
-    // 1. GMGN Official Daily Profit Calendar Win Rate >= 80% (Min 5 positive days)
     const calWr = w.calendarPnl?.calendarWinRate;
     const posDays = w.calendarPnl?.positiveDays || 0;
     if (calWr !== undefined) {
@@ -59,16 +67,11 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     } else {
       return false;
     }
-
-    // 2. Strict Serial Trader (Never concurrent tokens)
     if (w.isStrictSerial === false) return false;
-
-    // 3. Verified GMGN Profit (>= $3,000 USD and 7D >= 0)
     const gp = w.gmgnProfile || {};
     const totProf = gp.totalProfit || 0;
     const r7d = gp.realized7d || 0;
     if (totProf < 3000 || r7d < 0) return false;
-
     return true;
   }
 
@@ -81,6 +84,7 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
   }
 
   const totWallets = wallets.length;
+  const everyday90Winners = wallets.filter(w => isSixtyDayEveryday90(w));
   const recentWinners = wallets.filter(w => isRecentActivityWinner(w));
   const eliteClones = wallets.filter(w => isEliteClone(w));
   const multiHit = wallets.filter(w => w.hitCount >= 2);
@@ -89,8 +93,10 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
   const pingPongWallets = wallets.filter(w => isPingPongWallet(w));
 
   // Determine wallets to display SERVER-SIDE:
-  let displayWallets = recentWinners; // Default is strictly RECENT ACTIVITY >= 80% & POSITIVE NET PNL!
-  if (activeTab === 'calendar') {
+  let displayWallets = everyday90Winners; // Default is strictly 60-Day Everyday Traders with >90% Win Rate!
+  if (activeTab === 'recent') {
+    displayWallets = recentWinners;
+  } else if (activeTab === 'calendar') {
     displayWallets = eliteClones;
   } else if (activeTab === 'pingpong') {
     displayWallets = pingPongWallets;
@@ -100,14 +106,14 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     displayWallets = wallets;
   }
 
-  // Sort displayWallets: Recent Net PnL desc, then Win Rate desc
+  // Sort displayWallets: 60d PnL desc, then Win Rate desc
   displayWallets.sort((a, b) => {
-    const pnlB = b.recentActivityAudit?.recentActivityNetPnl || 0;
-    const pnlA = a.recentActivityAudit?.recentActivityNetPnl || 0;
+    const pnlB = b.calendarPnl?.totalNetPnl || b.recentActivityAudit?.recentActivityNetPnl || 0;
+    const pnlA = a.calendarPnl?.totalNetPnl || a.recentActivityAudit?.recentActivityNetPnl || 0;
     if (pnlB !== pnlA) return pnlB - pnlA;
 
-    const wrB = b.recentActivityAudit?.recentActivityWinRate || b.calendarPnl?.calendarWinRate || 0;
-    const wrA = a.recentActivityAudit?.recentActivityWinRate || a.calendarPnl?.calendarWinRate || 0;
+    const wrB = b.calendarPnl?.calendarWinRate || b.recentActivityAudit?.recentActivityWinRate || 0;
+    const wrA = a.calendarPnl?.calendarWinRate || a.recentActivityAudit?.recentActivityWinRate || 0;
     if (wrB !== wrA) return wrB - wrA;
 
     const profB = b.gmgnProfile?.totalProfit || b.gmgnProfile?.realized7d || 0;
@@ -308,19 +314,19 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
 
     <div class="stats-grid">
       <div class="stat-card">
+        <div class="stat-label">🔥 2 Bulan Tiap Hari &amp; WR &gt; 90%</div>
+        <div class="stat-val val-emerald">${everyday90Winners.length} Dompet</div>
+        <div class="stat-sub">Trading Tiap Hari &bull; Win Rate &gt; 90%!</div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">⚡ Recent Activity WR &ge; 80% (+)</div>
-        <div class="stat-val val-emerald">${recentWinners.length} Dompet</div>
+        <div class="stat-val val-cyan">${recentWinners.length} Dompet</div>
         <div class="stat-sub">Recent Trades Cuan &bull; Bukan Minus!</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">📅 60d Calendar WR &ge; 80%</div>
-        <div class="stat-val val-cyan">${eliteClones.length} Dompet</div>
+        <div class="stat-val" style="color:var(--amber);">${eliteClones.length} Dompet</div>
         <div class="stat-sub">Hari Konsisten Menang di GMGN</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">🏓 Strict Ping-Pong Scalpers</div>
-        <div class="stat-val" style="color:var(--rose);">${pingPongWallets.length} Dompet</div>
-        <div class="stat-sub">Beli ⇄ Jual ⇄ Beli Lagi Koin Sama</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Dompet Unfiltered</div>
@@ -330,21 +336,21 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
     </div>
 
     <div class="info-banner">
-      <h3>🎯 Standar Ketat: Recent Activity Win Rate &ge; 80% &bull; Net PnL Positif (+) &bull; Bukan Minus!</h3>
+      <h3>🎯 Standar Tertinggi Target: Trading Tiap Hari 60 Hari Terakhir &bull; Calendar Win Rate &gt; 90% &bull; Net Cuan Positif</h3>
       <p>
-        1. <strong>Recent Activity Win Rate &ge; 80%:</strong> Dihitung langsung dari 50 transaksi terakhir. Koin yang menang minimal 80% dari koin yang selesai diperdagangkan.<br>
-        2. <strong>Recent Net PnL Positif (Bukan Minus):</strong> Selisih uang keluar vs uang masuk di recent activity wajib <strong>PLUS (+)</strong>, bukan akun yang belakangan boncos/cutloss.<br>
-        3. <strong>Fokus 1 Token (Strict Serial):</strong> Tidak pernah menahan 2 token bersamaan. Wajib 1 koin tuntas keluar baru pindah.
+        1. <strong>Trading Tiap Hari (2 Bulan Terakhir):</strong> Terbukti aktif trading hampir setiap hari (&ge; 40–61 hari berturut-turut) di kalender resmi GMGN.<br>
+        2. <strong>Calendar Win Rate &gt; 90%:</strong> Hari menang minimal 90% hingga 100% tanpa ada floating loss/boncos besar.<br>
+        3. <strong>Net Cuan Positif (Bukan Minus):</strong> Akumulasi hasil bersih 60 hari ratusan ribu hingga jutaan dollar ($100k – $1.2M+ USD).
       </p>
     </div>
 
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <a href="/clone-radar?tab=recent" class="filter-btn ${activeTab === 'recent' || activeTab === 'elite' ? 'active' : ''}">⚡ Recent WR &ge; 80% &amp; (+) PnL (${recentWinners.length})</a>
+        <a href="/clone-radar?tab=everyday" class="filter-btn ${activeTab === 'everyday' || activeTab === 'elite' ? 'active' : ''}">🔥 2 Bulan Tiap Hari &amp; WR &gt; 90% (${everyday90Winners.length})</a>
+        <a href="/clone-radar?tab=recent" class="filter-btn ${activeTab === 'recent' ? 'active' : ''}">⚡ Recent WR &ge; 80% &amp; (+) PnL (${recentWinners.length})</a>
         <a href="/clone-radar?tab=calendar" class="filter-btn ${activeTab === 'calendar' ? 'active' : ''}">📅 60d Calendar WR &ge; 80% (${eliteClones.length})</a>
         <a href="/clone-radar?tab=pingpong" class="filter-btn ${activeTab === 'pingpong' ? 'active' : ''}">🏓 Strict Ping-Pong (${pingPongWallets.length})</a>
-        <a href="/clone-radar?tab=multi" class="filter-btn ${activeTab === 'multi' ? 'active' : ''}">👑 Multi-Hit (${multiHit.length})</a>
         <a href="/clone-radar?tab=all" class="filter-btn ${activeTab === 'all' ? 'active' : ''}">Semua Mentah (${totWallets})</a>
         <a href="javascript:location.reload()" class="filter-btn" style="background:#0284c7; color:#fff; border-color:#0284c7; margin-left:8px;">🔄 Refresh Data</a>
       </div>
@@ -357,10 +363,10 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
             <th>#</th>
             <th>Alamat Wallet</th>
             <th>Konsistensi &amp; DNA Badges</th>
+            <th>📅 Trading 2 Bulan (Tiap Hari)</th>
+            <th>🎯 Calendar Win Rate (60d)</th>
+            <th>💰 60d Net Cuan (Bukan Minus!)</th>
             <th>⚡ Recent Activity WR</th>
-            <th>💰 Recent Net PnL (Bukan Minus)</th>
-            <th>📅 Calendar WR (60d)</th>
-            <th>GMGN Total Profit ($)</th>
             <th>Saldo Kas SOL</th>
             <th>Koin Baru yang Dimasuki &amp; TWAP Sells</th>
             <th>Aksi</th>
@@ -393,9 +399,9 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
             const totProf = gp.totalProfit !== undefined ? gp.totalProfit : w.totalRealizedProfitUsd;
             const tb = gp.totalBuys || 0;
             const ts = gp.totalSells || 0;
-            const tradeText = (tb + ts) > 0 ? `${(tb + ts).toLocaleString()} Trades` : `Fresh Scalper`;
 
             const actAudit = w.recentActivityAudit;
+            const sixty = w.sixtyDayAudit;
 
             return `
               <tr class="wallet-row" data-elite="${isElite}" data-exact="${isExact}" data-pingpong="${isPingPong}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
@@ -415,19 +421,21 @@ export function renderDnaScannerHtml(activeTab = 'elite') {
                     ${pingPongBadge}
                   </div>
                 </td>
-                <td class="mono font-semibold val-emerald" style="font-size:1rem;">
-                  ⚡ ${actAudit ? actAudit.recentActivityWinRate : 0}%
-                  <div style="font-size:0.75rem; color:#94a3b8;">${actAudit ? actAudit.winTokens : 0}W / ${actAudit ? actAudit.lossTokens : 0}L</div>
+                <td class="mono font-semibold" style="color:var(--cyan); font-size:0.95rem;">
+                  📅 ${w.calendarPnl?.totalDays || 0}/60 Hari
+                  <div style="font-size:0.75rem; color:${(w.calendarPnl?.totalDays || 0) >= 40 ? 'var(--emerald)' : '#94a3b8'};">
+                    ${(w.calendarPnl?.totalDays || 0) >= 55 ? '🔥 Tiap Hari (100%)' : ((w.calendarPnl?.totalDays || 0) >= 40 ? '⚡ Hampir Tiap Hari' : 'Periodic')}
+                  </div>
                 </td>
-                <td class="mono font-semibold val-emerald" style="font-size:1rem;">
-                  +$${actAudit ? actAudit.recentActivityNetPnl.toLocaleString() : 0}
+                <td class="mono font-semibold val-emerald" style="font-size:1.05rem;">
+                  🎯 ${w.calendarPnl?.calendarWinRate || 0}%
+                  <div style="font-size:0.75rem; color:#94a3b8;">${w.calendarPnl?.positiveDays || 0}d Win / ${w.calendarPnl?.negativeDays || 0}d Loss</div>
                 </td>
-                <td class="mono font-semibold" style="color:var(--cyan);">
-                  📅 ${w.calendarPnl?.calendarWinRate !== undefined ? w.calendarPnl.calendarWinRate : 0}%
-                  <div style="font-size:0.75rem; color:#64748b;">${w.calendarPnl?.positiveDays || 0}d Win / ${w.calendarPnl?.negativeDays || 0}d Loss</div>
+                <td class="mono font-semibold val-emerald" style="font-size:1.05rem;">
+                  +$${(w.calendarPnl?.totalNetPnl || 0).toLocaleString()}
                 </td>
-                <td class="mono font-semibold ${totProf >= 0 ? 'val-emerald' : 'val-rose'}">
-                  ${totProf >= 0 ? '+' : ''}$${totProf.toLocaleString()}
+                <td class="mono font-semibold" style="color:#a5b4fc;">
+                  ${actAudit ? `⚡ ${actAudit.recentActivityWinRate}% (${actAudit.winTokens}W/${actAudit.lossTokens}L)` : `<span style="color:#64748b;">N/A</span>`}
                 </td>
                 <td class="mono font-semibold">${w.solBalance.toFixed(2)} SOL</td>
                 <td>
