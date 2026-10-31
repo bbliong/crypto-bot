@@ -753,4 +753,67 @@ export class MultiScenarioDryRunEngine {
       this.saveState();
     }
   }
+
+  /**
+   * Auto-likuidasi posisi stagnan / terbengkalai (> 25 menit tanpa aktivitas target)
+   */
+  public checkStagnantPositions(maxAgeMinutes: number = 25): void {
+    const now = Date.now();
+    const maxAgeMs = maxAgeMinutes * 60 * 1000;
+    let changed = false;
+
+    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5, this.scenarios.s6]) {
+      for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
+        const pos = scenario.openPositions[i];
+        if (now - pos.openedAt >= maxAgeMs) {
+          const timeWib = formatWibDate(now);
+          scenario.openPositions.splice(i, 1);
+          scenario.losses += 1;
+          scenario.totalTrades += 1;
+          scenario.realizedPnl = Number((scenario.realizedPnl - pos.costBasisUsd).toFixed(2));
+
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SELL',
+            symbol: pos.symbol,
+            mint: pos.mint,
+            usdReceived: 0,
+            feeUsd: 0,
+            tokens: pos.tokens,
+            priceUsd: pos.lastPriceUsd,
+            pnlUsd: -pos.costBasisUsd,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: Math.max(0, scenario.investedCash - pos.costBasisUsd),
+            reason: `STAGNANT_TIMEOUT_AUTO_EXIT (No target exit in ${maxAgeMinutes}m)`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+          scenario.closedTrades.unshift({
+            mint: pos.mint,
+            symbol: pos.symbol,
+            tokenName: pos.tokenName,
+            openedAt: pos.openedAt,
+            closedAt: now,
+            entryCount: pos.entryCount,
+            totalInvestedUsd: pos.costBasisUsd,
+            totalReturnedUsd: 0,
+            totalFeesPaidUsd: pos.feesPaidUsd,
+            realizedPnlUsd: -pos.costBasisUsd,
+            roiPct: -100,
+            exitReason: `STAGNANT_TIMEOUT_EXIT (> ${maxAgeMinutes}m Abandoned)`,
+            isWin: false,
+          });
+          if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      this.saveState();
+    }
+  }
 }

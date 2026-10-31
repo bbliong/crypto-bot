@@ -1525,6 +1525,11 @@ export class WalletFollowerRunner {
         }
       } catch {}
 
+      // Auto-likuidasi posisi dry-run multi-skenario jika terbengkalai > 25 menit
+      try {
+        this.multiDryRunEngine.checkStagnantPositions(25);
+      } catch {}
+
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);
       console.log(`--- LANE 1 (Direct Scalper $20 Pool, $2/buy) ---`);
       for (const p of openPositions) {
