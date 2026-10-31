@@ -38,6 +38,31 @@ export function renderDnaScannerHtml() {
     return profB - profA;
   });
 
+  function isEliteClone(w) {
+    // Gate 1: Multi-Hit Consistency (At least 2 different tokens)
+    if ((w.hitCount || 1) < 2) return false;
+    
+    // Gate 2: Verified GMGN Profit (Must have real profit on GMGN profile, >= $5,000 USD and 7D >= 0)
+    const gp = w.gmgnProfile || {};
+    const totProf = gp.totalProfit || 0;
+    const r7d = gp.realized7d || 0;
+    if (totProf < 5000 || r7d < 0) return false;
+    
+    // Gate 3: Strict Serial Trader (Never concurrent tokens)
+    if (w.isStrictSerial === false) return false;
+    
+    // Gate 4: TWAP Multi-Sell Intensity (Max sells >= 3)
+    const toks = w.tokensTraded || [];
+    const maxSells = Math.max(...toks.map(t => t.sellCount || 1), 1);
+    if (maxSells < 3) return false;
+    
+    // Gate 5: Stake Size Discipline ($60 - $450 USD average)
+    const avgStake = w.avgStakeUsd || 0;
+    if (avgStake < 60 || avgStake > 450) return false;
+    
+    return true;
+  }
+
   function isPingPongWallet(w) {
     if (w.isPingPongRebuy === true) return true;
     if (w.pingPongIntensity && w.pingPongIntensity.maxTransitions >= 4) return true;
@@ -47,6 +72,7 @@ export function renderDnaScannerHtml() {
   }
 
   const totWallets = wallets.length;
+  const eliteClones = wallets.filter(w => isEliteClone(w));
   const multiHit = wallets.filter(w => w.hitCount >= 2);
   const multiStep = wallets.filter(w => w.isMultiStepScalper);
   const exactClones = wallets.filter(w => w.isStrictSerial !== false && w.isMultiStepScalper);
@@ -244,47 +270,45 @@ export function renderDnaScannerHtml() {
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Total Dompet Terjaring</div>
-        <div class="stat-val val-amber">${totWallets} Dompet</div>
-        <div class="stat-sub">Sesuai Filter Sizing & Cuan</div>
+        <div class="stat-label">⭐ Elite Target Clones</div>
+        <div class="stat-val val-emerald">${eliteClones.length} Dompet</div>
+        <div class="stat-sub">Lolos 5 Gate Ketat Target DNA</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">👑 Exact 3azG Clones</div>
-        <div class="stat-val val-emerald">${exactClones.length} Dompet</div>
-        <div class="stat-sub">Serial + Multi-Sell TWAP + Pure DEX</div>
+        <div class="stat-label">🏓 Strict Ping-Pong Scalpers</div>
+        <div class="stat-val" style="color:var(--rose);">${pingPongWallets.length} Dompet</div>
+        <div class="stat-sub">Beli ⇄ Jual ⇄ Beli Lagi Koin Sama</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">🔁 Multi-Sell TWAP (&ge;2 Sells)</div>
-        <div class="stat-val" style="color:var(--purple);">${multiStep.length} Dompet</div>
-        <div class="stat-sub">Anti 1 Buy 1 Sell (Cicil Jual)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Konsistensi Tinggi (Multi-Hit)</div>
+        <div class="stat-label">Konsistensi Multi-Hit</div>
         <div class="stat-val val-cyan">${multiHit.length} Dompet</div>
         <div class="stat-sub">Menang di &ge; 2 Koin Berbeda</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Dompet Unfiltered</div>
+        <div class="stat-val" style="color:#64748b;">${totWallets} Dompet</div>
+        <div class="stat-sub">Seluruh temuan mentah di koin baru</div>
       </div>
     </div>
 
     <div class="info-banner">
-      <h3>🎯 Pola DNA Spesifik Target 3azG8rmt... yang Sedang Disaring Otomatis:</h3>
+      <h3>🎯 5 Gerbang Ketat Seleksi "Elite Target Clone" (Anti-Noise & Anti-Invalid):</h3>
       <p>
-        1. <strong>Ukuran Beli:</strong> $80 – $450 USD (~1 – 4.5 SOL) per entry.<br>
-        2. <strong>Bermain Beberapa Kali (Anti 1 Buy 1 Sell):</strong> Target <strong>TIDAK PERNAH</strong> hanya 1 buy lalu 1 sell. Target selalu mengeksekusi multi-sell bertahap (TWAP micro-sells 5%–15% berkali-kali).<br>
-        3. <strong>Fokus 1 Token (Strict Serial Execution):</strong> Tidak pernah spray banyak token sekaligus. Menahan 1 koin sampai tuntas (exit 0), baru membuka posisi di koin baru.<br>
-        4. <strong>Murni Transaksi DEX (0 P2P Tx In/Out):</strong> Dompet murni mesin trading DEX (100% AMM swap). Tidak pernah ada transfer kas pribadi keluar/masuk (0 transfer-in).<br>
-        5. <strong>Kecepatan Hold:</strong> 4 detik hingga 360 detik (keluar cepat begitu momentum pump selesai). Saldo aktif &ge; 0.3 SOL.
+        1. <strong>Konsistensi Multi-Hit:</strong> Wajib konsisten menang di minimal <strong>&ge; 2 koin baru berbeda</strong> (menolak sniper hoki 1x).<br>
+        2. <strong>Cuan Terverifikasi di Profil GMGN:</strong> Total profit resmi di GMGN wajib <strong>&ge; +$5,000 USD s/d +$1,400,000 USD</strong> dengan 7D Realized positif (menolak akun rugi/minus).<br>
+        3. <strong>Fokus 1 Token (Strict Serial Execution):</strong> Tidak pernah menahan 2 token bersamaan. Wajib 1 koin tuntas keluar (saldo 0) baru pindah.<br>
+        4. <strong>Gaya Jual TWAP Bertahap:</strong> Wajib mencicil buang <strong>&ge; 3 kali sell per koin</strong> (menolak bot yang hanya 1 buy 1 sell).<br>
+        5. <strong>Disiplin Ukuran Stake:</strong> Rata-rata belanja di kisaran <strong>$60 – $450 USD (~1 – 4.5 SOL)</strong> persis ukuran belanja target kita.
       </p>
     </div>
 
     <div class="table-toolbar">
       <input type="text" id="walletSearch" class="search-input" placeholder="🔍 Cari alamat wallet atau nama token..." onkeyup="filterWallets()">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <button class="filter-btn active" onclick="setFilter('all', this)">Semua (${totWallets})</button>
+        <button class="filter-btn active" onclick="setFilter('elite', this)">⭐ Elite Target Clones (${eliteClones.length})</button>
         <button class="filter-btn" onclick="setFilter('pingpong', this)">🏓 Strict Ping-Pong (${pingPongWallets.length})</button>
-        <button class="filter-btn" onclick="setFilter('exact', this)">👑 Exact Clones (${exactClones.length})</button>
         <button class="filter-btn" onclick="setFilter('multi', this)">👑 Multi-Hit (${multiHit.length})</button>
-        <button class="filter-btn" onclick="setFilter('twap', this)">🔁 TWAP Multi-Sell (${multiStep.length})</button>
-        <button class="filter-btn" onclick="setFilter('serial', this)">🎯 Strict Serial</button>
+        <button class="filter-btn" onclick="setFilter('all', this)">Semua Unfiltered (${totWallets})</button>
         <button class="filter-btn" style="background:#0284c7; color:#fff; border-color:#0284c7; margin-left:8px;" onclick="window.location.reload()">🔄 Refresh Data</button>
       </div>
     </div>
@@ -311,6 +335,8 @@ export function renderDnaScannerHtml() {
             const isSerial = w.isStrictSerial !== false;
             const isMultiStep = w.isMultiStepScalper === true;
             const isExact = isSerial && isMultiStep;
+            const isElite = isEliteClone(w);
+            const eliteBadge = isElite ? `<span class="badge-hit badge-gold" style="box-shadow:0 0 8px rgba(245,158,11,0.5);">⭐ ELITE CLONE</span>` : ``;
             const badgeClass = isMulti ? 'badge-gold' : 'badge-single';
             const badgeText = isMulti ? `👑 ${w.hitCount}x HIT` : `1x Hit`;
             const serialBadge = isSerial ? `<span class="badge-hit badge-serial" title="Strict Serial: Hanya pegang 1 koin dalam 1 waktu">🎯 SERIAL</span>` : `<span class="badge-hit" style="background:#334155;color:#94a3b8;">MULTI</span>`;
@@ -333,7 +359,7 @@ export function renderDnaScannerHtml() {
             const tradeText = (tb + ts) > 0 ? `${(tb + ts).toLocaleString()} Trades` : `Fresh Scalper`;
 
             return `
-              <tr class="wallet-row" data-exact="${isExact}" data-pingpong="${isPingPong}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
+              <tr class="wallet-row" data-elite="${isElite}" data-exact="${isExact}" data-pingpong="${isPingPong}" data-twap="${isMultiStep}" data-multi="${isMulti}" data-serial="${isSerial}" data-addr="${w.address.toLowerCase()}" data-tokens="${w.tokensTraded.map(t => t.symbol.toLowerCase()).join(' ')}">
                 <td class="mono" style="color:#64748b;">${idx + 1}</td>
                 <td>
                   <strong>${w.address.slice(0, 6)}...${w.address.slice(-4)}</strong>
@@ -343,6 +369,7 @@ export function renderDnaScannerHtml() {
                 <td>
                   <span class="badge-hit ${badgeClass}">${badgeText}</span>
                   <div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap;">
+                    ${eliteBadge}
                     ${serialBadge}
                     ${twapBadge}
                     ${pureDexBadge}
@@ -388,7 +415,7 @@ export function renderDnaScannerHtml() {
   </div>
 
   <script>
-    let currentFilter = 'all';
+    let currentFilter = 'elite';
 
     function setFilter(type, btn) {
       currentFilter = type;
@@ -411,11 +438,9 @@ export function renderDnaScannerHtml() {
 
         let matchSearch = !q || addr.includes(q) || toks.includes(q);
         let matchFilter = true;
-        if (currentFilter === 'exact') matchFilter = (r.getAttribute('data-exact') === 'true');
+        if (currentFilter === 'elite') matchFilter = (r.getAttribute('data-elite') === 'true');
         if (currentFilter === 'pingpong') matchFilter = (r.getAttribute('data-pingpong') === 'true');
         if (currentFilter === 'multi') matchFilter = isMulti;
-        if (currentFilter === 'twap') matchFilter = (r.getAttribute('data-twap') === 'true');
-        if (currentFilter === 'serial') matchFilter = (r.getAttribute('data-serial') === 'true');
 
         if (matchSearch && matchFilter) {
           r.style.display = '';
@@ -424,6 +449,10 @@ export function renderDnaScannerHtml() {
         }
       });
     }
+
+    // Filter to elite clones immediately upon load
+    window.addEventListener('DOMContentLoaded', filterWallets);
+    setTimeout(filterWallets, 50);
   </script>
 </body>
 </html>`;
