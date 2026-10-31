@@ -725,6 +725,11 @@ export class WalletFollowerRunner {
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
 
+    // Hit API Nyata GMGN untuk verifikasi respon route & submit order BUY
+    if (isGroundZero) {
+      this.executeGmgnApiProbe('BUY', signal, 5.0).catch(err => console.warn(`[GMGN BUY PROBE ERR] ${err?.message}`));
+    }
+
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
     const timeWib = formatWibDate(nowMs);
@@ -891,6 +896,9 @@ export class WalletFollowerRunner {
   private async handleTargetSell(signal: WalletTradeSignal): Promise<void> {
     // Jalankan eksekusi 3-way dry-run scenario simulator secara paralel
     this.multiDryRunEngine.handleTargetSell(signal);
+
+    // Hit API Nyata GMGN untuk verifikasi respon route & submit order SELL jika sinyal sell terpicu
+    this.executeGmgnApiProbe('SELL', signal, 5.0).catch(err => console.warn(`[GMGN SELL PROBE ERR] ${err?.message}`));
 
     // Update live price tick ke Lane 1 & Lane 2 setiap kali target menjual token
     if (signal.priceUsd > 0) {
@@ -1583,6 +1591,93 @@ export class WalletFollowerRunner {
           }
         } catch {}
       }
+    }
+  }
+
+  /**
+   * Helper: Eksekusi Hit API Nyata ke GMGN (Swap Route & Submit Order Probe)
+   * Dilakukan langsung via browser context ke API GMGN pada setiap trigger BUY/SELL
+   * untuk membuktikan respon server on-chain meskipun mode follower sedang dry-run.
+   */
+  private async executeGmgnApiProbe(
+    side: 'BUY' | 'SELL',
+    signal: WalletTradeSignal,
+    stakeUsd: number = 5.0,
+    baseUnits?: string
+  ): Promise<void> {
+    if (!this.page || this.page.isClosed()) {
+      return;
+    }
+
+    try {
+      const state = readFollowerRealState(this.dataDir);
+      const wallet = state.readiness.wallet || 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
+      const config = readFollowerLiveConfig(this.dataDir);
+
+      console.log(`\n=========================================================`);
+      console.log(`[GMGN LIVE API HIT: ${side}] 🎯 Menembak API GMGN untuk ${signal.symbol} ($${stakeUsd.toFixed(2)})...`);
+
+      let route: any;
+      if (side === 'BUY') {
+        route = await getBrowserBuySwapRoute(
+          this.page,
+          signal.mint,
+          wallet,
+          stakeUsd,
+          this.solPriceUsd,
+          config.buySlippagePercent || 15
+        );
+      } else {
+        const units = baseUnits || '1000000';
+        route = await getBrowserSellSwapRoute(
+          this.page,
+          signal.mint,
+          wallet,
+          units,
+          6,
+          config.sellSlippagePercent || 20
+        );
+      }
+
+      console.log(`[GMGN ROUTE RESPONSE] Status: ${route.status} | Ok: ${route.ok} | Latency: ${route.latencyMs}ms | Exchange: ${route.routeData?.exchange || '-'} | Msg: ${route.error || 'SUCCESS'}`);
+
+      if (!route.ok || !route.routeData) {
+        console.warn(`[GMGN API HIT ${side} ABORTED] Route tidak ditemukan oleh AMM: ${route.error}`);
+        auditFollowerReal(this.dataDir, state, null, `API_PROBE_${side}_NO_ROUTE`, {
+          signal,
+          route
+        });
+        return;
+      }
+
+      // Hit submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
+      const estimatedSol = stakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 95.0);
+      const unitsToSubmit = side === 'BUY'
+        ? (route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString())
+        : (baseUnits || '1000000');
+
+      const submitRes = await this.liveAdapter.submitSwapOrder(this.page, {
+        side,
+        mint: signal.mint,
+        wallet,
+        amountBaseUnits: unitsToSubmit,
+        routeData: route.routeData,
+        config,
+        solUsd: this.solPriceUsd,
+        tokenPriceUsd: route.impliedPriceUsd || signal.priceUsd,
+      });
+
+      console.log(`[GMGN SUBMIT ORDER RESPONSE] Status: ${submitRes.status} | Ok: ${submitRes.ok} | Order ID: ${submitRes.orderId || '-'} | Hash: ${submitRes.hash || '-'} | Error/Msg: ${submitRes.error || 'SUCCESS'}`);
+      console.log(`=========================================================\n`);
+
+      // Audit log ke follower-real-ledger.jsonl
+      auditFollowerReal(this.dataDir, state, null, `API_PROBE_${side}`, {
+        signal,
+        route: { ok: route.ok, status: route.status, latencyMs: route.latencyMs, exchange: route.routeData?.exchange },
+        submit: submitRes
+      });
+    } catch (err: any) {
+      console.error(`[GMGN API HIT ERR] ${err?.message}`);
     }
   }
 
