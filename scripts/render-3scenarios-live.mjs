@@ -7,18 +7,14 @@ const dataDir = join(__dirname, '../data');
 
 export function render3ScenariosLiveHtml() {
   const liveFile = join(dataDir, 'dryrun-3scenarios-live.json');
-  let data = { s1: null, s2: null, s3: null, s4: null, s5: null, s6: null };
+  let data = { s4: null, s6: null };
   if (existsSync(liveFile)) {
     try {
       data = JSON.parse(readFileSync(liveFile, 'utf8'));
     } catch {}
   }
 
-  const s1 = data.s1 || { name: 'Skenario 1 (Statis $2, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
-  const s2 = data.s2 || { name: 'Skenario 2 (Dynamic V1 $1-$5, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
-  const s3 = data.s3 || { name: 'Skenario 3 (Dynamic V2 $1-$5 Bertingkat, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
-  const s4 = data.s4 || { name: 'Skenario 4 (Single Buy $5 Only, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
-  const s5 = data.s5 || { name: 'Skenario 5 (Quick Exit 5%, Statis $5)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s4 = data.s4 || { name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s6 = data.s6 || { name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color) {
@@ -102,7 +98,7 @@ export function render3ScenariosLiveHtml() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Dry-Run 4 Skenario Simultan (Pool $20) | cr.bbliong.io</title>
+  <title>Live Dry-Run 2 Skenario (S4 vs S6) | cr.bbliong.io</title>
   <style>
     :root {
       --bg-dark: #090d16;
@@ -228,10 +224,10 @@ export function render3ScenariosLiveHtml() {
         <div>
           <h1>
             <span class="live-dot"></span>
-            Live 6-Way Dry-Run Comparison Radar
+            Live 2-Way Dry-Run Radar (S4 vs S6)
           </h1>
           <div class="header-subtitle">
-            Simulasi Aktif Real-Time 6 Skenario Sekaligus &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong> &bull; S1-S4: Exit <strong>&ge; 15%</strong> &bull; S5: Exit <strong>&ge; 5%</strong> &bull; S6: <strong>Re-Deploy Sniper V2 (Split TP 50% di &ge; 5% &bull; 50% di &ge; 15%)</strong>
+            Head-to-Head 2 Skenario Terbaik &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong> &bull; S4: <strong>Single Buy $5 (Exit &ge; 15%)</strong> &bull; S6: <strong>Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)</strong>
           </div>
         </div>
       </div>
@@ -244,16 +240,12 @@ export function render3ScenariosLiveHtml() {
     </header>
 
     <div class="scenarios-grid">
-      ${renderScenarioCard(s1, 'var(--primary)')}
-      ${renderScenarioCard(s2, 'var(--cyan)')}
-      ${renderScenarioCard(s3, 'var(--purple)')}
       ${renderScenarioCard(s4, 'var(--amber)')}
-      ${renderScenarioCard(s5, '#10b981')}
       ${renderScenarioCard(s6, '#ec4899')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 6-Way Parallel Dry-Run Engine &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 2-Way Parallel Dry-Run Engine (S4 vs S6) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 

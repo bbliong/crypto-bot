@@ -115,11 +115,7 @@ export class MultiScenarioDryRunEngine {
   public onTradeAction?: ScenarioTradeActionCallback;
 
   public scenarios: {
-    s1: ScenarioState;
-    s2: ScenarioState;
-    s3: ScenarioState;
     s4: ScenarioState;
-    s5: ScenarioState;
     s6: ScenarioState;
   };
 
@@ -130,88 +126,12 @@ export class MultiScenarioDryRunEngine {
     this.scenarios = this.loadState();
   }
 
-  private initFreshScenarios(): { s1: ScenarioState; s2: ScenarioState; s3: ScenarioState; s4: ScenarioState; s5: ScenarioState; s6: ScenarioState } {
+  private initFreshScenarios(): { s4: ScenarioState; s6: ScenarioState } {
     return {
-      s1: {
-        id: 'SCENARIO_1_STATIC_2USD',
-        name: 'Skenario 1: Full Follower Statis $2',
-        description: 'Saldo Awal $20.00. Buy $2.00 statis, Akumulasi Sell >= 15% -> Full Exit 100% (Fee $0.025/swap).',
-        initialCash: 20.0,
-        availableCash: 20.0,
-        investedCash: 0.0,
-        totalFeesPaid: 0.0,
-        realizedPnl: 0.0,
-        unrealizedPnl: 0.0,
-        totalPortfolioValue: 20.0,
-        wins: 0,
-        losses: 0,
-        totalTrades: 0,
-        winRate: 0.0,
-        openPositions: [],
-        closedTrades: [],
-        recentEvents: [],
-      },
-      s2: {
-        id: 'SCENARIO_2_DYNAMIC_V1',
-        name: 'Skenario 2: Dynamic V1 ($1 Flat, Max $5 / Token)',
-        description: 'Saldo Awal $20.00. Max $5 per token, buy $1.00 flat, Akumulasi Sell >= 15% -> Full Exit 100% (Fee $0.025/swap).',
-        initialCash: 20.0,
-        availableCash: 20.0,
-        investedCash: 0.0,
-        totalFeesPaid: 0.0,
-        realizedPnl: 0.0,
-        unrealizedPnl: 0.0,
-        totalPortfolioValue: 20.0,
-        wins: 0,
-        losses: 0,
-        totalTrades: 0,
-        winRate: 0.0,
-        openPositions: [],
-        closedTrades: [],
-        recentEvents: [],
-      },
-      s3: {
-        id: 'SCENARIO_3_DYNAMIC_V2',
-        name: 'Skenario 3: Dynamic V2 ($1 - $5 Bertingkat, Saldo Dinamis)',
-        description: 'Saldo Awal $20.00 (Dinamis). Buy bertingkat $1-$5, Akumulasi Sell >= 15% -> Full Exit 100% (Fee $0.025/swap).',
-        initialCash: 20.0,
-        availableCash: 20.0,
-        investedCash: 0.0,
-        totalFeesPaid: 0.0,
-        realizedPnl: 0.0,
-        unrealizedPnl: 0.0,
-        totalPortfolioValue: 20.0,
-        wins: 0,
-        losses: 0,
-        totalTrades: 0,
-        winRate: 0.0,
-        openPositions: [],
-        closedTrades: [],
-        recentEvents: [],
-      },
       s4: {
         id: 'SCENARIO_4_SINGLE_BUY_5USD',
         name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)',
         description: 'Saldo Awal $20.00. Hanya 1x Buy $5.00 saat First Buy (Tanpa akumulasi). Akumulasi Sell >= 15% -> Full Exit 100%.',
-        initialCash: 20.0,
-        availableCash: 20.0,
-        investedCash: 0.0,
-        totalFeesPaid: 0.0,
-        realizedPnl: 0.0,
-        unrealizedPnl: 0.0,
-        totalPortfolioValue: 20.0,
-        wins: 0,
-        losses: 0,
-        totalTrades: 0,
-        winRate: 0.0,
-        openPositions: [],
-        closedTrades: [],
-        recentEvents: [],
-      },
-      s5: {
-        id: 'SCENARIO_5_QUICK_EXIT_5PCT',
-        name: 'Skenario 5: Quick Exit 5% (Statis $5, Exit >= 5%)',
-        description: 'Saldo Awal $20.00. Buy $5.00 statis. Akumulasi Sell >= 5% -> Langsung Full Exit 100% (Anti-Rugpull Dev Kilat).',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -249,31 +169,18 @@ export class MultiScenarioDryRunEngine {
     };
   }
 
-  private loadState(): { s1: ScenarioState; s2: ScenarioState; s3: ScenarioState; s4: ScenarioState; s5: ScenarioState; s6: ScenarioState } {
+  private loadState(): { s4: ScenarioState; s6: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.s1 && parsed.s2 && parsed.s3) {
-          if (parsed.s1.totalFeesPaid === undefined) parsed.s1.totalFeesPaid = 0.0;
-          if (parsed.s2.totalFeesPaid === undefined) parsed.s2.totalFeesPaid = 0.0;
-          if (parsed.s3.totalFeesPaid === undefined) parsed.s3.totalFeesPaid = 0.0;
-          if (!parsed.s4) {
-            parsed.s4 = this.initFreshScenarios().s4;
-          } else if (parsed.s4.totalFeesPaid === undefined) {
-            parsed.s4.totalFeesPaid = 0.0;
-          }
-          if (!parsed.s5) {
-            parsed.s5 = this.initFreshScenarios().s5;
-          } else if (parsed.s5.totalFeesPaid === undefined) {
-            parsed.s5.totalFeesPaid = 0.0;
-          }
-          if (!parsed.s6) {
-            parsed.s6 = this.initFreshScenarios().s6;
-          } else if (parsed.s6.totalFeesPaid === undefined) {
-            parsed.s6.totalFeesPaid = 0.0;
-          }
-          return parsed;
+        if (parsed.s4 || parsed.s6) {
+          const fresh = this.initFreshScenarios();
+          const s4 = parsed.s4 || fresh.s4;
+          const s6 = parsed.s6 || fresh.s6;
+          if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
+          if (s6.totalFeesPaid === undefined) s6.totalFeesPaid = 0.0;
+          return { s4, s6 };
         }
       } catch {}
     }
@@ -282,7 +189,7 @@ export class MultiScenarioDryRunEngine {
 
   public saveState(): void {
     try {
-      for (const s of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5, this.scenarios.s6]) {
+      for (const s of [this.scenarios.s4, this.scenarios.s6]) {
         s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
         s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
@@ -296,18 +203,7 @@ export class MultiScenarioDryRunEngine {
   }
 
   /**
-   * Helper: Hitung ukuran beli bertingkat untuk Skenario 3
-   */
-  private getTieredStake(targetUsd: number): number {
-    if (targetUsd >= 200) return 5.0;
-    if (targetUsd >= 150) return 4.0;
-    if (targetUsd >= 100) return 3.0;
-    if (targetUsd >= 50) return 2.0;
-    return 1.0;
-  }
-
-  /**
-   * Tangani aktivitas Target BUY secara simultan di 4 skenario
+   * Tangani aktivitas Target BUY secara simultan di skenario s4 dan s6
    */
   public handleTargetBuy(
     signal: WalletTradeSignal,
@@ -317,38 +213,14 @@ export class MultiScenarioDryRunEngine {
     const timeWib = formatWibDate(now);
     const targetUsd = signal.usdAmount > 0 ? signal.usdAmount : (signal.solAmount * 100);
 
-    // 1. Skenario 1 (Statis $2, Plafon per token = min(Kas, $20))
-    this.processScenarioBuy(this.scenarios.s1, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: Math.min(this.scenarios.s1.availableCash + this.scenarios.s1.investedCash, 20.0),
-      getStake: () => 2.0,
-    });
-
-    // 2. Skenario 2 (Dynamic V1: $1 Flat, Max $5/token)
-    this.processScenarioBuy(this.scenarios.s2, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: 5.0,
-      getStake: () => 1.0,
-    });
-
-    // 3. Skenario 3 (Dynamic V2: $1-$5 Bertingkat, Saldo Dinamis)
-    this.processScenarioBuy(this.scenarios.s3, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: Math.min(this.scenarios.s3.availableCash + this.scenarios.s3.investedCash, 20.0),
-      getStake: (tUsd) => this.getTieredStake(tUsd),
-    });
-
-    // 4. Skenario 4 (Single Buy $5 Flat, HANYA 1x Buy per token, Anti-Akumulasi)
+    // 1. Skenario 4 (Single Buy $5 Flat, HANYA 1x Buy per token, Anti-Akumulasi)
     this.processScenarioBuy(this.scenarios.s4, signal, isGroundZero, targetUsd, now, timeWib, {
       maxTokenExposure: 5.0,
       getStake: () => 5.0,
       disallowAccumulation: true,
     });
 
-    // 5. Skenario 5 (Quick Exit 5%: Statis $5, Exit di Ambang Batas >= 5%)
-    this.processScenarioBuy(this.scenarios.s5, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: Math.min(this.scenarios.s5.availableCash + this.scenarios.s5.investedCash, 20.0),
-      getStake: () => 5.0,
-    });
-
-    // 6. Skenario 6 (Re-Deploy Sniper: Pool 1: $5, Pool 2: $7)
+    // 2. Skenario 6 (Re-Deploy Sniper: Pool 1: $5, Pool 2: $7)
     // Cek generasi pool berdasarkan kemunculan ticker nama token
     const normSym = (signal.symbol || '').toUpperCase().trim();
     let gen = 1;
@@ -609,7 +481,7 @@ export class MultiScenarioDryRunEngine {
 
     if (isFullExit) sellRatio = 1.0;
 
-    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5, this.scenarios.s6]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s6]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === signal.mint);
       if (posIdx === -1) continue;
 
@@ -624,8 +496,7 @@ export class MultiScenarioDryRunEngine {
 
       // Ambang Batas Exit & Strategi Khusus:
       // - Skenario 6: Split TP 50/50 (Stage 1: TP 50% di >= 5.0% Anti-Rug, Stage 2: 50% Tahan >= 15.0% Mega Runner)
-      // - Skenario 5: Quick Exit >= 5.0% (Full Exit 100%)
-      // - Skenario 1-4: Standar Exit >= 15.0% (Full Exit 100%)
+      // - Skenario 4: Single Buy $5 (Standar Full Exit >= 15.0%)
 
       if (scenario.id === 'SCENARIO_6_REDEPLOY_SNIPER') {
         const isStage1Met = pos.targetCumulativeSellRatioPct >= 5.0 && !pos.stage1Exited && !isFullExit;
@@ -708,12 +579,8 @@ export class MultiScenarioDryRunEngine {
 
         // Lanjut ke eksekusi Full Exit Stage 2
       } else {
-        // Skenario 1-5 Standar
-        let targetThresholdPct = 15.0;
-        if (scenario.id === 'SCENARIO_5_QUICK_EXIT_5PCT') {
-          targetThresholdPct = 5.0;
-        }
-
+        // Skenario 4: Single Buy $5 Standar (Ambang Batas Exit >= 15.0%)
+        const targetThresholdPct = 15.0;
         const isThresholdMet = pos.targetCumulativeSellRatioPct >= targetThresholdPct || isFullExit;
 
         if (!isThresholdMet) {
@@ -753,7 +620,7 @@ export class MultiScenarioDryRunEngine {
 
       const exitReason = pos.stage1Exited
         ? `STAGE_2_RUNNER_FULL_EXIT (Target sold ${pos.targetCumulativeSellRatioPct}% >= 15%)`
-        : (isFullExit ? 'FULL_EXIT_100%' : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${scenario.id === 'SCENARIO_5_QUICK_EXIT_5PCT' ? '5%' : '15%'}_FULL_EXIT`);
+        : (isFullExit ? 'FULL_EXIT_100%' : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_15%_FULL_EXIT`);
 
       scenario.recentEvents.unshift({
         id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -824,7 +691,7 @@ export class MultiScenarioDryRunEngine {
     if (priceUsd <= 0) return;
     let changed = false;
 
-    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5, this.scenarios.s6]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s6]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
       if (posIdx !== -1) {
         const pos = scenario.openPositions[posIdx];
@@ -906,7 +773,7 @@ export class MultiScenarioDryRunEngine {
     const maxAgeMs = maxAgeMinutes * 60 * 1000;
     let changed = false;
 
-    for (const scenario of [this.scenarios.s1, this.scenarios.s2, this.scenarios.s3, this.scenarios.s4, this.scenarios.s5, this.scenarios.s6]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s6]) {
       for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
         const pos = scenario.openPositions[i];
         if (now - pos.openedAt >= maxAgeMs) {
