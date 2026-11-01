@@ -1682,17 +1682,34 @@ export class WalletFollowerRunner {
       console.log(`[GMGN LIVE API HIT: ${side}] 🎯 Trigger [${scenarioId}] (${reason}) untuk ${signal.symbol} ($${stakeUsd.toFixed(2)})...`);
 
       let route: any;
+      let unitsToSubmit: string = '0';
+
       if (side === 'BUY') {
-        route = await getBrowserBuySwapRoute(
-          this.page,
-          signal.mint,
-          wallet,
-          stakeUsd,
-          this.solPriceUsd,
-          config.buySlippagePercent || 15
-        );
+        // Fast retry 2x pada route AMM Buy jika rute pertama sempat tertunda
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          route = await getBrowserBuySwapRoute(
+            this.page,
+            signal.mint,
+            wallet,
+            stakeUsd,
+            this.solPriceUsd,
+            config.buySlippagePercent || 15
+          );
+          if (route.ok && route.routeData) break;
+          if (attempt < 2) await new Promise(r => setTimeout(r, 600));
+        }
       } else {
-        const units = tokens && tokens > 0 ? Math.floor(tokens * 1e6).toString() : '1000000';
+        // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil
+        let units = tokens && tokens > 0 ? Math.floor(tokens * 1e6).toString() : '1000000';
+        try {
+          const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
+          const onChain = await getOnChainTokenBalance(signal.mint, wallet);
+          if (onChain && onChain.amount && onChain.amount !== '0') {
+            units = onChain.amount;
+            console.log(`[REAL SELL BALANCE PRE-CHECK] Menggunakan saldo on-chain riil: ${onChain.uiAmount} tokens (${units} base units)`);
+          }
+        } catch {}
+
         route = await getBrowserSellSwapRoute(
           this.page,
           signal.mint,
@@ -1701,6 +1718,30 @@ export class WalletFollowerRunner {
           6,
           config.sellSlippagePercent || 20
         );
+
+        // Double-Catch Auto-Recovery jika terdeteksi selisih saldo di aggregator
+        if (!route.ok && route.error && route.error.includes('token balance is less than available balance')) {
+          console.warn(`[DOUBLE-CATCH] Terdeteksi selisih saldo (${route.error}). Membaca ulang saldo on-chain dari blockchain...`);
+          try {
+            const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
+            const onChain = await getOnChainTokenBalance(signal.mint, wallet);
+            if (onChain && onChain.amount && onChain.amount !== '0') {
+              units = onChain.amount;
+              console.log(`[DOUBLE-CATCH] Mengulang quote sell dengan saldo aktual: ${onChain.uiAmount} tokens (${units} base units)...`);
+              route = await getBrowserSellSwapRoute(
+                this.page,
+                signal.mint,
+                wallet,
+                units,
+                6,
+                config.sellSlippagePercent || 20
+              );
+            }
+          } catch (e: any) {
+            console.warn(`[DOUBLE-CATCH-ERR] ${e?.message}`);
+          }
+        }
+        unitsToSubmit = units;
       }
 
       console.log(`[GMGN ROUTE RESPONSE: ${scenarioId}] Status: ${route.status} | Ok: ${route.ok} | Latency: ${route.latencyMs}ms | Exchange: ${route.routeData?.exchange || '-'} | Msg: ${route.error || 'SUCCESS'}`);
@@ -1734,9 +1775,9 @@ export class WalletFollowerRunner {
       // Jika TOGGLE ON: Eksekusi submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
       console.log(`[AUTO-BUY TOGGLE: ON] 🟢 Menembak order swap NYATA ke GMGN API...`);
       const estimatedSol = stakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 95.0);
-      const unitsToSubmit = side === 'BUY'
-        ? (route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString())
-        : (tokens && tokens > 0 ? Math.floor(tokens * 1e6).toString() : '1000000');
+      if (side === 'BUY') {
+        unitsToSubmit = route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString();
+      }
 
       const submitRes = await this.liveAdapter.submitSwapOrder(this.page, {
         side,
@@ -1751,6 +1792,52 @@ export class WalletFollowerRunner {
 
       console.log(`[GMGN SUBMIT ORDER RESPONSE: ${scenarioId}] Status: ${submitRes.status} | Ok: ${submitRes.ok} | Order ID: ${submitRes.orderId || '-'} | Hash: ${submitRes.hash || '-'} | Error/Msg: ${submitRes.error || 'SUCCESS'}`);
       console.log(`=========================================================\n`);
+
+      // Cek kondisi sebenarnya beli berapa angkanya (Post-Buy On-Chain Verification & Sync)
+      if (side === 'BUY' && submitRes.ok) {
+        console.log(`[POST-BUY SYNC] ⏳ Menunggu settlement blockchain untuk verifikasi jumlah token aktual yang terbeli...`);
+        setTimeout(async () => {
+          try {
+            const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              await new Promise(r => setTimeout(r, 2000));
+              const onChain = await getOnChainTokenBalance(signal.mint, wallet);
+              if (onChain && onChain.uiAmount > 0) {
+                console.log(`\n=========================================================`);
+                console.log(`[POST-BUY VERIFIED] ✅ Terkonfirmasi beli aktual: ${onChain.uiAmount.toLocaleString()} tokens (${onChain.amount} base units) pada mint ${signal.symbol || signal.mint}`);
+                console.log(`=========================================================\n`);
+                auditFollowerReal(this.dataDir, state, null, `POST_BUY_VERIFIED_${scenarioId}`, {
+                  scenarioId,
+                  mint: signal.mint,
+                  symbol: signal.symbol,
+                  actualTokens: onChain.uiAmount,
+                  actualBaseUnits: onChain.amount,
+                  stakeUsd
+                });
+                break;
+              }
+            }
+          } catch (e: any) {
+            console.warn(`[POST-BUY-SYNC-ERR] ${e?.message}`);
+          }
+        }, 1500);
+      }
+
+      // Auto-reclaim rent SOL setelah SELL berhasil
+      if (side === 'SELL' && submitRes.ok) {
+        setTimeout(async () => {
+          try {
+            const { reclaimRentForMint } = await import('./solana-rent-reclaimer.mjs');
+            console.log(`[AUTO-RECLAIM-RENT] Memeriksa akun kosong untuk reclaim rent token ${signal.symbol || signal.mint}...`);
+            const reclaimRes = await reclaimRentForMint(signal.mint);
+            if (reclaimRes.ok && reclaimRes.reclaimedSol > 0) {
+              console.log(`[AUTO-RECLAIM-RENT] ✅ Berhasil me-reclaim +${reclaimRes.reclaimedSol.toFixed(6)} SOL untuk mint ${signal.symbol || signal.mint}! Tx: ${reclaimRes.signatures?.[0]}`);
+            }
+          } catch (err: any) {
+            console.warn(`[AUTO-RECLAIM-RENT-WARN] ${err?.message}`);
+          }
+        }, 4000);
+      }
 
       // Audit log ke follower-real-ledger.jsonl
       auditFollowerReal(this.dataDir, state, null, `API_PROBE_${side}_${scenarioId}`, {
