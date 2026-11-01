@@ -19,7 +19,7 @@ export function render3ScenariosLiveHtml() {
   const s3 = data.s3 || { name: 'Skenario 3 (Dynamic V2 $1-$5 Bertingkat, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s4 = data.s4 || { name: 'Skenario 4 (Single Buy $5 Only, Pool $20)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s5 = data.s5 || { name: 'Skenario 5 (Quick Exit 5%, Statis $5)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
-  const s6 = data.s6 || { name: 'Skenario 6 (Re-Deploy Sniper: Pool 1: $5, Pool 2+: $7)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s6 = data.s6 || { name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color) {
     const isPnlPositive = s.realizedPnl >= 0;
@@ -231,7 +231,7 @@ export function render3ScenariosLiveHtml() {
             Live 6-Way Dry-Run Comparison Radar
           </h1>
           <div class="header-subtitle">
-            Simulasi Aktif Real-Time 6 Skenario Sekaligus &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong> &bull; S1-S4: Exit <strong>&ge; 15%</strong> &bull; S5: Exit <strong>&ge; 5%</strong> &bull; S6: <strong>Re-Deploy Sniper ($5 P1, $7 P2+ &bull; Fallback TP 45s)</strong>
+            Simulasi Aktif Real-Time 6 Skenario Sekaligus &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong> &bull; S1-S4: Exit <strong>&ge; 15%</strong> &bull; S5: Exit <strong>&ge; 5%</strong> &bull; S6: <strong>Re-Deploy Sniper V2 (Split TP 50% di &ge; 5% &bull; 50% di &ge; 15%)</strong>
           </div>
         </div>
       </div>

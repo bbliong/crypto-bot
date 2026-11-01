@@ -22,6 +22,9 @@ export interface ScenarioPosition {
   feesPaidUsd: number;
   targetCumulativeSellRatioPct?: number;
   lastTargetSellAt?: number;
+  stage1Exited?: boolean;
+  initialTokens?: number;
+  initialCostBasisUsd?: number;
 }
 
 export interface ScenarioTradeRecord {
@@ -226,8 +229,8 @@ export class MultiScenarioDryRunEngine {
       },
       s6: {
         id: 'SCENARIO_6_REDEPLOY_SNIPER',
-        name: 'Skenario 6: Re-Deploy Sniper (Pool 1: $5, Pool 2+: $7)',
-        description: 'Saldo Awal $20.00. Pool #1 beli $5 (Exit >= 5%). Pool #2+ beli $7 (Exit >= 15% runner, Fallback TP >= 5% jika diam > 45s). Strict 1x Buy.',
+        name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)',
+        description: 'Saldo Awal $20.00. Pool 1: $5 flat, Pool 2+: $7 flat (Strict 1x Buy). Stage 1: TP 50% di >= 5% (Kunci Modal & Anti-Rug). Stage 2: 50% Tahan >= 15% (Mega Runner).',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -458,6 +461,8 @@ export class MultiScenarioDryRunEngine {
         realizedPnlUsd: 0.0,
         peakTargetHolding: signal.remainingHolding,
         feesPaidUsd: REAL_SWAP_FEE_USD,
+        initialTokens: tokensBought,
+        initialCostBasisUsd: actualStake,
       };
       scenario.openPositions.unshift(pos);
 
@@ -617,41 +622,120 @@ export class MultiScenarioDryRunEngine {
       pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
       pos.lastTargetSellAt = now;
 
-      // Ambang Batas Exit:
-      // - Skenario 5: Quick Exit >= 5.0%
-      // - Skenario 6: Adaptif (Pool #1 Exit >= 5.0%, Pool #2+ Exit >= 15.0%)
-      // - Skenario 1-4: Standar Exit >= 15.0%
-      let targetThresholdPct = 15.0;
-      if (scenario.id === 'SCENARIO_5_QUICK_EXIT_5PCT') {
-        targetThresholdPct = 5.0;
-      } else if (scenario.id === 'SCENARIO_6_REDEPLOY_SNIPER') {
-        const normSym = (signal.symbol || '').toUpperCase().trim();
-        const genInfo = this.tokenGenerations.get(normSym);
-        // Jika pool generasi 1 -> exit cepat 5%, jika generasi 2+ -> biarkan runner 15%
-        targetThresholdPct = (genInfo && genInfo.generation >= 2) ? 15.0 : 5.0;
+      // Ambang Batas Exit & Strategi Khusus:
+      // - Skenario 6: Split TP 50/50 (Stage 1: TP 50% di >= 5.0% Anti-Rug, Stage 2: 50% Tahan >= 15.0% Mega Runner)
+      // - Skenario 5: Quick Exit >= 5.0% (Full Exit 100%)
+      // - Skenario 1-4: Standar Exit >= 15.0% (Full Exit 100%)
+
+      if (scenario.id === 'SCENARIO_6_REDEPLOY_SNIPER') {
+        const isStage1Met = pos.targetCumulativeSellRatioPct >= 5.0 && !pos.stage1Exited && !isFullExit;
+        const isStage2Met = (pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit) && pos.stage1Exited;
+        const isInstantFullMet = isFullExit && !pos.stage1Exited; // Target dump 100% seketika
+
+        if (isStage1Met) {
+          // EKSEKUSI STAGE 1: Jual 50% token untuk kunci modal pokok & amankan profit awal
+          const tokensToSell = Number((pos.tokens * 0.5).toFixed(6));
+          const costBasisSold = Number((pos.costBasisUsd * 0.5).toFixed(2));
+          const grossReceived = tokensToSell * pOut;
+          const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
+          const pnlUsd = Number((netReceived - costBasisSold).toFixed(2));
+
+          scenario.availableCash = Number((scenario.availableCash + netReceived).toFixed(2));
+          scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
+          scenario.realizedPnl = Number((scenario.realizedPnl + pnlUsd).toFixed(2));
+
+          pos.tokens = Number((pos.tokens - tokensToSell).toFixed(6));
+          pos.costBasisUsd = Number((pos.costBasisUsd - costBasisSold).toFixed(2));
+          pos.feesPaidUsd += REAL_SWAP_FEE_USD;
+          pos.realizedPnlUsd += pnlUsd;
+          pos.lastPriceUsd = pOut;
+          pos.updatedAt = now;
+          pos.stage1Exited = true;
+
+          const reason = `STAGE_1_TP_50% (Target sold ${pos.targetCumulativeSellRatioPct}% >= 5%)`;
+
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SELL',
+            symbol: signal.symbol,
+            mint: signal.mint,
+            usdReceived: netReceived,
+            feeUsd: REAL_SWAP_FEE_USD,
+            tokens: tokensToSell,
+            priceUsd: pOut,
+            pnlUsd: pnlUsd,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
+            reason: `${reason} (Fee: $${REAL_SWAP_FEE_USD})`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+          if (this.onTradeAction) {
+            try {
+              this.onTradeAction('SELL', scenario.id, signal, {
+                stakeUsd: netReceived,
+                tokens: tokensToSell,
+                priceUsd: pOut,
+                reason,
+              });
+            } catch {}
+          }
+          continue; // Posisi tetap terbuka (Open) dengan sisa 50% token untuk runner
+        }
+
+        if (!isStage2Met && !isInstantFullMet) {
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SKIP',
+            symbol: signal.symbol,
+            mint: signal.mint,
+            priceUsd: pOut,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: scenario.investedCash,
+            reason: pos.stage1Exited
+              ? `RUNNER_HOLD (Stage 1 TP done | Target sold ${currentSellRatioPct}% | Cum: ${pos.targetCumulativeSellRatioPct}% < 15%)`
+              : `HOLD_ACCUMULATING (Target sold ${currentSellRatioPct}% | Cum: ${pos.targetCumulativeSellRatioPct}% < 5%)`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+          continue;
+        }
+
+        // Lanjut ke eksekusi Full Exit Stage 2
+      } else {
+        // Skenario 1-5 Standar
+        let targetThresholdPct = 15.0;
+        if (scenario.id === 'SCENARIO_5_QUICK_EXIT_5PCT') {
+          targetThresholdPct = 5.0;
+        }
+
+        const isThresholdMet = pos.targetCumulativeSellRatioPct >= targetThresholdPct || isFullExit;
+
+        if (!isThresholdMet) {
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SKIP',
+            symbol: signal.symbol,
+            mint: signal.mint,
+            priceUsd: pOut,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: scenario.investedCash,
+            reason: `HOLD_ACCUMULATING (Target sold ${currentSellRatioPct}% | Cum: ${pos.targetCumulativeSellRatioPct}% < ${targetThresholdPct}%)`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+          continue;
+        }
       }
 
-      const isThresholdMet = pos.targetCumulativeSellRatioPct >= targetThresholdPct || isFullExit;
-
-      if (!isThresholdMet) {
-        scenario.recentEvents.unshift({
-          id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
-          timestamp: now,
-          timeWib,
-          scenarioId: scenario.id,
-          action: 'SKIP',
-          symbol: signal.symbol,
-          mint: signal.mint,
-          priceUsd: pOut,
-          availableCashAfter: scenario.availableCash,
-          investedCashAfter: scenario.investedCash,
-          reason: `HOLD_ACCUMULATING (Target sold ${currentSellRatioPct}% | Cum: ${pos.targetCumulativeSellRatioPct}% < ${targetThresholdPct}%)`,
-        });
-        if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
-        continue;
-      }
-
-      // AMBANG BATAS TERCAPAI: Jual Seluruhnya 100% (Instant Full Exit)
+      // AMBANG BATAS TERCAPAI: Jual Seluruh Sisa Token 100% (Full Exit)
       const tokensToSell = pos.tokens;
       const grossReceived = tokensToSell * pOut;
       const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
@@ -666,6 +750,10 @@ export class MultiScenarioDryRunEngine {
       pos.realizedPnlUsd += pnlUsd;
       pos.lastPriceUsd = pOut;
       pos.updatedAt = now;
+
+      const exitReason = pos.stage1Exited
+        ? `STAGE_2_RUNNER_FULL_EXIT (Target sold ${pos.targetCumulativeSellRatioPct}% >= 15%)`
+        : (isFullExit ? 'FULL_EXIT_100%' : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${scenario.id === 'SCENARIO_5_QUICK_EXIT_5PCT' ? '5%' : '15%'}_FULL_EXIT`);
 
       scenario.recentEvents.unshift({
         id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -682,15 +770,13 @@ export class MultiScenarioDryRunEngine {
         pnlUsd: pnlUsd,
         availableCashAfter: scenario.availableCash,
         investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
-        reason: isFullExit
-          ? `FULL_EXIT_100% (Fee: $${REAL_SWAP_FEE_USD})`
-          : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${targetThresholdPct}%_FULL_EXIT (Fee: $${REAL_SWAP_FEE_USD})`,
+        reason: `${exitReason} (Fee: $${REAL_SWAP_FEE_USD})`,
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
 
       // Tutup posisi 100%
       scenario.openPositions.splice(posIdx, 1);
-      const totalInvested = costBasisSold;
+      const totalInvested = pos.initialCostBasisUsd || costBasisSold;
       const roi = totalInvested > 0 ? (pos.realizedPnlUsd / totalInvested) * 100 : 0.0;
       const isWin = pos.realizedPnlUsd >= 0;
 
@@ -705,7 +791,7 @@ export class MultiScenarioDryRunEngine {
             stakeUsd: netReceived,
             tokens: tokensToSell,
             priceUsd: pOut,
-            reason: isFullExit ? 'FULL_EXIT_100%' : `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${targetThresholdPct}%`,
+            reason: exitReason,
           });
         } catch {}
       }
@@ -722,7 +808,7 @@ export class MultiScenarioDryRunEngine {
         totalFeesPaidUsd: Number(pos.feesPaidUsd.toFixed(3)),
         realizedPnlUsd: Number(pos.realizedPnlUsd.toFixed(2)),
         roiPct: Number(roi.toFixed(1)),
-        exitReason: isFullExit ? 'TARGET_FULL_EXIT' : `CUMULATIVE_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_${targetThresholdPct}%`,
+        exitReason,
         isWin,
       });
       if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
@@ -752,9 +838,21 @@ export class MultiScenarioDryRunEngine {
           const now = Date.now();
           const timeWib = formatWibDate(now);
           scenario.openPositions.splice(posIdx, 1);
-          scenario.losses += 1;
-          scenario.totalTrades += 1;
           scenario.realizedPnl = Number((scenario.realizedPnl - pos.costBasisUsd).toFixed(2));
+
+          const initialInvested = pos.initialCostBasisUsd || (pos.stage1Exited ? pos.costBasisUsd * 2 : pos.costBasisUsd);
+          const finalPnlUsd = Number(((pos.realizedPnlUsd || 0) - pos.costBasisUsd).toFixed(2));
+          const totalReturned = Math.max(0, Number((initialInvested + finalPnlUsd).toFixed(2)));
+          const roiPct = initialInvested > 0 ? Number(((finalPnlUsd / initialInvested) * 100).toFixed(1)) : -100;
+          const isWin = finalPnlUsd >= 0;
+
+          if (isWin) scenario.wins += 1;
+          else scenario.losses += 1;
+          scenario.totalTrades += 1;
+
+          const crashReason = pos.stage1Exited
+            ? `AUTO_LIQUIDATION_CRASH (Stage 1 TP done | Sisa 50% dropped >95%)`
+            : `AUTO_LIQUIDATION_CRASH (>95% drop / Rugpull)`;
 
           scenario.recentEvents.unshift({
             id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -771,7 +869,7 @@ export class MultiScenarioDryRunEngine {
             pnlUsd: -pos.costBasisUsd,
             availableCashAfter: scenario.availableCash,
             investedCashAfter: Math.max(0, scenario.investedCash - pos.costBasisUsd),
-            reason: `AUTO_LIQUIDATION_CRASH (Price dropped >95% to $${priceUsd})`,
+            reason: crashReason,
           });
           if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
 
@@ -782,13 +880,13 @@ export class MultiScenarioDryRunEngine {
             openedAt: pos.openedAt,
             closedAt: now,
             entryCount: pos.entryCount,
-            totalInvestedUsd: pos.costBasisUsd,
-            totalReturnedUsd: 0,
-            totalFeesPaidUsd: pos.feesPaidUsd,
-            realizedPnlUsd: -pos.costBasisUsd,
-            roiPct: -100,
-            exitReason: 'AUTO_LIQUIDATION_CRASH (>95% drop / Rugpull)',
-            isWin: false,
+            totalInvestedUsd: initialInvested,
+            totalReturnedUsd: totalReturned,
+            totalFeesPaidUsd: Number(pos.feesPaidUsd.toFixed(3)),
+            realizedPnlUsd: finalPnlUsd,
+            roiPct,
+            exitReason: crashReason,
+            isWin,
           });
           if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
         }
