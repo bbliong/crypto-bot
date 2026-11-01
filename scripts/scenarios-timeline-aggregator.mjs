@@ -325,7 +325,7 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
         { label: 'Tx Hash', val: sig.txHash ? `${sig.txHash.slice(0, 8)}...${sig.txHash.slice(-6)}` : '-', link: sig.txHash ? `${solScanTxBase}${sig.txHash}` : null }
       ],
       request: {
-        monitorType: 'Helius WebSocket + Poller Real-Time Stream',
+        monitorType: 'GMGN Native WebSocket (ws.gmgn.ai - channel wallet_activity_info)',
         targetWallet: '5tP...F2y (Whale Smart Follower)',
         action: 'BUY',
         mint: sig.mint || activeToken.mint,
@@ -544,7 +544,7 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
         { label: 'Tx Hash', val: sigSell.txHash ? `${sigSell.txHash.slice(0, 8)}...${sigSell.txHash.slice(-6)}` : '-', link: sigSell.txHash ? `${solScanTxBase}${sigSell.txHash}` : null }
       ],
       request: {
-        monitorType: 'Helius WebSocket Real-Time Stream',
+        monitorType: 'GMGN Native WebSocket (ws.gmgn.ai - channel wallet_activity_info)',
         targetWallet: '5tP...F2y (Whale Smart Follower)',
         action: 'SELL',
         mint: sigSell.mint || activeToken.mint,
