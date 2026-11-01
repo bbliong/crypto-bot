@@ -314,16 +314,25 @@ export function render3ScenariosLiveHtml() {
     function toggleAutobuy(enabled) {
       if (isToggling) return;
       isToggling = true;
-      fetch('/api/autobuy/toggle', {
+      const curPath = window.location.pathname;
+      const ep = curPath.includes('/add-fol') ? '/add-fol/api/autobuy/toggle' : '/api/autobuy/toggle';
+      fetch(ep, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
       })
-      .then(r => r.json())
+      .then(async r => {
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error('HTTP ' + r.status + ': ' + text);
+        }
+        return r.json();
+      })
       .then(res => {
         setTimeout(() => location.reload(), 200);
       })
       .catch(err => {
+        isToggling = false;
         alert('Gagal mengubah toggle: ' + err.message);
         location.reload();
       });
