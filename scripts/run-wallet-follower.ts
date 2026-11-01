@@ -1757,6 +1757,31 @@ export class WalletFollowerRunner {
         return;
       }
 
+      const estimatedSol = stakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 95.0);
+      const swapRouteRequest = {
+        endpoint: '/txproxy/v1/get_swap_route',
+        method: 'GET',
+        side,
+        mint: signal.mint,
+        wallet,
+        inAmountBaseUnits: side === 'BUY' ? Math.floor(estimatedSol * 1e9).toString() : unitsToSubmit,
+        stakeUsd: side === 'BUY' ? stakeUsd : undefined,
+        slippage: side === 'BUY' ? (config.buySlippagePercent || 15) : (config.sellSlippagePercent || 20)
+      };
+
+      const swapRouteResponse = {
+        status: route.status,
+        ok: route.ok,
+        latencyMs: route.latencyMs,
+        exchange: route.routeData?.exchange,
+        quote: route.routeData?.quote ? {
+          inAmount: route.routeData.quote.inAmount,
+          outAmount: route.routeData.quote.outAmount,
+          priceImpactPct: route.routeData.quote.priceImpactPct
+        } : null,
+        error: route.error || null
+      };
+
       // Periksa toggle Auto-Buy: Jika OFF, hanya jalankan swap simulasi (tidak submit order nyata)
       const isAutoBuyEnabled = Boolean(config.enabled);
       if (!isAutoBuyEnabled) {
@@ -1767,6 +1792,8 @@ export class WalletFollowerRunner {
           reason,
           signal,
           route: { ok: route.ok, status: route.status, latencyMs: route.latencyMs, exchange: route.routeData?.exchange },
+          request: { swap: swapRouteRequest, order: null },
+          response: { swap: swapRouteResponse, order: { simulation: true, note: 'Simulation mode active (Rute AMM diverifikasi tanpa broadcast)' } },
           autoBuyEnabled: false
         });
         return;
@@ -1774,10 +1801,21 @@ export class WalletFollowerRunner {
 
       // Jika TOGGLE ON: Eksekusi submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
       console.log(`[AUTO-BUY TOGGLE: ON] 🟢 Menembak order swap NYATA ke GMGN API...`);
-      const estimatedSol = stakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 95.0);
       if (side === 'BUY') {
         unitsToSubmit = route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString();
       }
+
+      const orderSubmitRequest = {
+        endpoint: '/mrtapi/v2/swap_batch_order',
+        method: 'POST',
+        side,
+        mint: signal.mint,
+        wallet,
+        amountBaseUnits: unitsToSubmit,
+        exchange: route.routeData?.exchange,
+        tipFeeSol: config.tipFeeSol,
+        priorityFeeSol: config.priorityFeeSol
+      };
 
       const submitRes = await this.liveAdapter.submitSwapOrder(this.page, {
         side,
@@ -1845,7 +1883,9 @@ export class WalletFollowerRunner {
         reason,
         signal,
         route: { ok: route.ok, status: route.status, latencyMs: route.latencyMs, exchange: route.routeData?.exchange },
-        submit: submitRes
+        submit: submitRes,
+        request: { swap: swapRouteRequest, order: orderSubmitRequest },
+        response: { swap: swapRouteResponse, order: submitRes }
       });
     } catch (err: any) {
       console.error(`[GMGN API HIT ERR: ${scenarioId}] ${err?.message}`);
