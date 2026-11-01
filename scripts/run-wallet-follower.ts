@@ -1716,7 +1716,23 @@ export class WalletFollowerRunner {
         return;
       }
 
-      // Hit submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
+      // Periksa toggle Auto-Buy: Jika OFF, hanya jalankan swap simulasi (tidak submit order nyata)
+      const isAutoBuyEnabled = Boolean(config.enabled);
+      if (!isAutoBuyEnabled) {
+        console.log(`[AUTO-BUY TOGGLE: OFF] ⚪ Mode simulasi swap saja. Rute terverifikasi (${route.routeData?.exchange || '-'} | Latency ${route.latencyMs}ms), order nyata tidak disubmit.`);
+        console.log(`=========================================================\n`);
+        auditFollowerReal(this.dataDir, state, null, `SWAP_SIMULATION_${side}_${scenarioId}`, {
+          scenarioId,
+          reason,
+          signal,
+          route: { ok: route.ok, status: route.status, latencyMs: route.latencyMs, exchange: route.routeData?.exchange },
+          autoBuyEnabled: false
+        });
+        return;
+      }
+
+      // Jika TOGGLE ON: Eksekusi submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
+      console.log(`[AUTO-BUY TOGGLE: ON] 🟢 Menembak order swap NYATA ke GMGN API...`);
       const estimatedSol = stakeUsd / (this.solPriceUsd > 0 ? this.solPriceUsd : 95.0);
       const unitsToSubmit = side === 'BUY'
         ? (route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString())

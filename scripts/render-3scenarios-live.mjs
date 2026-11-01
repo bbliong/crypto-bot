@@ -14,6 +14,15 @@ export function render3ScenariosLiveHtml() {
     } catch {}
   }
 
+  const settingsFile = join(dataDir, 'follower-autobuy-settings.json');
+  let autobuyConfig = { enabled: false };
+  if (existsSync(settingsFile)) {
+    try {
+      autobuyConfig = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    } catch {}
+  }
+  const isAutoBuyEnabled = Boolean(autobuyConfig.enabled);
+
   const s4 = data.s4 || { name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s6 = data.s6 || { name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
@@ -215,6 +224,31 @@ export function render3ScenariosLiveHtml() {
       padding: 6px 0; border-bottom: 1px dashed rgba(30, 41, 59, 0.4); font-size: 0.8rem;
     }
     .event-row:last-child { border-bottom: none; }
+
+    /* Autobuy Toggle Bar */
+    .autobuy-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 14px 20px;
+      margin-bottom: 24px;
+      gap: 16px;
+    }
+    .autobuy-info { flex: 1; min-width: 280px; }
+    .autobuy-title { font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 8px; }
+    .autobuy-sub { font-size: 0.82rem; color: #94a3b8; margin-top: 4px; }
+    .toggle-control { display: flex; align-items: center; gap: 14px; }
+    .toggle-text { font-weight: 700; font-size: 0.95rem; }
+    .switch { position: relative; display: inline-block; width: 54px; height: 28px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #475569; transition: .3s; border-radius: 28px; }
+    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: #10b981; }
+    input:checked + .slider:before { transform: translateX(26px); }
   </style>
 </head>
 <body>
@@ -239,6 +273,32 @@ export function render3ScenariosLiveHtml() {
       </div>
     </header>
 
+    <!-- Auto-Buy Real API Toggle Bar -->
+    <div class="autobuy-bar">
+      <div class="autobuy-info">
+        <div class="autobuy-title">
+          <span>⚡ REAL AUTO-BUY (HIT API ASLI GMGN)</span>
+          <span style="font-size:0.75rem; padding: 2px 8px; border-radius: 6px; background: ${isAutoBuyEnabled ? 'rgba(16,185,129,0.2)' : 'rgba(148,163,184,0.15)'}; color: ${isAutoBuyEnabled ? '#10b981' : '#94a3b8'};">
+            ${isAutoBuyEnabled ? 'LIVE ACTIVE' : 'SIMULATION MODE'}
+          </span>
+        </div>
+        <div class="autobuy-sub">
+          ${isAutoBuyEnabled 
+            ? '🟢 <strong>AKTIF:</strong> Order BUY/SELL swap NYATA disubmit langsung ke GMGN API & Blockchain saat rules S4/S6 terpenuhi.' 
+            : '⚪ <strong>NONAKTIF:</strong> Mode simulasi swap saja. Rute AMM diverifikasi tanpa mengirim order beli asli.'}
+        </div>
+      </div>
+      <div class="toggle-control">
+        <span class="toggle-text" style="color: ${isAutoBuyEnabled ? 'var(--emerald)' : '#94a3b8'};">
+          ${isAutoBuyEnabled ? 'ON' : 'OFF'}
+        </span>
+        <label class="switch">
+          <input type="checkbox" id="autobuyToggle" ${isAutoBuyEnabled ? 'checked' : ''} onchange="toggleAutobuy(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
     <div class="scenarios-grid">
       ${renderScenarioCard(s4, 'var(--amber)')}
       ${renderScenarioCard(s6, '#ec4899')}
@@ -250,7 +310,26 @@ export function render3ScenariosLiveHtml() {
   </div>
 
   <script>
-    setTimeout(() => { window.location.reload(); }, 5000);
+    let isToggling = false;
+    function toggleAutobuy(enabled) {
+      if (isToggling) return;
+      isToggling = true;
+      fetch('/api/autobuy/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      })
+      .then(r => r.json())
+      .then(res => {
+        setTimeout(() => location.reload(), 200);
+      })
+      .catch(err => {
+        alert('Gagal mengubah toggle: ' + err.message);
+        location.reload();
+      });
+    }
+
+    setTimeout(() => { if (!isToggling) window.location.reload(); }, 5000);
   </script>
 </body>
 </html>`;

@@ -158,8 +158,8 @@ const server = createServer((req, res) => {
     return res.end();
   }
 
-  // API Auto-Buy Config update endpoint
-  if (pathname.includes('/api/autobuy/config') && req.method === 'POST') {
+  // API Auto-Buy Toggle & Config update endpoint
+  if ((pathname.includes('/api/autobuy/toggle') || pathname.includes('/api/autobuy/config')) && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
@@ -189,6 +189,10 @@ const server = createServer((req, res) => {
           updatedAt: Date.now(),
         };
 
+        if (patch.enabled !== undefined) {
+          updated.enabled = Boolean(patch.enabled);
+        }
+
         if (patch.reboundBuyEnabled !== undefined) {
           updated.reboundBuyEnabled = Boolean(patch.reboundBuyEnabled);
         }
@@ -207,11 +211,12 @@ const server = createServer((req, res) => {
         }
 
         atomicWriteJson(FOLLOWER_SETTINGS_FILE, updated);
+        console.log(`[AUTOBUY-CONFIG] Status Auto-Buy diperbarui: ${updated.enabled ? '🟢 AKTIF (REAL ORDER)' : '⚪ NONAKTIF (SWAP SIMULASI)'}`);
         res.writeHead(200, {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
         });
-        return res.end(JSON.stringify({ ok: true, config: updated }));
+        return res.end(JSON.stringify({ ok: true, enabled: updated.enabled, config: updated }));
       } catch (err) {
         res.writeHead(400, {
           'Content-Type': 'application/json',
@@ -221,6 +226,16 @@ const server = createServer((req, res) => {
       }
     });
     return;
+  }
+
+  // API Auto-Buy Status endpoint
+  if (pathname.includes('/api/autobuy/status') && req.method === 'GET') {
+    const current = safeReadJson(FOLLOWER_SETTINGS_FILE, { enabled: false });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(JSON.stringify({ ok: true, enabled: Boolean(current.enabled) }));
   }
 
   // API Reclaim Rent endpoint
