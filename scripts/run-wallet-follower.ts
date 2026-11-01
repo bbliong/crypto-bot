@@ -1555,9 +1555,10 @@ export class WalletFollowerRunner {
         }
       } catch {}
 
-      // Auto-likuidasi posisi dry-run multi-skenario jika terbengkalai > 25 menit
+      // Auto-likuidasi posisi dry-run multi-skenario jika terbengkalai > 25 menit & fallback safety TP 45s
       try {
         this.multiDryRunEngine.checkStagnantPositions(25);
+        this.multiDryRunEngine.checkSafetyExits(45000, 60000);
       } catch {}
 
       console.log(`\n[HEARTBEAT] Follower Aktif | Target: ${this.targetWallet.slice(0, 8)}... | Tab: ${this.page?.url()?.slice(0, 45)}...`);

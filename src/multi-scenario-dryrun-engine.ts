@@ -21,6 +21,7 @@ export interface ScenarioPosition {
   peakTargetHolding: number;
   feesPaidUsd: number;
   targetCumulativeSellRatioPct?: number;
+  lastTargetSellAt?: number;
 }
 
 export interface ScenarioTradeRecord {
@@ -225,8 +226,8 @@ export class MultiScenarioDryRunEngine {
       },
       s6: {
         id: 'SCENARIO_6_REDEPLOY_SNIPER',
-        name: 'Skenario 6: Re-Deploy Sniper (Pool 1: $5, Pool 2: $7)',
-        description: 'Saldo Awal $20.00. Pool #1 beli $5 (Exit >= 5%). Jika dev re-deploy pool #2 nama sama dlm 20m: beli $7 (Exit >= 15% Mega Runner).',
+        name: 'Skenario 6: Re-Deploy Sniper (Pool 1: $5, Pool 2+: $7)',
+        description: 'Saldo Awal $20.00. Pool #1 beli $5 (Exit >= 5%). Pool #2+ beli $7 (Exit >= 15% runner, Fallback TP >= 5% jika diam > 45s). Strict 1x Buy.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -371,8 +372,9 @@ export class MultiScenarioDryRunEngine {
     const s6Stake = gen >= 2 ? 7.0 : 5.0;
 
     this.processScenarioBuy(this.scenarios.s6, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: Math.min(this.scenarios.s6.availableCash + this.scenarios.s6.investedCash, 20.0),
+      maxTokenExposure: s6Stake,
       getStake: () => s6Stake,
+      disallowAccumulation: true,
     });
 
     this.saveState();
@@ -613,6 +615,7 @@ export class MultiScenarioDryRunEngine {
       if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
       const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
       pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
+      pos.lastTargetSellAt = now;
 
       // Ambang Batas Exit:
       // - Skenario 5: Quick Exit >= 5.0%
@@ -848,6 +851,129 @@ export class MultiScenarioDryRunEngine {
             roiPct: -100,
             exitReason: `STAGNANT_TIMEOUT_EXIT (> ${maxAgeMinutes}m Abandoned)`,
             isWin: false,
+          });
+          if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      this.saveState();
+    }
+
+    // Periksa fallback safety exits (ambil TP jika target diam setelah jual >= 5%)
+    this.checkSafetyExits(45000, 60000);
+  }
+
+  /**
+   * Fallback Safety Exit:
+   * Jika target sudah menjual akumulasi >= 5% tapi belum mencapai 15%,
+   * lalu target berhenti menjual selama > inactivityMs (indikasi target selesai TP / dev akan rugpull),
+   * bot langsung mengeksekusi Full Exit untuk mengamankan profit!
+   */
+  public checkSafetyExits(inactivityMsS6: number = 45000, inactivityMsS4: number = 60000): void {
+    const now = Date.now();
+    let changed = false;
+
+    const targets = [
+      { scenario: this.scenarios.s6, maxInactivity: inactivityMsS6 },
+      { scenario: this.scenarios.s4, maxInactivity: inactivityMsS4 }
+    ];
+
+    for (const { scenario, maxInactivity } of targets) {
+      for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
+        const pos = scenario.openPositions[i];
+        if (pos.tokens <= 0) continue;
+
+        const cumSell = pos.targetCumulativeSellRatioPct || 0;
+        const lastSellAt = pos.lastTargetSellAt || 0;
+
+        if (cumSell >= 5.0 && lastSellAt > 0 && (now - lastSellAt >= maxInactivity)) {
+          const timeWib = formatWibDate(now);
+          const pOut = pos.lastPriceUsd;
+          const tokensToSell = pos.tokens;
+          const grossReceived = tokensToSell * pOut;
+          const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
+          const costBasisSold = pos.costBasisUsd;
+          const pnlUsd = Number((netReceived - costBasisSold).toFixed(2));
+
+          scenario.availableCash = Number((scenario.availableCash + netReceived).toFixed(2));
+          scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
+          scenario.realizedPnl = Number((scenario.realizedPnl + pnlUsd).toFixed(2));
+
+          pos.feesPaidUsd += REAL_SWAP_FEE_USD;
+          pos.realizedPnlUsd += pnlUsd;
+          pos.lastPriceUsd = pOut;
+          pos.updatedAt = now;
+
+          const inactiveSec = Math.round((now - lastSellAt) / 1000);
+          const reason = `FALLBACK_SAFETY_EXIT (Target sold ${cumSell}% then silent ${inactiveSec}s)`;
+
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SELL',
+            symbol: pos.symbol,
+            mint: pos.mint,
+            usdReceived: netReceived,
+            feeUsd: REAL_SWAP_FEE_USD,
+            tokens: tokensToSell,
+            priceUsd: pOut,
+            pnlUsd: pnlUsd,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
+            reason: `${reason} (Fee: $${REAL_SWAP_FEE_USD})`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+          scenario.openPositions.splice(i, 1);
+          const roi = costBasisSold > 0 ? (pos.realizedPnlUsd / costBasisSold) * 100 : 0.0;
+          const isWin = pos.realizedPnlUsd >= 0;
+
+          if (isWin) scenario.wins += 1;
+          else scenario.losses += 1;
+          scenario.totalTrades += 1;
+
+          if (this.onTradeAction) {
+            try {
+              this.onTradeAction('SELL', scenario.id, {
+                mint: pos.mint,
+                symbol: pos.symbol,
+                tokenName: pos.tokenName,
+                action: 'sell',
+                tokenAmount: tokensToSell,
+                remainingHolding: 0,
+                solAmount: 0,
+                usdAmount: netReceived,
+                priceUsd: pOut,
+                txHash: '',
+                timestamp: Math.floor(now / 1000),
+              }, {
+                stakeUsd: netReceived,
+                tokens: tokensToSell,
+                priceUsd: pOut,
+                reason,
+              });
+            } catch {}
+          }
+
+          scenario.closedTrades.unshift({
+            mint: pos.mint,
+            symbol: pos.symbol,
+            tokenName: pos.tokenName,
+            openedAt: pos.openedAt,
+            closedAt: now,
+            entryCount: pos.entryCount,
+            totalInvestedUsd: costBasisSold,
+            totalReturnedUsd: netReceived,
+            totalFeesPaidUsd: pos.feesPaidUsd,
+            realizedPnlUsd: pnlUsd,
+            roiPct: Number(roi.toFixed(1)),
+            exitReason: reason,
+            isWin,
           });
           if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
           changed = true;
