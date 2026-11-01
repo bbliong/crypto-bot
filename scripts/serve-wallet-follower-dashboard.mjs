@@ -238,6 +238,29 @@ const server = createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, enabled: Boolean(current.enabled) }));
   }
 
+  // API Scenario Audit Detail Endpoint (supports /api/scenarios/audit, /add-fol/api/scenarios/audit)
+  if (pathname.includes('/api/scenarios/audit') && req.method === 'GET') {
+    (async () => {
+      try {
+        const scenario = url.searchParams.get('scenario') || 's6';
+        const { getScenarioAuditData } = await import('./scenarios-audit-aggregator.mjs');
+        const data = getScenarioAuditData(scenario);
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(500, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    })();
+    return;
+  }
+
   // API Reclaim Rent endpoint
   if (pathname.includes('/api/autobuy/reclaim-rent') && req.method === 'POST') {
     (async () => {
@@ -269,6 +292,64 @@ const server = createServer((req, res) => {
       'Cache-Control': 'no-cache',
     });
     return res.end(JSON.stringify(data));
+  }
+
+  // API Scenario Timeline Endpoint (supports /api/scenarios/timeline, /add-fol/api/scenarios/timeline)
+  if (pathname.includes('/api/scenarios/timeline') && req.method === 'GET') {
+    (async () => {
+      try {
+        const scenario = url.searchParams.get('scenario') || 'sce4';
+        const token = url.searchParams.get('token') || '';
+        const { getScenarioTokenTimeline } = await import('./scenarios-timeline-aggregator.mjs');
+        const data = await getScenarioTokenTimeline(scenario, token);
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(500, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 4 Detail Timeline (/3scenarios/sce4, /add-fol/3scenarios/sce4)
+  if (pathname.includes('/3scenarios/sce4') || pathname.includes('/4scenarios/sce4') || pathname.includes('/scenarios/sce4')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce4', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S4 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 6 Detail Timeline (/3scenarios/sce6, /add-fol/3scenarios/sce6)
+  if (pathname.includes('/3scenarios/sce6') || pathname.includes('/4scenarios/sce6') || pathname.includes('/scenarios/sce6')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce6', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S6 timeline: ' + err.message);
+      }
+    })();
+    return;
   }
 
   // Dedicated Live Multi-Scenario Dry-Run Dashboard (/3scenarios, /4scenarios, /scenarios)

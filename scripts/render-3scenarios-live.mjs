@@ -26,7 +26,7 @@ export function render3ScenariosLiveHtml() {
   const s4 = data.s4 || { name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s6 = data.s6 || { name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
-  function renderScenarioCard(s, color) {
+  function renderScenarioCard(s, color, scId = 'sce4') {
     const isPnlPositive = s.realizedPnl >= 0;
     const pnlSign = isPnlPositive ? '+' : '';
     const pnlClass = isPnlPositive ? 'val-emerald' : 'val-rose';
@@ -98,6 +98,11 @@ export function render3ScenariosLiveHtml() {
             `;
           }).join('')}
         </div>
+
+        <!-- Button to Timeline Page -->
+        <a href="/add-fol/3scenarios/${scId}" class="nav-btn" style="width: 100%; justify-content: center; margin-top: 10px; background: rgba(129, 140, 248, 0.15); color: #a5b4fc; border: 1px solid rgba(129, 140, 248, 0.4); text-decoration: none; font-size: 0.82rem; font-weight: 700;">
+          🔍 Lihat Detail Transaksi & Timeline API (${scId.toUpperCase()}) ↗
+        </a>
       </div>
     `;
   }
@@ -270,6 +275,8 @@ export function render3ScenariosLiveHtml() {
         <a href="/add-fol/backtest-dynamic" class="nav-btn">📊 Backtest V1 ($5 Cap)</a>
         <a href="/add-fol/backtest-dynamic2" class="nav-btn">🚀 Backtest V2 ($20 Pool)</a>
         <a href="/add-fol/3scenarios" class="nav-btn active">📡 Live Radar Multi-Skenario</a>
+        <a href="/add-fol/3scenarios/sce4" class="nav-btn" style="color:#f59e0b; border-color:rgba(245,158,11,0.4);">🔍 Detail S4</a>
+        <a href="/add-fol/3scenarios/sce6" class="nav-btn" style="color:#ec4899; border-color:rgba(236,72,153,0.4);">🚀 Detail S6</a>
       </div>
     </header>
 
@@ -300,8 +307,8 @@ export function render3ScenariosLiveHtml() {
     </div>
 
     <div class="scenarios-grid">
-      ${renderScenarioCard(s4, 'var(--amber)')}
-      ${renderScenarioCard(s6, '#ec4899')}
+      ${renderScenarioCard(s4, 'var(--amber)', 'sce4')}
+      ${renderScenarioCard(s6, '#ec4899', 'sce6')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
