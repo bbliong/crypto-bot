@@ -302,7 +302,7 @@ export class MultiScenarioDryRunEngine {
       }
 
       // Cek ketersediaan kas di pool (wajib cukup stake + fee $0.025)
-      if (scenario.availableCash < 1.0 + REAL_SWAP_FEE_USD) {
+      if (scenario.availableCash < 0.05 + REAL_SWAP_FEE_USD) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
           timestamp: now,
@@ -314,7 +314,7 @@ export class MultiScenarioDryRunEngine {
           priceUsd: pIn,
           availableCashAfter: scenario.availableCash,
           investedCashAfter: scenario.investedCash,
-          reason: 'CASH_EXHAUSTED (Sisa kas < $1.00 + fee)',
+          reason: 'CASH_EXHAUSTED (Sisa kas < $0.05 + fee)',
         });
         if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
         return;
@@ -323,7 +323,7 @@ export class MultiScenarioDryRunEngine {
       const desiredStake = rules.getStake(targetUsd);
       const maxAffordableStake = Math.max(0, scenario.availableCash - REAL_SWAP_FEE_USD);
       const actualStake = Math.min(maxAffordableStake, Math.min(rules.maxTokenExposure, desiredStake));
-      if (actualStake < 1.0) return;
+      if (actualStake < 0.05) return;
 
       const tokensBought = actualStake / pIn;
       const totalCashDeducted = Number((actualStake + REAL_SWAP_FEE_USD).toFixed(2));
@@ -403,7 +403,7 @@ export class MultiScenarioDryRunEngine {
 
     // Jika skenario mengizinkan akumulasi buy
     const remTokenCap = Math.max(0, rules.maxTokenExposure - pos.costBasisUsd);
-    if (remTokenCap < 1.0 || scenario.availableCash < 1.0 + REAL_SWAP_FEE_USD) {
+    if (remTokenCap < 0.05 || scenario.availableCash < 0.05 + REAL_SWAP_FEE_USD) {
       scenario.recentEvents.unshift({
         id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
         timestamp: now,
@@ -424,7 +424,7 @@ export class MultiScenarioDryRunEngine {
     const desiredStake = rules.getStake(targetUsd);
     const maxAffordableStake = Math.max(0, scenario.availableCash - REAL_SWAP_FEE_USD);
     const actualStake = Math.min(maxAffordableStake, Math.min(remTokenCap, desiredStake));
-    if (actualStake < 1.0) return;
+    if (actualStake < 0.05) return;
 
     const addedTokens = actualStake / pIn;
     const totalCashDeducted = Number((actualStake + REAL_SWAP_FEE_USD).toFixed(2));

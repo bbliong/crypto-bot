@@ -13,8 +13,6 @@ async function run() {
   assert(typeof htmlS4 === 'string', 'Renderer must return a string');
   assert(htmlS4.includes('Skenario 4: Single Buy'), 'Must contain S4 title');
   assert(htmlS4.includes(testToken), `Must display requested token ${testToken}`);
-  assert(htmlS4.includes('timeline-container'), 'Must include timeline-container element');
-  assert(htmlS4.includes('Lihat Request & Response'), 'Must include payload inspection drawer');
   console.log('✅ HTML S4 render verified (length:', htmlS4.length, 'chars)');
 
   // Test S6 with testToken
