@@ -1761,6 +1761,18 @@ export class WalletFollowerRunner {
 
       if (!route.ok || !route.routeData) {
         console.warn(`[GMGN API HIT ${side} ABORTED: ${scenarioId}] Route tidak ditemukan oleh AMM: ${route.error}`);
+        if (side === 'SELL' && this.isScenarioAllowedForRealOrder(scenarioId, config)) {
+          try {
+            const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
+            console.log(`[SAFETY-AUTO-RECLAIM] Rute sell tidak ada (${route.error}). Membakar sisa token & me-reclaim sewa rent SOL untuk ${signal.symbol || signal.mint}...`);
+            const burnRes = await burnAndCloseTokenAccount(signal.mint);
+            if (burnRes.ok) {
+              console.log(`[SAFETY-AUTO-RECLAIM] ✅ Berhasil burn & reclaim rent SOL: +${burnRes.reclaimedSol} SOL! Tx: ${burnRes.tx}`);
+            }
+          } catch (e: any) {
+            console.warn(`[SAFETY-AUTO-RECLAIM-WARN] ${e?.message}`);
+          }
+        }
         auditFollowerReal(this.dataDir, state, null, `API_PROBE_${side}_${scenarioId}_NO_ROUTE`, {
           scenarioId,
           reason,

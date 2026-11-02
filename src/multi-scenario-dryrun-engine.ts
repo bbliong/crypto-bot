@@ -231,6 +231,8 @@ export class MultiScenarioDryRunEngine {
       getStake: () => s4Stake,
       disallowAccumulation: true,
     });
+    // Auto-rotasi: Setelah buy Mint baru, segera sell 100% posisi lama yang memiliki simbol/nama sama
+    this.autoRotateSameSymbolPositions(this.scenarios.s4, signal, now, timeWib);
 
     // 2. Skenario 6 (Re-Deploy Sniper: Pool 1 Dinamis, Pool 2 Dinamis)
     // Cek generasi pool berdasarkan kemunculan ticker nama token
@@ -263,6 +265,8 @@ export class MultiScenarioDryRunEngine {
       getStake: () => s6Stake,
       disallowAccumulation: true,
     });
+    // Auto-rotasi: Setelah buy Mint baru, segera sell 100% posisi lama yang memiliki simbol/nama sama
+    this.autoRotateSameSymbolPositions(this.scenarios.s6, signal, now, timeWib);
 
     this.saveState();
   }
@@ -467,6 +471,137 @@ export class MultiScenarioDryRunEngine {
           reason: `ACCUMULATE_${pos.entryCount}`,
         });
       } catch {}
+    }
+  }
+
+  /**
+   * Auto-Rotasi: Jika target buy token baru (Mint B) dengan simbol/nama yang sama,
+   * segera sell 100% posisi lama (Mint A) agar hanya ada 1 token aktif bernama sama.
+   * Dijalankan SETELAH buy Mint B selesai dieksekusi agar tidak menahan kecepatan entry buy.
+   */
+  private autoRotateSameSymbolPositions(
+    scenario: ScenarioState,
+    newSignal: WalletTradeSignal,
+    now: number,
+    timeWib: string
+  ): void {
+    const newSym = (newSignal.symbol || '').trim().toUpperCase();
+    const newName = (newSignal.tokenName || '').trim().toUpperCase();
+    if (!newSym && !newName) return;
+
+    // Cari posisi lama dengan simbol atau nama yang sama tapi mint berbeda
+    const staleIndices: number[] = [];
+    for (let i = 0; i < scenario.openPositions.length; i++) {
+      const p = scenario.openPositions[i];
+      if (p.mint === newSignal.mint) continue;
+
+      const pSym = (p.symbol || '').trim().toUpperCase();
+      const pName = (p.tokenName || '').trim().toUpperCase();
+      const match = (newSym && pSym && newSym === pSym) || (newName && pName && newName === pName);
+      if (match) {
+        staleIndices.push(i);
+      }
+    }
+
+    if (staleIndices.length === 0) return;
+
+    // Urutkan dari indeks terbesar ke terkecil agar splice aman
+    staleIndices.sort((a, b) => b - a);
+
+    for (const idx of staleIndices) {
+      const pos = scenario.openPositions[idx];
+      const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+      const tokensToSell = pos.tokens;
+      const costBasisSold = pos.costBasisUsd;
+
+      // Estimasi USD kembali
+      const grossReceived = tokensToSell * pOut;
+      const netReceived = Math.max(0, grossReceived - REAL_SWAP_FEE_USD);
+      const pnlUsd = netReceived - costBasisSold;
+
+      const exitReason = `AUTO_ROTATION_SAME_NAME (Target buy kontrak baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...])`;
+
+      pos.realizedPnlUsd = Number((pos.realizedPnlUsd + pnlUsd).toFixed(2));
+      pos.feesPaidUsd = Number((pos.feesPaidUsd + REAL_SWAP_FEE_USD).toFixed(3));
+      scenario.availableCash = Number((scenario.availableCash + netReceived).toFixed(2));
+      scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
+
+      scenario.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: scenario.id,
+        action: 'SELL',
+        symbol: pos.symbol,
+        mint: pos.mint,
+        usdReceived: Number(netReceived.toFixed(2)),
+        feeUsd: REAL_SWAP_FEE_USD,
+        tokens: tokensToSell,
+        priceUsd: pOut,
+        pnlUsd: Number(pnlUsd.toFixed(2)),
+        availableCashAfter: scenario.availableCash,
+        investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
+        reason: `${exitReason} (Fee: $${REAL_SWAP_FEE_USD})`,
+      });
+      if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+      // Hapus dari open positions
+      scenario.openPositions.splice(idx, 1);
+
+      const totalInvested = pos.initialCostBasisUsd || costBasisSold;
+      const roi = totalInvested > 0 ? (pos.realizedPnlUsd / totalInvested) * 100 : 0.0;
+      const isWin = pos.realizedPnlUsd >= 0;
+
+      if (isWin) scenario.wins += 1;
+      else scenario.losses += 1;
+      scenario.totalTrades += 1;
+
+      // Pindahkan ke closedTrades
+      scenario.closedTrades.unshift({
+        mint: pos.mint,
+        symbol: pos.symbol,
+        tokenName: pos.tokenName,
+        openedAt: pos.openedAt,
+        closedAt: now,
+        entryCount: pos.entryCount,
+        totalInvestedUsd: Number(totalInvested.toFixed(2)),
+        totalReturnedUsd: Number((totalInvested + pos.realizedPnlUsd).toFixed(2)),
+        totalFeesPaidUsd: Number(pos.feesPaidUsd.toFixed(3)),
+        realizedPnlUsd: Number(pos.realizedPnlUsd.toFixed(2)),
+        roiPct: Number(roi.toFixed(1)),
+        exitReason,
+        isWin,
+      });
+      if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+
+      // Trigger callback SELL untuk eksekusi swap riil / burn & reclaim rent
+      if (this.onTradeAction) {
+        try {
+          const oldSignal: WalletTradeSignal = {
+            action: 'sell',
+            mint: pos.mint,
+            symbol: pos.symbol,
+            tokenName: pos.tokenName,
+            tokenAmount: tokensToSell,
+            remainingHolding: 0,
+            solAmount: 0,
+            usdAmount: netReceived,
+            priceUsd: pOut,
+            txHash: '',
+            timestamp: Math.floor(now / 1000),
+            isOpenOrClose: true,
+            isFirstBuy: false,
+          };
+          this.onTradeAction('SELL', scenario.id, oldSignal, {
+            stakeUsd: netReceived,
+            tokens: tokensToSell,
+            priceUsd: pOut,
+            reason: exitReason,
+          });
+        } catch (e: any) {
+          console.warn(`[AUTO-ROTATION-ACTION-ERR] ${e?.message}`);
+        }
+      }
     }
   }
 
