@@ -1718,8 +1718,14 @@ export class WalletFollowerRunner {
           const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
           const onChain = await getOnChainTokenBalance(signal.mint, wallet);
           if (onChain && onChain.amount && onChain.amount !== '0') {
-            units = onChain.amount;
-            console.log(`[REAL SELL BALANCE PRE-CHECK] Menggunakan saldo on-chain riil: ${onChain.uiAmount} tokens (${units} base units)`);
+            const isStage1Partial = reason && reason.includes('STAGE_1_TP_50%');
+            if (isStage1Partial) {
+              units = (BigInt(onChain.amount) / 2n).toString();
+              console.log(`[REAL SELL BALANCE PRE-CHECK] S6 STAGE 1 TP 50%: Menjual 50% saldo on-chain riil: ${units} base units`);
+            } else {
+              units = onChain.amount;
+              console.log(`[REAL SELL BALANCE PRE-CHECK] Menggunakan 100% saldo on-chain riil: ${onChain.uiAmount} tokens (${units} base units)`);
+            }
           }
         } catch {}
 
@@ -1739,8 +1745,9 @@ export class WalletFollowerRunner {
             const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
             const onChain = await getOnChainTokenBalance(signal.mint, wallet);
             if (onChain && onChain.amount && onChain.amount !== '0') {
-              units = onChain.amount;
-              console.log(`[DOUBLE-CATCH] Mengulang quote sell dengan saldo aktual: ${onChain.uiAmount} tokens (${units} base units)...`);
+              const isStage1Partial = reason && reason.includes('STAGE_1_TP_50%');
+              units = isStage1Partial ? (BigInt(onChain.amount) / 2n).toString() : onChain.amount;
+              console.log(`[DOUBLE-CATCH] Mengulang quote sell dengan saldo aktual: ${units} base units...`);
               route = await getBrowserSellSwapRoute(
                 this.page,
                 signal.mint,
@@ -1890,8 +1897,8 @@ export class WalletFollowerRunner {
         }, 1500);
       }
 
-      // Auto-reclaim rent SOL setelah SELL berhasil
-      if (side === 'SELL' && submitRes.ok) {
+      // Auto-reclaim rent SOL setelah SELL berhasil (hanya pada full exit, bukan partial Stage 1 TP)
+      if (side === 'SELL' && submitRes.ok && (!reason || !reason.includes('STAGE_1_TP_50%'))) {
         setTimeout(async () => {
           try {
             const { reclaimRentForMint } = await import('./solana-rent-reclaimer.mjs');
