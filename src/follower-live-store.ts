@@ -187,16 +187,16 @@ export function saveFollowerLiveConfig(
   }
 
   // Sanitasi & boundary checks
-  updated.stakeUsdLane1 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane1) || 2.0));
-  updated.stakeUsdLane2 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane2) || 5.0));
+  updated.stakeUsdLane1 = Math.max(0.05, Math.min(1000, Number(updated.stakeUsdLane1) || 2.0));
+  updated.stakeUsdLane2 = Math.max(0.05, Math.min(1000, Number(updated.stakeUsdLane2) || 5.0));
   if (patch.stakeUsdS4 !== undefined || updated.stakeUsdS4 === undefined) {
-    updated.stakeUsdS4 = Math.max(0.5, Math.min(1000, Number(patch.stakeUsdS4 || updated.stakeUsdS4) || 5.0));
+    updated.stakeUsdS4 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS4 !== undefined ? patch.stakeUsdS4 : updated.stakeUsdS4) || 5.0));
   }
   if (patch.stakeUsdS6Pool1 !== undefined || updated.stakeUsdS6Pool1 === undefined) {
-    updated.stakeUsdS6Pool1 = Math.max(0.5, Math.min(1000, Number(patch.stakeUsdS6Pool1 || updated.stakeUsdS6Pool1) || 5.0));
+    updated.stakeUsdS6Pool1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS6Pool1 !== undefined ? patch.stakeUsdS6Pool1 : updated.stakeUsdS6Pool1) || 5.0));
   }
   if (patch.stakeUsdS6Pool2 !== undefined || updated.stakeUsdS6Pool2 === undefined) {
-    updated.stakeUsdS6Pool2 = Math.max(0.5, Math.min(1000, Number(patch.stakeUsdS6Pool2 || updated.stakeUsdS6Pool2) || 7.0));
+    updated.stakeUsdS6Pool2 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS6Pool2 !== undefined ? patch.stakeUsdS6Pool2 : updated.stakeUsdS6Pool2) || 7.0));
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;

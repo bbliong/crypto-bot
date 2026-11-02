@@ -82,7 +82,7 @@ export function render3ScenariosLiveHtml() {
             <div class="stake-form-row">
               <div class="stake-input-wrap">
                 <span class="currency-prefix">$</span>
-                <input type="number" id="s4StakeInput" value="${s4Stake.toFixed(2)}" step="0.5" min="0.5" max="1000" placeholder="5.00">
+                <input type="number" id="s4StakeInput" value="${s4Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="0.25">
               </div>
               <button onclick="saveS4Stake()" class="btn-stake-save">💾 Simpan Modal S4</button>
             </div>
@@ -98,14 +98,14 @@ export function render3ScenariosLiveHtml() {
                 <label class="stake-sublabel">Pool 1 (Koin Baru):</label>
                 <div class="stake-input-wrap">
                   <span class="currency-prefix">$</span>
-                  <input type="number" id="s6Pool1Input" value="${s6Pool1.toFixed(2)}" step="0.5" min="0.5" max="1000" placeholder="5.00">
+                  <input type="number" id="s6Pool1Input" value="${s6Pool1.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="0.25">
                 </div>
               </div>
               <div>
                 <label class="stake-sublabel">Pool 2+ (Re-Deploy):</label>
                 <div class="stake-input-wrap">
                   <span class="currency-prefix">$</span>
-                  <input type="number" id="s6Pool2Input" value="${s6Pool2.toFixed(2)}" step="0.5" min="0.5" max="1000" placeholder="7.00">
+                  <input type="number" id="s6Pool2Input" value="${s6Pool2.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="0.50">
                 </div>
               </div>
             </div>
@@ -659,8 +659,8 @@ export function render3ScenariosLiveHtml() {
       const input = document.getElementById('s4StakeInput');
       if (!input) return;
       const val = parseFloat(input.value);
-      if (!Number.isFinite(val) || val < 0.5) {
-        alert('Modal S4 minimal $0.50!');
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S4 minimal $0.05!');
         return;
       }
       sendStakeUpdate({ stakeUsdS4: val }, 'Modal S4 berhasil disimpan: $' + val.toFixed(2));
@@ -672,8 +672,8 @@ export function render3ScenariosLiveHtml() {
       if (!p1 || !p2) return;
       const val1 = parseFloat(p1.value);
       const val2 = parseFloat(p2.value);
-      if (!Number.isFinite(val1) || val1 < 0.5 || !Number.isFinite(val2) || val2 < 0.5) {
-        alert('Modal Pool 1 dan Pool 2 minimal $0.50!');
+      if (!Number.isFinite(val1) || val1 < 0.05 || !Number.isFinite(val2) || val2 < 0.05) {
+        alert('Modal Pool 1 dan Pool 2 minimal $0.05!');
         return;
       }
       sendStakeUpdate({
