@@ -57,11 +57,21 @@ async function main() {
   console.log('\n🧹 [CLEAN] Mengosongkan data aktif untuk evaluasi fresh...');
 
   // Reset dryrun-3scenarios-live.json
+  let s4Stake = 0.25;
+  let s6Pool1 = 5.0;
+  let s6Pool2 = 7.0;
+  try {
+    const s = JSON.parse(readFileSync(join(dataDir, 'follower-autobuy-settings.json'), 'utf8'));
+    if (s.stakeUsdS4) s4Stake = Number(s.stakeUsdS4);
+    if (s.stakeUsdS6Pool1) s6Pool1 = Number(s.stakeUsdS6Pool1);
+    if (s.stakeUsdS6Pool2) s6Pool2 = Number(s.stakeUsdS6Pool2);
+  } catch {}
+
   const freshScenarios = {
     s4: {
       id: 'SCENARIO_4_SINGLE_BUY_5USD',
-      name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)',
-      description: 'Saldo Awal $20.00. Hanya 1x Buy $5.00 saat First Buy (Tanpa akumulasi). Akumulasi Sell >= 15% -> Full Exit 100%.',
+      name: `Skenario 4: Single Buy $${s4Stake.toFixed(2)} (Hanya 1x Buy)`,
+      description: `Saldo Awal $20.00. Hanya 1x Buy $${s4Stake.toFixed(2)} saat First Buy (Tanpa akumulasi). Akumulasi Sell >= 15% -> Full Exit 100%.`,
       initialCash: 20.0,
       availableCash: 20.0,
       investedCash: 0.0,
@@ -79,8 +89,8 @@ async function main() {
     },
     s6: {
       id: 'SCENARIO_6_REDEPLOY_SNIPER',
-      name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)',
-      description: 'Saldo Awal $20.00. Pool 1: $5 flat, Pool 2+: $7 flat (Strict 1x Buy). Stage 1: TP 50% di >= 5% (Kunci Modal & Anti-Rug). Stage 2: 50% Tahan >= 15% (Mega Runner).',
+      name: `Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)`,
+      description: `Saldo Awal $20.00. Pool 1: $${s6Pool1.toFixed(2)} flat, Pool 2+: $${s6Pool2.toFixed(2)} flat (Strict 1x Buy). Stage 1: TP 50% di >= 5% (Kunci Modal & Anti-Rug). Stage 2: 50% Tahan >= 15% (Mega Runner).`,
       initialCash: 20.0,
       availableCash: 20.0,
       investedCash: 0.0,
