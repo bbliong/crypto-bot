@@ -17,6 +17,9 @@ export interface FollowerLiveConfig {
   autobuyScenario?: 'OFF' | 'S4' | 'S6' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
+  stakeUsdS4?: number;
+  stakeUsdS6Pool1?: number;
+  stakeUsdS6Pool2?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -37,6 +40,9 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   autobuyScenario: 'OFF',
   stakeUsdLane1: 2.0,
   stakeUsdLane2: 5.0,
+  stakeUsdS4: 5.0,
+  stakeUsdS6Pool1: 5.0,
+  stakeUsdS6Pool2: 7.0,
   maxBuysQuota: 3,
   maxActiveRealPositions: 1,
   buySlippagePercent: 15,
@@ -183,6 +189,15 @@ export function saveFollowerLiveConfig(
   // Sanitasi & boundary checks
   updated.stakeUsdLane1 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane1) || 2.0));
   updated.stakeUsdLane2 = Math.max(0.1, Math.min(1000, Number(updated.stakeUsdLane2) || 5.0));
+  if (patch.stakeUsdS4 !== undefined || updated.stakeUsdS4 === undefined) {
+    updated.stakeUsdS4 = Math.max(0.5, Math.min(1000, Number(patch.stakeUsdS4 || updated.stakeUsdS4) || 5.0));
+  }
+  if (patch.stakeUsdS6Pool1 !== undefined || updated.stakeUsdS6Pool1 === undefined) {
+    updated.stakeUsdS6Pool1 = Math.max(0.5, Math.min(1000, Number(patch.stakeUsdS6Pool1 || updated.stakeUsdS6Pool1) || 5.0));
+  }
+  if (patch.stakeUsdS6Pool2 !== undefined || updated.stakeUsdS6Pool2 === undefined) {
+    updated.stakeUsdS6Pool2 = Math.max(0.5, Math.min(1000, Number(patch.stakeUsdS6Pool2 || updated.stakeUsdS6Pool2) || 7.0));
+  }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;
   updated.maxActiveRealPositions = Math.max(1, Math.min(10, Number(updated.maxActiveRealPositions) || 1));

@@ -217,6 +217,21 @@ const server = createServer((req, res) => {
           updated.maxBuysQuota = Number.isInteger(q) && q >= 0 ? q : 0;
         }
 
+        if (patch.stakeUsdS4 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS4);
+          if (Number.isFinite(val) && val >= 0.5 && val <= 1000) updated.stakeUsdS4 = val;
+        }
+
+        if (patch.stakeUsdS6Pool1 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS6Pool1);
+          if (Number.isFinite(val) && val >= 0.5 && val <= 1000) updated.stakeUsdS6Pool1 = val;
+        }
+
+        if (patch.stakeUsdS6Pool2 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS6Pool2);
+          if (Number.isFinite(val) && val >= 0.5 && val <= 1000) updated.stakeUsdS6Pool2 = val;
+        }
+
         if (patch.resetQuota) {
           updated.quotaResetAt = Date.now();
         }
