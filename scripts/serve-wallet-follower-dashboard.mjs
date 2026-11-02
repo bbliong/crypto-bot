@@ -189,8 +189,19 @@ const server = createServer((req, res) => {
           updatedAt: Date.now(),
         };
 
-        if (patch.enabled !== undefined) {
+        if (patch.autobuyScenario !== undefined) {
+          const sc = String(patch.autobuyScenario).toUpperCase();
+          if (['OFF', 'S4', 'S6', 'BOTH'].includes(sc)) {
+            updated.autobuyScenario = sc;
+            updated.enabled = (sc !== 'OFF');
+          }
+        } else if (patch.enabled !== undefined) {
           updated.enabled = Boolean(patch.enabled);
+          if (!updated.enabled) {
+            updated.autobuyScenario = 'OFF';
+          } else if (!updated.autobuyScenario || updated.autobuyScenario === 'OFF') {
+            updated.autobuyScenario = 'BOTH';
+          }
         }
 
         if (patch.reboundBuyEnabled !== undefined) {

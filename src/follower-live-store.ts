@@ -14,6 +14,7 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
+  autobuyScenario?: 'OFF' | 'S4' | 'S6' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   maxBuysQuota: number;
@@ -33,6 +34,7 @@ export interface FollowerLiveConfig {
 export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   enabled: false,
   activeLane: 'LANE_2',
+  autobuyScenario: 'OFF',
   stakeUsdLane1: 2.0,
   stakeUsdLane2: 5.0,
   maxBuysQuota: 3,
@@ -161,6 +163,21 @@ export function saveFollowerLiveConfig(
 
   if (patch.resetQuota) {
     updated.quotaResetAt = Date.now();
+  }
+
+  if (patch.autobuyScenario !== undefined) {
+    const sc = String(patch.autobuyScenario).toUpperCase();
+    if (['OFF', 'S4', 'S6', 'BOTH'].includes(sc)) {
+      updated.autobuyScenario = sc as any;
+      updated.enabled = sc !== 'OFF';
+    }
+  } else if (patch.enabled !== undefined) {
+    updated.enabled = Boolean(patch.enabled);
+    if (!updated.enabled) {
+      updated.autobuyScenario = 'OFF';
+    } else if (!updated.autobuyScenario || updated.autobuyScenario === 'OFF') {
+      updated.autobuyScenario = 'BOTH';
+    }
   }
 
   // Sanitasi & boundary checks

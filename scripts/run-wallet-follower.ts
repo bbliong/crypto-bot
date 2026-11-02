@@ -1782,10 +1782,23 @@ export class WalletFollowerRunner {
         error: route.error || null
       };
 
-      // Periksa toggle Auto-Buy: Jika OFF, hanya jalankan swap simulasi (tidak submit order nyata)
+      // Periksa config Real Auto-Buy & filter skenario aktif (OFF, S4, S6, BOTH)
       const isAutoBuyEnabled = Boolean(config.enabled);
-      if (!isAutoBuyEnabled) {
-        console.log(`[AUTO-BUY TOGGLE: OFF] ⚪ Mode simulasi swap saja. Rute terverifikasi (${route.routeData?.exchange || '-'} | Latency ${route.latencyMs}ms), order nyata tidak disubmit.`);
+      const autobuySc = String(config.autobuyScenario || (isAutoBuyEnabled ? 'BOTH' : 'OFF')).toUpperCase();
+
+      let isScenarioTargeted = false;
+      if (isAutoBuyEnabled && autobuySc !== 'OFF') {
+        if (autobuySc === 'BOTH' || autobuySc === 'ALL') {
+          isScenarioTargeted = true;
+        } else if (autobuySc === 'S4' || autobuySc === 'SCE4' || autobuySc === 'SCENARIO_4') {
+          isScenarioTargeted = scenarioId.includes('4') || scenarioId.includes('SINGLE');
+        } else if (autobuySc === 'S6' || autobuySc === 'SCE6' || autobuySc === 'SCENARIO_6') {
+          isScenarioTargeted = scenarioId.includes('6') || scenarioId.includes('REDEPLOY') || scenarioId.includes('SNIPER');
+        }
+      }
+
+      if (!isScenarioTargeted) {
+        console.log(`[AUTO-BUY CONFIG: ${isAutoBuyEnabled ? `AKTIF PADA ${autobuySc}` : 'OFF'}] ⚪ Mode simulasi swap saja untuk ${scenarioId}. Rute terverifikasi (${route.routeData?.exchange || '-'} | Latency ${route.latencyMs}ms), order nyata tidak disubmit.`);
         console.log(`=========================================================\n`);
         auditFollowerReal(this.dataDir, state, null, `SWAP_SIMULATION_${side}_${scenarioId}`, {
           scenarioId,
@@ -1793,14 +1806,15 @@ export class WalletFollowerRunner {
           signal,
           route: { ok: route.ok, status: route.status, latencyMs: route.latencyMs, exchange: route.routeData?.exchange },
           request: { swap: swapRouteRequest, order: null },
-          response: { swap: swapRouteResponse, order: { simulation: true, note: 'Simulation mode active (Rute AMM diverifikasi tanpa broadcast)' } },
-          autoBuyEnabled: false
+          response: { swap: swapRouteResponse, order: { simulation: true, note: `Simulation mode active (Target Real Auto-Buy: ${autobuySc})` } },
+          autoBuyEnabled: false,
+          activeScenarioConfig: autobuySc
         });
         return;
       }
 
-      // Jika TOGGLE ON: Eksekusi submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
-      console.log(`[AUTO-BUY TOGGLE: ON] 🟢 Menembak order swap NYATA ke GMGN API...`);
+      // Jika TARGET AKTIF: Eksekusi submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
+      console.log(`[AUTO-BUY TOGGLE: ON (${autobuySc})] 🟢 Menembak order swap NYATA ke GMGN API untuk ${scenarioId}...`);
       if (side === 'BUY') {
         unitsToSubmit = route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString();
       }

@@ -15,13 +15,18 @@ export function render3ScenariosLiveHtml() {
   }
 
   const settingsFile = join(dataDir, 'follower-autobuy-settings.json');
-  let autobuyConfig = { enabled: false };
+  let autobuyConfig = { enabled: false, autobuyScenario: 'OFF' };
   if (existsSync(settingsFile)) {
     try {
       autobuyConfig = JSON.parse(readFileSync(settingsFile, 'utf8'));
     } catch {}
   }
   const isAutoBuyEnabled = Boolean(autobuyConfig.enabled);
+  let activeScenario = String(autobuyConfig.autobuyScenario || (isAutoBuyEnabled ? 'BOTH' : 'OFF')).toUpperCase();
+  if (!isAutoBuyEnabled) activeScenario = 'OFF';
+
+  const isS4Real = activeScenario === 'S4' || activeScenario === 'BOTH';
+  const isS6Real = activeScenario === 'S6' || activeScenario === 'BOTH';
 
   const s4 = data.s4 || { name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s6 = data.s6 || { name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
@@ -31,11 +36,17 @@ export function render3ScenariosLiveHtml() {
     const pnlSign = isPnlPositive ? '+' : '';
     const pnlClass = isPnlPositive ? 'val-emerald' : 'val-rose';
     const winRate = s.totalTrades > 0 ? ((s.wins / s.totalTrades) * 100).toFixed(1) : '0';
+    const isRealActive = scId === 'sce4' ? isS4Real : isS6Real;
 
     return `
       <div class="scenario-panel" style="border-top: 4px solid ${color};">
         <div class="panel-header">
-          <div class="panel-title">${s.name}</div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+            <div class="panel-title">${s.name}</div>
+            <span style="font-size:0.68rem; padding: 2px 8px; border-radius: 4px; font-weight:800; white-space:nowrap; ${isRealActive ? 'background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);' : 'background:rgba(148,163,184,0.15); color:#94a3b8; border:1px solid #334155;'}">
+              ${isRealActive ? '⚡ REAL AUTO-BUY' : '⚪ SIMULASI SWAP'}
+            </span>
+          </div>
           <div class="panel-desc">${s.description || ''}</div>
         </div>
 
@@ -230,30 +241,155 @@ export function render3ScenariosLiveHtml() {
     }
     .event-row:last-child { border-bottom: none; }
 
-    /* Autobuy Toggle Bar */
+    /* Autobuy Bar & Scenario Selector */
     .autobuy-bar {
+      display: flex;
+      flex-direction: column;
+      background: #141e33;
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 18px 22px;
+      margin-bottom: 24px;
+      gap: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+    .autobuy-top {
       display: flex;
       flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 14px 20px;
-      margin-bottom: 24px;
-      gap: 16px;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 12px;
     }
-    .autobuy-info { flex: 1; min-width: 280px; }
-    .autobuy-title { font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 8px; }
-    .autobuy-sub { font-size: 0.82rem; color: #94a3b8; margin-top: 4px; }
-    .toggle-control { display: flex; align-items: center; gap: 14px; }
-    .toggle-text { font-weight: 700; font-size: 0.95rem; }
-    .switch { position: relative; display: inline-block; width: 54px; height: 28px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #475569; transition: .3s; border-radius: 28px; }
-    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
-    input:checked + .slider { background-color: #10b981; }
-    input:checked + .slider:before { transform: translateX(26px); }
+    .autobuy-title {
+      font-weight: 700;
+      font-size: 0.98rem;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .autobuy-sub {
+      font-size: 0.84rem;
+      color: #cbd5e1;
+      line-height: 1.45;
+    }
+
+    .status-pill {
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+    }
+    .status-off { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569; }
+    .status-s4 { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.5); }
+    .status-s6 { background: rgba(236, 72, 153, 0.2); color: #ec4899; border: 1px solid rgba(236, 72, 153, 0.5); }
+    .status-both { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.5); }
+
+    .scenario-radio-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .scenario-radio-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .scenario-radio-card:hover {
+      background: #1e293b;
+      border-color: #475569;
+    }
+    .scenario-radio-card input[type="radio"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #64748b;
+      border-radius: 50%;
+      outline: none;
+      cursor: pointer;
+      display: grid;
+      place-content: center;
+      margin: 0;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+    .scenario-radio-card input[type="radio"]::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      transform: scale(0);
+      transition: 120ms transform ease-in-out;
+      box-shadow: inset 1em 1em #fff;
+    }
+    .scenario-radio-card input[type="radio"]:checked::before {
+      transform: scale(1);
+    }
+
+    .scenario-radio-card.active-off {
+      border-color: #64748b;
+      background: rgba(148, 163, 184, 0.08);
+    }
+    .scenario-radio-card.active-off input[type="radio"]:checked {
+      border-color: #94a3b8;
+      background: #475569;
+    }
+
+    .scenario-radio-card.active-s4 {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.12);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+    }
+    .scenario-radio-card.active-s4 input[type="radio"]:checked {
+      border-color: #f59e0b;
+      background: #f59e0b;
+    }
+
+    .scenario-radio-card.active-s6 {
+      border-color: #ec4899;
+      background: rgba(236, 72, 153, 0.12);
+      box-shadow: 0 0 12px rgba(236, 72, 153, 0.15);
+    }
+    .scenario-radio-card.active-s6 input[type="radio"]:checked {
+      border-color: #ec4899;
+      background: #ec4899;
+    }
+
+    .scenario-radio-card.active-both {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.12);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+    }
+    .scenario-radio-card.active-both input[type="radio"]:checked {
+      border-color: #10b981;
+      background: #10b981;
+    }
+
+    .radio-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .radio-main {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .radio-hint {
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
   </style>
 </head>
 <body>
@@ -280,28 +416,62 @@ export function render3ScenariosLiveHtml() {
       </div>
     </header>
 
-    <!-- Auto-Buy Real API Toggle Bar -->
+    <!-- Auto-Buy Real API Scenario Selector Bar -->
     <div class="autobuy-bar">
-      <div class="autobuy-info">
+      <div class="autobuy-top">
         <div class="autobuy-title">
           <span>⚡ REAL AUTO-BUY (HIT API ASLI GMGN)</span>
-          <span style="font-size:0.75rem; padding: 2px 8px; border-radius: 6px; background: ${isAutoBuyEnabled ? 'rgba(16,185,129,0.2)' : 'rgba(148,163,184,0.15)'}; color: ${isAutoBuyEnabled ? '#10b981' : '#94a3b8'};">
-            ${isAutoBuyEnabled ? 'LIVE ACTIVE' : 'SIMULATION MODE'}
+          <span class="status-pill status-${activeScenario.toLowerCase()}">
+            ${activeScenario === 'OFF' ? '⚪ SIMULASI SAJA (KEDUANYA OFF)' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : '🟢 KEDUANYA REAL AUTO-BUY AKTIF'))}
           </span>
         </div>
-        <div class="autobuy-sub">
-          ${isAutoBuyEnabled 
-            ? '🟢 <strong>AKTIF:</strong> Order BUY/SELL swap NYATA disubmit langsung ke GMGN API & Blockchain saat rules S4/S6 terpenuhi.' 
-            : '⚪ <strong>NONAKTIF:</strong> Mode simulasi swap saja. Rute AMM diverifikasi tanpa mengirim order beli asli.'}
+        <div style="font-size: 0.78rem; color: #94a3b8;">
+          Pilih skenario yang ingin mengirim order nyata ke blockchain & GMGN
         </div>
       </div>
-      <div class="toggle-control">
-        <span class="toggle-text" style="color: ${isAutoBuyEnabled ? 'var(--emerald)' : '#94a3b8'};">
-          ${isAutoBuyEnabled ? 'ON' : 'OFF'}
-        </span>
-        <label class="switch">
-          <input type="checkbox" id="autobuyToggle" ${isAutoBuyEnabled ? 'checked' : ''} onchange="toggleAutobuy(this.checked)">
-          <span class="slider"></span>
+
+      <div class="autobuy-sub">
+        ${activeScenario === 'OFF' 
+          ? '⚪ <strong>Keduanya Nonaktif:</strong> Mode simulasi swap saja. Rute AMM diverifikasi tanpa mengirim order beli/jual nyata.' 
+          : (activeScenario === 'S4' 
+              ? '🟡 <strong>Skenario 4 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S4 terpenuhi ($5 Single Buy Ground Zero & Exit ≥ 15%). Skenario 6 berjalan sebagai simulasi.' 
+              : (activeScenario === 'S6' 
+                  ? '🟣 <strong>Skenario 6 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S6 terpenuhi (Re-Deploy Sniper: TP1 50% @ 5% & TP2 @ 15%). Skenario 4 berjalan sebagai simulasi.' 
+                  : '🟢 <strong>Keduanya Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain untuk Skenario 4 maupun Skenario 6 saat trigger masing-masing terpenuhi.'))}
+      </div>
+
+      <!-- Radio Buttons Selection -->
+      <div class="scenario-radio-grid">
+        <label class="scenario-radio-card ${activeScenario === 'OFF' ? 'active-off' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="OFF" ${activeScenario === 'OFF' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main">⚪ Keduanya OFF</span>
+            <span class="radio-hint">Mode Simulasi Swap Saja</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'S4' ? 'active-s4' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S4" ${activeScenario === 'S4' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #f59e0b;">🟡 Skenario 4 Saja</span>
+            <span class="radio-hint">Single Buy $5 (Exit ≥ 15%)</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'S6' ? 'active-s6' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S6" ${activeScenario === 'S6' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #ec4899;">🟣 Skenario 6 Saja</span>
+            <span class="radio-hint">Sniper V2 (TP 5% & 15%)</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'BOTH' ? 'active-both' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="BOTH" ${activeScenario === 'BOTH' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #10b981;">🟢 Keduanya (S4 & S6)</span>
+            <span class="radio-hint">Dua-duanya Real Order</span>
+          </div>
         </label>
       </div>
     </div>
@@ -318,15 +488,19 @@ export function render3ScenariosLiveHtml() {
 
   <script>
     let isToggling = false;
-    function toggleAutobuy(enabled) {
+    function setAutobuyScenario(scenario) {
       if (isToggling) return;
       isToggling = true;
       const curPath = window.location.pathname;
-      const ep = curPath.includes('/add-fol') ? '/add-fol/api/autobuy/toggle' : '/api/autobuy/toggle';
+      const ep = curPath.includes('/add-fol') ? '/add-fol/api/autobuy/config' : '/api/autobuy/config';
+      const enabled = scenario !== 'OFF';
       fetch(ep, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
+        body: JSON.stringify({
+          autobuyScenario: scenario,
+          enabled: enabled
+        })
       })
       .then(async r => {
         if (!r.ok) {
@@ -340,7 +514,7 @@ export function render3ScenariosLiveHtml() {
       })
       .catch(err => {
         isToggling = false;
-        alert('Gagal mengubah toggle: ' + err.message);
+        alert('Gagal mengubah skenario Auto-Buy: ' + err.message);
         location.reload();
       });
     }
