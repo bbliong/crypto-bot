@@ -699,6 +699,99 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
     });
   }
 
+  // Fallback: Jika skenario ini tidak diizinkan untuk Real Order (misal S4 aktif, S6 simulasi murni),
+  // susun langkah timeline informatif dari data dryrun-3scenarios-live.json tanpa membuat API probe palsu.
+  if (!primaryBuy && (tradeRecord || openRecord)) {
+    const record = tradeRecord || openRecord;
+    const isClosed = Boolean(tradeRecord);
+
+    // STEP 1: Target Buy (Simulasi)
+    steps.push({
+      stepNumber: 1,
+      id: 'step_target_buy',
+      type: 'TARGET_BUY',
+      category: 'TARGET',
+      badgeColor: '#a855f7',
+      title: 'Target Wallet Buy Signal Detected (Mode Simulasi)',
+      timeWib: formatWib(record.openedAt),
+      timeShort: formatWibTimeOnly(record.openedAt),
+      timestampMs: record.openedAt,
+      description: `Target membeli koin ${activeToken.symbol}. Skenario ini berjalan dalam mode Simulasi Dry-Run murni (Real Auto-Buy tidak aktif untuk skenario ini).`,
+      metrics: [
+        { label: 'Mode', val: 'DRY_RUN_SIMULATION', color: '#94a3b8' },
+        { label: 'Entry Price', val: `$${Number(record.avgEntryPriceUsd || (record.totalInvestedUsd / (record.tokens || 1)) || 0).toFixed(8)}`, color: '#f1f5f9' },
+        { label: 'Modal Entry', val: `$${Number(record.totalInvestedUsd || record.costBasisUsd || 5).toFixed(2)}`, color: '#38bdf8' }
+      ],
+      request: {
+        monitorType: 'GMGN Native WebSocket (ws.gmgn.ai)',
+        action: 'BUY',
+        symbol: activeToken.symbol,
+        mint: activeToken.mint,
+        note: 'Mode Simulasi: Real Auto-Buy tidak aktif untuk skenario ini'
+      },
+      response: {
+        status: 'SIMULATED_ENTRY',
+        timestamp: record.openedAt,
+        investedUsd: record.totalInvestedUsd || record.costBasisUsd || 5
+      }
+    });
+
+    // STEP 2: Status Real Order
+    steps.push({
+      stepNumber: 2,
+      id: 'step_api_buy_status',
+      type: 'API_BUY_SIMULATION',
+      category: 'SIMULATION',
+      badgeColor: '#64748b',
+      title: 'Real Auto-Buy Nonaktif untuk Skenario Ini',
+      timeWib: formatWib(record.openedAt + 500),
+      timeShort: formatWibTimeOnly(record.openedAt + 500),
+      timestampMs: record.openedAt + 500,
+      description: `Karena konfigurasi Real Auto-Buy saat ini HANYA menargetkan Skenario 4, maka Skenario 6 tidak melakukan panggilan API buy/swap ke GMGN atau blockchain (murni simulasi matematis).`,
+      metrics: [
+        { label: 'Status', val: 'API_PROBE_SKIPPED', color: '#94a3b8' },
+        { label: 'Target Aktif', val: 'HANYA SKENARIO 4', color: '#f59e0b' }
+      ],
+      request: null,
+      response: {
+        simulation: true,
+        reason: 'Scenario not selected for real order execution'
+      }
+    });
+
+    if (isClosed) {
+      // STEP 3: Target Sell
+      steps.push({
+        stepNumber: 3,
+        id: 'step_target_sell',
+        type: 'TARGET_SELL',
+        category: 'TARGET',
+        badgeColor: '#f43f5e',
+        title: 'Target Wallet Sell Signal Detected',
+        timeWib: formatWib(tradeRecord.closedAt),
+        timeShort: formatWibTimeOnly(tradeRecord.closedAt),
+        timestampMs: tradeRecord.closedAt,
+        description: `Target menjual koin ${activeToken.symbol}. Trigger exit terpenuhi: "${tradeRecord.exitReason || 'TAKE_PROFIT'}".`,
+        metrics: [
+          { label: 'Target Action', val: 'SELL', color: '#f43f5e' },
+          { label: 'Exit Reason', val: (tradeRecord.exitReason || 'EXIT').slice(0, 30), color: '#f59e0b' },
+          { label: 'PnL Hasil', val: `${tradeRecord.realizedPnlUsd >= 0 ? '+' : ''}$${tradeRecord.realizedPnlUsd.toFixed(2)} (${tradeRecord.roiPct.toFixed(1)}%)`, color: tradeRecord.realizedPnlUsd >= 0 ? '#10b981' : '#f43f5e' }
+        ],
+        request: {
+          action: 'SELL',
+          symbol: activeToken.symbol,
+          exitReason: tradeRecord.exitReason
+        },
+        response: {
+          status: 'SIMULATED_EXIT',
+          timestamp: tradeRecord.closedAt,
+          realizedPnlUsd: tradeRecord.realizedPnlUsd,
+          roiPct: tradeRecord.roiPct
+        }
+      });
+    }
+  }
+
   // Ringkasan metrik koin
   const summary = {
     symbol: activeToken.symbol,
