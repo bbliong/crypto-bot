@@ -403,32 +403,36 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
       }
     });
 
-    // STEP 3: Hit API Buy Submit
-    const submit = primaryBuy.details?.submit || (primaryBuy.details?.autoBuyEnabled === false 
-      ? { ok: true, status: 200, simulation: true, note: 'Simulation mode active (Rute AMM diverifikasi tanpa broadcast)' }
-      : { ok: false, status: 400, error: 'insufficient account balance / simulation bypass' });
-    const isSuccess = submit.ok;
+    // STEP 3: Hit API Buy Submit (atau Status Simulasi)
+    const isSimulatedBuy = Boolean(primaryBuy.details?.autoBuyEnabled === false || primaryBuy.details?.submit === undefined);
+    const submit = primaryBuy.details?.submit || {
+      ok: true,
+      status: 200,
+      simulation: true,
+      note: 'Simulation mode active (Rute swap AMM terverifikasi, batch_order tidak disubmit)'
+    };
+    const isSuccess = submit.ok && !isSimulatedBuy;
 
     steps.push({
       stepNumber: 3,
       id: 'step_api_buy_submit',
       type: 'API_BUY_SUBMIT',
-      category: 'ORDER_SUBMIT',
-      badgeColor: '#10b981',
-      title: 'Hit API GMGN Submit Swap Order (Buy)',
+      category: isSimulatedBuy ? 'SIMULATION' : 'ORDER_SUBMIT',
+      badgeColor: isSimulatedBuy ? '#64748b' : (isSuccess ? '#10b981' : '#f59e0b'),
+      title: isSimulatedBuy ? 'Status Order Buy: Simulasi Swap (batch_order Dilewati)' : 'Hit API GMGN Submit Swap Order (Buy)',
       timeWib: formatWib(probeTimeMs + 500),
       timeShort: formatWibTimeOnly(probeTimeMs + 500),
       timestampMs: probeTimeMs + 500,
-      description: submit.simulation 
-        ? `Mode Simulasi Terverifikasi: Rute AMM siap dieksekusi dengan modal $${buyStakeUsd.toFixed(2)}. (Auto-Buy Toggle OFF, order nyata tidak disubmit).`
+      description: isSimulatedBuy 
+        ? `Mode Simulasi Terverifikasi: Rute swap AMM berhasil diperoleh untuk modal $${buyStakeUsd.toFixed(2)}. Endpoint /mrtapi/v2/swap_batch_order TIDAK disubmit karena Real Auto-Buy menargetkan: "${primaryBuy.details?.activeScenarioConfig || 'OFF'}".`
         : (isSuccess ? `Order Beli Berhasil Disubmit ke GMGN! Order ID: ${submit.orderId || '-'}, Hash: ${submit.hash || '-'}` : `Probe Eksekusi GMGN: Status ${submit.status || 400} (${submit.error || 'insufficient balance for probe'}).`),
       metrics: [
-        { label: 'Endpoint', val: '/mrtapi/v2/swap_batch_order', color: '#94a3b8' },
+        { label: 'Endpoint', val: isSimulatedBuy ? '/mrtapi/v2/swap_batch_order (SKIPPED)' : '/mrtapi/v2/swap_batch_order', color: '#94a3b8' },
         { label: 'Method', val: 'POST', color: '#94a3b8' },
         { label: 'Stake Usd', val: `$${buyStakeUsd.toFixed(2)}`, color: '#38bdf8' },
-        { label: 'Execution', val: submit.simulation ? 'SIMULATED' : (isSuccess ? 'SUBMITTED' : 'API_PROBE'), color: isSuccess || submit.simulation ? '#10b981' : '#f59e0b' }
+        { label: 'Execution', val: isSimulatedBuy ? 'SIMULATION_ONLY' : (isSuccess ? 'SUBMITTED' : 'API_PROBE'), color: isSuccess ? '#10b981' : (isSimulatedBuy ? '#64748b' : '#f59e0b') }
       ],
-      request: {
+      request: isSimulatedBuy ? null : {
         endpoint: '/mrtapi/v2/swap_batch_order',
         method: 'POST',
         headers: { 'content-type': 'application/json', 'authorization': 'Bearer [redacted_auth]' },
@@ -450,7 +454,7 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
         orderId: submit.orderId || null,
         hash: submit.hash || null,
         error: submit.error || null,
-        simulation: Boolean(submit.simulation)
+        simulation: isSimulatedBuy
       }
     });
 
@@ -610,31 +614,36 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
       }
     });
 
-    // STEP 7: Hit API Sell Submit
-    const sellSubmit = primarySell.details?.submit || (primarySell.details?.autoBuyEnabled === false
-      ? { ok: true, status: 200, simulation: true, note: 'Simulation mode active (Rute sell AMM terverifikasi)' }
-      : { ok: false, status: 400, error: 'token account not exist' });
+    // STEP 7: Hit API Sell Submit (atau Status Simulasi)
+    const isSimulatedSell = Boolean(primarySell.details?.autoBuyEnabled === false || primarySell.details?.submit === undefined);
+    const sellSubmit = primarySell.details?.submit || {
+      ok: true,
+      status: 200,
+      simulation: true,
+      note: 'Simulation mode active (Rute sell AMM terverifikasi, batch_order tidak disubmit)'
+    };
+    const isSellSuccess = sellSubmit.ok && !isSimulatedSell;
 
     steps.push({
       stepNumber: 7,
       id: 'step_api_sell_submit',
       type: 'API_SELL_SUBMIT',
-      category: 'ORDER_SUBMIT',
-      badgeColor: '#f43f5e',
-      title: 'Hit API GMGN Submit Swap Order (Sell)',
+      category: isSimulatedSell ? 'SIMULATION' : 'ORDER_SUBMIT',
+      badgeColor: isSimulatedSell ? '#64748b' : (isSellSuccess ? '#10b981' : '#f59e0b'),
+      title: isSimulatedSell ? 'Status Order Sell: Simulasi Swap (batch_order Dilewati)' : 'Hit API GMGN Submit Swap Order (Sell)',
       timeWib: formatWib(sellProbeTimeMs + 400),
       timeShort: formatWibTimeOnly(sellProbeTimeMs + 400),
       timestampMs: sellProbeTimeMs + 400,
-      description: sellSubmit.simulation 
-        ? `Mode Simulasi Terverifikasi: Rute sell AMM sukses dipetakan. Hasil simulasi PnL: +$${(tradeRecord?.realizedPnlUsd || 4.75).toFixed(2)} (ROI +${(tradeRecord?.roiPct || 95).toFixed(1)}%).`
-        : (sellSubmit.ok ? `Order Jual Berhasil Disubmit ke GMGN! Order ID: ${sellSubmit.orderId || '-'}, Hash: ${sellSubmit.hash || '-'}` : `Probe Jual GMGN: Status ${sellSubmit.status || 400} (${sellSubmit.error || 'token account not exist'}).`),
+      description: isSimulatedSell 
+        ? `Mode Simulasi Terverifikasi: Rute sell AMM sukses dipetakan (${sellRoute.exchange || 'meteora_dammv2'}). Endpoint /mrtapi/v2/swap_batch_order TIDAK disubmit karena Real Auto-Buy menargetkan: "${primarySell.details?.activeScenarioConfig || 'OFF'}".`
+        : (isSellSuccess ? `Order Jual Berhasil Disubmit ke GMGN! Order ID: ${sellSubmit.orderId || '-'}, Hash: ${sellSubmit.hash || '-'}` : `Probe Jual GMGN: Status ${sellSubmit.status || 400} (${sellSubmit.error || 'token account not exist'}).`),
       metrics: [
-        { label: 'Endpoint', val: '/mrtapi/v2/swap_batch_order', color: '#94a3b8' },
+        { label: 'Endpoint', val: isSimulatedSell ? '/mrtapi/v2/swap_batch_order (SKIPPED)' : '/mrtapi/v2/swap_batch_order', color: '#94a3b8' },
         { label: 'Side', val: 'SELL', color: '#f43f5e' },
-        { label: 'Execution', val: sellSubmit.simulation ? 'SIMULATED' : (sellSubmit.ok ? 'SUBMITTED' : 'API_PROBE'), color: sellSubmit.ok || sellSubmit.simulation ? '#10b981' : '#f59e0b' },
+        { label: 'Execution', val: isSimulatedSell ? 'SIMULATION_ONLY' : (isSellSuccess ? 'SUBMITTED' : 'API_PROBE'), color: isSellSuccess ? '#10b981' : (isSimulatedSell ? '#64748b' : '#f59e0b') },
         { label: 'Realized PnL', val: tradeRecord ? `+$${tradeRecord.realizedPnlUsd.toFixed(2)} (${tradeRecord.roiPct.toFixed(1)}%)` : '+0.00', color: '#10b981' }
       ],
-      request: {
+      request: isSimulatedSell ? null : {
         endpoint: '/mrtapi/v2/swap_batch_order',
         method: 'POST',
         headers: { 'content-type': 'application/json', 'authorization': 'Bearer [redacted_auth]' },
@@ -653,7 +662,7 @@ export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuer
         orderId: sellSubmit.orderId || null,
         hash: sellSubmit.hash || null,
         error: sellSubmit.error || null,
-        simulation: Boolean(sellSubmit.simulation)
+        simulation: isSimulatedSell
       }
     });
 

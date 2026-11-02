@@ -397,12 +397,9 @@ export class WalletFollowerRunner {
 
     this.multiDryRunEngine = new MultiScenarioDryRunEngine(this.dataDir);
 
-    // Hit API Asli GMGN mengikuti trigger BUY dan SELL HANYA untuk skenario yang aktif di config:
+    // Enqueue swap route probe untuk masing-masing skenario (S4 & S6):
+    // Rute swap DEX/AMM selalu dicek. Order nyata batch_order & rent reclaim dikontrol oleh config autobuyScenario.
     this.multiDryRunEngine.onTradeAction = (action, scenarioId, signal, details) => {
-      const config = readFollowerLiveConfig(this.dataDir);
-      if (!this.isScenarioAllowedForRealOrder(scenarioId, config)) {
-        return; // Lewati jika skenario ini tidak diaktifkan untuk Real Order
-      }
       this.enqueueGmgnApiProbe({
         side: action,
         scenarioId,
@@ -1694,14 +1691,8 @@ export class WalletFollowerRunner {
       const wallet = state.readiness.wallet || 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
       const config = readFollowerLiveConfig(this.dataDir);
 
-      // Cek apakah skenario ini diizinkan untuk Real Order
-      if (!this.isScenarioAllowedForRealOrder(scenarioId, config)) {
-        return;
-      }
-      const autobuySc = String(config.autobuyScenario || 'BOTH').toUpperCase();
-
       console.log(`\n=========================================================`);
-      console.log(`[GMGN LIVE API HIT: ${side}] 🎯 Trigger [${scenarioId}] (${reason}) untuk ${signal.symbol} ($${stakeUsd.toFixed(2)})...`);
+      console.log(`[GMGN SWAP ROUTE] 🎯 Cek rute ${side} [${scenarioId}] (${reason}) untuk ${signal.symbol} ($${stakeUsd.toFixed(2)})...`);
 
       let route: any;
       let unitsToSubmit: string = '0';
@@ -1804,8 +1795,29 @@ export class WalletFollowerRunner {
         error: route.error || null
       };
 
+      // Cek apakah skenario ini DIIZINKAN untuk Real Order batch_order & reclaim rent
+      const isRealOrderTargeted = this.isScenarioAllowedForRealOrder(scenarioId, config);
+      const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
+
+      if (!isRealOrderTargeted) {
+        console.log(`[AUTO-BUY: SIMULASI ONLY (${scenarioId})] ⚪ Rute swap selesai dicek (${route.routeData?.exchange || '-'} | Latency ${route.latencyMs}ms).`);
+        console.log(`   Order nyata /mrtapi/v2/swap_batch_order & reclaim rent dilewati (Target aktif: ${autobuySc}).`);
+        console.log(`=========================================================\n`);
+        auditFollowerReal(this.dataDir, state, null, `SWAP_SIMULATION_${side}_${scenarioId}`, {
+          scenarioId,
+          reason,
+          signal,
+          route: { ok: route.ok, status: route.status, latencyMs: route.latencyMs, exchange: route.routeData?.exchange },
+          request: { swap: swapRouteRequest, order: null },
+          response: { swap: swapRouteResponse, order: { simulation: true, note: `Simulasi swap selesai. batch_order & rent reclaim dilewati karena Real Auto-Buy menargetkan ${autobuySc}.` } },
+          autoBuyEnabled: false,
+          activeScenarioConfig: autobuySc
+        });
+        return;
+      }
+
       // Jika TARGET AKTIF: Eksekusi submitSwapOrder ke /mrtapi/v2/swap_batch_order via browser
-      console.log(`[AUTO-BUY TOGGLE: ON (${autobuySc})] 🟢 Menembak order swap NYATA ke GMGN API untuk ${scenarioId}...`);
+      console.log(`[AUTO-BUY: REAL ORDER (${autobuySc})] 🟢 Menembak order swap NYATA ke GMGN API /mrtapi/v2/swap_batch_order untuk ${scenarioId}...`);
       if (side === 'BUY') {
         unitsToSubmit = route.routeData.quote?.inAmount || Math.floor(estimatedSol * 1e9).toString();
       }
