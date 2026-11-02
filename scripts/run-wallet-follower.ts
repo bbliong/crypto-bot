@@ -1922,6 +1922,11 @@ export class WalletFollowerRunner {
       const config = readFollowerLiveConfig(this.dataDir);
       if (!config.enabled) return;
 
+      // Jika autobuyScenario aktif (S4, S6, atau BOTH), maka eksekusi nyata ditangani oleh scenario engine, bukan legacy lane
+      if (config.autobuyScenario && config.autobuyScenario !== 'OFF') {
+        return;
+      }
+
       const laneAllowed = config.activeLane === 'BOTH' || config.activeLane === lane;
       if (!laneAllowed) {
         console.log(`[REAL AUTO-BUY SKIP] Lane ${lane} tidak diizinkan oleh config (Active: ${config.activeLane})`);
