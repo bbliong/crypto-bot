@@ -2189,6 +2189,11 @@ export class WalletFollowerRunner {
       const config = readFollowerLiveConfig(this.dataDir);
       if (!config.autoSell) return;
 
+      // Jika autobuyScenario aktif (S4, S6, atau BOTH), maka eksekusi nyata ditangani oleh scenario engine, bukan legacy lane
+      if (config.autobuyScenario && config.autobuyScenario !== 'OFF' && !forceEmergencyClose) {
+        return;
+      }
+
       const state = readFollowerRealState(this.dataDir);
       const openPos = state.positions.find(p => p.mint === mint && p.lane === lane && REAL_ACTIVE_STATUSES.has(p.status));
       if (!openPos || openPos.remainingTokens <= 0) return;
