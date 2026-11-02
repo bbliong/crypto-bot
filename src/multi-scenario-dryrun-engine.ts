@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { WalletTradeSignal } from './wallet-follower-lane.js';
+import { readFollowerLiveConfig } from './follower-live-store.js';
 
 // Rata-rata fee riil per swap: on-chain gas ($0.0105) + priority/tip ($0.0100) + DEX swap fee ($0.0045) = $0.025 USD
 export const REAL_SWAP_FEE_USD = 0.025;
@@ -213,14 +214,25 @@ export class MultiScenarioDryRunEngine {
     const timeWib = formatWibDate(now);
     const targetUsd = signal.usdAmount > 0 ? signal.usdAmount : (signal.solAmount * 100);
 
-    // 1. Skenario 4 (Single Buy $5 Flat, HANYA 1x Buy per token, Anti-Akumulasi)
+    // Baca konfigurasi stake dinamis (default: S4=$5, S6 Pool1=$5, S6 Pool2=$7)
+    let s4Stake = 5.0;
+    let s6Pool1 = 5.0;
+    let s6Pool2 = 7.0;
+    try {
+      const cfg = readFollowerLiveConfig(this.dataDir);
+      if (cfg.stakeUsdS4) s4Stake = Number(cfg.stakeUsdS4);
+      if (cfg.stakeUsdS6Pool1) s6Pool1 = Number(cfg.stakeUsdS6Pool1);
+      if (cfg.stakeUsdS6Pool2) s6Pool2 = Number(cfg.stakeUsdS6Pool2);
+    } catch {}
+
+    // 1. Skenario 4 (Single Buy Dinamis, HANYA 1x Buy per token, Anti-Akumulasi)
     this.processScenarioBuy(this.scenarios.s4, signal, isGroundZero, targetUsd, now, timeWib, {
-      maxTokenExposure: 5.0,
-      getStake: () => 5.0,
+      maxTokenExposure: s4Stake,
+      getStake: () => s4Stake,
       disallowAccumulation: true,
     });
 
-    // 2. Skenario 6 (Re-Deploy Sniper: Pool 1: $5, Pool 2: $7)
+    // 2. Skenario 6 (Re-Deploy Sniper: Pool 1 Dinamis, Pool 2 Dinamis)
     // Cek generasi pool berdasarkan kemunculan ticker nama token
     const normSym = (signal.symbol || '').toUpperCase().trim();
     let gen = 1;
@@ -243,8 +255,8 @@ export class MultiScenarioDryRunEngine {
       this.tokenGenerations.set(normSym, { firstSeenAt: now, generation: 1, lastMint: signal.mint });
     }
 
-    // Aturan S6: Pool 1 stake $5.00, Pool 2+ stake $7.00
-    const s6Stake = gen >= 2 ? 7.0 : 5.0;
+    // Aturan S6: Pool 1 stake dinamis, Pool 2+ stake dinamis
+    const s6Stake = gen >= 2 ? s6Pool2 : s6Pool1;
 
     this.processScenarioBuy(this.scenarios.s6, signal, isGroundZero, targetUsd, now, timeWib, {
       maxTokenExposure: s6Stake,
