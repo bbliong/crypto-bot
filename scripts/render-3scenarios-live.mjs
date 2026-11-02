@@ -28,7 +28,11 @@ export function render3ScenariosLiveHtml() {
   const isS4Real = activeScenario === 'S4' || activeScenario === 'BOTH';
   const isS6Real = activeScenario === 'S6' || activeScenario === 'BOTH';
 
-  const s4 = data.s4 || { name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s4Stake = Number(autobuyConfig.stakeUsdS4) || 5.0;
+  const s6Pool1 = Number(autobuyConfig.stakeUsdS6Pool1) || 5.0;
+  const s6Pool2 = Number(autobuyConfig.stakeUsdS6Pool2) || 7.0;
+
+  const s4 = data.s4 || { name: `Skenario 4: Single Buy $${s4Stake.toFixed(2)} (Hanya 1x Buy)`, availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s6 = data.s6 || { name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
@@ -67,6 +71,47 @@ export function render3ScenariosLiveHtml() {
             <div class="mini-sub">Modal Awal $20.00</div>
           </div>
         </div>
+
+        <!-- Stake Configuration Section -->
+        ${scId === 'sce4' ? `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal Buy (1 Input)</span>
+              <span class="stake-current-val">Aktif: $${s4Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-row">
+              <div class="stake-input-wrap">
+                <span class="currency-prefix">$</span>
+                <input type="number" id="s4StakeInput" value="${s4Stake.toFixed(2)}" step="0.5" min="0.5" max="1000" placeholder="5.00">
+              </div>
+              <button onclick="saveS4Stake()" class="btn-stake-save">💾 Simpan Modal S4</button>
+            </div>
+          </div>
+        ` : `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal Buy (2 Pool)</span>
+              <span class="stake-current-val">P1: $${s6Pool1.toFixed(2)} | P2: $${s6Pool2.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-2">
+              <div>
+                <label class="stake-sublabel">Pool 1 (Koin Baru):</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s6Pool1Input" value="${s6Pool1.toFixed(2)}" step="0.5" min="0.5" max="1000" placeholder="5.00">
+                </div>
+              </div>
+              <div>
+                <label class="stake-sublabel">Pool 2+ (Re-Deploy):</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s6Pool2Input" value="${s6Pool2.toFixed(2)}" step="0.5" min="0.5" max="1000" placeholder="7.00">
+                </div>
+              </div>
+            </div>
+            <button onclick="saveS6Stake()" class="btn-stake-save" style="margin-top: 4px; width: 100%;">💾 Simpan Modal S6 (Pool 1 & 2)</button>
+          </div>
+        `}
 
         <!-- Open Positions -->
         <div class="sub-section">
@@ -240,6 +285,97 @@ export function render3ScenariosLiveHtml() {
       padding: 6px 0; border-bottom: 1px dashed rgba(30, 41, 59, 0.4); font-size: 0.8rem;
     }
     .event-row:last-child { border-bottom: none; }
+
+    /* Stake Config Box in Scenario Panel */
+    .stake-card-section {
+      background: #0b1120;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .stake-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.74rem;
+    }
+    .stake-section-title {
+      font-weight: 700;
+      color: #cbd5e1;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .stake-current-val {
+      font-weight: 700;
+      color: var(--primary);
+      font-family: ui-monospace, monospace;
+    }
+    .stake-form-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .stake-form-grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stake-sublabel {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      display: block;
+      margin-bottom: 3px;
+    }
+    .stake-input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      flex: 1;
+    }
+    .currency-prefix {
+      position: absolute;
+      left: 10px;
+      color: #94a3b8;
+      font-weight: 700;
+      font-size: 0.85rem;
+      pointer-events: none;
+    }
+    .stake-input-wrap input {
+      width: 100%;
+      background: #141e33;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      padding: 6px 10px 6px 24px;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .stake-input-wrap input:focus {
+      border-color: var(--primary);
+    }
+    .btn-stake-save {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-stake-save:hover {
+      background: #334155;
+      border-color: #64748b;
+      color: #fff;
+    }
 
     /* Autobuy Bar & Scenario Selector */
     .autobuy-bar {
@@ -519,7 +655,67 @@ export function render3ScenariosLiveHtml() {
       });
     }
 
-    setTimeout(() => { if (!isToggling) window.location.reload(); }, 5000);
+    function saveS4Stake() {
+      const input = document.getElementById('s4StakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.5) {
+        alert('Modal S4 minimal $0.50!');
+        return;
+      }
+      sendStakeUpdate({ stakeUsdS4: val }, 'Modal S4 berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveS6Stake() {
+      const p1 = document.getElementById('s6Pool1Input');
+      const p2 = document.getElementById('s6Pool2Input');
+      if (!p1 || !p2) return;
+      const val1 = parseFloat(p1.value);
+      const val2 = parseFloat(p2.value);
+      if (!Number.isFinite(val1) || val1 < 0.5 || !Number.isFinite(val2) || val2 < 0.5) {
+        alert('Modal Pool 1 dan Pool 2 minimal $0.50!');
+        return;
+      }
+      sendStakeUpdate({
+        stakeUsdS6Pool1: val1,
+        stakeUsdS6Pool2: val2
+      }, 'Modal S6 berhasil disimpan: Pool 1 = $' + val1.toFixed(2) + ', Pool 2 = $' + val2.toFixed(2));
+    }
+
+    function sendStakeUpdate(payload, successMsg) {
+      if (isToggling) return;
+      isToggling = true;
+      const curPath = window.location.pathname;
+      const ep = curPath.includes('/add-fol') ? '/add-fol/api/autobuy/config' : '/api/autobuy/config';
+      fetch(ep, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(async r => {
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error('HTTP ' + r.status + ': ' + text);
+        }
+        return r.json();
+      })
+      .then(res => {
+        alert(successMsg);
+        location.reload();
+      })
+      .catch(err => {
+        isToggling = false;
+        alert('Gagal menyimpan modal: ' + err.message);
+      });
+    }
+
+    setInterval(() => {
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+      if (!isToggling && !isTyping) {
+        window.location.reload();
+      }
+    }, 5000);
   </script>
 </body>
 </html>`;
