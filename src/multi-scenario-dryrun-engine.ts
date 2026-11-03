@@ -24,6 +24,7 @@ export interface ScenarioPosition {
   targetCumulativeSellRatioPct?: number;
   lastTargetSellAt?: number;
   stage1Exited?: boolean;
+  stage1RealUsdReturned?: number;
   initialTokens?: number;
   initialCostBasisUsd?: number;
 }
@@ -42,6 +43,7 @@ export interface ScenarioTradeRecord {
   roiPct: number;
   exitReason: string;
   isWin: boolean;
+  stage1RealUsdReturned?: number;
 }
 
 export interface ScenarioLogEvent {
@@ -689,6 +691,7 @@ export class MultiScenarioDryRunEngine {
           pos.lastPriceUsd = pOut;
           pos.updatedAt = now;
           pos.stage1Exited = true;
+          pos.stage1RealUsdReturned = netReceived;
 
           const reason = `STAGE_1_TP_50% (Target sold ${pos.targetCumulativeSellRatioPct}% >= 5%)`;
 
@@ -844,6 +847,7 @@ export class MultiScenarioDryRunEngine {
         roiPct: Number(roi.toFixed(1)),
         exitReason,
         isWin,
+        stage1RealUsdReturned: pos.stage1RealUsdReturned || 0,
       });
       if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
     }
@@ -1268,18 +1272,33 @@ export class MultiScenarioDryRunEngine {
     if (realUsdReturned < 0) return;
     const targetSc = scenarioId.includes('6') ? this.scenarios.s6 : this.scenarios.s4;
 
-    // 1. Cek apakah ada di closedTrades (Full exit)
+    // 1. Cek apakah ini sinkronisasi Stage 1 TP 50% (posisi masih open)
+    if (reason && reason.includes('STAGE_1_TP_50%')) {
+      const openPos = targetSc.openPositions.find(p => p.mint === mint);
+      if (openPos) {
+        openPos.stage1RealUsdReturned = realUsdReturned;
+        console.log(`[DRYRUN-ENGINE SYNC] ✅ Stage 1 TP 50% ${openPos.symbol} [${scenarioId}] proceeds disinkronkan ke swap AMM: $${realUsdReturned.toFixed(2)}`);
+        this.saveState();
+        return;
+      }
+    }
+
+    // 2. Cek apakah ada di closedTrades (Full exit / Stage 2)
     const trade = targetSc.closedTrades.find(t => t.mint === mint);
     if (trade) {
       const oldPnl = trade.realizedPnlUsd;
       const oldReturned = trade.totalReturnedUsd;
 
-      trade.totalReturnedUsd = Number(realUsdReturned.toFixed(2));
-      trade.realizedPnlUsd = Number((realUsdReturned - trade.totalInvestedUsd).toFixed(2));
+      // Jika trade ini adalah S6 Split TP yang melewati Stage 1:
+      const stage1Proceeds = trade.stage1RealUsdReturned || 0;
+      const totalRealReturned = stage1Proceeds + realUsdReturned;
+
+      trade.totalReturnedUsd = Number(totalRealReturned.toFixed(2));
+      trade.realizedPnlUsd = Number((totalRealReturned - trade.totalInvestedUsd).toFixed(2));
       trade.roiPct = trade.totalInvestedUsd > 0 ? Number(((trade.realizedPnlUsd / trade.totalInvestedUsd) * 100).toFixed(1)) : 0.0;
       trade.isWin = trade.realizedPnlUsd >= 0;
       if (!trade.exitReason.includes('Real Swap:')) {
-        trade.exitReason = `${trade.exitReason} (Real Swap: $${realUsdReturned.toFixed(2)})`;
+        trade.exitReason = `${trade.exitReason} (Real Swap: $${totalRealReturned.toFixed(2)})`;
       }
 
       // Recalculate scenario metrics
@@ -1292,7 +1311,7 @@ export class MultiScenarioDryRunEngine {
       targetSc.losses = targetSc.closedTrades.filter(t => !t.isWin).length;
       targetSc.winRate = targetSc.totalTrades > 0 ? Number(((targetSc.wins / targetSc.totalTrades) * 100).toFixed(1)) : 0.0;
 
-      console.log(`[DRYRUN-ENGINE SYNC] ✅ Trade ${trade.symbol} [${scenarioId}] disinkronkan ke hasil swap AMM riil: $${realUsdReturned.toFixed(2)} (PnL: $${trade.realizedPnlUsd.toFixed(2)}, ROI: ${trade.roiPct}%)`);
+      console.log(`[DRYRUN-ENGINE SYNC] ✅ Trade ${trade.symbol} [${scenarioId}] disinkronkan ke hasil swap AMM riil: Total Return $${totalRealReturned.toFixed(2)} (Stage 1: $${stage1Proceeds.toFixed(2)}, Stage 2: $${realUsdReturned.toFixed(2)} | PnL: $${trade.realizedPnlUsd.toFixed(2)}, ROI: ${trade.roiPct}%)`);
       this.saveState();
     }
   }
