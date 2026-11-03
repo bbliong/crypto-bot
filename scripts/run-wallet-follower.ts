@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
 import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
 import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.js';
+import { SingleDevWalletWatcher } from '../src/dev-wallet-watcher.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
 import {
@@ -60,6 +61,7 @@ export class WalletFollowerRunner {
   public readonly lane: WalletFollowerLane;
   public readonly smartDipLane: SmartDipFollowerLane;
   public readonly multiDryRunEngine: MultiScenarioDryRunEngine;
+  public readonly devWatcher: SingleDevWalletWatcher;
   private browser: Browser | null = null;
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
@@ -397,6 +399,18 @@ export class WalletFollowerRunner {
 
     this.multiDryRunEngine = new MultiScenarioDryRunEngine(this.dataDir);
 
+    // Radar 1 Dev Wallet: Memantau 1 dev aktif dan mendeteksi koin baru sebelum target buy
+    this.devWatcher = new SingleDevWalletWatcher();
+    this.devWatcher.on('redeploy_detected', (evt) => {
+      console.log(`\n=========================================================`);
+      console.log(`🚨 [DEV-RADAR TRIGGER] Terdeteksi Pool Baru Lahir dari Dev: ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
+      console.log(`   Dev Wallet : ${evt.devWallet}`);
+      console.log(`   Tx Genesis : ${evt.signature}`);
+      console.log(`   Mengeksekusi BUY Proaktif S6 (SEBELUM Target Masuk)!`);
+      console.log(`=========================================================\n`);
+      this.multiDryRunEngine.handleEarlyRedeployBuy(evt);
+    });
+
     // Enqueue swap route probe untuk masing-masing skenario (S4 & S6):
     // Rute swap DEX/AMM selalu dicek. Order nyata batch_order & rent reclaim dikontrol oleh config autobuyScenario.
     this.multiDryRunEngine.onTradeAction = (action, scenarioId, signal, details) => {
@@ -465,6 +479,9 @@ export class WalletFollowerRunner {
     if (this.fastSellRetryInterval) {
       clearInterval(this.fastSellRetryInterval);
       this.fastSellRetryInterval = null;
+    }
+    if (this.devWatcher) {
+      this.devWatcher.unwatch();
     }
     if (this.browser) {
       await this.browser.close().catch(() => {});
@@ -757,6 +774,13 @@ export class WalletFollowerRunner {
     }
 
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
+
+    // Pantau HANYA 1 Dev Wallet secara real-time via Solana WebSocket (Sub-second radar)
+    if (isGroundZero && signal.priceUsd <= GROUND_ZERO_MAX_PRICE_USD) {
+      this.devWatcher.watchSingleDev(signal.mint, signal.symbol).catch((err: any) => {
+        console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
+      });
+    }
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();

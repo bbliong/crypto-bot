@@ -273,6 +273,62 @@ export class MultiScenarioDryRunEngine {
     this.saveState();
   }
 
+  /**
+   * Eksekusi BUY Proaktif / Dini (SEBELUM Target Buy):
+   * Dipanggil saat WebSocket Dev-Radar mendeteksi dev membuat koin baru (Gen 2)!
+   */
+  public handleEarlyRedeployBuy(
+    evt: { oldMint: string; newMint: string; symbol: string; ipfsUri?: string; devWallet: string; signature: string; timestamp: number },
+    customStakeUsd?: number
+  ): void {
+    const now = evt.timestamp || Date.now();
+    const timeWib = formatWibDate(now);
+
+    // Cek apakah posisi ini sudah ada agar tidak duplikasi
+    const existingPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
+    if (existingPos) return;
+
+    let pool2Stake = customStakeUsd;
+    if (!pool2Stake) {
+      const liveCfg = readFollowerLiveConfig(this.dataDir);
+      pool2Stake = liveCfg.stakeUsdS6Pool2 || 2.0;
+    }
+
+    console.log(`\n=========================================================`);
+    console.log(`🚀 [EARLY-BUY RADAR] Mengeksekusi Buy SEBELUM Target Buy:`);
+    console.log(`   Token Baru : ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
+    console.log(`   Modal S6   : $${pool2Stake.toFixed(2)} (Pool 2)`);
+    console.log(`   Dev Wallet : ${evt.devWallet}`);
+    console.log(`=========================================================\n`);
+
+    const earlySignal: WalletTradeSignal = {
+      action: 'buy',
+      mint: evt.newMint,
+      symbol: evt.symbol,
+      tokenName: evt.symbol,
+      tokenAmount: 1000000,
+      remainingHolding: 1000000,
+      solAmount: 15,
+      usdAmount: 1380,
+      priceUsd: 0.0000096, // estimasi awal ground zero, akan disinkronkan ke kuotasi swap AMM riil
+      txHash: evt.signature,
+      timestamp: Math.floor(now / 1000),
+      isOpenOrClose: true,
+      isFirstBuy: true
+    };
+
+    // Eksekusi buy di Skenario 6
+    this.processScenarioBuy(this.scenarios.s6, earlySignal, true, 1380, now, timeWib, {
+      maxTokenExposure: pool2Stake,
+      getStake: () => pool2Stake,
+      disallowAccumulation: true,
+    });
+
+    // Auto-rotasi: likuidasi koin lama
+    this.autoRotateSameSymbolPositions(this.scenarios.s6, earlySignal, now, timeWib);
+    this.saveState();
+  }
+
   private processScenarioBuy(
     scenario: ScenarioState,
     signal: WalletTradeSignal,
@@ -512,18 +568,12 @@ export class MultiScenarioDryRunEngine {
     const newName = (newSignal.tokenName || '').trim().toUpperCase();
     if (!newSym && !newName) return;
 
-    // Cari posisi lama dengan simbol atau nama yang sama tapi mint berbeda
+    // Cari posisi lama yang berbeda dengan mint yang baru dibeli
     const staleIndices: number[] = [];
     for (let i = 0; i < scenario.openPositions.length; i++) {
       const p = scenario.openPositions[i];
       if (p.mint === newSignal.mint) continue;
-
-      const pSym = (p.symbol || '').trim().toUpperCase();
-      const pName = (p.tokenName || '').trim().toUpperCase();
-      const match = (newSym && pSym && newSym === pSym) || (newName && pName && newName === pName);
-      if (match) {
-        staleIndices.push(i);
-      }
+      staleIndices.push(i);
     }
 
     if (staleIndices.length === 0) return;
@@ -542,7 +592,13 @@ export class MultiScenarioDryRunEngine {
       const netReceived = Math.max(0, grossReceived - REAL_SWAP_FEE_USD);
       const pnlUsd = netReceived - costBasisSold;
 
-      const exitReason = `AUTO_ROTATION_SAME_NAME (Target buy kontrak baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...])`;
+      const pSym = (pos.symbol || '').trim().toUpperCase();
+      const pName = (pos.tokenName || '').trim().toUpperCase();
+      const isSameSymbol = (newSym && pSym && newSym === pSym) || (newName && pName && newName === pName);
+
+      const exitReason = isSameSymbol
+        ? `AUTO_ROTATION_SAME_NAME (Target buy kontrak baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...])`
+        : `AUTO_LIQUIDATE_TARGET_MOVED (Target berpindah beli koin baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...], likuidasi '${pos.symbol}')`;
 
       pos.realizedPnlUsd = Number((pos.realizedPnlUsd + pnlUsd).toFixed(2));
       pos.feesPaidUsd = Number((pos.feesPaidUsd + REAL_SWAP_FEE_USD).toFixed(3));
