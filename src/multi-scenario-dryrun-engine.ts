@@ -811,7 +811,9 @@ export class MultiScenarioDryRunEngine {
 
       const exitReason = isSameSymbol
         ? `AUTO_ROTATION_SAME_NAME (Target buy kontrak baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...])`
-        : `AUTO_LIQUIDATE_TARGET_MOVED (Target berpindah beli koin baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...], likuidasi '${pos.symbol}')`;
+        : (scenario.id === 'SCENARIO_8_FRONTRUN_DEV'
+            ? `TARGET_SKIPPED_FOR_ANOTHER_COIN (Dev deploy pool '${pos.symbol}' tapi Target malah beli '${newSignal.symbol}', likuidasi S8)`
+            : `AUTO_LIQUIDATE_TARGET_MOVED (Target berpindah beli koin baru '${newSignal.symbol}' [${newSignal.mint.slice(0, 8)}...], likuidasi '${pos.symbol}')`);
 
       pos.realizedPnlUsd = Number((pos.realizedPnlUsd + pnlUsd).toFixed(2));
       pos.feesPaidUsd = Number((pos.feesPaidUsd + REAL_SWAP_FEE_USD).toFixed(3));
@@ -1501,7 +1503,7 @@ export class MultiScenarioDryRunEngine {
       if (elapsedMs >= 45000) {
         const timeWib = formatWibDate(now);
         const elapsedSec = Math.round(elapsedMs / 1000);
-        const reason = `S8_NO_TARGET_ENTRY_TIMEOUT_${elapsedSec}S (Target did not enter within ${elapsedSec}s of Genesis, safety exit)`;
+        const reason = `TARGET_SKIPPED_DEV_POOL (Dev Deploy Pool '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit)`;
         this.executeScenarioExit(s8, i, pos.lastPriceUsd, now, timeWib, reason);
         changed = true;
       }

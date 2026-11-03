@@ -98,7 +98,7 @@ async function run() {
   assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 must be closed by 45s safety timeout');
   assert.equal(engine.scenarios.s8.closedTrades.length, 2);
   const tradeB = engine.scenarios.s8.closedTrades[0];
-  assert(tradeB.exitReason.includes('S8_NO_TARGET_ENTRY_TIMEOUT'), 'Must exit due to target no-show');
+  assert(tradeB.exitReason.includes('TARGET_SKIPPED_DEV_POOL'), 'Must exit due to target no-show');
   console.log('   ✅ S8 safely exited on 45s timeout:', tradeB.exitReason);
 
   console.log('\n🎉 ALL SCENARIO 8 ENGINE LOGIC TESTS (CASES A & B) PASSED 100%!');

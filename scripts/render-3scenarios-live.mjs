@@ -200,12 +200,16 @@ export function render3ScenariosLiveHtml() {
           <h5>📜 5 Aktivitas Terakhir</h5>
           ${s.recentEvents.slice(0, 5).map(ev => {
             const actColor = ev.action === 'BUY' ? 'var(--emerald)' : (ev.action === 'SELL' ? 'var(--cyan)' : '#94a3b8');
+            const isTargetSkipped = ev.reason && (ev.reason.includes('TARGET_SKIPPED') || ev.reason.includes('S8_NO_TARGET_ENTRY'));
+            const isTargetInflow = ev.reason && ev.reason.includes('TARGET_BUY_INFLOW');
             return `
               <div class="event-row">
                 <span style="color:${actColor}; font-weight:700;">${ev.action} ${ev.symbol}</span>
                 <span class="mono" style="font-size:0.75rem; color:#cbd5e1;">
                   ${ev.stakeUsd ? `$${ev.stakeUsd.toFixed(2)}` : (ev.usdReceived ? `+$${ev.usdReceived.toFixed(2)}` : '')}
                 </span>
+                ${isTargetSkipped ? '<span style="font-size:0.62rem; background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); padding:1px 5px; border-radius:4px; font-weight:700;">⚠️ TARGET SKIP</span>' : ''}
+                ${isTargetInflow ? '<span style="font-size:0.62rem; background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:1px 5px; border-radius:4px; font-weight:700;">🎯 TARGET INFLOW</span>' : ''}
                 <span style="font-size:0.7rem; color:#64748b;">${ev.timeWib ? ev.timeWib.slice(11, 19) : ''}</span>
               </div>
             `;
