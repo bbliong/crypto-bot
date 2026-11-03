@@ -231,7 +231,16 @@ export class SingleDevWalletWatcher extends EventEmitter {
           const m = t.token_address;
           if (!m || this.knownDevMints.has(m)) continue;
 
-          // Token baru dari dev terdeteksi!
+          // Validasi Re-Deploy: Simbol koin baru wajib sama dengan token yang dimasuki target
+          const targetSym = (this.activeTarget.symbol || '').toUpperCase().trim();
+          const newSym = (t.symbol || '').toUpperCase().trim();
+          if (targetSym && newSym && targetSym !== newSym) {
+            this.knownDevMints.add(m);
+            console.log(`[GMGN DEV-TOKENS SKIP] Dev merilis token '${t.symbol}', tetapi target sedang aktif di '${this.activeTarget.symbol}'. Melewati (Bukan Re-Deploy)...`);
+            continue;
+          }
+
+          // Token baru dari dev terdeteksi (Re-Deploy)!
           this.knownDevMints.add(m);
 
           console.log(`\n=========================================================`);
@@ -432,10 +441,26 @@ export class SingleDevWalletWatcher extends EventEmitter {
       }
 
       if (detectedMint) {
+        // Cek apakah simbol koin baru sesuai dengan koin target yang sedang aktif
+        let detectedSymbol = this.activeTarget.symbol;
+        try {
+          const accInfo = await conn.getParsedAccountInfo(new PublicKey(detectedMint));
+          const exts = (accInfo.value?.data as any)?.parsed?.info?.extensions || [];
+          const tm = exts.find((e: any) => e.extension === 'tokenMetadata')?.state;
+          if (tm && tm.symbol) detectedSymbol = tm.symbol;
+        } catch {}
+
+        const targetSym = (this.activeTarget.symbol || '').toUpperCase().trim();
+        const newSym = (detectedSymbol || '').toUpperCase().trim();
+        if (targetSym && newSym && targetSym !== newSym) {
+          console.log(`[DEV-RADAR SKIP] Dev deploy pool baru '${detectedSymbol}', tapi target sedang aktif di '${this.activeTarget.symbol}'. Melewati (Bukan Re-Deploy)...`);
+          return;
+        }
+
         const evt: RedeployDetectedEvent = {
           oldMint: this.activeTarget.mint,
           newMint: detectedMint,
-          symbol: this.activeTarget.symbol,
+          symbol: detectedSymbol || this.activeTarget.symbol,
           ipfsUri: this.activeTarget.ipfsUri,
           devWallet: this.activeTarget.devWallet,
           signature: sig,
