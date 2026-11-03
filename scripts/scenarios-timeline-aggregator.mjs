@@ -45,12 +45,26 @@ export const SCENARIO_META = {
       const s = (id || '') + ' ' + (type || '');
       return s.includes('SCENARIO_7') || s.includes('TIME_STOP');
     }
+  },
+  sce8: {
+    id: 'sce8',
+    canonicalKey: 's8',
+    name: 'Skenario 8: Front-Run Dev & Dump on Target Entry',
+    shortName: 'Skenario 8',
+    description: 'Front-Run Genesis: Buy instan saat Dev deploy pool baru, lalu SELL 100% dump ke likuiditas masuk target saat target beli.',
+    ruleBadge: 'Front-Run Dev | Dump on Target Buy',
+    color: '#a855f7',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_8') || s.includes('FRONTRUN');
+    }
   }
 };
 
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('8') || str.includes('frontrun') || str.includes('target_inflow')) return 'sce8';
   if (str.includes('7') || str.includes('time_stop') || str.includes('timestop')) return 'sce7';
   if (str.includes('6') || str.includes('redeploy')) return 'sce6';
   return 'sce4';

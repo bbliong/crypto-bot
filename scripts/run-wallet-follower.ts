@@ -407,7 +407,7 @@ export class WalletFollowerRunner {
       console.log(`🚨 [DEV-RADAR TRIGGER] Terdeteksi Pool Baru Lahir dari Dev: ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
       console.log(`   Dev Wallet : ${evt.devWallet}`);
       console.log(`   Tx Genesis : ${evt.signature}`);
-      console.log(`   Mengeksekusi BUY Proaktif S6 (SEBELUM Target Masuk)!`);
+      console.log(`   Mengeksekusi BUY Proaktif S6/S7/S8 (SEBELUM Target Masuk)!`);
       console.log(`=========================================================\n`);
       this.multiDryRunEngine.handleEarlyRedeployBuy(evt);
     });
@@ -1714,6 +1714,9 @@ export class WalletFollowerRunner {
     }
     if (targetSc === 'S7' || targetSc === 'SCE7' || targetSc === 'SCENARIO_7') {
       return scUpper.includes('7') || scUpper.includes('TIME_STOP');
+    }
+    if (targetSc === 'S8' || targetSc === 'SCE8' || targetSc === 'SCENARIO_8') {
+      return scUpper.includes('8') || scUpper.includes('FRONTRUN');
     }
     return false;
   }

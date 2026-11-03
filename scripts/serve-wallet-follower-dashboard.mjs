@@ -191,7 +191,7 @@ const server = createServer((req, res) => {
 
         if (patch.autobuyScenario !== undefined) {
           const sc = String(patch.autobuyScenario).toUpperCase();
-          if (['OFF', 'DRY_RUN', 'S4', 'S6', 'S7', 'BOTH'].includes(sc)) {
+          if (['OFF', 'DRY_RUN', 'S4', 'S6', 'S7', 'S8', 'BOTH'].includes(sc)) {
             updated.autobuyScenario = sc;
             updated.enabled = (sc !== 'OFF');
           }
@@ -240,6 +240,11 @@ const server = createServer((req, res) => {
         if (patch.stakeUsdS7Pool2 !== undefined) {
           const val = parseFloat(patch.stakeUsdS7Pool2);
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS7Pool2 = val;
+        }
+
+        if (patch.stakeUsdS8 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS8);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS8 = val;
         }
 
         if (patch.resetQuota) {
@@ -416,6 +421,23 @@ const server = createServer((req, res) => {
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
         return res.end('Error rendering S7 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 8 Detail Timeline (/3scenarios/sce8, /add-fol/3scenarios/sce8)
+  if (pathname.includes('/3scenarios/sce8') || pathname.includes('/4scenarios/sce8') || pathname.includes('/scenarios/sce8')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce8', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S8 timeline: ' + err.message);
       }
     })();
     return;
