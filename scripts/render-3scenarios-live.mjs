@@ -21,6 +21,14 @@ export function render3ScenariosLiveHtml() {
       autobuyConfig = JSON.parse(readFileSync(settingsFile, 'utf8'));
     } catch {}
   }
+
+  const devStateFile = join(dataDir, 'follower-dev-watcher-state.json');
+  let devWatcherState = { active: false, target: null };
+  if (existsSync(devStateFile)) {
+    try {
+      devWatcherState = JSON.parse(readFileSync(devStateFile, 'utf8'));
+    } catch {}
+  }
   const isAutoBuyEnabled = Boolean(autobuyConfig.enabled);
   let activeScenario = String(autobuyConfig.autobuyScenario || (isAutoBuyEnabled ? 'BOTH' : 'OFF')).toUpperCase();
   if (!isAutoBuyEnabled && activeScenario !== 'DRY_RUN') activeScenario = 'OFF';
@@ -632,6 +640,56 @@ export function render3ScenariosLiveHtml() {
           </div>
         </label>
       </div>
+    </div>
+
+    <!-- 🎯 Active 1-Dev Radar Live Card -->
+    <div class="dev-radar-card" style="background:#0f172a; border:1px solid #1e293b; border-left:4px solid #38bdf8; border-radius:12px; padding:16px 20px; margin-bottom:24px; box-shadow:0 4px 16px rgba(0,0,0,0.25);">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:8px;">
+        <div style="font-size:0.92rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+          <span>🎯 ACTIVE 1-DEV RADAR (EARLY REDEPLOY WATCHER)</span>
+          <span style="font-size:0.7rem; padding:2px 8px; border-radius:4px; font-weight:800; ${devWatcherState.active ? 'background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);' : 'background:rgba(148,163,184,0.15); color:#94a3b8; border:1px solid #334155;'}">
+            ${devWatcherState.active ? '🟢 AKTIF MEMANTAU 1 DEV (LISTENING WS)' : '⚪ STANDBY / IDLE'}
+          </span>
+        </div>
+        <div style="font-size:0.75rem; color:#64748b; font-family:ui-monospace, monospace;">
+          Limit: Maks 1 Dev Wallet Aktif &bull; Zero Delay Execution
+        </div>
+      </div>
+
+      ${devWatcherState.active && devWatcherState.target ? `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; font-size:0.82rem; font-family:ui-monospace, monospace;">
+          <div style="background:#141e33; padding:8px 12px; border-radius:6px; border:1px solid #1e293b;">
+            <div style="font-size:0.68rem; color:#94a3b8; text-transform:uppercase;">Token Sedang Diawasi</div>
+            <div style="font-weight:700; color:#38bdf8; margin-top:2px;">${devWatcherState.target.symbol}</div>
+            <div style="font-size:0.68rem; color:#64748b; overflow:hidden; text-overflow:ellipsis;">Mint: ${devWatcherState.target.mint}</div>
+          </div>
+
+          <div style="background:#141e33; padding:8px 12px; border-radius:6px; border:1px solid #1e293b;">
+            <div style="font-size:0.68rem; color:#94a3b8; text-transform:uppercase;">Alamat Dompet Dev</div>
+            <div style="font-weight:700; color:#f8fafc; margin-top:2px; display:flex; align-items:center; gap:6px;">
+              <span>${devWatcherState.target.devWallet.slice(0, 10)}...${devWatcherState.target.devWallet.slice(-6)}</span>
+              <a href="https://solscan.io/account/${devWatcherState.target.devWallet}" target="_blank" style="color:#818cf8; text-decoration:none; font-size:0.75rem;">↗ Solscan</a>
+            </div>
+            <div style="font-size:0.68rem; color:#10b981;">WebSocket logsSubscribe Connected ✓</div>
+          </div>
+
+          <div style="background:#141e33; padding:8px 12px; border-radius:6px; border:1px solid #1e293b;">
+            <div style="font-size:0.68rem; color:#94a3b8; text-transform:uppercase;">Sidik Jari IPFS URI</div>
+            <div style="font-weight:700; color:#a855f7; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${devWatcherState.target.ipfsUri || ''}">
+              ${devWatcherState.target.ipfsHash || 'No IPFS Hash'}
+            </div>
+            <div style="font-size:0.68rem; color:#64748b;">Kunci Pencocokan Generasi 2</div>
+          </div>
+        </div>
+        <div style="font-size:0.75rem; color:#cbd5e1; margin-top:10px; display:flex; align-items:center; gap:6px;">
+          <span>⚡</span>
+          <span>Jika Dev ini memanggil <code>InitializeCustomizablePool</code> di Meteora, bot akan <strong>LANGSUNG BUY SEBELUM TARGET BUY</strong>. Jika target membeli token lain, token ini otomatis di-SELL 100%.</span>
+        </div>
+      ` : `
+        <div style="font-size:0.8rem; color:#94a3b8;">
+          ⚪ <em>Belum ada dev yang dikunci. Begitu Target melakukan First Buy di koin Ground Zero (&le; $0.000020), bot otomatis mengunci 1 dompet dev pembuat koin tersebut dan mulai memantau via WebSocket Solana.</em>
+        </div>
+      `}
     </div>
 
     <div class="scenarios-grid">

@@ -287,6 +287,22 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // Dedicated Endpoint Dev Watcher Status (/api/dev-watcher, /add-fol/api/dev-watcher)
+  if (pathname.includes('/api/dev-watcher') && req.method === 'GET') {
+    const devStateFile = path.join(DATA_DIR, 'follower-dev-watcher-state.json');
+    let devState = { active: false, target: null };
+    if (existsSync(devStateFile)) {
+      try {
+        devState = JSON.parse(readFileSync(devStateFile, 'utf8'));
+      } catch {}
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(JSON.stringify({ ok: true, devWatcher: devState }, null, 2));
+  }
+
   // API Reclaim Rent endpoint
   if (pathname.includes('/api/autobuy/reclaim-rent') && req.method === 'POST') {
     (async () => {

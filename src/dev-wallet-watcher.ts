@@ -1,5 +1,7 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { getSolanaRpcUrl } from '../scripts/solana-rpc-config.mjs';
 
@@ -38,12 +40,27 @@ export class SingleDevWalletWatcher extends EventEmitter {
   private reqId: number = 1;
   private processedSigs: Set<string> = new Set();
   private pingInterval: NodeJS.Timeout | null = null;
+  private dataDir: string;
 
-  constructor(options: { wsUrl?: string; rpcUrl?: string } = {}) {
+  constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string } = {}) {
     super();
     // Gunakan public solana WebSocket yang bebas kuota dan stabil
     this.wsUrl = options.wsUrl || 'wss://api.mainnet-beta.solana.com';
     this.rpcUrl = options.rpcUrl || 'https://api.mainnet-beta.solana.com';
+    this.dataDir = options.dataDir || path.resolve(process.cwd(), 'data');
+    this.saveState();
+  }
+
+  private saveState(): void {
+    try {
+      const stateFile = path.join(this.dataDir, 'follower-dev-watcher-state.json');
+      const payload = {
+        updatedAt: Date.now(),
+        active: !!this.activeTarget,
+        target: this.activeTarget
+      };
+      fs.writeFileSync(stateFile, JSON.stringify(payload, null, 2), 'utf8');
+    } catch {}
   }
 
   public getActiveTarget(): WatchedDevTarget | null {
@@ -122,6 +139,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     };
 
     this.activeTarget = target;
+    this.saveState();
     console.log(`[DEV-WATCHER] 🎯 Terkunci pada 1 Dev: ${target.devWallet} (Token: ${target.symbol} | IPFS: ${target.ipfsHash || '-'})`);
 
     // 3. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut
@@ -137,6 +155,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
       console.log(`[DEV-WATCHER] 🛑 Melepas pengawasan dev: ${this.activeTarget.devWallet} (Token: ${this.activeTarget.symbol})`);
     }
     this.activeTarget = null;
+    this.saveState();
     this.closeWs();
   }
 
