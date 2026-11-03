@@ -289,7 +289,7 @@ const server = createServer((req, res) => {
 
   // Dedicated Endpoint Dev Watcher Status (/api/dev-watcher, /add-fol/api/dev-watcher)
   if (pathname.includes('/api/dev-watcher') && req.method === 'GET') {
-    const devStateFile = path.join(DATA_DIR, 'follower-dev-watcher-state.json');
+    const devStateFile = join(ROOT, 'data', 'follower-dev-watcher-state.json');
     let devState = { active: false, target: null };
     if (existsSync(devStateFile)) {
       try {
