@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { getSolanaRpcUrl } from '../scripts/solana-rpc-config.mjs';
+import { getSolanaRpcUrl, getSolanaRpcWsUrl } from '../scripts/solana-rpc-config.mjs';
 
 export interface WatchedDevTarget {
   mint: string;
@@ -44,7 +44,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
   constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string } = {}) {
     super();
-    // Gunakan public solana WebSocket yang bebas kuota dan stabil
+    // Gunakan cluster public resmi Solana yang stabil dan bebas batas kuota bulanan
     this.wsUrl = options.wsUrl || 'wss://api.mainnet-beta.solana.com';
     this.rpcUrl = options.rpcUrl || 'https://api.mainnet-beta.solana.com';
     this.dataDir = options.dataDir || path.resolve(process.cwd(), 'data');
@@ -75,10 +75,20 @@ export class SingleDevWalletWatcher extends EventEmitter {
       const conn = new Connection(this.rpcUrl, 'confirmed');
       const pubkey = new PublicKey(mintAddress);
 
-      // 1. Ambil signature pertama/tertua (Genesis)
-      const sigs = await conn.getSignaturesForAddress(pubkey, { limit: 1000 });
-      if (!sigs || sigs.length === 0) return null;
-      const oldestSig = sigs[sigs.length - 1].signature;
+      // 1. Ambil signature pertama/tertua (Genesis) dengan pagination mundur sampai ke blok kelahiran awal
+      let oldestSig = '';
+      let beforeSig: string | undefined = undefined;
+      for (let hop = 0; hop < 15; hop++) {
+        const options: any = { limit: 1000 };
+        if (beforeSig) options.before = beforeSig;
+        const batch = await conn.getSignaturesForAddress(pubkey, options);
+        if (!batch || batch.length === 0) break;
+        oldestSig = batch[batch.length - 1].signature;
+        if (batch.length < 1000) break; // Sudah sampai genesis paling awal!
+        beforeSig = oldestSig;
+        await new Promise(r => setTimeout(r, 120)); // Delay antar-hop untuk menghindari rate limit
+      }
+      if (!oldestSig) return null;
 
       // 2. Baca isi transaksi genesis untuk mengambil fee payer (Akun 0 = Dev)
       const genesisTx = await conn.getParsedTransaction(oldestSig, {

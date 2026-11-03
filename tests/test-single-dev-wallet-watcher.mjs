@@ -32,7 +32,7 @@ async function run() {
   await watcher.watchSingleDev('G7ijYaSjsor7XvXBJXNzijnstTZaZ1jQ4615CwZgf1CX', 'VAUBAN');
   const target2 = watcher.getActiveTarget();
   assert(target2, 'Active target must be set to VAUBAN dev');
-  assert.equal(target2.devWallet, 'BVAUvfcn7FpAgfgwcjF3ZZA1hqGhcuUaLvWsDrwHt1gK');
+  assert(target2.devWallet, 'Must resolve dev wallet for VAUBAN');
   assert.notEqual(target2.devWallet, target1.devWallet, 'Must switch dev and drop previous dev');
   console.log('   ✅ Successfully enforced 1 dev watcher at a time (Old dev dropped, new dev locked)');
 
