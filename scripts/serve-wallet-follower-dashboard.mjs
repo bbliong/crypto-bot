@@ -191,7 +191,7 @@ const server = createServer((req, res) => {
 
         if (patch.autobuyScenario !== undefined) {
           const sc = String(patch.autobuyScenario).toUpperCase();
-          if (['OFF', 'S4', 'S6', 'BOTH'].includes(sc)) {
+          if (['OFF', 'DRY_RUN', 'S4', 'S6', 'BOTH'].includes(sc)) {
             updated.autobuyScenario = sc;
             updated.enabled = (sc !== 'OFF');
           }

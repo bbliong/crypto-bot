@@ -100,7 +100,7 @@ async function run() {
     remainingHolding: 2000000,
     solAmount: 20,
     usdAmount: 2000,
-    priceUsd: 0.00003,
+    priceUsd: 0.000015,
     txHash: 'Tx3',
     timestamp: Math.floor(Date.now() / 1000) + 10,
     isOpenOrClose: true,

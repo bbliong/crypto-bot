@@ -72,6 +72,18 @@ async function run() {
   assert(htmlBoth.includes('status-both'), 'Status pill must have status-both');
   console.log('   ✅ BOTH scenario selection verified');
 
+  // 5. Test Select DRY_RUN (Keduanya Dry Run)
+  console.log('5. Setting scenario to DRY_RUN...');
+  const resDryRun = await updateConfig({ autobuyScenario: 'DRY_RUN' });
+  assert.equal(resDryRun.ok, true);
+  assert.equal(resDryRun.config.enabled, true);
+  assert.equal(resDryRun.config.autobuyScenario, 'DRY_RUN');
+
+  const htmlDryRun = await (await fetch(`${baseUrl}/3scenarios`)).text();
+  assert(htmlDryRun.includes('value="DRY_RUN" checked'), 'DRY_RUN radio button must be checked');
+  assert(htmlDryRun.includes('status-dry_run') || htmlDryRun.includes('status-dryrun'), 'Status pill must have status-dryrun');
+  console.log('   ✅ DRY_RUN scenario selection verified');
+
   console.log('\n✅ All Auto-Buy Scenario Selection tests passed successfully!');
 }
 

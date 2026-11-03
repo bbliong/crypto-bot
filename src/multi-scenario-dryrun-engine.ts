@@ -283,6 +283,26 @@ export class MultiScenarioDryRunEngine {
     const pIn = signal.priceUsd;
     if (pIn <= 0) return;
 
+    // Filter Anti-Pucuk (Ground-Zero Price Cap): Target buy price wajib <= $0.000020
+    const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
+    if (pIn > GROUND_ZERO_MAX_PRICE_USD) {
+      scenario.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: scenario.id,
+        action: 'SKIP',
+        symbol: signal.symbol,
+        mint: signal.mint,
+        priceUsd: pIn,
+        availableCashAfter: scenario.availableCash,
+        investedCashAfter: scenario.investedCash,
+        reason: `REJECT_NON_GROUND_ZERO_PRICE_CAP (Target price $${pIn.toFixed(7)} > $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)})`,
+      });
+      if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+      return;
+    }
+
     let pos = scenario.openPositions.find(p => p.mint === signal.mint);
 
     // Jika posisi belum ada: wajib Ground Zero (First Buy dari saldo 0)
@@ -1192,6 +1212,87 @@ export class MultiScenarioDryRunEngine {
     }
 
     if (changed) {
+      this.saveState();
+    }
+  }
+
+  /**
+   * Sinkronisasi Eksekusi Beli Riil (dari kuotasi AMM DEX riil / swap ke-2 dryrun):
+   * Menggantikan harga estimasi target dengan harga swap pasar nyata!
+   */
+  public syncRealBuyExecution(
+    scenarioId: string,
+    mint: string,
+    realPriceUsd: number,
+    tokensBought: number,
+    stakeUsd: number
+  ): void {
+    if (realPriceUsd <= 0 || tokensBought <= 0) return;
+    const targetSc = scenarioId.includes('6') ? this.scenarios.s6 : this.scenarios.s4;
+    const pos = targetSc.openPositions.find(p => p.mint === mint);
+    if (!pos) return;
+
+    const oldPrice = pos.avgEntryPriceUsd;
+    pos.avgEntryPriceUsd = realPriceUsd;
+    pos.lastPriceUsd = realPriceUsd;
+    pos.tokens = tokensBought;
+    pos.initialTokens = tokensBought;
+    pos.costBasisUsd = stakeUsd;
+    pos.initialCostBasisUsd = stakeUsd;
+
+    // Update recent event jika ada
+    const ev = targetSc.recentEvents.find(e => e.mint === mint && e.action === 'BUY');
+    if (ev) {
+      ev.priceUsd = realPriceUsd;
+      ev.tokens = tokensBought;
+      if (!ev.reason.includes('Real Swap:')) {
+        ev.reason = `${ev.reason} (Real Swap: $${realPriceUsd.toFixed(8)})`;
+      }
+    }
+
+    console.log(`[DRYRUN-ENGINE SYNC] ✅ Posisi ${pos.symbol} [${scenarioId}] disinkronkan ke harga swap AMM riil: $${realPriceUsd.toFixed(8)} (Target: $${oldPrice.toFixed(8)}, Gap: ${((realPriceUsd - oldPrice)/oldPrice*100).toFixed(1)}%)`);
+    this.saveState();
+  }
+
+  /**
+   * Sinkronisasi Eksekusi Jual Riil (dari kuotasi swap AMM sell):
+   * Menggantikan estimasi harga target dengan proceeds kas riil yang kembali dari DEX!
+   */
+  public syncRealSellExecution(
+    scenarioId: string,
+    mint: string,
+    realExitPriceUsd: number,
+    realUsdReturned: number,
+    reason: string
+  ): void {
+    if (realUsdReturned < 0) return;
+    const targetSc = scenarioId.includes('6') ? this.scenarios.s6 : this.scenarios.s4;
+
+    // 1. Cek apakah ada di closedTrades (Full exit)
+    const trade = targetSc.closedTrades.find(t => t.mint === mint);
+    if (trade) {
+      const oldPnl = trade.realizedPnlUsd;
+      const oldReturned = trade.totalReturnedUsd;
+
+      trade.totalReturnedUsd = Number(realUsdReturned.toFixed(2));
+      trade.realizedPnlUsd = Number((realUsdReturned - trade.totalInvestedUsd).toFixed(2));
+      trade.roiPct = trade.totalInvestedUsd > 0 ? Number(((trade.realizedPnlUsd / trade.totalInvestedUsd) * 100).toFixed(1)) : 0.0;
+      trade.isWin = trade.realizedPnlUsd >= 0;
+      if (!trade.exitReason.includes('Real Swap:')) {
+        trade.exitReason = `${trade.exitReason} (Real Swap: $${realUsdReturned.toFixed(2)})`;
+      }
+
+      // Recalculate scenario metrics
+      const pnlDiff = trade.realizedPnlUsd - oldPnl;
+      const cashDiff = trade.totalReturnedUsd - oldReturned;
+      targetSc.realizedPnl = Number((targetSc.realizedPnl + pnlDiff).toFixed(2));
+      targetSc.availableCash = Number((targetSc.availableCash + cashDiff).toFixed(2));
+
+      targetSc.wins = targetSc.closedTrades.filter(t => t.isWin).length;
+      targetSc.losses = targetSc.closedTrades.filter(t => !t.isWin).length;
+      targetSc.winRate = targetSc.totalTrades > 0 ? Number(((targetSc.wins / targetSc.totalTrades) * 100).toFixed(1)) : 0.0;
+
+      console.log(`[DRYRUN-ENGINE SYNC] ✅ Trade ${trade.symbol} [${scenarioId}] disinkronkan ke hasil swap AMM riil: $${realUsdReturned.toFixed(2)} (PnL: $${trade.realizedPnlUsd.toFixed(2)}, ROI: ${trade.roiPct}%)`);
       this.saveState();
     }
   }

@@ -23,10 +23,11 @@ export function render3ScenariosLiveHtml() {
   }
   const isAutoBuyEnabled = Boolean(autobuyConfig.enabled);
   let activeScenario = String(autobuyConfig.autobuyScenario || (isAutoBuyEnabled ? 'BOTH' : 'OFF')).toUpperCase();
-  if (!isAutoBuyEnabled) activeScenario = 'OFF';
+  if (!isAutoBuyEnabled && activeScenario !== 'DRY_RUN') activeScenario = 'OFF';
 
   const isS4Real = activeScenario === 'S4' || activeScenario === 'BOTH';
   const isS6Real = activeScenario === 'S6' || activeScenario === 'BOTH';
+  const isDryRun = activeScenario === 'DRY_RUN';
 
   const s4Stake = Number(autobuyConfig.stakeUsdS4) || 5.0;
   const s6Pool1 = Number(autobuyConfig.stakeUsdS6Pool1) || 5.0;
@@ -47,8 +48,8 @@ export function render3ScenariosLiveHtml() {
         <div class="panel-header">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
             <div class="panel-title">${s.name}</div>
-            <span style="font-size:0.68rem; padding: 2px 8px; border-radius: 4px; font-weight:800; white-space:nowrap; ${isRealActive ? 'background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);' : 'background:rgba(148,163,184,0.15); color:#94a3b8; border:1px solid #334155;'}">
-              ${isRealActive ? '⚡ REAL AUTO-BUY' : '⚪ SIMULASI SWAP'}
+            <span style="font-size:0.68rem; padding: 2px 8px; border-radius: 4px; font-weight:800; white-space:nowrap; ${isRealActive ? 'background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);' : (isDryRun ? 'background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid rgba(56,189,248,0.5);' : 'background:rgba(148,163,184,0.15); color:#94a3b8; border:1px solid #334155;')}">
+              ${isRealActive ? '⚡ REAL AUTO-BUY' : (isDryRun ? '⚪ DRY RUN REALISTIS' : '⚪ SIMULASI SWAP')}
             </span>
           </div>
           <div class="panel-desc">${s.description || ''}</div>
@@ -420,6 +421,7 @@ export function render3ScenariosLiveHtml() {
       letter-spacing: 0.03em;
     }
     .status-off { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569; }
+    .status-dry_run, .status-dryrun { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5); }
     .status-s4 { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.5); }
     .status-s6 { background: rgba(236, 72, 153, 0.2); color: #ec4899; border: 1px solid rgba(236, 72, 153, 0.5); }
     .status-both { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.5); }
@@ -480,6 +482,16 @@ export function render3ScenariosLiveHtml() {
     .scenario-radio-card.active-off input[type="radio"]:checked {
       border-color: #94a3b8;
       background: #475569;
+    }
+
+    .scenario-radio-card.active-dry_run, .scenario-radio-card.active-dryrun {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+    }
+    .scenario-radio-card.active-dry_run input[type="radio"]:checked, .scenario-radio-card.active-dryrun input[type="radio"]:checked {
+      border-color: #38bdf8;
+      background: #38bdf8;
     }
 
     .scenario-radio-card.active-s4 {
@@ -556,24 +568,26 @@ export function render3ScenariosLiveHtml() {
     <div class="autobuy-bar">
       <div class="autobuy-top">
         <div class="autobuy-title">
-          <span>⚡ REAL AUTO-BUY (HIT API ASLI GMGN)</span>
+          <span>⚡ REAL AUTO-BUY & DRY-RUN CONTROLLER</span>
           <span class="status-pill status-${activeScenario.toLowerCase()}">
-            ${activeScenario === 'OFF' ? '⚪ SIMULASI SAJA (KEDUANYA OFF)' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : '🟢 KEDUANYA REAL AUTO-BUY AKTIF'))}
+            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : (activeScenario === 'DRY_RUN' ? '⚪ KEDUANYA DRY RUN REALISTIS' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : '🟢 KEDUANYA REAL AUTO-BUY AKTIF')))}
           </span>
         </div>
         <div style="font-size: 0.78rem; color: #94a3b8;">
-          Pilih skenario yang ingin mengirim order nyata ke blockchain & GMGN
+          Pilih mode eksekusi: Dry-Run Realistis (simulasi swap ganda tanpa modal) atau Real Order ke GMGN & Solana
         </div>
       </div>
 
       <div class="autobuy-sub">
         ${activeScenario === 'OFF' 
-          ? '⚪ <strong>Keduanya Nonaktif:</strong> Mode simulasi swap saja. Rute AMM diverifikasi tanpa mengirim order beli/jual nyata.' 
-          : (activeScenario === 'S4' 
-              ? '🟡 <strong>Skenario 4 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S4 terpenuhi ($5 Single Buy Ground Zero & Exit ≥ 15%). Skenario 6 berjalan sebagai simulasi.' 
-              : (activeScenario === 'S6' 
-                  ? '🟣 <strong>Skenario 6 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S6 terpenuhi (Re-Deploy Sniper: TP1 50% @ 5% & TP2 @ 15%). Skenario 4 berjalan sebagai simulasi.' 
-                  : '🟢 <strong>Keduanya Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain untuk Skenario 4 maupun Skenario 6 saat trigger masing-masing terpenuhi.'))}
+          ? '⚪ <strong>Keduanya Nonaktif:</strong> Bot idle, tidak ada pemantauan swap.' 
+          : (activeScenario === 'DRY_RUN'
+              ? '⚪ <strong>Keduanya Dry Run (Simulasi Swap Ganda):</strong> Mekanisme persis seperti buy asli! Hit batch_order diganti hit swap ke-2 untuk simulasi slippage riil. PnL dihitung murni dari harga swap DEX nyata tanpa memotong saldo SOL.'
+              : (activeScenario === 'S4' 
+                  ? '🟡 <strong>Skenario 4 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S4 terpenuhi. Skenario 6 berjalan sebagai simulasi.' 
+                  : (activeScenario === 'S6' 
+                      ? '🟣 <strong>Skenario 6 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S6 terpenuhi (Re-Deploy Sniper: TP1 50% @ 5% & TP2 @ 15%). Skenario 4 berjalan sebagai simulasi.' 
+                      : '🟢 <strong>Keduanya Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain untuk Skenario 4 maupun Skenario 6 saat trigger masing-masing terpenuhi.')))}
       </div>
 
       <!-- Radio Buttons Selection -->
@@ -581,8 +595,16 @@ export function render3ScenariosLiveHtml() {
         <label class="scenario-radio-card ${activeScenario === 'OFF' ? 'active-off' : ''}">
           <input type="radio" name="autobuyScenarioRadio" value="OFF" ${activeScenario === 'OFF' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
-            <span class="radio-main">⚪ Keduanya OFF</span>
-            <span class="radio-hint">Mode Simulasi Swap Saja</span>
+            <span class="radio-main">⚪ Nonaktif (OFF)</span>
+            <span class="radio-hint">Bot Idle / Tidak Memantau</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'DRY_RUN' ? 'active-dryrun' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="DRY_RUN" ${activeScenario === 'DRY_RUN' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #38bdf8;">⚪ Keduanya Dry Run</span>
+            <span class="radio-hint">Simulasi Swap Ganda (Slippage Riil)</span>
           </div>
         </label>
 
@@ -590,7 +612,7 @@ export function render3ScenariosLiveHtml() {
           <input type="radio" name="autobuyScenarioRadio" value="S4" ${activeScenario === 'S4' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
             <span class="radio-main" style="color: #f59e0b;">🟡 Skenario 4 Saja</span>
-            <span class="radio-hint">Single Buy $5 (Exit ≥ 15%)</span>
+            <span class="radio-hint">Single Buy (Exit ≥ 15%) Real</span>
           </div>
         </label>
 
@@ -598,7 +620,7 @@ export function render3ScenariosLiveHtml() {
           <input type="radio" name="autobuyScenarioRadio" value="S6" ${activeScenario === 'S6' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
             <span class="radio-main" style="color: #ec4899;">🟣 Skenario 6 Saja</span>
-            <span class="radio-hint">Sniper V2 (TP 5% & 15%)</span>
+            <span class="radio-hint">Sniper V2 (TP 5% & 15%) Real</span>
           </div>
         </label>
 

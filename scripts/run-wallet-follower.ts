@@ -747,6 +747,15 @@ export class WalletFollowerRunner {
 
     const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
+
+    // Filter Anti-Pucuk (Ground-Zero Price Cap): Target buy price wajib <= $0.000020
+    const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
+    if (signal.priceUsd > GROUND_ZERO_MAX_PRICE_USD) {
+      console.log(`[PRICE CAP GATE] 🚫 Harga target $${signal.priceUsd.toFixed(8)} melebihi batas Ground Zero $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)}. Melewati buy (anti-pucuk)!`);
+      this.multiDryRunEngine.handleTargetBuy(signal, false);
+      return;
+    }
+
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
@@ -1819,6 +1828,45 @@ export class WalletFollowerRunner {
       const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
 
       if (!isRealOrderTargeted) {
+        let finalQuote = route.routeData?.quote;
+        let finalPriceUsd = route.impliedPriceUsd;
+
+        if (side === 'BUY') {
+          // Double-Swap Mechanism: Hit swap ke-2 menggantikan batch_order untuk simulasi slippage eksekusi riil
+          console.log(`[DRY RUN REALISTIS: ${scenarioId}] 🔄 Menembak swap ke-2 untuk simulasi slippage riil (menggantikan batch_order)...`);
+          try {
+            await new Promise(r => setTimeout(r, 300));
+            const route2 = await getBrowserBuySwapRoute(
+              this.page,
+              signal.mint,
+              wallet,
+              stakeUsd,
+              this.solPriceUsd,
+              config.buySlippagePercent || 15
+            );
+            if (route2.ok && route2.routeData?.quote) {
+              finalQuote = route2.routeData.quote;
+              finalPriceUsd = route2.impliedPriceUsd || (stakeUsd / (Number(finalQuote.outAmount) / 1e6));
+              console.log(`[DRY RUN REALISTIS: ${scenarioId}] ✅ Swap ke-2 berhasil (${route2.routeData.exchange || '-'} | ${route2.latencyMs}ms). Harga AMM ke-2: $${finalPriceUsd?.toFixed(8)}`);
+            }
+          } catch (e: any) {
+            console.warn(`[DRY-RUN-SWAP2-WARN] ${e?.message}`);
+          }
+
+          if (finalQuote && finalPriceUsd) {
+            const tokensBought = Number(finalQuote.outAmount) / 1e6;
+            this.multiDryRunEngine.syncRealBuyExecution(scenarioId, signal.mint, finalPriceUsd, tokensBought, stakeUsd);
+          }
+        } else {
+          // SELL Simulation: Sinkronkan proceeds jual riil ke engine
+          if (finalQuote) {
+            const solOut = Number(finalQuote.outAmount) / 1e9;
+            const usdReceived = solOut * (this.solPriceUsd > 0 ? this.solPriceUsd : 93.0);
+            const realExitPrice = route.impliedPriceUsd || (usdReceived / (Number(finalQuote.inAmount) / 1e6));
+            this.multiDryRunEngine.syncRealSellExecution(scenarioId, signal.mint, realExitPrice, usdReceived, reason);
+          }
+        }
+
         console.log(`[AUTO-BUY: SIMULASI ONLY (${scenarioId})] ⚪ Rute swap selesai dicek (${route.routeData?.exchange || '-'} | Latency ${route.latencyMs}ms).`);
         console.log(`   Order nyata /mrtapi/v2/swap_batch_order & reclaim rent dilewati (Target aktif: ${autobuySc}).`);
         console.log(`=========================================================\n`);
@@ -1867,6 +1915,14 @@ export class WalletFollowerRunner {
       console.log(`[GMGN SUBMIT ORDER RESPONSE: ${scenarioId}] Status: ${submitRes.status} | Ok: ${submitRes.ok} | Order ID: ${submitRes.orderId || '-'} | Hash: ${submitRes.hash || '-'} | Error/Msg: ${submitRes.error || 'SUCCESS'}`);
       console.log(`=========================================================\n`);
 
+      // Sinkronkan SELL nyata ke engine
+      if (side === 'SELL' && submitRes.ok && route.routeData?.quote) {
+        const solOut = Number(route.routeData.quote.outAmount) / 1e9;
+        const usdReceived = solOut * (this.solPriceUsd > 0 ? this.solPriceUsd : 93.0);
+        const realExitPrice = route.impliedPriceUsd || (usdReceived / (Number(route.routeData.quote.inAmount) / 1e6));
+        this.multiDryRunEngine.syncRealSellExecution(scenarioId, signal.mint, realExitPrice, usdReceived, reason);
+      }
+
       // Cek kondisi sebenarnya beli berapa angkanya (Post-Buy On-Chain Verification & Sync)
       if (side === 'BUY' && submitRes.ok) {
         console.log(`[POST-BUY SYNC] ⏳ Menunggu settlement blockchain untuk verifikasi jumlah token aktual yang terbeli...`);
@@ -1880,6 +1936,10 @@ export class WalletFollowerRunner {
                 console.log(`\n=========================================================`);
                 console.log(`[POST-BUY VERIFIED] ✅ Terkonfirmasi beli aktual: ${onChain.uiAmount.toLocaleString()} tokens (${onChain.amount} base units) pada mint ${signal.symbol || signal.mint}`);
                 console.log(`=========================================================\n`);
+                
+                const realPriceUsd = (stakeUsd / onChain.uiAmount);
+                this.multiDryRunEngine.syncRealBuyExecution(scenarioId, signal.mint, realPriceUsd, onChain.uiAmount, stakeUsd);
+
                 auditFollowerReal(this.dataDir, state, null, `POST_BUY_VERIFIED_${scenarioId}`, {
                   scenarioId,
                   mint: signal.mint,

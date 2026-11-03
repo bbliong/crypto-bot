@@ -14,7 +14,7 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'S4' | 'S6' | 'BOTH';
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S6' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
@@ -173,7 +173,7 @@ export function saveFollowerLiveConfig(
 
   if (patch.autobuyScenario !== undefined) {
     const sc = String(patch.autobuyScenario).toUpperCase();
-    if (['OFF', 'S4', 'S6', 'BOTH'].includes(sc)) {
+    if (['OFF', 'DRY_RUN', 'S4', 'S6', 'BOTH'].includes(sc)) {
       updated.autobuyScenario = sc as any;
       updated.enabled = sc !== 'OFF';
     }

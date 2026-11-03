@@ -36,7 +36,7 @@ const mockSignalA = {
   remainingHolding: 1000000,
   solAmount: 10,
   usdAmount: 1000,
-  priceUsd: 0.001,
+  priceUsd: 0.000010,
   txHash: 'MockTxHashA',
   timestamp: Math.floor(Date.now() / 1000),
   isOpenOrClose: true,
@@ -65,7 +65,7 @@ const mockSignalB = {
   remainingHolding: 1000000,
   solAmount: 10,
   usdAmount: 1000,
-  priceUsd: 0.001,
+  priceUsd: 0.000010,
   txHash: 'MockTxHashB',
   timestamp: Math.floor(Date.now() / 1000) + 120, // 2 minutes later
   isOpenOrClose: true,
