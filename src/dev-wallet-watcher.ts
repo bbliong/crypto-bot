@@ -58,6 +58,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
         if (parsed && parsed.active && parsed.target) {
           this.activeTarget = parsed.target;
           console.log(`[DEV-WATCHER] 🔄 Memulihkan target dev dari state tersimpan: ${this.activeTarget?.devWallet} (${this.activeTarget?.symbol})`);
+          setTimeout(() => this.connectAndSubscribe(), 500);
         }
       }
     } catch {}
