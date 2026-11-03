@@ -14,7 +14,7 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S6' | 'S7' | 'BOTH';
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S6' | 'S7' | 'S8' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
@@ -22,6 +22,7 @@ export interface FollowerLiveConfig {
   stakeUsdS6Pool2?: number;
   stakeUsdS7Pool1?: number;
   stakeUsdS7Pool2?: number;
+  stakeUsdS8?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -205,6 +206,9 @@ export function saveFollowerLiveConfig(
   }
   if (patch.stakeUsdS7Pool2 !== undefined || updated.stakeUsdS7Pool2 === undefined) {
     updated.stakeUsdS7Pool2 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS7Pool2 !== undefined ? patch.stakeUsdS7Pool2 : updated.stakeUsdS7Pool2) || 2.0));
+  }
+  if (patch.stakeUsdS8 !== undefined || updated.stakeUsdS8 === undefined) {
+    updated.stakeUsdS8 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS8 !== undefined ? patch.stakeUsdS8 : updated.stakeUsdS8) || 1.0));
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;
