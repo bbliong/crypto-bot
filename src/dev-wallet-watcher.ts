@@ -51,6 +51,19 @@ export class SingleDevWalletWatcher extends EventEmitter {
     this.wsUrl = options.wsUrl || 'wss://api.mainnet-beta.solana.com';
     this.rpcUrl = options.rpcUrl || 'https://api.mainnet-beta.solana.com';
     this.dataDir = options.dataDir || path.resolve(process.cwd(), 'data');
+
+    // Pulihkan activeTarget yang tersimpan sebelumnya agar tidak reset saat service restart
+    try {
+      const stateFile = path.join(this.dataDir, 'follower-dev-watcher-state.json');
+      if (fs.existsSync(stateFile)) {
+        const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        if (parsed && parsed.active && parsed.target) {
+          this.activeTarget = parsed.target;
+          console.log(`[DEV-WATCHER] 🔄 Memulihkan target dev dari state tersimpan: ${this.activeTarget?.devWallet} (${this.activeTarget?.symbol})`);
+        }
+      }
+    } catch {}
+
     this.saveState();
   }
 

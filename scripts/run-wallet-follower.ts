@@ -789,7 +789,9 @@ export class WalletFollowerRunner {
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
 
     // Pantau HANYA 1 Dev Wallet secara real-time via Solana WebSocket (Sub-second radar)
-    if (isGroundZero && signal.priceUsd <= GROUND_ZERO_MAX_PRICE_USD) {
+    const currentWatched = this.devWatcher.getActiveTarget();
+    const shouldWatch = (isGroundZero && signal.priceUsd <= GROUND_ZERO_MAX_PRICE_USD) || (!currentWatched && signal.priceUsd <= 0.000050) || (currentWatched && currentWatched.mint !== signal.mint && signal.priceUsd <= 0.000050);
+    if (shouldWatch) {
       this.devWatcher.watchSingleDev(signal.mint, signal.symbol).catch((err: any) => {
         console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
       });
