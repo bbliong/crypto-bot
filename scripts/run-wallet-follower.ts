@@ -748,10 +748,10 @@ export class WalletFollowerRunner {
     const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
 
-    // Filter Anti-Pucuk (Ground-Zero Price Cap): Target buy price wajib <= $0.000020
+    // Filter Anti-Pucuk (Ground-Zero Price Cap): Jika ini First Buy, harga wajib <= $0.000020
     const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
-    if (signal.priceUsd > GROUND_ZERO_MAX_PRICE_USD) {
-      console.log(`[PRICE CAP GATE] 🚫 Harga target $${signal.priceUsd.toFixed(8)} melebihi batas Ground Zero $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)}. Melewati buy (anti-pucuk)!`);
+    if (isGroundZero && signal.priceUsd > GROUND_ZERO_MAX_PRICE_USD) {
+      console.log(`[PRICE CAP GATE] 🚫 Target First Buy pada $${signal.priceUsd.toFixed(8)} melebihi batas Ground Zero $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)}. Melewati buy (anti-pucuk)!`);
       this.multiDryRunEngine.handleTargetBuy(signal, false);
       return;
     }

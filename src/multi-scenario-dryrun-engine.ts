@@ -285,30 +285,11 @@ export class MultiScenarioDryRunEngine {
     const pIn = signal.priceUsd;
     if (pIn <= 0) return;
 
-    // Filter Anti-Pucuk (Ground-Zero Price Cap): Target buy price wajib <= $0.000020
-    const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
-    if (pIn > GROUND_ZERO_MAX_PRICE_USD) {
-      scenario.recentEvents.unshift({
-        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: now,
-        timeWib,
-        scenarioId: scenario.id,
-        action: 'SKIP',
-        symbol: signal.symbol,
-        mint: signal.mint,
-        priceUsd: pIn,
-        availableCashAfter: scenario.availableCash,
-        investedCashAfter: scenario.investedCash,
-        reason: `REJECT_NON_GROUND_ZERO_PRICE_CAP (Target price $${pIn.toFixed(7)} > $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)})`,
-      });
-      if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
-      return;
-    }
-
     let pos = scenario.openPositions.find(p => p.mint === signal.mint);
 
-    // Jika posisi belum ada: wajib Ground Zero (First Buy dari saldo 0)
+    // Jika posisi belum ada:
     if (!pos) {
+      // 1. Wajib First Buy (Ground Zero dari saldo 0)
       if (!isGroundZero) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -321,7 +302,27 @@ export class MultiScenarioDryRunEngine {
           priceUsd: pIn,
           availableCashAfter: scenario.availableCash,
           investedCashAfter: scenario.investedCash,
-          reason: 'REJECT_MID_FLIGHT (Target held tokens before)',
+          reason: 'REJECT_MID_FLIGHT (Bukan First Buy / Target sudah pegang token)',
+        });
+        if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+        return;
+      }
+
+      // 2. Filter Anti-Pucuk (Ground-Zero Price Cap): Target First Buy price wajib <= $0.000020
+      const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
+      if (pIn > GROUND_ZERO_MAX_PRICE_USD) {
+        scenario.recentEvents.unshift({
+          id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: now,
+          timeWib,
+          scenarioId: scenario.id,
+          action: 'SKIP',
+          symbol: signal.symbol,
+          mint: signal.mint,
+          priceUsd: pIn,
+          availableCashAfter: scenario.availableCash,
+          investedCashAfter: scenario.investedCash,
+          reason: `REJECT_NON_GROUND_ZERO_PRICE_CAP (First Buy tapi harga pucuk $${pIn.toFixed(7)} > $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)})`,
         });
         if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
         return;
