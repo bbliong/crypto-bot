@@ -78,6 +78,7 @@ export class WalletFollowerRunner {
   private heliusApiKey = '';
   private heliusPollInterval: NodeJS.Timeout | null = null;
   private fastSellRetryInterval: NodeJS.Timeout | null = null;
+  private timeStopInterval: NodeJS.Timeout | null = null;
   private isPollingHelius = false;
   private probeQueue: Array<{
     side: 'BUY' | 'SELL';
@@ -448,6 +449,13 @@ export class WalletFollowerRunner {
     // Loop retry cepat (1.5 detik) khusus eksekusi Real Sell jika rute AMM sempat gagal/delay
     this.fastSellRetryInterval = setInterval(() => this.fastRetryPendingRealSells(), 1500);
 
+    // Loop time-stop aktif (setiap 1 detik) khusus Skenario 7 Time-Stop (Force Exit @ 28s)
+    this.timeStopInterval = setInterval(() => {
+      try {
+        this.multiDryRunEngine.checkTimeStopExits(28000);
+      } catch {}
+    }, 1000);
+
     if (durationSeconds > 0) {
       console.log(`[FOLLOWER] Berjalan dengan batas waktu ${durationSeconds} detik...`);
       await new Promise(r => setTimeout(r, durationSeconds * 1000));
@@ -479,6 +487,10 @@ export class WalletFollowerRunner {
     if (this.fastSellRetryInterval) {
       clearInterval(this.fastSellRetryInterval);
       this.fastSellRetryInterval = null;
+    }
+    if (this.timeStopInterval) {
+      clearInterval(this.timeStopInterval);
+      this.timeStopInterval = null;
     }
     if (this.devWatcher) {
       this.devWatcher.unwatch();
@@ -1698,7 +1710,10 @@ export class WalletFollowerRunner {
       return scUpper.includes('4') || scUpper.includes('SINGLE');
     }
     if (targetSc === 'S6' || targetSc === 'SCE6' || targetSc === 'SCENARIO_6') {
-      return scUpper.includes('6') || scUpper.includes('REDEPLOY') || scUpper.includes('SNIPER');
+      return scUpper.includes('6') || scUpper.includes('REDEPLOY');
+    }
+    if (targetSc === 'S7' || targetSc === 'SCE7' || targetSc === 'SCENARIO_7') {
+      return scUpper.includes('7') || scUpper.includes('TIME_STOP');
     }
     return false;
   }

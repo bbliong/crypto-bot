@@ -32,13 +32,27 @@ export const SCENARIO_META = {
       const s = (id || '') + ' ' + (type || '');
       return s.includes('SCENARIO_6') || s.includes('REDEPLOY_SNIPER');
     }
+  },
+  sce7: {
+    id: 'sce7',
+    canonicalKey: 's7',
+    name: 'Skenario 7: Time-Stop Sniper (Stage 1 @ 5% + Force Sell 100% @ 28s)',
+    shortName: 'Skenario 7',
+    description: 'Time-Stop Hybrid: TP 1 (50%) saat target sell >= 5%, dan Force Sell 100% tepat di Detik 28 sebelum dev rugpull.',
+    ruleBadge: 'Time-Stop Sniper | TP1 5% & Force 28s',
+    color: '#06b6d4',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_7') || s.includes('TIME_STOP');
+    }
   }
 };
 
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
-  if (str.includes('6') || str.includes('redeploy') || str.includes('sniper')) return 'sce6';
+  if (str.includes('7') || str.includes('time_stop') || str.includes('timestop')) return 'sce7';
+  if (str.includes('6') || str.includes('redeploy')) return 'sce6';
   return 'sce4';
 }
 

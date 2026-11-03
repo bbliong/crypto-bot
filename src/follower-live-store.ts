@@ -14,12 +14,14 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S6' | 'BOTH';
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S6' | 'S7' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
   stakeUsdS6Pool1?: number;
   stakeUsdS6Pool2?: number;
+  stakeUsdS7Pool1?: number;
+  stakeUsdS7Pool2?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -173,7 +175,7 @@ export function saveFollowerLiveConfig(
 
   if (patch.autobuyScenario !== undefined) {
     const sc = String(patch.autobuyScenario).toUpperCase();
-    if (['OFF', 'DRY_RUN', 'S4', 'S6', 'BOTH'].includes(sc)) {
+    if (['OFF', 'DRY_RUN', 'S4', 'S6', 'S7', 'BOTH'].includes(sc)) {
       updated.autobuyScenario = sc as any;
       updated.enabled = sc !== 'OFF';
     }
@@ -197,6 +199,12 @@ export function saveFollowerLiveConfig(
   }
   if (patch.stakeUsdS6Pool2 !== undefined || updated.stakeUsdS6Pool2 === undefined) {
     updated.stakeUsdS6Pool2 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS6Pool2 !== undefined ? patch.stakeUsdS6Pool2 : updated.stakeUsdS6Pool2) || 7.0));
+  }
+  if (patch.stakeUsdS7Pool1 !== undefined || updated.stakeUsdS7Pool1 === undefined) {
+    updated.stakeUsdS7Pool1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS7Pool1 !== undefined ? patch.stakeUsdS7Pool1 : updated.stakeUsdS7Pool1) || 1.0));
+  }
+  if (patch.stakeUsdS7Pool2 !== undefined || updated.stakeUsdS7Pool2 === undefined) {
+    updated.stakeUsdS7Pool2 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS7Pool2 !== undefined ? patch.stakeUsdS7Pool2 : updated.stakeUsdS7Pool2) || 2.0));
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;
