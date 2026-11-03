@@ -42,8 +42,6 @@ export class SingleDevWalletWatcher extends EventEmitter {
   private pingInterval: NodeJS.Timeout | null = null;
   private dataDir: string;
   private browserPage: any = null;
-  private devTokensPollInterval: NodeJS.Timeout | null = null;
-  private knownDevMints: Set<string> = new Set();
 
   constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string } = {}) {
     super();
@@ -197,11 +195,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
     this.saveState();
     console.log(`[DEV-WATCHER] 🎯 Terkunci pada 1 Dev: ${target.devWallet} (Token: ${target.symbol} | IPFS: ${target.ipfsHash || '-'})`);
 
-    // 3. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut
+    // 3. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut (100% Real-time Pure WebSocket)
     this.connectAndSubscribe();
-
-    // 4. Pasang Poller GMGN dev_created_tokens sebagai radar ganda (Dual-Radar)
-    this.startDevTokensPoller(target.devWallet);
     return target;
   }
 
@@ -212,85 +207,9 @@ export class SingleDevWalletWatcher extends EventEmitter {
     if (this.activeTarget) {
       console.log(`[DEV-WATCHER] 🛑 Melepas pengawasan dev: ${this.activeTarget.devWallet} (Token: ${this.activeTarget.symbol})`);
     }
-    this.stopDevTokensPoller();
     this.activeTarget = null;
     this.saveState();
     this.closeWs();
-  }
-
-  private startDevTokensPoller(devWallet: string): void {
-    this.stopDevTokensPoller();
-    if (!this.activeTarget) return;
-
-    this.knownDevMints.add(this.activeTarget.mint);
-
-    const checkGmgnDevTokens = async () => {
-      if (!this.activeTarget || !this.browserPage || this.browserPage.isClosed()) return;
-      try {
-        const tokens = await this.browserPage.evaluate(async (dev: string) => {
-          try {
-            const resp = await fetch(`/api/v1/dev_created_tokens/sol/${dev}`);
-            const json = await resp.json();
-            return json?.data?.tokens || [];
-          } catch {
-            return [];
-          }
-        }, devWallet);
-
-        if (!Array.isArray(tokens) || tokens.length === 0) return;
-
-        // Cek apakah ada token baru yang lahir
-        for (const t of tokens) {
-          const m = t.token_address;
-          if (!m || this.knownDevMints.has(m)) continue;
-
-          // Validasi Re-Deploy: Simbol koin baru wajib sama dengan token yang dimasuki target
-          const targetSym = (this.activeTarget.symbol || '').toUpperCase().trim();
-          const newSym = (t.symbol || '').toUpperCase().trim();
-          if (targetSym && newSym && targetSym !== newSym) {
-            this.knownDevMints.add(m);
-            console.log(`[GMGN DEV-TOKENS SKIP] Dev merilis token '${t.symbol}', tetapi target sedang aktif di '${this.activeTarget.symbol}'. Melewati (Bukan Re-Deploy)...`);
-            continue;
-          }
-
-          // Token baru dari dev terdeteksi (Re-Deploy)!
-          this.knownDevMints.add(m);
-
-          console.log(`\n=========================================================`);
-          console.log(`🚨 [GMGN DEV-TOKENS RADAR] Dev Rilis Token Baru Terdeteksi via API!`);
-          console.log(`   Token Baru : ${t.symbol} [${m.slice(0, 8)}...]`);
-          console.log(`   Dev Wallet : ${devWallet}`);
-          console.log(`   Pool DAMM  : ${t.biggest_pool || '-'}`);
-          console.log(`   Liquidity  : $${t.pool_liquidity || '0'}`);
-          console.log(`=========================================================\n`);
-
-          const event: RedeployDetectedEvent = {
-            oldMint: this.activeTarget ? this.activeTarget.mint : m,
-            newMint: m,
-            symbol: t.symbol || (this.activeTarget ? this.activeTarget.symbol : 'UNKNOWN'),
-            devWallet: devWallet,
-            signature: `gmgn_dev_pool_${t.biggest_pool || Date.now()}`,
-            timestamp: Date.now()
-          };
-
-          this.emit('redeploy_detected', event);
-          break; // tangani 1 token per tick
-        }
-      } catch (err: any) {
-        // quiet error on transient page navigation
-      }
-    };
-
-    checkGmgnDevTokens();
-    this.devTokensPollInterval = setInterval(checkGmgnDevTokens, 2500);
-  }
-
-  private stopDevTokensPoller(): void {
-    if (this.devTokensPollInterval) {
-      clearInterval(this.devTokensPollInterval);
-      this.devTokensPollInterval = null;
-    }
-    this.knownDevMints.clear();
   }
 
   private closeWs(): void {
@@ -422,34 +341,47 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
       if (!tx || !tx.transaction) return;
 
-      // Pada transaksi pool Meteora DAMM v2, akun 13 adalah mint koin baru
-      const accs = tx.transaction.message.accountKeys;
+      // Ekstrak mint koin baru dari innerInstructions (0 network call) atau accountKeys
       let detectedMint = '';
+      const inner = (tx.meta as any)?.innerInstructions || [];
+      for (const g of inner) {
+        for (const ix of (g.instructions || [])) {
+          const m = ix?.parsed?.info?.mint;
+          if (m && m !== 'So11111111111111111111111111111111111111112' && m !== this.activeTarget.mint && m !== this.activeTarget.devWallet) {
+            detectedMint = m;
+            break;
+          }
+        }
+        if (detectedMint) break;
+      }
 
-      for (const a of accs) {
-        const pk = a.pubkey ? a.pubkey.toBase58() : (a as any).toString();
-        // Mint baru bukan devWallet, bukan WSOL, bukan program
-        if (
-          pk !== this.activeTarget.devWallet &&
-          pk !== 'So11111111111111111111111111111111111111112' &&
-          pk !== '11111111111111111111111111111111' &&
-          pk !== 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' &&
-          pk !== 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' &&
-          pk !== 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL' &&
-          pk !== 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG' &&
-          pk !== this.activeTarget.mint
-        ) {
-          // Cek apakah akun ini adalah token mint (punya Decimals / supply)
-          try {
-            const accInfo = await conn.getParsedAccountInfo(new PublicKey(pk));
-            if (accInfo.value && 'parsed' in accInfo.value.data) {
-              const info = accInfo.value.data.parsed?.info;
-              if (info && info.decimals !== undefined && info.supply !== undefined) {
-                detectedMint = pk;
-                break;
+      if (!detectedMint) {
+        const accs = tx.transaction.message.accountKeys;
+        for (const a of accs) {
+          const pk = a.pubkey ? a.pubkey.toBase58() : (a as any).toString();
+          // Mint baru bukan devWallet, bukan WSOL, bukan program
+          if (
+            pk !== this.activeTarget.devWallet &&
+            pk !== 'So11111111111111111111111111111111111111112' &&
+            pk !== '11111111111111111111111111111111' &&
+            pk !== 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' &&
+            pk !== 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' &&
+            pk !== 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL' &&
+            pk !== 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG' &&
+            pk !== this.activeTarget.mint
+          ) {
+            // Cek apakah akun ini adalah token mint (punya Decimals / supply)
+            try {
+              const accInfo = await conn.getParsedAccountInfo(new PublicKey(pk));
+              if (accInfo.value && 'parsed' in accInfo.value.data) {
+                const info = accInfo.value.data.parsed?.info;
+                if (info && info.decimals !== undefined && info.supply !== undefined) {
+                  detectedMint = pk;
+                  break;
+                }
               }
-            }
-          } catch {}
+            } catch {}
+          }
         }
       }
 

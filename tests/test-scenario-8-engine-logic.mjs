@@ -86,20 +86,20 @@ async function run() {
   engine.handleEarlyRedeployBuy(genesisEvtB, 1.0);
   assert.equal(engine.scenarios.s8.openPositions.length, 1);
 
-  // Simulasikan waktu bergeser 46 detik tanpa target buy
+  // Simulasikan waktu bergeser 82 detik tanpa target buy
   const originalNow = Date.now;
-  Date.now = () => nowB + 46000;
+  Date.now = () => nowB + 82000;
   try {
     engine.checkTimeStopExits(28000);
   } finally {
     Date.now = originalNow;
   }
 
-  assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 must be closed by 45s safety timeout');
+  assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 must be closed by 80s safety timeout');
   assert.equal(engine.scenarios.s8.closedTrades.length, 2);
   const tradeB = engine.scenarios.s8.closedTrades[0];
   assert(tradeB.exitReason.includes('TARGET_SKIPPED_DEV_POOL'), 'Must exit due to target no-show');
-  console.log('   ✅ S8 safely exited on 45s timeout:', tradeB.exitReason);
+  console.log('   ✅ S8 safely exited on 80s timeout:', tradeB.exitReason);
 
   console.log('\n🎉 ALL SCENARIO 8 ENGINE LOGIC TESTS (CASES A & B) PASSED 100%!');
 }

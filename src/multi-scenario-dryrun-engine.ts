@@ -1494,13 +1494,13 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
-    // 2. Cek Skenario 8 Timeout (Safety Exit jika Target tidak kunjung masuk dalam 45s sejak Genesis):
+    // 2. Cek Skenario 8 Timeout (Safety Exit jika Target tidak kunjung masuk dalam 80s sejak Genesis):
     const s8 = this.scenarios.s8;
     for (let i = s8.openPositions.length - 1; i >= 0; i--) {
       const pos = s8.openPositions[i];
       if (pos.tokens <= 0) continue;
       const elapsedMs = now - pos.openedAt;
-      if (elapsedMs >= 45000) {
+      if (elapsedMs >= 80000) {
         const timeWib = formatWibDate(now);
         const elapsedSec = Math.round(elapsedMs / 1000);
         const reason = `TARGET_SKIPPED_DEV_POOL (Dev Deploy Pool '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit)`;
