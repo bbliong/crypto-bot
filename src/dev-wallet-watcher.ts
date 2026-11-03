@@ -41,6 +41,9 @@ export class SingleDevWalletWatcher extends EventEmitter {
   private processedSigs: Set<string> = new Set();
   private pingInterval: NodeJS.Timeout | null = null;
   private dataDir: string;
+  private browserPage: any = null;
+  private devTokensPollInterval: NodeJS.Timeout | null = null;
+  private knownDevMints: Set<string> = new Set();
 
   constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string } = {}) {
     super();
@@ -49,6 +52,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
     this.rpcUrl = options.rpcUrl || 'https://api.mainnet-beta.solana.com';
     this.dataDir = options.dataDir || path.resolve(process.cwd(), 'data');
     this.saveState();
+  }
+
+  public setBrowserPage(page: any): void {
+    this.browserPage = page;
+    console.log('[DEV-WATCHER] 🌐 Browser page terhubung untuk GMGN Dev API integration.');
   }
 
   private saveState(): void {
@@ -68,9 +76,33 @@ export class SingleDevWalletWatcher extends EventEmitter {
   }
 
   /**
-   * Resolusi on-chain: Cari dev pembuat koin (genesis fee payer) & IPFS metadata
+   * Resolusi dev pembuat koin (GMGN Creator Tag -> On-Chain Genesis Fallback) & IPFS metadata
    */
   public async resolveDevAndMetadata(mintAddress: string, defaultSymbol: string = 'UNKNOWN'): Promise<{ devWallet: string; symbol: string; uri: string } | null> {
+    // 1. Prioritas Pertama: Cek GMGN Token Holders API (< 100ms via Browser Session)
+    if (this.browserPage && !this.browserPage.isClosed()) {
+      try {
+        const gmgnDev = await this.browserPage.evaluate(async (m: string) => {
+          try {
+            const resp = await fetch(`/vas/api/v1/token_holders/sol/${m}?limit=50&orderby=amount_percentage&direction=desc`);
+            const json = await resp.json();
+            const list = json?.data?.list || [];
+            const creator = list.find((h: any) => (h.maker_token_tags || []).includes('creator') || (h.tags || []).includes('creator'));
+            return creator ? creator.address : null;
+          } catch {
+            return null;
+          }
+        }, mintAddress);
+
+        if (gmgnDev) {
+          console.log(`[DEV-RESOLVER] ⚡ GMGN Creator Tag Terdeteksi Instan: ${gmgnDev}`);
+          return { devWallet: gmgnDev, symbol: defaultSymbol, uri: '' };
+        }
+      } catch (err: any) {
+        console.warn(`[DEV-RESOLVER-GMGN-WARN] ${err?.message}`);
+      }
+    }
+
     try {
       const conn = new Connection(this.rpcUrl, 'confirmed');
       const pubkey = new PublicKey(mintAddress);
@@ -154,6 +186,9 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
     // 3. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut
     this.connectAndSubscribe();
+
+    // 4. Pasang Poller GMGN dev_created_tokens sebagai radar ganda (Dual-Radar)
+    this.startDevTokensPoller(target.devWallet);
     return target;
   }
 
@@ -164,9 +199,76 @@ export class SingleDevWalletWatcher extends EventEmitter {
     if (this.activeTarget) {
       console.log(`[DEV-WATCHER] 🛑 Melepas pengawasan dev: ${this.activeTarget.devWallet} (Token: ${this.activeTarget.symbol})`);
     }
+    this.stopDevTokensPoller();
     this.activeTarget = null;
     this.saveState();
     this.closeWs();
+  }
+
+  private startDevTokensPoller(devWallet: string): void {
+    this.stopDevTokensPoller();
+    if (!this.activeTarget) return;
+
+    this.knownDevMints.add(this.activeTarget.mint);
+
+    const checkGmgnDevTokens = async () => {
+      if (!this.activeTarget || !this.browserPage || this.browserPage.isClosed()) return;
+      try {
+        const tokens = await this.browserPage.evaluate(async (dev: string) => {
+          try {
+            const resp = await fetch(`/api/v1/dev_created_tokens/sol/${dev}`);
+            const json = await resp.json();
+            return json?.data?.tokens || [];
+          } catch {
+            return [];
+          }
+        }, devWallet);
+
+        if (!Array.isArray(tokens) || tokens.length === 0) return;
+
+        // Cek apakah ada token baru yang lahir
+        for (const t of tokens) {
+          const m = t.token_address;
+          if (!m || this.knownDevMints.has(m)) continue;
+
+          // Token baru dari dev terdeteksi!
+          this.knownDevMints.add(m);
+
+          console.log(`\n=========================================================`);
+          console.log(`🚨 [GMGN DEV-TOKENS RADAR] Dev Rilis Token Baru Terdeteksi via API!`);
+          console.log(`   Token Baru : ${t.symbol} [${m.slice(0, 8)}...]`);
+          console.log(`   Dev Wallet : ${devWallet}`);
+          console.log(`   Pool DAMM  : ${t.biggest_pool || '-'}`);
+          console.log(`   Liquidity  : $${t.pool_liquidity || '0'}`);
+          console.log(`=========================================================\n`);
+
+          const event: RedeployDetectedEvent = {
+            oldMint: this.activeTarget ? this.activeTarget.mint : m,
+            newMint: m,
+            symbol: t.symbol || (this.activeTarget ? this.activeTarget.symbol : 'UNKNOWN'),
+            devWallet: devWallet,
+            signature: `gmgn_dev_pool_${t.biggest_pool || Date.now()}`,
+            timestamp: Date.now()
+          };
+
+          this.emit('redeploy_detected', event);
+          break; // tangani 1 token per tick
+        }
+      } catch (err: any) {
+        // quiet error on transient page navigation
+      }
+    };
+
+    checkGmgnDevTokens();
+    this.devTokensPollInterval = setInterval(checkGmgnDevTokens, 2500);
+  }
+
+  private stopDevTokensPoller(): void {
+    if (this.devTokensPollInterval) {
+      clearInterval(this.devTokensPollInterval);
+      this.devTokensPollInterval = null;
+    }
+    this.knownDevMints.clear();
   }
 
   private closeWs(): void {

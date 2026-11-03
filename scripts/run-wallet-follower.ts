@@ -521,6 +521,7 @@ export class WalletFollowerRunner {
 
       this.page = targetTab;
       this.liveAdapter.attachPageListeners(this.page);
+      this.devWatcher.setBrowserPage(this.page);
 
       // Trigger user info fetch to capture fresh Bearer Authorization header immediately
       this.page.evaluate(() => {
@@ -1474,6 +1475,7 @@ export class WalletFollowerRunner {
           this.cdp.on('Network.webSocketFrameReceived', ({ response }) => {
             this.handleIncomingWsFrame(response.payloadData);
           });
+          this.devWatcher.setBrowserPage(this.page);
           console.log(`[WATCHDOG] ✅ Berhasil merecover tab target wallet!`);
         }
       } catch (err: any) {
