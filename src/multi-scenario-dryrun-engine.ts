@@ -847,7 +847,105 @@ export class MultiScenarioDryRunEngine {
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
         changed = true;
 
-        // Auto Liquidation Gate: Jika harga crash > 95% dari harga entry (Rugpull/Liquidity Drained)
+        // 1. Hard Take-Profit Gate: Jika harga melonjak >= +200% (>= 3x dari harga entry)
+        // Eksekusi sell 100% instan untuk mengamankan profit multi-bagger sebelum dev rugpull
+        if (pos.avgEntryPriceUsd > 0 && priceUsd >= pos.avgEntryPriceUsd * 3.0) {
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+          const tokensToSell = pos.tokens;
+          const costBasisSold = pos.costBasisUsd;
+
+          const grossReceived = tokensToSell * priceUsd;
+          const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
+          const pnlUsd = Number((netReceived - costBasisSold).toFixed(2));
+
+          pos.realizedPnlUsd = Number(((pos.realizedPnlUsd || 0) + pnlUsd).toFixed(2));
+          pos.feesPaidUsd = Number((pos.feesPaidUsd + REAL_SWAP_FEE_USD).toFixed(3));
+          scenario.availableCash = Number((scenario.availableCash + netReceived).toFixed(2));
+          scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
+          scenario.realizedPnl = Number((scenario.realizedPnl + pnlUsd).toFixed(2));
+
+          scenario.openPositions.splice(posIdx, 1);
+
+          const initialInvested = pos.initialCostBasisUsd || (pos.stage1Exited ? costBasisSold * 2 : costBasisSold);
+          const totalInvested = initialInvested;
+          const roi = totalInvested > 0 ? (pos.realizedPnlUsd / totalInvested) * 100 : 0.0;
+          const isWin = pos.realizedPnlUsd >= 0;
+
+          if (isWin) scenario.wins += 1;
+          else scenario.losses += 1;
+          scenario.totalTrades += 1;
+
+          const exitReason = `HARD_TP_200%_CEILING (Gain: +${roi.toFixed(1)}% >= +200% | Auto-Harvest Profit)`;
+
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SELL',
+            symbol: pos.symbol,
+            mint: pos.mint,
+            usdReceived: netReceived,
+            feeUsd: REAL_SWAP_FEE_USD,
+            tokens: tokensToSell,
+            priceUsd,
+            pnlUsd,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
+            reason: `${exitReason} (Fee: $${REAL_SWAP_FEE_USD})`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+          scenario.closedTrades.unshift({
+            mint: pos.mint,
+            symbol: pos.symbol,
+            tokenName: pos.tokenName,
+            openedAt: pos.openedAt,
+            closedAt: now,
+            entryCount: pos.entryCount,
+            totalInvestedUsd: Number(totalInvested.toFixed(2)),
+            totalReturnedUsd: Number((totalInvested + pos.realizedPnlUsd).toFixed(2)),
+            totalFeesPaidUsd: Number(pos.feesPaidUsd.toFixed(3)),
+            realizedPnlUsd: Number(pos.realizedPnlUsd.toFixed(2)),
+            roiPct: Number(roi.toFixed(1)),
+            exitReason,
+            isWin,
+          });
+          if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+
+          // Trigger onTradeAction SELL
+          if (this.onTradeAction) {
+            try {
+              const sellSignal: WalletTradeSignal = {
+                action: 'sell',
+                mint: pos.mint,
+                symbol: pos.symbol,
+                tokenName: pos.tokenName,
+                tokenAmount: tokensToSell,
+                remainingHolding: 0,
+                solAmount: 0,
+                usdAmount: netReceived,
+                priceUsd,
+                txHash: '',
+                timestamp: Math.floor(now / 1000),
+                isOpenOrClose: true,
+                isFirstBuy: false,
+              };
+              this.onTradeAction('SELL', scenario.id, sellSignal, {
+                stakeUsd: netReceived,
+                tokens: tokensToSell,
+                priceUsd,
+                reason: exitReason,
+              });
+            } catch (err: any) {
+              console.warn(`[HARD-TP-ACTION-ERR] ${err?.message}`);
+            }
+          }
+          continue;
+        }
+
+        // 2. Auto Liquidation Gate: Jika harga crash > 95% dari harga entry (Rugpull/Liquidity Drained)
         if (pos.avgEntryPriceUsd > 0 && priceUsd < pos.avgEntryPriceUsd * 0.05) {
           const now = Date.now();
           const timeWib = formatWibDate(now);
