@@ -64,13 +64,22 @@ async function run() {
   };
 
   engine.handleTargetBuy(targetBuySignal, true);
-  assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 position must be closed immediately on target buy');
+  assert.equal(engine.scenarios.s8.openPositions.length, 1, 'S8 position must hold for 20s post-target inflow');
+
+  // Simulasikan 21 detik pasca target masuk
+  const targetEnteredTime = engine.scenarios.s8.openPositions[0].targetEnteredAt;
+  const originalNow = Date.now;
+  Date.now = () => targetEnteredTime + 21000;
+  engine.checkTimeStopExits(28000);
+  Date.now = originalNow;
+
+  assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 position must be closed after 20s');
   assert.equal(engine.scenarios.s8.closedTrades.length, 1, 'Trade must be closed');
   const closed = engine.scenarios.s8.closedTrades[0];
-  assert(closed.exitReason.includes('TARGET_BUY_INFLOW_EXIT'), 'Exit reason must mention target buy inflow');
+  assert(closed.exitReason.includes('TIME_STOP_'), 'Exit reason must mention time stop');
   assert(closed.isWin, 'Must be a WIN');
   assert(closed.realizedPnlUsd > 0.8, 'PnL must be significant (+40% on $2.00)');
-  console.log('   ✅ S8 dumped into target buy! Return: $' + closed.totalReturnedUsd + ', PnL: +$' + closed.realizedPnlUsd + ' (' + closed.roiPct + '%)');
+  console.log('   ✅ S8 held and exited at 20s post-target! Return: $' + closed.totalReturnedUsd + ', PnL: +$' + closed.realizedPnlUsd + ' (' + closed.roiPct + '%)');
 
   // 3. State persistence test
   const rawSaved = readFileSync(join(testDir, 'dryrun-3scenarios-live.json'), 'utf8');

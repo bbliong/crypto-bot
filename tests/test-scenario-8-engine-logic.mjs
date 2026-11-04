@@ -61,13 +61,23 @@ async function run() {
 
   actions.length = 0;
   engine.handleTargetBuy(targetBuySignal, true);
-  assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 must be 100% closed when target buys');
+  assert.equal(engine.scenarios.s8.openPositions.length, 1, 'S8 must hold position waiting for 20s post-target inflow');
+  assert(engine.scenarios.s8.openPositions[0].targetEnteredAt, 'targetEnteredAt must be recorded');
+
+  // Simulasikan 21 detik pasca target masuk (checkTimeStopExits)
+  const targetEnteredTime = engine.scenarios.s8.openPositions[0].targetEnteredAt;
+  const originalNowA = Date.now;
+  Date.now = () => targetEnteredTime + 21000;
+  engine.checkTimeStopExits(28000);
+  Date.now = originalNowA;
+
+  assert.equal(engine.scenarios.s8.openPositions.length, 0, 'S8 must be closed after 20s post-target inflow');
   assert.equal(engine.scenarios.s8.closedTrades.length, 1, 'Trade must be closed in S8');
   const tradeA = engine.scenarios.s8.closedTrades[0];
-  assert(tradeA.exitReason.includes('TARGET_BUY_INFLOW_EXIT'), 'Exit reason must mention target buy inflow exit');
+  assert(tradeA.exitReason.includes('TIME_STOP_'), 'Exit reason must mention 20s time stop');
   assert(tradeA.isWin, 'Trade must be a WIN');
   assert(tradeA.roiPct >= 20.0, 'ROI must be positive profit from target pump');
-  console.log('   ✅ S8 successfully dumped into target buy inflow! Return: $' + tradeA.totalReturnedUsd + ', PnL: $' + tradeA.realizedPnlUsd + ' (' + tradeA.roiPct + '%)');
+  console.log('   ✅ S8 successfully held and exited at 20s post-target! Return: $' + tradeA.totalReturnedUsd + ', PnL: $' + tradeA.realizedPnlUsd + ' (' + tradeA.roiPct + '%)');
 
   // =========================================================================
   // Test Case B: Target No-Show (Target did not enter within 45s) -> Safety Exit!

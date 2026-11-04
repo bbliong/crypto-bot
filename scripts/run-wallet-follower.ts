@@ -1883,8 +1883,16 @@ export class WalletFollowerRunner {
       };
 
       // Cek apakah skenario ini DIIZINKAN untuk Real Order batch_order & reclaim rent
-      const isRealOrderTargeted = this.isScenarioAllowedForRealOrder(scenarioId, config);
+      let isRealOrderTargeted = this.isScenarioAllowedForRealOrder(scenarioId, config);
       const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
+
+      if (isRealOrderTargeted && side === 'BUY') {
+        const completedBuys = state.positions.filter(p => p.status === 'HOLDING' || p.status === 'CLOSED').length;
+        if (config.maxBuysQuota > 0 && completedBuys >= config.maxBuysQuota) {
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Kuota Max Buys (${completedBuys}/${config.maxBuysQuota}) telah tercapai! Mengalihkan ke mode simulasi saja...`);
+          isRealOrderTargeted = false;
+        }
+      }
 
       if (!isRealOrderTargeted) {
         let finalQuote = route.routeData?.quote;
@@ -1975,16 +1983,69 @@ export class WalletFollowerRunner {
       console.log(`[GMGN SUBMIT ORDER RESPONSE: ${scenarioId}] Status: ${submitRes.status} | Ok: ${submitRes.ok} | Order ID: ${submitRes.orderId || '-'} | Hash: ${submitRes.hash || '-'} | Error/Msg: ${submitRes.error || 'SUCCESS'}`);
       console.log(`=========================================================\n`);
 
-      // Sinkronkan SELL nyata ke engine
+      // Sinkronkan SELL nyata ke engine & update state posisi riil
       if (side === 'SELL' && submitRes.ok && route.routeData?.quote) {
         const solOut = Number(route.routeData.quote.outAmount) / 1e9;
         const usdReceived = solOut * (this.solPriceUsd > 0 ? this.solPriceUsd : 93.0);
         const realExitPrice = route.impliedPriceUsd || (usdReceived / (Number(route.routeData.quote.inAmount) / 1e6));
         this.multiDryRunEngine.syncRealSellExecution(scenarioId, signal.mint, realExitPrice, usdReceived, reason);
+
+        // Update status posisi riil menjadi CLOSED
+        const curRealState = readFollowerRealState(this.dataDir);
+        const targetPos = curRealState.positions.find(p => p.mint === signal.mint && (p.status === 'HOLDING' || p.status === 'ACTIVE'));
+        if (targetPos) {
+          targetPos.status = 'CLOSED';
+          targetPos.updatedAt = Date.now();
+          targetPos.exitPriceUsd = realExitPrice;
+          targetPos.realizedPnlUsd = usdReceived - targetPos.costBasisUsd;
+          targetPos.sells.push(submitRes);
+          saveFollowerRealState(this.dataDir, curRealState);
+        }
+
+        // Reclaim rent SOL seketika pasca-sell
+        try {
+          const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
+          burnAndCloseTokenAccount(signal.mint).catch(() => {});
+        } catch {}
+
+        // Jika kuota tercapai, otomatis set autobuyScenario = 'DRY_RUN' agar aman
+        const totalCompleted = curRealState.positions.filter(p => p.status === 'CLOSED').length;
+        if (config.maxBuysQuota > 0 && totalCompleted >= config.maxBuysQuota) {
+          console.log(`\n=========================================================`);
+          console.log(`🏁 [TEST SELESAI] Kuota 1x Test Buy Asli telah tuntas (${totalCompleted}/${config.maxBuysQuota})!`);
+          console.log(`   Otomatis menonaktifkan Real Auto-Buy (autobuyScenario = 'DRY_RUN') demi keamanan.`);
+          console.log(`=========================================================\n`);
+          config.autobuyScenario = 'DRY_RUN';
+          saveFollowerLiveConfig(this.dataDir, config);
+        }
       }
 
       // Cek kondisi sebenarnya beli berapa angkanya (Post-Buy On-Chain Verification & Sync)
       if (side === 'BUY' && submitRes.ok) {
+        const newRealPos = {
+          id: `real_${signal.mint.slice(0, 8)}_${Date.now()}`,
+          mint: signal.mint,
+          symbol: signal.symbol,
+          tokenName: signal.tokenName,
+          lane: scenarioId,
+          status: 'HOLDING',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          wallet,
+          acquiredTokens: Number(route.routeData?.quote?.outAmount || 0) / 1e6,
+          remainingTokens: Number(route.routeData?.quote?.outAmount || 0) / 1e6,
+          costBasisUsd: stakeUsd,
+          realizedPnlUsd: 0,
+          entryPriceUsd: route.impliedPriceUsd || signal.priceUsd,
+          stage1Exited: false,
+          buys: [submitRes],
+          sells: [] as any[],
+          audit: [{ at: Date.now(), type: 'REAL_BUY_SUBMITTED', details: submitRes }],
+          lastError: submitRes.error,
+        };
+        state.positions.unshift(newRealPos as any);
+        saveFollowerRealState(this.dataDir, state);
+
         console.log(`[POST-BUY SYNC] ⏳ Menunggu settlement blockchain untuk verifikasi jumlah token aktual yang terbeli...`);
         setTimeout(async () => {
           try {

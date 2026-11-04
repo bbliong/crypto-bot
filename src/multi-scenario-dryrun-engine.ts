@@ -28,6 +28,7 @@ export interface ScenarioPosition {
   initialTokens?: number;
   initialCostBasisUsd?: number;
   boughtAtGenesis?: boolean;
+  targetEnteredAt?: number;
   pairAddress?: string;
   exchange?: string;
 }
@@ -330,22 +331,22 @@ export class MultiScenarioDryRunEngine {
     });
     this.autoRotateSameSymbolPositions(this.scenarios.s7, signal, now, timeWib);
 
-    // 4. Skenario 8 (Front-Run Dev & Dump on Target Entry)
+    // 4. Skenario 8 (Front-Run Dev & Hold 20s Post-Target Inflow)
     // Jika S8 memiliki posisi terbuka pada koin ini yang dibeli di Genesis:
-    // TARGET SUDAH MASUK (15-20 SOL)! Kurva harga terpompa! DUMP 100% KE LIKUIDITAS MASUK TARGET!
+    // TARGET SUDAH MASUK (15-20 SOL)! Kurva harga terpompa! Kunci waktu masuk target & tahan hingga 20 detik!
     const s8PosIdx = this.scenarios.s8.openPositions.findIndex(p => p.mint === signal.mint);
     if (s8PosIdx >= 0) {
       const s8Pos = this.scenarios.s8.openPositions[s8PosIdx];
-      if (s8Pos.boughtAtGenesis) {
-        const exitReason = `TARGET_BUY_INFLOW_EXIT (Target injected ${signal.solAmount} SOL buy, dumping into target entry pump)`;
+      if (s8Pos.boughtAtGenesis && !s8Pos.targetEnteredAt) {
+        s8Pos.targetEnteredAt = now;
+        s8Pos.lastPriceUsd = signal.priceUsd;
         console.log(`\n=========================================================`);
-        console.log(`🎯 [SCENARIO 8 DUMP-ON-TARGET] Target Masuk Beli ${signal.solAmount} SOL!`);
+        console.log(`🎯 [SCENARIO 8 TARGET INFLOW DETECTED] Target Masuk Beli ${signal.solAmount} SOL!`);
         console.log(`   Token    : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
         console.log(`   Harga In : $${s8Pos.avgEntryPriceUsd.toFixed(8)} (Floor Genesis)`);
         console.log(`   Harga Out: $${signal.priceUsd.toFixed(8)} (Pumped by Target)`);
-        console.log(`   Aksi     : SELL 100% Dump ke Likuiditas Target!`);
+        console.log(`   Strategi : Tahan posisi selama 20 detik pasca-target masuk untuk maksimalkan profit!`);
         console.log(`=========================================================\n`);
-        this.executeScenarioExit(this.scenarios.s8, s8PosIdx, signal.priceUsd, now, timeWib, exitReason);
       }
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s8, signal, now, timeWib);
@@ -966,10 +967,20 @@ export class MultiScenarioDryRunEngine {
       const pos = scenario.openPositions[posIdx];
       if (pos.tokens <= 0) continue;
 
-      // Jika Skenario 8 masih memegang posisi saat target sell: Full Exit seketika!
+      // Jika Skenario 8 masih memegang posisi saat target sell:
       if (scenario.id === 'SCENARIO_8_FRONTRUN_DEV') {
-        const exitReason = `S8_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol}, dumping remaining position)`;
-        this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+        pos.lastPriceUsd = pOut;
+        if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
+        const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
+        pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
+
+        // Safety exit jika target dump >= 15% atau Full Exit sebelum 20 detik
+        if (pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit) {
+          const exitReason = `S8_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol} ${pos.targetCumulativeSellRatioPct}% >= 15%, safety exit)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+        // Jika target baru jual sedikit (< 15%), S8 tetap hold menuju 20 detik
         continue;
       }
 
@@ -1531,11 +1542,27 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
-    // 2. Cek Skenario 8 Timeout (Safety Exit jika Target tidak kunjung masuk dalam 80s sejak Genesis):
+    // 2. Cek Skenario 8 Time-Stop (Force Exit @ 20s pasca Target Inflow) & Timeout 80s:
     const s8 = this.scenarios.s8;
     for (let i = s8.openPositions.length - 1; i >= 0; i--) {
       const pos = s8.openPositions[i];
       if (pos.tokens <= 0) continue;
+
+      // Kasus A: Target sudah masuk, hitung apakah sudah mencapai 20 detik pasca-target masuk!
+      if (pos.targetEnteredAt) {
+        const elapsedSinceTarget = now - pos.targetEnteredAt;
+        if (elapsedSinceTarget >= 20000) {
+          const timeWib = formatWibDate(now);
+          const elapsedSec = Math.round(elapsedSinceTarget / 1000);
+          const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+          const reason = `TIME_STOP_${elapsedSec}S_POST_TARGET_ENTRY (Reached 20s post-target inflow, locked profit before dump)`;
+          this.executeScenarioExit(s8, i, pOut, now, timeWib, reason);
+          changed = true;
+          continue;
+        }
+      }
+
+      // Kasus B: Target tidak kunjung masuk dalam 80s sejak Genesis
       const elapsedMs = now - pos.openedAt;
       if (elapsedMs >= 80000) {
         const timeWib = formatWibDate(now);
