@@ -335,14 +335,22 @@ export class SingleDevWalletWatcher extends EventEmitter {
     console.log(`⚡ [DEV-RADAR TRIGGER] Dev ${this.activeTarget.devWallet.slice(0, 8)}... baru saja memanggil InitializePool (tx: ${sig.slice(0, 12)}...)!`);
     console.log(`=========================================================`);
 
-    // Ambil detail transaksi genesis koin baru secara instan
+    // Ambil detail transaksi genesis koin baru secara instan (retry hingga 4x / 600ms agar pasti ter-index)
     try {
       const conn = new Connection(this.rpcUrl, 'confirmed');
-      const tx = await conn.getParsedTransaction(sig, {
-        maxSupportedTransactionVersion: 0
-      });
+      let tx: any = null;
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        tx = await conn.getParsedTransaction(sig, {
+          maxSupportedTransactionVersion: 0
+        });
+        if (tx && tx.transaction) break;
+        if (attempt < 4) await new Promise(r => setTimeout(r, 150));
+      }
 
-      if (!tx || !tx.transaction) return;
+      if (!tx || !tx.transaction) {
+        console.warn(`[DEV-RADAR WARN] Tx genesis ${sig.slice(0, 12)}... belum ter-index oleh RPC node.`);
+        return;
+      }
 
       // Ekstrak mint koin baru secara presisi dari transferChecked / transfer di innerInstructions (Base Token liquidity deposit)
       let detectedMint = '';
