@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Connection, PublicKey } from '@solana/web3.js';
+// @ts-ignore
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from '../scripts/solana-rpc-config.mjs';
 
 export interface WatchedDevTarget {
@@ -136,7 +137,6 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
       // 2. Baca isi transaksi genesis untuk mengambil fee payer (Akun 0 = Dev)
       const genesisTx = await conn.getParsedTransaction(oldestSig, {
-        encoding: 'jsonParsed',
         maxSupportedTransactionVersion: 0
       });
       if (!genesisTx || !genesisTx.transaction) return null;
@@ -336,26 +336,68 @@ export class SingleDevWalletWatcher extends EventEmitter {
     try {
       const conn = new Connection(this.rpcUrl, 'confirmed');
       const tx = await conn.getParsedTransaction(sig, {
-        encoding: 'jsonParsed',
         maxSupportedTransactionVersion: 0
       });
 
       if (!tx || !tx.transaction) return;
 
-      // Ekstrak mint koin baru dari innerInstructions (0 network call) atau accountKeys
+      // Ekstrak mint koin baru secara presisi dari transferChecked / transfer di innerInstructions (Base Token liquidity deposit)
       let detectedMint = '';
       const inner = (tx.meta as any)?.innerInstructions || [];
       for (const g of inner) {
         for (const ix of (g.instructions || [])) {
-          const m = ix?.parsed?.info?.mint;
-          if (m && m !== 'So11111111111111111111111111111111111111112' && m !== this.activeTarget.mint && m !== this.activeTarget.devWallet) {
-            detectedMint = m;
-            break;
+          if (ix?.parsed?.type === 'transferChecked' || ix?.parsed?.type === 'transfer') {
+            const m = ix?.parsed?.info?.mint;
+            if (
+              m &&
+              m !== 'So11111111111111111111111111111111111111112' &&
+              m !== this.activeTarget.devWallet &&
+              m !== this.activeTarget.mint
+            ) {
+              detectedMint = m;
+              break;
+            }
           }
         }
         if (detectedMint) break;
       }
 
+      // Fallback 1: cek inner ix mint lain yang bukan WSOL
+      if (!detectedMint) {
+        for (const g of inner) {
+          for (const ix of (g.instructions || [])) {
+            const m = ix?.parsed?.info?.mint;
+            if (
+              m &&
+              m !== 'So11111111111111111111111111111111111111112' &&
+              m !== this.activeTarget.devWallet &&
+              m !== this.activeTarget.mint
+            ) {
+              detectedMint = m;
+              break;
+            }
+          }
+          if (detectedMint) break;
+        }
+      }
+
+      // Fallback 2: cek postTokenBalances (Base Token yang didepositkan ke vault)
+      if (!detectedMint) {
+        const postBalances = (tx.meta as any)?.postTokenBalances || [];
+        for (const b of postBalances) {
+          if (
+            b.mint &&
+            b.mint !== 'So11111111111111111111111111111111111111112' &&
+            b.mint !== this.activeTarget.devWallet &&
+            b.mint !== this.activeTarget.mint
+          ) {
+            detectedMint = b.mint;
+            break;
+          }
+        }
+      }
+
+      // Fallback 3: cek accountKeys
       if (!detectedMint) {
         const accs = tx.transaction.message.accountKeys;
         for (const a of accs) {
@@ -395,6 +437,12 @@ export class SingleDevWalletWatcher extends EventEmitter {
           const tm = exts.find((e: any) => e.extension === 'tokenMetadata')?.state;
           if (tm && tm.symbol) detectedSymbol = tm.symbol;
         } catch {}
+
+        // Abaikan jika LP token internal (MPN)
+        if (detectedSymbol === 'MPN') {
+          console.log(`[DEV-RADAR IGNORE] Mint ${detectedMint.slice(0, 8)}... adalah LP token (MPN). Mengabaikan.`);
+          return;
+        }
 
         const targetSym = (this.activeTarget.symbol || '').toUpperCase().trim();
         const newSym = (detectedSymbol || '').toUpperCase().trim();
