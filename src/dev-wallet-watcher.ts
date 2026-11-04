@@ -23,6 +23,9 @@ export interface RedeployDetectedEvent {
   devWallet: string;
   signature: string;
   timestamp: number;
+  initialMeteoraSol?: number;
+  mainExchange?: 'meteora' | 'pumpswap' | 'raydium';
+  mainPairAddress?: string;
 }
 
 export function extractIpfsHash(uri?: string): string | undefined {
@@ -451,6 +454,55 @@ export class SingleDevWalletWatcher extends EventEmitter {
           return;
         }
 
+        // 1. Hitung saldo awal SOL yang disetor dev ke pool Meteora
+        let initialMeteoraSol = 0;
+        const inner = (tx.meta as any)?.innerInstructions || [];
+        for (const g of inner) {
+          for (const ix of (g.instructions || [])) {
+            if (ix?.parsed?.type === 'transferChecked' || ix?.parsed?.type === 'transfer') {
+              const m = ix?.parsed?.info?.mint;
+              if (m === 'So11111111111111111111111111111111111111112') {
+                const amt = ix?.parsed?.info?.tokenAmount?.uiAmount ?? (ix?.parsed?.info?.lamports ? ix.parsed.info.lamports / 1e9 : 0);
+                if (amt > initialMeteoraSol) initialMeteoraSol = amt;
+              }
+            }
+          }
+        }
+
+        let mainExchange: 'meteora' | 'pumpswap' | 'raydium' = 'meteora';
+        let mainPairAddress = '';
+        let poolLiquidityUsd = 0;
+
+        if (initialMeteoraSol >= 0.1) {
+          mainExchange = 'meteora';
+          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL`);
+        } else {
+          console.log(`[DEV-RADAR POOL WARN] ⚠️ Meteora pool cuma berisi ${initialMeteoraSol.toFixed(6)} SOL (< 0.1 SOL)! Mengecek kolam utama Pump.fun/PumpSwap...`);
+          try {
+            const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${detectedMint}`, { signal: AbortSignal.timeout(1500) });
+            if (res.ok) {
+              const data = await res.json() as any;
+              const pairs = (data.pairs || []).sort((a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+              const bestPair = pairs[0];
+              if (bestPair && (bestPair.liquidity?.usd || 0) > 500) {
+                mainPairAddress = bestPair.pairAddress;
+                poolLiquidityUsd = bestPair.liquidity.usd;
+                if (bestPair.dexId === 'pumpswap' || bestPair.dexId === 'pumpfun') {
+                  mainExchange = 'pumpswap';
+                } else if (bestPair.dexId === 'raydium') {
+                  mainExchange = 'raydium';
+                }
+                console.log(`[DEV-RADAR SMART-REDIRECT] 🎯 Mengalihkan front-run ke kolam utama: ${mainExchange.toUpperCase()} (${bestPair.pairAddress.slice(0, 8)}...) dengan Likuiditas $${poolLiquidityUsd.toLocaleString()}!`);
+              }
+            }
+          } catch {}
+
+          if (initialMeteoraSol < 0.05 && poolLiquidityUsd < 500) {
+            console.log(`[DEV-RADAR SKIP] 🚫 Kolam Meteora (${initialMeteoraSol.toFixed(6)} SOL) dan kolam alternatif tidak memiliki likuiditas valid. Melewati koin debu...`);
+            return;
+          }
+        }
+
         const evt: RedeployDetectedEvent = {
           oldMint: this.activeTarget.mint,
           newMint: detectedMint,
@@ -458,7 +510,10 @@ export class SingleDevWalletWatcher extends EventEmitter {
           ipfsUri: this.activeTarget.ipfsUri,
           devWallet: this.activeTarget.devWallet,
           signature: sig,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          initialMeteoraSol,
+          mainExchange,
+          mainPairAddress,
         };
 
         console.log(`🚀 [DEV-RADAR SUCCESS] DITEMUKAN TOKEN RE-DEPLOY GENERASI 2!`);
@@ -466,6 +521,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
         console.log(`   Mint Baru : ${evt.newMint}`);
         console.log(`   Simbol    : ${evt.symbol}`);
         console.log(`   Dev Wallet: ${evt.devWallet}`);
+        console.log(`   Exchange  : ${evt.mainExchange}`);
         console.log(`   Tx Hash   : ${evt.signature}`);
 
         this.emit('redeploy_detected', evt);

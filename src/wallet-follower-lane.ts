@@ -99,6 +99,8 @@ export interface WalletTradeSignal {
   timestamp: number;
   isOpenOrClose?: boolean;
   isFirstBuy?: boolean;
+  pairAddress?: string;
+  exchange?: string;
 }
 
 export interface FollowerLaneConfig {

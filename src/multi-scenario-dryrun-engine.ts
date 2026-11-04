@@ -28,6 +28,8 @@ export interface ScenarioPosition {
   initialTokens?: number;
   initialCostBasisUsd?: number;
   boughtAtGenesis?: boolean;
+  pairAddress?: string;
+  exchange?: string;
 }
 
 export interface ScenarioTradeRecord {
@@ -356,7 +358,18 @@ export class MultiScenarioDryRunEngine {
    * Dipanggil saat WebSocket Dev-Radar mendeteksi dev membuat koin baru (Gen 2)!
    */
   public handleEarlyRedeployBuy(
-    evt: { oldMint: string; newMint: string; symbol: string; ipfsUri?: string; devWallet: string; signature: string; timestamp: number },
+    evt: {
+      oldMint: string;
+      newMint: string;
+      symbol: string;
+      ipfsUri?: string;
+      devWallet: string;
+      signature: string;
+      timestamp: number;
+      initialMeteoraSol?: number;
+      mainExchange?: 'meteora' | 'pumpswap' | 'raydium';
+      mainPairAddress?: string;
+    },
     customStakeUsd?: number
   ): void {
     const now = evt.timestamp || Date.now();
@@ -372,9 +385,12 @@ export class MultiScenarioDryRunEngine {
       pool2Stake = liveCfg.stakeUsdS6Pool2 || 2.0;
     }
 
+    const targetExchange = evt.mainExchange === 'pumpswap' ? 'pump_amm' : (evt.mainExchange || 'meteora_dammv2');
+
     console.log(`\n=========================================================`);
     console.log(`🚀 [EARLY-BUY RADAR] Mengeksekusi Buy SEBELUM Target Buy:`);
     console.log(`   Token Baru : ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
+    console.log(`   Exchange   : ${targetExchange} (Pool: ${evt.mainPairAddress ? evt.mainPairAddress.slice(0, 8) + '...' : 'Default'})`);
     console.log(`   Modal S6/S7: $${pool2Stake.toFixed(2)} (Pool 2)`);
     console.log(`   Dev Wallet : ${evt.devWallet}`);
     console.log(`=========================================================\n`);
@@ -392,7 +408,9 @@ export class MultiScenarioDryRunEngine {
       txHash: evt.signature,
       timestamp: Math.floor(now / 1000),
       isOpenOrClose: true,
-      isFirstBuy: true
+      isFirstBuy: true,
+      pairAddress: evt.mainPairAddress || '',
+      exchange: targetExchange
     };
 
     // Eksekusi buy di Skenario 6 & Skenario 7
@@ -424,6 +442,18 @@ export class MultiScenarioDryRunEngine {
     const s8CreatedPos = this.scenarios.s8.openPositions.find(p => p.mint === evt.newMint);
     if (s8CreatedPos) {
       s8CreatedPos.boughtAtGenesis = true;
+      s8CreatedPos.pairAddress = evt.mainPairAddress || '';
+      s8CreatedPos.exchange = targetExchange;
+    }
+    const s6CreatedPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
+    if (s6CreatedPos) {
+      s6CreatedPos.pairAddress = evt.mainPairAddress || '';
+      s6CreatedPos.exchange = targetExchange;
+    }
+    const s7CreatedPos = this.scenarios.s7.openPositions.find(p => p.mint === evt.newMint);
+    if (s7CreatedPos) {
+      s7CreatedPos.pairAddress = evt.mainPairAddress || '';
+      s7CreatedPos.exchange = targetExchange;
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
 
@@ -533,6 +563,8 @@ export class MultiScenarioDryRunEngine {
         feesPaidUsd: REAL_SWAP_FEE_USD,
         initialTokens: tokensBought,
         initialCostBasisUsd: actualStake,
+        pairAddress: signal.pairAddress || '',
+        exchange: signal.exchange || '',
       };
       scenario.openPositions.unshift(pos);
 
@@ -751,6 +783,8 @@ export class MultiScenarioDryRunEngine {
           timestamp: Math.floor(now / 1000),
           isOpenOrClose: true,
           isFirstBuy: false,
+          pairAddress: pos.pairAddress || '',
+          exchange: pos.exchange || '',
         };
         const p = this.onTradeAction('SELL', scenario.id, signal, {
           tokens: tokensToSell,

@@ -674,6 +674,8 @@ export class WalletFollowerRunner {
       timestamp: Number(item.t) || Math.floor(Date.now() / 1000),
       isOpenOrClose,
       isFirstBuy,
+      pairAddress: item.pa || '',
+      exchange: item.exchange || ''
     };
 
     console.log(`\n---------------------------------------------------------`);
@@ -1673,6 +1675,20 @@ export class WalletFollowerRunner {
     priceUsd: number;
     reason: string;
   }): void {
+    // S8 adalah Genesis Front-Run yang super sensitif waktu (< 200ms).
+    // Eksekusi LANGSUNG secara paralel tanpa antre di belakang retry loop skenario lain!
+    if (item.scenarioId.includes('8') || item.scenarioId.includes('FRONTRUN')) {
+      this.executeGmgnApiProbe(
+        item.side,
+        item.scenarioId,
+        item.signal,
+        item.stakeUsd,
+        item.reason,
+        item.tokens
+      ).catch(err => console.warn(`[S8 IMMEDIATE PROBE ERR] ${err?.message}`));
+      return;
+    }
+
     this.probeQueue.push(item);
     this.processProbeQueue().catch(err => console.warn(`[PROBE QUEUE ERR] ${err?.message}`));
   }
@@ -1753,19 +1769,16 @@ export class WalletFollowerRunner {
       let unitsToSubmit: string = '0';
 
       if (side === 'BUY') {
-        // Fast retry 2x pada route AMM Buy jika rute pertama sempat tertunda
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          route = await getBrowserBuySwapRoute(
-            this.page,
-            signal.mint,
-            wallet,
-            stakeUsd,
-            this.solPriceUsd,
-            config.buySlippagePercent || 15
-          );
-          if (route.ok && route.routeData) break;
-          if (attempt < 2) await new Promise(r => setTimeout(r, 600));
-        }
+        // Fast 1-attempt tanpa delay sleep agar tidak blocking skenario lain
+        route = await getBrowserBuySwapRoute(
+          this.page,
+          signal.mint,
+          wallet,
+          stakeUsd,
+          this.solPriceUsd,
+          config.buySlippagePercent || 15,
+          1 // maxRetries = 1 agar probe cepat (< 200ms)
+        );
       } else {
         // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil
         let units = tokens && tokens > 0 ? Math.floor(tokens * 1e6).toString() : '1000000';
@@ -1888,7 +1901,8 @@ export class WalletFollowerRunner {
               wallet,
               stakeUsd,
               this.solPriceUsd,
-              config.buySlippagePercent || 15
+              config.buySlippagePercent || 15,
+              1
             );
             if (route2.ok && route2.routeData?.quote) {
               finalQuote = route2.routeData.quote;
