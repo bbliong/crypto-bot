@@ -347,7 +347,14 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
     if (!isPoolCreation) {
       // Periksa apakah ini transaksi transfer rotasi modal dev (SystemProgram.transfer)
-      const hasSystemTransfer = logs.some(l => l.includes('11111111111111111111111111111111'));
+      // Hanya cek jika transaksi transfer murni (bukan interaksi DEX/Token program yang memicu spam RPC)
+      const isDexOrTokenTx = logs.some(l => 
+        l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG') || 
+        l.includes('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') || 
+        l.includes('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') ||
+        l.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA')
+      );
+      const hasSystemTransfer = !isDexOrTokenTx && logs.some(l => l.includes('11111111111111111111111111111111'));
       if (hasSystemTransfer) {
         this.checkDevCapitalRotation(sig, target);
       }
