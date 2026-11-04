@@ -375,10 +375,6 @@ export class MultiScenarioDryRunEngine {
     const now = evt.timestamp || Date.now();
     const timeWib = formatWibDate(now);
 
-    // Cek apakah posisi ini sudah ada agar tidak duplikasi
-    const existingPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
-    if (existingPos) return;
-
     let pool2Stake = customStakeUsd;
     if (!pool2Stake) {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
@@ -413,47 +409,54 @@ export class MultiScenarioDryRunEngine {
       exchange: targetExchange
     };
 
-    // Eksekusi buy di Skenario 6 & Skenario 7
-    this.processScenarioBuy(this.scenarios.s6, earlySignal, true, 1380, now, timeWib, {
-      maxTokenExposure: pool2Stake,
-      getStake: () => pool2Stake,
-      disallowAccumulation: true,
-    });
-    this.autoRotateSameSymbolPositions(this.scenarios.s6, earlySignal, now, timeWib);
+    // Eksekusi buy di Skenario 6 & Skenario 7 jika posisi belum ada
+    if (!this.scenarios.s6.openPositions.some(p => p.mint === evt.newMint)) {
+      this.processScenarioBuy(this.scenarios.s6, earlySignal, true, 1380, now, timeWib, {
+        maxTokenExposure: pool2Stake,
+        getStake: () => pool2Stake,
+        disallowAccumulation: true,
+      });
+      this.autoRotateSameSymbolPositions(this.scenarios.s6, earlySignal, now, timeWib);
+      const s6CreatedPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
+      if (s6CreatedPos) {
+        s6CreatedPos.pairAddress = evt.mainPairAddress || '';
+        s6CreatedPos.exchange = targetExchange;
+      }
+    }
 
-    this.processScenarioBuy(this.scenarios.s7, earlySignal, true, 1380, now, timeWib, {
-      maxTokenExposure: pool2Stake,
-      getStake: () => pool2Stake,
-      disallowAccumulation: true,
-    });
-    this.autoRotateSameSymbolPositions(this.scenarios.s7, earlySignal, now, timeWib);
+    if (!this.scenarios.s7.openPositions.some(p => p.mint === evt.newMint)) {
+      this.processScenarioBuy(this.scenarios.s7, earlySignal, true, 1380, now, timeWib, {
+        maxTokenExposure: pool2Stake,
+        getStake: () => pool2Stake,
+        disallowAccumulation: true,
+      });
+      this.autoRotateSameSymbolPositions(this.scenarios.s7, earlySignal, now, timeWib);
+      const s7CreatedPos = this.scenarios.s7.openPositions.find(p => p.mint === evt.newMint);
+      if (s7CreatedPos) {
+        s7CreatedPos.pairAddress = evt.mainPairAddress || '';
+        s7CreatedPos.exchange = targetExchange;
+      }
+    }
 
-    // Eksekusi buy di Skenario 8 (Front-Run Dev Genesis)
+    // Eksekusi buy di Skenario 8 (Front-Run Dev Genesis) jika posisi belum ada
     let s8Stake = customStakeUsd;
     if (!s8Stake) {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
       s8Stake = liveCfg.stakeUsdS8 || 1.0;
     }
-    this.processScenarioBuy(this.scenarios.s8, earlySignal, true, 1380, now, timeWib, {
-      maxTokenExposure: s8Stake,
-      getStake: () => s8Stake,
-      disallowAccumulation: true,
-    });
-    const s8CreatedPos = this.scenarios.s8.openPositions.find(p => p.mint === evt.newMint);
-    if (s8CreatedPos) {
-      s8CreatedPos.boughtAtGenesis = true;
-      s8CreatedPos.pairAddress = evt.mainPairAddress || '';
-      s8CreatedPos.exchange = targetExchange;
-    }
-    const s6CreatedPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
-    if (s6CreatedPos) {
-      s6CreatedPos.pairAddress = evt.mainPairAddress || '';
-      s6CreatedPos.exchange = targetExchange;
-    }
-    const s7CreatedPos = this.scenarios.s7.openPositions.find(p => p.mint === evt.newMint);
-    if (s7CreatedPos) {
-      s7CreatedPos.pairAddress = evt.mainPairAddress || '';
-      s7CreatedPos.exchange = targetExchange;
+    if (!this.scenarios.s8.openPositions.some(p => p.mint === evt.newMint)) {
+      this.processScenarioBuy(this.scenarios.s8, earlySignal, true, 1380, now, timeWib, {
+        maxTokenExposure: s8Stake,
+        getStake: () => s8Stake,
+        disallowAccumulation: true,
+      });
+      const s8CreatedPos = this.scenarios.s8.openPositions.find(p => p.mint === evt.newMint);
+      if (s8CreatedPos) {
+        s8CreatedPos.boughtAtGenesis = true;
+        s8CreatedPos.pairAddress = evt.mainPairAddress || '';
+        s8CreatedPos.exchange = targetExchange;
+      }
+      this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
 
