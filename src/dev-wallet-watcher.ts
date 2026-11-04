@@ -345,7 +345,14 @@ export class SingleDevWalletWatcher extends EventEmitter {
       (l.includes('TokenMetadataInstruction: Initialize') && l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'))
     );
 
-    if (!isPoolCreation) return;
+    if (!isPoolCreation) {
+      // Periksa apakah ini transaksi transfer rotasi modal dev (SystemProgram.transfer)
+      const hasSystemTransfer = logs.some(l => l.includes('11111111111111111111111111111111'));
+      if (hasSystemTransfer) {
+        this.checkDevCapitalRotation(sig, target);
+      }
+      return;
+    }
 
     console.log(`\n=========================================================`);
     console.log(`⚡ [DEV-RADAR TRIGGER] Dev ${target.devWallet.slice(0, 8)}... baru saja memanggil InitializePool (tx: ${sig.slice(0, 12)}...)!`);
@@ -552,6 +559,90 @@ export class SingleDevWalletWatcher extends EventEmitter {
       }
     } catch (err: any) {
       console.warn(`[DEV-RADAR-RESOLVE-ERR] ${err?.message}`);
+    }
+  }
+
+  /**
+   * Deteksi Rotasi Dompet Dev:
+   * Jika dev yang sedang dipantau mentransfer kas besar (>= 10 SOL) ke dompet lain,
+   * itu adalah sinyal bahwa dev memindahkan modal ke Child Dev Wallet untuk membuat pool berikutnya!
+   */
+  private async checkDevCapitalRotation(sig: string, target: WatchedDevTarget): Promise<void> {
+    try {
+      const conn = new Connection(this.rpcUrl, 'confirmed');
+      const tx = await conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: 0 });
+      if (!tx || !tx.meta || !tx.transaction) return;
+
+      const keys = tx.transaction.message.accountKeys.map((a: any) => a.pubkey ? a.pubkey.toBase58() : a.toString());
+      const pre = tx.meta.preBalances;
+      const post = tx.meta.postBalances;
+
+      let senderDelta = 0;
+      let newDevCandidate: string | null = null;
+      let maxGain = 0;
+
+      for (let i = 0; i < keys.length; i++) {
+        const pk = keys[i];
+        const delta = (post[i] - pre[i]) / 1e9;
+        if (pk === target.devWallet && delta <= -10.0) {
+          senderDelta = delta;
+        } else if (pk !== target.devWallet && delta >= 10.0 && delta > maxGain) {
+          // Abaikan program address umum
+          if (
+            pk !== '11111111111111111111111111111111' &&
+            pk !== 'So11111111111111111111111111111111111111112' &&
+            pk !== 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' &&
+            pk !== 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr' &&
+            pk !== 'ComputeBudget111111111111111111111111111111'
+          ) {
+            maxGain = delta;
+            newDevCandidate = pk;
+          }
+        }
+      }
+
+      if (senderDelta <= -10.0 && newDevCandidate && maxGain >= 10.0) {
+        console.log(`\n=========================================================`);
+        console.log(`🚨 [DEV-ROTATION DETECTED] Sindikat Dev Memindahkan Kas!`);
+        console.log(`   Dev Lama : ${target.devWallet} (Keluar: ${senderDelta.toFixed(3)} SOL)`);
+        console.log(`   Dev Baru : ${newDevCandidate} (Masuk: +${maxGain.toFixed(3)} SOL)`);
+        console.log(`   Token    : ${target.symbol}`);
+        console.log(`   Aksi     : Memasang Radar Tambahan ke Dev Baru SEKETIKA!`);
+        console.log(`=========================================================\n`);
+
+        this.migrateToNewDev(newDevCandidate, target);
+      }
+    } catch (e: any) {
+      console.warn(`[DEV-ROTATION-CHECK-ERR] ${e?.message}`);
+    }
+  }
+
+  public migrateToNewDev(newDevWallet: string, oldTarget: WatchedDevTarget): void {
+    const updated: WatchedDevTarget = {
+      mint: oldTarget.mint,
+      symbol: oldTarget.symbol,
+      devWallet: newDevWallet,
+      ipfsUri: oldTarget.ipfsUri,
+      ipfsHash: oldTarget.ipfsHash,
+      subscribedAt: Date.now()
+    };
+    this.activeTarget = updated;
+    this.saveState();
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const req = {
+        jsonrpc: '2.0',
+        id: ++this.reqId,
+        method: 'logsSubscribe',
+        params: [
+          { mentions: [newDevWallet] },
+          { commitment: 'processed' }
+        ]
+      };
+      this.ws.send(JSON.stringify(req));
+      console.log(`[DEV-WATCHER-WS] 🟢 Berhasil memasang logsSubscribe tambahan ke Dev Baru: ${newDevWallet.slice(0, 8)}...`);
+    } else {
+      this.connectAndSubscribe();
     }
   }
 }
