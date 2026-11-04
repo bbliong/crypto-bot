@@ -175,16 +175,31 @@ export class SingleDevWalletWatcher extends EventEmitter {
    * Jika sebelumnya ada dev lain yang diawasi, langsung unwatch dev lama.
    */
   public async watchSingleDev(mintAddress: string, symbol: string): Promise<WatchedDevTarget | null> {
-    // 1. Lepas watcher sebelumnya jika ada
-    this.unwatch();
+    if (this.activeTarget && this.activeTarget.mint === mintAddress) {
+      return this.activeTarget;
+    }
 
-    // 2. Resolusi alamat dev wallet on-chain
+    // 1. Resolusi alamat dev wallet on-chain DULU SEBELUM unwatch agar tidak ada gap/race condition
     console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev wallet pembuat ${symbol} (${mintAddress.slice(0, 10)}...)...`);
     const resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
     if (!resolved || !resolved.devWallet) {
       console.warn(`[DEV-WATCHER] ⚠️ Tidak dapat menemukan dev wallet untuk ${symbol}`);
       return null;
     }
+
+    // 2. Jika dev wallet sama dengan yang sedang aktif, jangan putus WebSocket! Cukup perbarui token targetnya.
+    if (this.activeTarget && this.activeTarget.devWallet === resolved.devWallet) {
+      this.activeTarget.mint = mintAddress;
+      this.activeTarget.symbol = resolved.symbol || symbol;
+      this.activeTarget.ipfsUri = resolved.uri;
+      this.activeTarget.ipfsHash = extractIpfsHash(resolved.uri);
+      this.saveState();
+      console.log(`[DEV-WATCHER] 🎯 Dev wallet sama (${resolved.devWallet.slice(0, 8)}...). Memperbarui token target ke: ${this.activeTarget.symbol} [${mintAddress.slice(0, 8)}...]`);
+      return this.activeTarget;
+    }
+
+    // 3. Hanya jika dev wallet benar-benar berbeda: lepas dev lama dan pasang ke dev baru
+    this.unwatch();
 
     const target: WatchedDevTarget = {
       mint: mintAddress,
@@ -199,7 +214,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     this.saveState();
     console.log(`[DEV-WATCHER] 🎯 Terkunci pada 1 Dev: ${target.devWallet} (Token: ${target.symbol} | IPFS: ${target.ipfsHash || '-'})`);
 
-    // 3. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut (100% Real-time Pure WebSocket)
+    // 4. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut (100% Real-time Pure WebSocket)
     this.connectAndSubscribe();
     return target;
   }
@@ -313,7 +328,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
    * Menangani event notifikasi log dari transaksi dev
    */
   private async handleLogsNotification(val: any): Promise<void> {
-    if (!val || !val.signature || !this.activeTarget) return;
+    const target = this.activeTarget;
+    if (!val || !val.signature || !target) return;
     const sig = val.signature;
     if (this.processedSigs.has(sig)) return;
     this.processedSigs.add(sig);
@@ -332,7 +348,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     if (!isPoolCreation) return;
 
     console.log(`\n=========================================================`);
-    console.log(`⚡ [DEV-RADAR TRIGGER] Dev ${this.activeTarget.devWallet.slice(0, 8)}... baru saja memanggil InitializePool (tx: ${sig.slice(0, 12)}...)!`);
+    console.log(`⚡ [DEV-RADAR TRIGGER] Dev ${target.devWallet.slice(0, 8)}... baru saja memanggil InitializePool (tx: ${sig.slice(0, 12)}...)!`);
     console.log(`=========================================================`);
 
     // Ambil detail transaksi genesis koin baru secara instan (retry hingga 4x / 600ms agar pasti ter-index)
@@ -362,8 +378,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
             if (
               m &&
               m !== 'So11111111111111111111111111111111111111112' &&
-              m !== this.activeTarget.devWallet &&
-              m !== this.activeTarget.mint
+              m !== target.devWallet &&
+              m !== target.mint
             ) {
               detectedMint = m;
               break;
@@ -381,8 +397,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
             if (
               m &&
               m !== 'So11111111111111111111111111111111111111112' &&
-              m !== this.activeTarget.devWallet &&
-              m !== this.activeTarget.mint
+              m !== target.devWallet &&
+              m !== target.mint
             ) {
               detectedMint = m;
               break;
@@ -399,8 +415,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
           if (
             b.mint &&
             b.mint !== 'So11111111111111111111111111111111111111112' &&
-            b.mint !== this.activeTarget.devWallet &&
-            b.mint !== this.activeTarget.mint
+            b.mint !== target.devWallet &&
+            b.mint !== target.mint
           ) {
             detectedMint = b.mint;
             break;
@@ -415,14 +431,14 @@ export class SingleDevWalletWatcher extends EventEmitter {
           const pk = a.pubkey ? a.pubkey.toBase58() : (a as any).toString();
           // Mint baru bukan devWallet, bukan WSOL, bukan program
           if (
-            pk !== this.activeTarget.devWallet &&
+            pk !== target.devWallet &&
             pk !== 'So11111111111111111111111111111111111111112' &&
             pk !== '11111111111111111111111111111111' &&
             pk !== 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' &&
             pk !== 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' &&
             pk !== 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL' &&
             pk !== 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG' &&
-            pk !== this.activeTarget.mint
+            pk !== target.mint
           ) {
             // Cek apakah akun ini adalah token mint (punya Decimals / supply)
             try {
@@ -441,7 +457,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
       if (detectedMint) {
         // Cek apakah simbol koin baru sesuai dengan koin target yang sedang aktif
-        let detectedSymbol = this.activeTarget.symbol;
+        let detectedSymbol = target.symbol;
         try {
           const accInfo = await conn.getParsedAccountInfo(new PublicKey(detectedMint));
           const exts = (accInfo.value?.data as any)?.parsed?.info?.extensions || [];
@@ -455,10 +471,10 @@ export class SingleDevWalletWatcher extends EventEmitter {
           return;
         }
 
-        const targetSym = (this.activeTarget.symbol || '').toUpperCase().trim();
+        const targetSym = (target.symbol || '').toUpperCase().trim();
         const newSym = (detectedSymbol || '').toUpperCase().trim();
         if (targetSym && newSym && targetSym !== newSym) {
-          console.log(`[DEV-RADAR SKIP] Dev deploy pool baru '${detectedSymbol}', tapi target sedang aktif di '${this.activeTarget.symbol}'. Melewati (Bukan Re-Deploy)...`);
+          console.log(`[DEV-RADAR SKIP] Dev deploy pool baru '${detectedSymbol}', tapi target sedang aktif di '${target.symbol}'. Melewati (Bukan Re-Deploy)...`);
           return;
         }
 
@@ -512,11 +528,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
         }
 
         const evt: RedeployDetectedEvent = {
-          oldMint: this.activeTarget.mint,
+          oldMint: target.mint,
           newMint: detectedMint,
-          symbol: detectedSymbol || this.activeTarget.symbol,
-          ipfsUri: this.activeTarget.ipfsUri,
-          devWallet: this.activeTarget.devWallet,
+          symbol: detectedSymbol || target.symbol,
+          ipfsUri: target.ipfsUri,
+          devWallet: target.devWallet,
           signature: sig,
           timestamp: Date.now(),
           initialMeteoraSol,
