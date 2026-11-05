@@ -60,11 +60,17 @@ async function main() {
   let s4Stake = 0.25;
   let s6Pool1 = 5.0;
   let s6Pool2 = 7.0;
+  let s7Pool1 = 1.0;
+  let s7Pool2 = 2.0;
+  let s8Stake = 0.25;
   try {
     const s = JSON.parse(readFileSync(join(dataDir, 'follower-autobuy-settings.json'), 'utf8'));
     if (s.stakeUsdS4) s4Stake = Number(s.stakeUsdS4);
     if (s.stakeUsdS6Pool1) s6Pool1 = Number(s.stakeUsdS6Pool1);
     if (s.stakeUsdS6Pool2) s6Pool2 = Number(s.stakeUsdS6Pool2);
+    if (s.stakeUsdS7Pool1) s7Pool1 = Number(s.stakeUsdS7Pool1);
+    if (s.stakeUsdS7Pool2) s7Pool2 = Number(s.stakeUsdS7Pool2);
+    if (s.stakeUsdS8) s8Stake = Number(s.stakeUsdS8);
   } catch {}
 
   const freshScenarios = {
@@ -91,6 +97,44 @@ async function main() {
       id: 'SCENARIO_6_REDEPLOY_SNIPER',
       name: `Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)`,
       description: `Saldo Awal $20.00. Pool 1: $${s6Pool1.toFixed(2)} flat, Pool 2+: $${s6Pool2.toFixed(2)} flat (Strict 1x Buy). Stage 1: TP 50% di >= 5% (Kunci Modal & Anti-Rug). Stage 2: 50% Tahan >= 15% (Mega Runner).`,
+      initialCash: 20.0,
+      availableCash: 20.0,
+      investedCash: 0.0,
+      totalFeesPaid: 0.0,
+      realizedPnl: 0.0,
+      unrealizedPnl: 0.0,
+      totalPortfolioValue: 20.0,
+      wins: 0,
+      losses: 0,
+      totalTrades: 0,
+      winRate: 0.0,
+      openPositions: [],
+      closedTrades: [],
+      recentEvents: [],
+    },
+    s7: {
+      id: 'SCENARIO_7_TIME_STOP_SNIPER',
+      name: 'Skenario 7: Time-Stop Sniper (Stage 1 @ 5% + Force Sell @ 28s)',
+      description: `Saldo Awal $20.00. Pool 1: $${s7Pool1.toFixed(2)}, Pool 2+: $${s7Pool2.toFixed(2)}. Stage 1: TP 50% di >= 5% Anti-Rug. Stage 2: Kejar >= 15% ATAU Force Sell 100% tepat di Detik 28 (Puncak Pump) sebelum dev rugpull.`,
+      initialCash: 20.0,
+      availableCash: 20.0,
+      investedCash: 0.0,
+      totalFeesPaid: 0.0,
+      realizedPnl: 0.0,
+      unrealizedPnl: 0.0,
+      totalPortfolioValue: 20.0,
+      wins: 0,
+      losses: 0,
+      totalTrades: 0,
+      winRate: 0.0,
+      openPositions: [],
+      closedTrades: [],
+      recentEvents: [],
+    },
+    s8: {
+      id: 'SCENARIO_8_FRONTRUN_DEV',
+      name: `Skenario 8: Front-Run Dev Floor & Hold 20s Post-Target ($${s8Stake.toFixed(2)})`,
+      description: `Saldo Awal $20.00. Stake $${s8Stake.toFixed(2)} di Detik 0 lantai Dev Meteora DAMM v2. Tahan 20 detik pasca target whale masuk (TIME_STOP_20S_POST_TARGET_ENTRY) atau safety exit jika target dump >= 15%.`,
       initialCash: 20.0,
       availableCash: 20.0,
       investedCash: 0.0,
