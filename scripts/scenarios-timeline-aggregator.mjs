@@ -80,6 +80,7 @@ export function normalizeScenarioId(raw) {
   if (str.includes('8') || str.includes('frontrun') || str.includes('target_inflow')) return 'sce8';
   if (str.includes('7') || str.includes('time_stop') || str.includes('timestop')) return 'sce7';
   if (str.includes('6') || str.includes('redeploy')) return 'sce6';
+  if (str.includes('5') || str.includes('anti_shakeout') || str.includes('runner')) return 'sce5';
   return 'sce4';
 }
 

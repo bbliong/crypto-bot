@@ -421,9 +421,12 @@ export async function renderScenarioTimelineHtml({ scenarioId = 'sce4', tokenQue
       </div>
       <div class="nav-group">
         <a href="/add-fol" class="nav-btn">⚡ Live Dashboard</a>
-        <a href="/add-fol/3scenarios" class="nav-btn">📡 Live Radar Multi-Skenario</a>
-        <a href="/add-fol/3scenarios/sce4?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${isS4 ? 'active' : ''}">🔍 Detail S4 (Single Buy)</a>
-        <a href="/add-fol/3scenarios/sce6?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${!isS4 ? 'active' : ''}">🚀 Detail S6 (Sniper V2)</a>
+        <a href="/add-fol/3scenarios" class="nav-btn">📡 Multi-Skenario</a>
+        <a href="/add-fol/3scenarios/sce4?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce4' ? 'active' : ''}">🔍 S4 (Single)</a>
+        <a href="/add-fol/3scenarios/sce5?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce5' ? 'active' : ''}">🌊 S5 (Runner)</a>
+        <a href="/add-fol/3scenarios/sce6?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce6' ? 'active' : ''}">🚀 S6 (Split TP)</a>
+        <a href="/add-fol/3scenarios/sce7?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce7' ? 'active' : ''}">⏱️ S7 (Time-Stop)</a>
+        <a href="/add-fol/3scenarios/sce8?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce8' ? 'active' : ''}">⚡ S8 (Front-Run)</a>
       </div>
     </header>
 
