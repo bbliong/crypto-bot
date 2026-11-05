@@ -110,16 +110,16 @@ async function run() {
   });
 
   // Now the AMM sell quote is processed with realistic proceeds
-  // Real swap proceeds: $0.85 (meaning net loss due to slippage, despite target claiming +12.6%)
+  // Real swap proceeds: $0.85 gross, which after network & DEX fee (-$0.025) yields $0.82 net cash returned
   const realReturnedUsd = 0.85;
   const realExitPriceUsd = 0.00001020;
   engine.syncRealSellExecution('SCENARIO_6_REDEPLOY_SNIPER', gzSignal.mint, realExitPriceUsd, realReturnedUsd, 'STAGE_2_RUNNER_FULL_EXIT');
 
   const closedTrade = engine.scenarios.s6.closedTrades.find(t => t.mint === gzSignal.mint);
   assert(closedTrade, 'Closed trade must exist');
-  assert.equal(closedTrade.totalReturnedUsd, 0.85, 'Total returned must reflect real swap proceeds');
-  assert.equal(closedTrade.realizedPnlUsd, -0.15, 'Realized PnL must be $0.85 - $1.00 = -$0.15');
-  assert.equal(closedTrade.roiPct, -15.0, 'ROI must be -15%');
+  assert.equal(closedTrade.totalReturnedUsd, 0.82, 'Total returned must reflect real swap proceeds minus sell fee ($0.85 - $0.025 = $0.82)');
+  assert.equal(closedTrade.realizedPnlUsd, -0.18, 'Realized PnL must be $0.82 - $1.00 = -$0.18');
+  assert.equal(closedTrade.roiPct, -18.0, 'ROI must be -18%');
   assert.equal(closedTrade.isWin, false, 'Must be marked as loss based on real swap proceeds');
   console.log('   ✅ Closed trade successfully reflects honest AMM swap outcome: Returned $' + closedTrade.totalReturnedUsd + ', PnL $' + closedTrade.realizedPnlUsd + ' (' + closedTrade.roiPct + '%)');
 
