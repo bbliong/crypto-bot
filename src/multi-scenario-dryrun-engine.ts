@@ -1792,17 +1792,18 @@ export class MultiScenarioDryRunEngine {
 
       // Jika trade ini adalah S6 Split TP yang melewati Stage 1:
       const stage1Proceeds = trade.stage1RealUsdReturned || 0;
-      // Kurangi fee transaksi DEX riil agar total kas kembali benar-benar kas bersih yang masuk ke dompet!
-      const netSellProceeds = Math.max(0, realUsdReturned - REAL_SWAP_FEE_USD);
-      const totalRealReturned = stage1Proceeds + netSellProceeds;
+      // Kurangi total fee transaksi roundtrip ($0.05 = $0.025 buy + $0.025 sell) agar persis sama dengan GMGN & dompet asli!
+      const totalRoundtripFee = REAL_SWAP_FEE_USD * 2; // $0.050 USD
+      const grossTotalReturn = stage1Proceeds + realUsdReturned;
+      const totalRealReturned = Math.max(0, grossTotalReturn - totalRoundtripFee);
 
       trade.totalReturnedUsd = Number(totalRealReturned.toFixed(2));
       trade.realizedPnlUsd = Number((totalRealReturned - trade.totalInvestedUsd).toFixed(2));
       trade.roiPct = trade.totalInvestedUsd > 0 ? Number(((trade.realizedPnlUsd / trade.totalInvestedUsd) * 100).toFixed(1)) : 0.0;
       trade.isWin = trade.realizedPnlUsd >= 0;
-      trade.totalFeesPaidUsd = Number(((trade.totalFeesPaidUsd || 0) + REAL_SWAP_FEE_USD).toFixed(3));
+      trade.totalFeesPaidUsd = Number(totalRoundtripFee.toFixed(3));
       if (!trade.exitReason.includes('Real Swap:')) {
-        trade.exitReason = `${trade.exitReason} (Real Swap: $${totalRealReturned.toFixed(2)})`;
+        trade.exitReason = `${trade.exitReason} (Real Swap: $${grossTotalReturn.toFixed(2)} | Net: $${totalRealReturned.toFixed(2)})`;
       }
 
       // Recalculate scenario metrics
@@ -1816,7 +1817,7 @@ export class MultiScenarioDryRunEngine {
       targetSc.losses = targetSc.closedTrades.filter(t => !t.isWin).length;
       targetSc.winRate = targetSc.totalTrades > 0 ? Number(((targetSc.wins / targetSc.totalTrades) * 100).toFixed(1)) : 0.0;
 
-      console.log(`[DRYRUN-ENGINE SYNC] ✅ Trade ${trade.symbol} [${scenarioId}] disinkronkan ke hasil swap AMM riil bersih: Total Return $${totalRealReturned.toFixed(2)} (Gross: $${realUsdReturned.toFixed(2)}, Net PnL: $${trade.realizedPnlUsd.toFixed(2)}, ROI: ${trade.roiPct}%)`);
+      console.log(`[DRYRUN-ENGINE SYNC] ✅ Trade ${trade.symbol} [${scenarioId}] disinkronkan ke hasil bersih GMGN & dompet riil: Total Return Net $${totalRealReturned.toFixed(2)} (Gross: $${grossTotalReturn.toFixed(2)}, Fee: -$${totalRoundtripFee.toFixed(2)} | Net PnL: $${trade.realizedPnlUsd.toFixed(2)}, ROI: ${trade.roiPct}%)`);
       this.saveState();
     }
   }
