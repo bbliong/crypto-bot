@@ -14,10 +14,11 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S6' | 'S7' | 'S8' | 'BOTH';
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
+  stakeUsdS5?: number;
   stakeUsdS6Pool1?: number;
   stakeUsdS6Pool2?: number;
   stakeUsdS7Pool1?: number;
@@ -194,6 +195,9 @@ export function saveFollowerLiveConfig(
   updated.stakeUsdLane2 = Math.max(0.05, Math.min(1000, Number(updated.stakeUsdLane2) || 5.0));
   if (patch.stakeUsdS4 !== undefined || updated.stakeUsdS4 === undefined) {
     updated.stakeUsdS4 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS4 !== undefined ? patch.stakeUsdS4 : updated.stakeUsdS4) || 5.0));
+  }
+  if (patch.stakeUsdS5 !== undefined || updated.stakeUsdS5 === undefined) {
+    updated.stakeUsdS5 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS5 !== undefined ? patch.stakeUsdS5 : updated.stakeUsdS5) || 1.0));
   }
   if (patch.stakeUsdS6Pool1 !== undefined || updated.stakeUsdS6Pool1 === undefined) {
     updated.stakeUsdS6Pool1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS6Pool1 !== undefined ? patch.stakeUsdS6Pool1 : updated.stakeUsdS6Pool1) || 5.0));

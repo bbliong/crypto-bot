@@ -20,6 +20,19 @@ export const SCENARIO_META = {
       return s.includes('SCENARIO_4') || s.includes('SINGLE_BUY');
     }
   },
+  sce5: {
+    id: 'sce5',
+    canonicalKey: 's5',
+    name: 'Skenario 5: Anti-Shakeout Runner (TP +25% | Hold >= 12s | Time-Stop 35s)',
+    shortName: 'Skenario 5',
+    description: 'Abaikan goyangan dump target di 12 detik pertama (Anti-Shakeout). Auto Take-Profit +25%, Time-Stop 35s, atau ikuti sell target jika dump pasca detik 12.',
+    ruleBadge: 'Anti-Shakeout | TP +25% & TS 35s',
+    color: '#10b981',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_5') || s.includes('ANTI_SHAKEOUT');
+    }
+  },
   sce6: {
     id: 'sce6',
     canonicalKey: 's6',

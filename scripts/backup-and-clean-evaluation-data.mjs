@@ -58,6 +58,7 @@ async function main() {
 
   // Reset dryrun-3scenarios-live.json
   let s4Stake = 0.25;
+  let s5Stake = 1.0;
   let s6Pool1 = 5.0;
   let s6Pool2 = 7.0;
   let s7Pool1 = 1.0;
@@ -66,6 +67,7 @@ async function main() {
   try {
     const s = JSON.parse(readFileSync(join(dataDir, 'follower-autobuy-settings.json'), 'utf8'));
     if (s.stakeUsdS4) s4Stake = Number(s.stakeUsdS4);
+    if (s.stakeUsdS5) s5Stake = Number(s.stakeUsdS5);
     if (s.stakeUsdS6Pool1) s6Pool1 = Number(s.stakeUsdS6Pool1);
     if (s.stakeUsdS6Pool2) s6Pool2 = Number(s.stakeUsdS6Pool2);
     if (s.stakeUsdS7Pool1) s7Pool1 = Number(s.stakeUsdS7Pool1);
@@ -78,6 +80,25 @@ async function main() {
       id: 'SCENARIO_4_SINGLE_BUY_5USD',
       name: `Skenario 4: Single Buy $${s4Stake.toFixed(2)} (Hanya 1x Buy)`,
       description: `Saldo Awal $20.00. Hanya 1x Buy $${s4Stake.toFixed(2)} saat First Buy (Tanpa akumulasi). Akumulasi Sell >= 15% -> Full Exit 100%.`,
+      initialCash: 20.0,
+      availableCash: 20.0,
+      investedCash: 0.0,
+      totalFeesPaid: 0.0,
+      realizedPnl: 0.0,
+      unrealizedPnl: 0.0,
+      totalPortfolioValue: 20.0,
+      wins: 0,
+      losses: 0,
+      totalTrades: 0,
+      winRate: 0.0,
+      openPositions: [],
+      closedTrades: [],
+      recentEvents: [],
+    },
+    s5: {
+      id: 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER',
+      name: `Skenario 5: Anti-Shakeout Runner (TP +25% | Hold >= 12s | Time-Stop 35s)`,
+      description: `Saldo Awal $20.00. Modal $${s5Stake.toFixed(2)}. Abaikan goyangan dump target di 12 detik pertama (Anti-Shakeout). Auto Take-Profit +25%, Time-Stop 35s, atau ikuti sell target jika dump pasca detik 12.`,
       initialCash: 20.0,
       availableCash: 20.0,
       investedCash: 0.0,
