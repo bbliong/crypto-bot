@@ -1675,9 +1675,11 @@ export class WalletFollowerRunner {
     priceUsd: number;
     reason: string;
   }): void {
-    // S8 adalah Genesis Front-Run yang super sensitif waktu (< 200ms).
-    // Eksekusi LANGSUNG secara paralel tanpa antre di belakang retry loop skenario lain!
-    if (item.scenarioId.includes('8') || item.scenarioId.includes('FRONTRUN')) {
+    // Jika skenario ini adalah target Real Auto-Buy aktif (misal S4) atau S8 (Genesis),
+    // eksekusi LANGSUNG secara paralel tanpa antre di belakang simulasi skenario lain!
+    const config = readFollowerLiveConfig(this.dataDir);
+    const isTargetReal = this.isScenarioAllowedForRealOrder(item.scenarioId, config);
+    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('FRONTRUN')) {
       this.executeGmgnApiProbe(
         item.side,
         item.scenarioId,
@@ -1685,7 +1687,7 @@ export class WalletFollowerRunner {
         item.stakeUsd,
         item.reason,
         item.tokens
-      ).catch(err => console.warn(`[S8 IMMEDIATE PROBE ERR] ${err?.message}`));
+      ).catch(err => console.warn(`[IMMEDIATE PROBE ERR: ${item.scenarioId}] ${err?.message}`));
       return;
     }
 
