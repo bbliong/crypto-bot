@@ -109,9 +109,10 @@ async function run() {
 
   engine.handleTargetBuy(signalMint3, true);
 
-  // Both faucet (Mint 2) and DOGE (Mint 3) should be open now because different symbols
-  assert.strictEqual(engine.scenarios.s4.openPositions.length, 2, 'Should now hold both faucet and DOGE');
-  console.log('   ✅ Both faucet (Mint 2) and DOGE (Mint 3) active simultaneously (different tickers)');
+  // DOGE (Mint 3) is now active; previous token was auto-liquidated because target moved to DOGE
+  assert.strictEqual(engine.scenarios.s4.openPositions.length, 1, 'Should hold DOGE after target moved');
+  assert.strictEqual(engine.scenarios.s4.openPositions[0].symbol, 'DOGE');
+  console.log('   ✅ DOGE (Mint 3) active and old token auto-liquidated upon target moving');
 
   console.log('\n🎉 ALL SAME-SYMBOL AUTO-ROTATION TESTS PASSED SUCCESSFULLY!');
 }

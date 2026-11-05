@@ -482,6 +482,26 @@ export class MultiScenarioDryRunEngine {
 
     // Jika posisi belum ada:
     if (!pos) {
+      // 0. Strict 1-Cycle-Per-Token Rule: Dilarang keras buy ulang token yang sudah pernah ditradingkan / ada di closedTrades
+      const alreadyTraded = scenario.closedTrades.some(t => t.mint === signal.mint);
+      if (alreadyTraded) {
+        scenario.recentEvents.unshift({
+          id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: now,
+          timeWib,
+          scenarioId: scenario.id,
+          action: 'SKIP',
+          symbol: signal.symbol,
+          mint: signal.mint,
+          priceUsd: pIn,
+          availableCashAfter: scenario.availableCash,
+          investedCashAfter: scenario.investedCash,
+          reason: 'REJECT_ALREADY_TRADED (Limitasi 1 token hanya boleh buy 1 kali, dilarang buy ulang)',
+        });
+        if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+        return;
+      }
+
       // 1. Wajib First Buy (Ground Zero dari saldo 0)
       if (!isGroundZero) {
         scenario.recentEvents.unshift({

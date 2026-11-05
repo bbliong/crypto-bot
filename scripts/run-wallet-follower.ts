@@ -1889,6 +1889,13 @@ export class WalletFollowerRunner {
       const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
 
       if (isRealOrderTargeted && side === 'BUY') {
+        // Cek apakah token ini sudah pernah dibeli sebelumnya di state posisi riil (Strict 1 Token 1 Buy)
+        const alreadyBoughtReal = state.positions.some(p => p.mint === signal.mint);
+        if (alreadyBoughtReal) {
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Token ${signal.symbol} [${signal.mint.slice(0, 8)}...] sudah pernah dibeli di real wallet! Dilarang buy ulang koin yang sama.`);
+          isRealOrderTargeted = false;
+        }
+
         const completedBuys = state.positions.filter(p => p.status === 'HOLDING' || p.status === 'CLOSED').length;
         if (config.maxBuysQuota > 0 && completedBuys >= config.maxBuysQuota) {
           console.warn(`[AUTO-BUY REAL ORDER ABORTED] Kuota Max Buys (${completedBuys}/${config.maxBuysQuota}) telah tercapai! Mengalihkan ke mode simulasi saja...`);
