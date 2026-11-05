@@ -2001,7 +2001,7 @@ export class WalletFollowerRunner {
           targetPos.exitPriceUsd = realExitPrice;
           targetPos.realizedPnlUsd = usdReceived - targetPos.costBasisUsd;
           targetPos.sells.push(submitRes);
-          saveFollowerRealState(this.dataDir, curRealState);
+          writeFollowerRealState(this.dataDir, curRealState);
         }
 
         // Reclaim rent SOL seketika pasca-sell
@@ -2046,7 +2046,7 @@ export class WalletFollowerRunner {
           lastError: submitRes.error,
         };
         state.positions.unshift(newRealPos as any);
-        saveFollowerRealState(this.dataDir, state);
+        writeFollowerRealState(this.dataDir, state);
 
         console.log(`[POST-BUY SYNC] ⏳ Menunggu settlement blockchain untuk verifikasi jumlah token aktual yang terbeli...`);
         setTimeout(async () => {
