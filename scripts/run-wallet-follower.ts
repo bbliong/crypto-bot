@@ -1896,9 +1896,10 @@ export class WalletFollowerRunner {
           isRealOrderTargeted = false;
         }
 
-        const completedBuys = state.positions.filter(p => p.status === 'HOLDING' || p.status === 'CLOSED').length;
+        const quotaThreshold = Number(config.quotaResetAt) || 0;
+        const completedBuys = state.positions.filter(p => (p.status === 'HOLDING' || p.status === 'CLOSED') && (p.createdAt || 0) >= quotaThreshold).length;
         if (config.maxBuysQuota > 0 && completedBuys >= config.maxBuysQuota) {
-          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Kuota Max Buys (${completedBuys}/${config.maxBuysQuota}) telah tercapai! Mengalihkan ke mode simulasi saja...`);
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Kuota Max Buys (${completedBuys}/${config.maxBuysQuota}) telah tercapai sejak reset! Mengalihkan ke mode simulasi saja...`);
           isRealOrderTargeted = false;
         }
       }
@@ -2018,7 +2019,8 @@ export class WalletFollowerRunner {
         } catch {}
 
         // Jika kuota tercapai, otomatis set autobuyScenario = 'DRY_RUN' agar aman
-        const totalCompleted = curRealState.positions.filter(p => p.status === 'CLOSED').length;
+        const quotaThreshold = Number(config.quotaResetAt) || 0;
+        const totalCompleted = curRealState.positions.filter(p => p.status === 'CLOSED' && (p.createdAt || 0) >= quotaThreshold).length;
         if (config.maxBuysQuota > 0 && totalCompleted >= config.maxBuysQuota) {
           console.log(`\n=========================================================`);
           console.log(`🏁 [TEST SELESAI] Kuota 1x Test Buy Asli telah tuntas (${totalCompleted}/${config.maxBuysQuota})!`);
