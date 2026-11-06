@@ -80,8 +80,8 @@ async function main() {
   const freshScenarios = {
     s4: {
       id: 'SCENARIO_4_SINGLE_BUY_5USD',
-      name: `Skenario 4: Single Buy $${s4Stake.toFixed(2)} (Hanya 1x Buy)`,
-      description: `Saldo Awal $20.00. Hanya 1x Buy $${s4Stake.toFixed(2)} saat First Buy (Tanpa akumulasi). Akumulasi Sell >= 15% -> Full Exit 100%.`,
+      name: `Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)`,
+      description: `Saldo Awal $20.00. Modal $${s4Stake.toFixed(2)}. Jika target sell <= 3s (shakeout): tahan hingga 8 detik. Begitu target buyback: LANGSUNG SELL 100% dump ke likuiditas target. Jika tidak buyback dlm 8s -> Safety Exit.`,
       initialCash: 20.0,
       availableCash: 20.0,
       investedCash: 0.0,

@@ -31,6 +31,7 @@ export interface ScenarioPosition {
   targetEnteredAt?: number;
   pairAddress?: string;
   exchange?: string;
+  waitingBuybackSince?: number;
 }
 
 export interface ScenarioTradeRecord {
@@ -141,8 +142,8 @@ export class MultiScenarioDryRunEngine {
     return {
       s4: {
         id: 'SCENARIO_4_SINGLE_BUY_5USD',
-        name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)',
-        description: 'Saldo Awal $20.00. Hanya 1x Buy $5.00 saat First Buy (Tanpa akumulasi). Akumulasi Sell >= 15% -> Full Exit 100%.',
+        name: 'Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)',
+        description: 'Saldo Awal $20.00. 1x Buy Ground Zero. Jika target sell <= 3s (shakeout): tahan hingga 8 detik. Begitu target buyback: LANGSUNG SELL 100% dump ke likuiditas target. Jika tidak buyback dlm 8s -> Safety Exit.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -325,7 +326,25 @@ export class MultiScenarioDryRunEngine {
       if (cfg.stakeUsdS7Pool2) s7Pool2 = Number(cfg.stakeUsdS7Pool2);
     } catch {}
 
-    // 1. Skenario 4 (Single Buy Dinamis, HANYA 1x Buy per token, Anti-Akumulasi)
+    // 1. Skenario 4 (2-Lapis Shakeout Trap: Hold 8s & Dump on Buyback)
+    // Cek apakah S4 sedang menunggu buyback pada token ini (Lapis 2: Dump on Buyback)
+    const s4PosIdx = this.scenarios.s4.openPositions.findIndex(p => p.mint === signal.mint);
+    if (s4PosIdx >= 0) {
+      const s4Pos = this.scenarios.s4.openPositions[s4PosIdx];
+      if (s4Pos.waitingBuybackSince) {
+        const elapsedSinceSell = (now - s4Pos.waitingBuybackSince) / 1000;
+        if (elapsedSinceSell <= 8.5) {
+          console.log(`\n=========================================================`);
+          console.log(`🎯 [SCENARIO 4 LAPIS 2: DUMP ON BUYBACK] Target Buyback $${targetUsd.toFixed(0)} di +${elapsedSinceSell.toFixed(1)}s!`);
+          console.log(`   Token    : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
+          console.log(`   Aksi     : LANGSUNG SELL 100% Dump ke Likuiditas Buy Target!`);
+          console.log(`=========================================================\n`);
+          const exitReason = `S4_DUMP_ON_BUYBACK (Target buyback $${targetUsd.toFixed(0)} di +${elapsedSinceSell.toFixed(1)}s pasca-shakeout, panen likuiditas)`;
+          this.executeScenarioExit(this.scenarios.s4, s4PosIdx, signal.priceUsd, now, timeWib, exitReason);
+        }
+      }
+    }
+
     this.processScenarioBuy(this.scenarios.s4, signal, isGroundZero, targetUsd, now, timeWib, {
       maxTokenExposure: s4Stake,
       getStake: () => s4Stake,
@@ -1092,6 +1111,58 @@ export class MultiScenarioDryRunEngine {
       const pos = scenario.openPositions[posIdx];
       if (pos.tokens <= 0) continue;
 
+      // Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)
+      if (scenario.id === 'SCENARIO_4_SINGLE_BUY_5USD') {
+        pos.lastPriceUsd = pOut;
+        if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
+        const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
+        pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
+        pos.lastTargetSellAt = now;
+
+        const elapsedSec = (now - pos.openedAt) / 1000;
+
+        // Lapis 1: Jika sell terjadi di detik <= 3.0 (Shakeout) dan belum pernah masuk mode waitingBuyback:
+        if (elapsedSec <= 3.0 && !pos.waitingBuybackSince) {
+          pos.waitingBuybackSince = now;
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SKIP',
+            symbol: signal.symbol,
+            mint: signal.mint,
+            priceUsd: pOut,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: scenario.investedCash,
+            reason: `S4_WAITING_BUYBACK (Target sell ${currentSellRatioPct}% di detik ${elapsedSec.toFixed(1)}s <= 3s, tahan hingga 8s menunggu buyback)`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+          continue;
+        }
+
+        // Jika sedang dalam status waitingBuyback:
+        if (pos.waitingBuybackSince) {
+          const waitElapsedSec = (now - pos.waitingBuybackSince) / 1000;
+          // Jika target malah melakukan dump kedua berturut-turut (consecutive dump) >= 15% atau Full Exit:
+          if (currentSellRatioPct >= 15.0 || isFullExit) {
+            const exitReason = `S4_CONSECUTIVE_DUMP_EXIT (Target dump susulan ${currentSellRatioPct}% saat menunggu buyback di +${waitElapsedSec.toFixed(1)}s, safety cut)`;
+            this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+            continue;
+          }
+          // Masih dalam 8s dan sell kecil: tetap tahan
+          continue;
+        }
+
+        // Standar exit S4 jika sell terjadi di luar detik 3 (misal detik 10, 15, dll):
+        if (pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit) {
+          const exitReason = `CUM_SELL_${pos.targetCumulativeSellRatioPct}%_GTE_15%_FULL_EXIT`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+        continue;
+      }
+
       // Skenario 9: Dev Front-Run & 2-Way Target Sync (Anti-Shakeout 12s pasca-target masuk + Follow Whale Exit)
       if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
         pos.lastPriceUsd = pOut;
@@ -1840,6 +1911,25 @@ export class MultiScenarioDryRunEngine {
           this.executeScenarioExit(s9, i, pOut, now, timeWib, reason);
           changed = true;
           continue;
+        }
+      }
+    }
+
+    // 5. Cek Skenario 4: 8s Buyback Timeout
+    const s4 = this.scenarios.s4;
+    for (let i = s4.openPositions.length - 1; i >= 0; i--) {
+      const pos = s4.openPositions[i];
+      if (pos.tokens <= 0) continue;
+
+      if (pos.waitingBuybackSince) {
+        const elapsedSinceSell = now - pos.waitingBuybackSince;
+        if (elapsedSinceSell >= 8000) {
+          const timeWib = formatWibDate(now);
+          const elapsedSec = Math.round(elapsedSinceSell / 1000);
+          const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+          const reason = `S4_BUYBACK_TIMEOUT_${elapsedSec}S_EXIT (Target tidak buyback dalam 8s pasca shakeout sell, safety exit)`;
+          this.executeScenarioExit(s4, i, pOut, now, timeWib, reason);
+          changed = true;
         }
       }
     }

@@ -10,10 +10,10 @@ export const SCENARIO_META = {
   sce4: {
     id: 'sce4',
     canonicalKey: 's4',
-    name: 'Skenario 4: Single Buy $5 (Hanya 1x Buy)',
+    name: 'Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)',
     shortName: 'Skenario 4',
-    description: 'Hanya 1x Buy di Ground Zero sebesar $5. Full Exit saat target sell akumulatif >= 15%.',
-    ruleBadge: 'Single Buy $5 | Exit >= 15%',
+    description: '1x Buy Ground Zero. Tahan goyangan sell <= 3s hingga 8 detik. Dump 100% saat target buyback, atau timeout 8s safety exit.',
+    ruleBadge: '2-Lapis Trap | Hold 8s & Dump on Buyback',
     color: '#f59e0b',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
