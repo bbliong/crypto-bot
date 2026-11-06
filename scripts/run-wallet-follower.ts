@@ -401,7 +401,7 @@ export class WalletFollowerRunner {
     this.multiDryRunEngine = new MultiScenarioDryRunEngine(this.dataDir);
 
     // Radar 1 Dev Wallet: Memantau 1 dev aktif dan mendeteksi koin baru sebelum target buy
-    this.devWatcher = new SingleDevWalletWatcher();
+    this.devWatcher = new SingleDevWalletWatcher({ targetWallet: this.targetWallet });
     this.devWatcher.on('redeploy_detected', (evt) => {
       console.log(`\n=========================================================`);
       console.log(`🚨 [DEV-RADAR TRIGGER] Terdeteksi Pool Baru Lahir dari Dev: ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
@@ -675,7 +675,8 @@ export class WalletFollowerRunner {
       isOpenOrClose,
       isFirstBuy,
       pairAddress: item.pa || '',
-      exchange: item.exchange || ''
+      exchange: item.exchange || '',
+      devWallet: item.ad || ''
     };
 
     console.log(`\n---------------------------------------------------------`);
@@ -785,6 +786,10 @@ export class WalletFollowerRunner {
     if (isGroundZero && signal.priceUsd > GROUND_ZERO_MAX_PRICE_USD) {
       console.log(`[PRICE CAP GATE] 🚫 Target First Buy pada $${signal.priceUsd.toFixed(8)} melebihi batas Ground Zero $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)}. Melewati buy (anti-pucuk)!`);
       this.multiDryRunEngine.handleTargetBuy(signal, false);
+      // Tetap pasang radar ke Dev pembuat koin ini agar S9 bisa front-run token berikutnya dari dev yang sama!
+      if (signal.devWallet || signal.mint) {
+        this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch(() => {});
+      }
       return;
     }
 
@@ -794,7 +799,7 @@ export class WalletFollowerRunner {
     const currentWatched = this.devWatcher.getActiveTarget();
     const shouldWatch = (isGroundZero && signal.priceUsd <= GROUND_ZERO_MAX_PRICE_USD) || (!currentWatched && signal.priceUsd <= 0.000050) || (currentWatched && currentWatched.mint !== signal.mint && signal.priceUsd <= 0.000050);
     if (shouldWatch) {
-      this.devWatcher.watchSingleDev(signal.mint, signal.symbol).catch((err: any) => {
+      this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch((err: any) => {
         console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
       });
     }

@@ -47,12 +47,14 @@ export class SingleDevWalletWatcher extends EventEmitter {
   private pingInterval: NodeJS.Timeout | null = null;
   private dataDir: string;
   private browserPage: any = null;
+  private targetWallet: string = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 
-  constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string } = {}) {
+  constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string; targetWallet?: string } = {}) {
     super();
     this.wsUrl = options.wsUrl || getSolanaRpcWsUrl();
     this.rpcUrl = options.rpcUrl || getSolanaRpcUrl();
     this.dataDir = options.dataDir || path.resolve(process.cwd(), 'data');
+    if (options.targetWallet) this.targetWallet = options.targetWallet;
 
     // Pulihkan activeTarget yang tersimpan sebelumnya agar tidak reset saat service restart
     try {
@@ -174,16 +176,23 @@ export class SingleDevWalletWatcher extends EventEmitter {
    * Mengawasi HANYA 1 Dev Wallet per waktu.
    * Jika sebelumnya ada dev lain yang diawasi, langsung unwatch dev lama.
    */
-  public async watchSingleDev(mintAddress: string, symbol: string): Promise<WatchedDevTarget | null> {
-    if (this.activeTarget && this.activeTarget.mint === mintAddress) {
+  public async watchSingleDev(mintAddress: string, symbol: string, explicitDevWallet?: string): Promise<WatchedDevTarget | null> {
+    if (this.activeTarget && this.activeTarget.mint === mintAddress && (!explicitDevWallet || this.activeTarget.devWallet === explicitDevWallet)) {
       return this.activeTarget;
     }
 
-    // 1. Resolusi alamat dev wallet on-chain DULU SEBELUM unwatch agar tidak ada gap/race condition
-    console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev wallet pembuat ${symbol} (${mintAddress.slice(0, 10)}...)...`);
-    const resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
-    if (!resolved || !resolved.devWallet) {
-      console.warn(`[DEV-WATCHER] ⚠️ Tidak dapat menemukan dev wallet untuk ${symbol}`);
+    // 1. Resolusi alamat dev wallet (prioritaskan explicitDevWallet jika valid)
+    let resolved: { devWallet: string; symbol: string; uri: string } | null = null;
+    if (explicitDevWallet && explicitDevWallet !== this.targetWallet) {
+      console.log(`[DEV-WATCHER] ⚡ Menggunakan Dev Wallet eksplisit dari GMGN: ${explicitDevWallet} (${symbol})`);
+      resolved = { devWallet: explicitDevWallet, symbol, uri: '' };
+    } else {
+      console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev wallet pembuat ${symbol} (${mintAddress.slice(0, 10)}...)...`);
+      resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
+    }
+
+    if (!resolved || !resolved.devWallet || resolved.devWallet === this.targetWallet) {
+      console.warn(`[DEV-WATCHER] ⚠️ Tidak dapat menemukan dev wallet valid untuk ${symbol} (Dev: ${resolved?.devWallet || '-'})`);
       return null;
     }
 
@@ -600,7 +609,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
         const delta = (post[i] - pre[i]) / 1e9;
         if (pk === target.devWallet && delta <= -10.0) {
           senderDelta = delta;
-        } else if (pk !== target.devWallet && delta >= 10.0 && delta > maxGain) {
+        } else if (pk !== target.devWallet && pk !== this.targetWallet && delta >= 10.0 && delta > maxGain) {
           // Abaikan program address umum
           if (
             pk !== '11111111111111111111111111111111' &&

@@ -101,6 +101,7 @@ export interface WalletTradeSignal {
   isFirstBuy?: boolean;
   pairAddress?: string;
   exchange?: string;
+  devWallet?: string;
 }
 
 export interface FollowerLaneConfig {
