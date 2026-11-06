@@ -122,7 +122,7 @@ export async function getBrowserBuySwapRoute(
             };
           }
         },
-        { mint, fromAddress, inputLamports, curSlippage, SOL_MINT }
+        { mint, fromAddress, inputLamports, curSlippage, SOL_MINT, pairAddress }
       );
 
       if (lastResult.ok) {
@@ -238,7 +238,7 @@ export async function getBrowserSellSwapRoute(
             };
           }
         },
-        { mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT }
+        { mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT, pairAddress }
       );
 
       if (lastResult.ok) {

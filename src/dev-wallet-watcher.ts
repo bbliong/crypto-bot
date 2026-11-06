@@ -654,11 +654,20 @@ export class SingleDevWalletWatcher extends EventEmitter {
           console.log(`[DEV-RADAR INFO] Dev deploy pool baru '${detectedSymbol}', berbeda simbol dengan koin aktif '${target.symbol}'. Meneruskan untuk S9 Front-Run...`);
         }
 
-        // 1. Hitung saldo awal SOL yang disetor dev ke pool Meteora
+        // 1. Ekstrak pool pair address dan saldo awal SOL yang disetor dev
         let initialMeteoraSol = 0;
+        let mainPairAddress = '';
+        let detectedExchangeOwner = '';
         const inner = (tx.meta as any)?.innerInstructions || [];
         for (const g of inner) {
           for (const ix of (g.instructions || [])) {
+            if (ix?.parsed?.type === 'createAccount') {
+              const owner = ix?.parsed?.info?.owner;
+              if (owner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA' || owner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB') {
+                mainPairAddress = ix.parsed.info.newAccount;
+                detectedExchangeOwner = owner;
+              }
+            }
             if (ix?.parsed?.type === 'transferChecked' || ix?.parsed?.type === 'transfer') {
               const m = ix?.parsed?.info?.mint;
               if (m === 'So11111111111111111111111111111111111111112') {
@@ -670,12 +679,17 @@ export class SingleDevWalletWatcher extends EventEmitter {
         }
 
         let mainExchange: 'meteora' | 'pumpswap' | 'raydium' = 'pumpswap';
-        let mainPairAddress = '';
         let poolLiquidityUsd = 0;
 
-        if (initialMeteoraSol >= 0.1) {
+        if (detectedExchangeOwner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB') {
           mainExchange = 'meteora';
-          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL`);
+          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
+        } else if (detectedExchangeOwner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA') {
+          mainExchange = 'pumpswap';
+          console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
+        } else if (initialMeteoraSol >= 0.1) {
+          mainExchange = 'meteora';
+          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM fallback (SOL: ${initialMeteoraSol.toFixed(3)})`);
         } else {
           mainExchange = 'pumpswap';
           console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif untuk token baru ${detectedSymbol} [${detectedMint.slice(0, 8)}...]!`);
