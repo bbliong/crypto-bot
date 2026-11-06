@@ -102,7 +102,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
       try {
         const gmgnDev = await this.browserPage.evaluate(async (m: string) => {
           try {
-            const resp = await fetch(`/vas/api/v1/token_holders/sol/${m}?limit=50&orderby=amount_percentage&direction=desc`);
+            const resp = await fetch(`https://gmgn.ai/vas/api/v1/token_holders/sol/${m}?limit=50&orderby=amount_percentage&direction=desc`);
             const json = await resp.json();
             const list = json?.data?.list || [];
             const creator = list.find((h: any) => (h.maker_token_tags || []).includes('creator') || (h.tags || []).includes('creator'));
@@ -177,7 +177,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
    * Jika sebelumnya ada dev lain yang diawasi, langsung unwatch dev lama.
    */
   public async watchSingleDev(mintAddress: string, symbol: string, explicitDevWallet?: string): Promise<WatchedDevTarget | null> {
-    if (this.activeTarget && this.activeTarget.mint === mintAddress && (!explicitDevWallet || this.activeTarget.devWallet === explicitDevWallet)) {
+    if (this.activeTarget && this.activeTarget.mint === mintAddress) {
       return this.activeTarget;
     }
 

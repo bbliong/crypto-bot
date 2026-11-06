@@ -781,13 +781,12 @@ export class WalletFollowerRunner {
     const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
 
-    // DYNAMIC 1-DEV LOCK: Setiap kali target BUY token apapun (baik Ground Zero maupun Bukan Ground Zero / Mid-Flight),
-    // jika token atau dev pembuatnya berbeda dari yang sedang diawasi di radar,
-    // langsung kunci radar Dev-Watcher ke Developer pembuat token ini (item.ad)!
+    // DYNAMIC 1-DEV LOCK: Setiap kali target BUY token baru (atau belum ada radar dev aktif),
+    // langsung cross-check via GMGN Creator Tag / On-chain Genesis untuk mendeteksi dev asli koin tersebut
+    // dan mengecek apakah dev-nya berubah atau masih sindikat yang sama!
     const currentWatched = this.devWatcher.getActiveTarget();
-    const isDifferentDev = !currentWatched || (signal.devWallet && currentWatched.devWallet !== signal.devWallet);
-    const isDifferentToken = !currentWatched || currentWatched.mint !== signal.mint;
-    if (isDifferentDev || isDifferentToken) {
+    const isNewToken = !currentWatched || currentWatched.mint !== signal.mint;
+    if (isNewToken) {
       this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch((err: any) => {
         console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
       });
