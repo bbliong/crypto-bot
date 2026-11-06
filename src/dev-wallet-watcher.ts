@@ -294,12 +294,6 @@ export class SingleDevWalletWatcher extends EventEmitter {
     console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev ASLI pembuat ${symbol} (${mintAddress.slice(0, 10)}...) via GMGN Creator Tag / On-Chain Genesis...`);
     resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
 
-    // Fallback ke explicitDevWallet jika resolusi gagal (dan bukan target whale sendiri)
-    if (!resolved && explicitDevWallet && explicitDevWallet !== this.targetWallet) {
-      console.log(`[DEV-WATCHER] ⚠️ Resolusi on-chain gagal. Fallback ke GMGN WS ad field: ${explicitDevWallet} (${symbol})`);
-      resolved = { devWallet: explicitDevWallet, symbol, uri: '' };
-    }
-
     if (!resolved || !resolved.devWallet || resolved.devWallet === this.targetWallet) {
       console.warn(`[DEV-WATCHER] ⚠️ Tidak dapat menemukan dev wallet valid untuk ${symbol} (Dev: ${resolved?.devWallet || '-'})`);
       return null;
