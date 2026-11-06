@@ -342,6 +342,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
     }
   }
 
+  private lastRotationCheckTime = 0;
+
   /**
    * Menangani event notifikasi log dari transaksi dev
    */
@@ -378,7 +380,9 @@ export class SingleDevWalletWatcher extends EventEmitter {
         l.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA')
       );
       const hasSystemTransfer = !isDexOrTokenTx && logs.some(l => l.includes('11111111111111111111111111111111'));
-      if (hasSystemTransfer) {
+      const now = Date.now();
+      if (hasSystemTransfer && (now - this.lastRotationCheckTime > 15000)) {
+        this.lastRotationCheckTime = now;
         this.checkDevCapitalRotation(sig, target);
       }
       return;
