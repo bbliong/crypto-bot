@@ -183,7 +183,7 @@ export function saveFollowerLiveConfig(
 
   if (patch.autobuyScenario !== undefined) {
     const sc = String(patch.autobuyScenario).toUpperCase();
-    if (['OFF', 'DRY_RUN', 'S4', 'S6', 'S7', 'BOTH'].includes(sc)) {
+    if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'BOTH'].includes(sc)) {
       updated.autobuyScenario = sc as any;
       updated.enabled = sc !== 'OFF';
     }

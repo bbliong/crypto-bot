@@ -84,6 +84,49 @@ async function run() {
   assert(htmlDryRun.includes('status-dry_run') || htmlDryRun.includes('status-dryrun'), 'Status pill must have status-dryrun');
   console.log('   ✅ DRY_RUN scenario selection verified');
 
+  // 6. Test Select S5
+  console.log('6. Setting scenario to S5...');
+  const resS5 = await updateConfig({ autobuyScenario: 'S5', stakeUsdS5: 1.25 });
+  assert.equal(resS5.ok, true);
+  assert.equal(resS5.config.enabled, true);
+  assert.equal(resS5.config.autobuyScenario, 'S5');
+  assert.equal(resS5.config.stakeUsdS5, 1.25);
+
+  const fileS5 = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.equal(fileS5.enabled, true);
+  assert.equal(fileS5.autobuyScenario, 'S5');
+  assert.equal(fileS5.stakeUsdS5, 1.25);
+
+  const htmlS5 = await (await fetch(`${baseUrl}/3scenarios`)).text();
+  assert(htmlS5.includes('value="S5" checked'), 'S5 radio button must be checked');
+  assert(htmlS5.includes('status-s5'), 'Status pill must have status-s5');
+  assert(htmlS5.includes('s5StakeInput'), 'S5 stake input must be present');
+  console.log('   ✅ S5 scenario selection & stake verified');
+
+  // 7. Test Select S9
+  console.log('7. Setting scenario to S9...');
+  const resS9 = await updateConfig({ autobuyScenario: 'S9', stakeUsdS9: 1.50 });
+  assert.equal(resS9.ok, true);
+  assert.equal(resS9.config.enabled, true);
+  assert.equal(resS9.config.autobuyScenario, 'S9');
+  assert.equal(resS9.config.stakeUsdS9, 1.50);
+
+  const fileS9 = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.equal(fileS9.enabled, true);
+  assert.equal(fileS9.autobuyScenario, 'S9');
+  assert.equal(fileS9.stakeUsdS9, 1.50);
+
+  const htmlS9 = await (await fetch(`${baseUrl}/3scenarios`)).text();
+  assert(htmlS9.includes('value="S9" checked'), 'S9 radio button must be checked');
+  assert(htmlS9.includes('status-s9'), 'Status pill must have status-s9');
+  assert(htmlS9.includes('s9StakeInput'), 'S9 stake input must be present');
+  console.log('   ✅ S9 scenario selection & stake verified');
+
+  // 8. Restore to DRY_RUN and default stakes
+  console.log('8. Restoring to DRY_RUN...');
+  await updateConfig({ autobuyScenario: 'DRY_RUN', stakeUsdS5: 1.0, stakeUsdS9: 1.0 });
+  console.log('   ✅ Restored to DRY_RUN');
+
   console.log('\n✅ All Auto-Buy Scenario Selection tests passed successfully!');
 }
 

@@ -109,6 +109,20 @@ export function render3ScenariosLiveHtml() {
               <button onclick="saveS4Stake()" class="btn-stake-save">💾 Simpan Modal S4</button>
             </div>
           </div>
+        ` : (scId === 'sce5' ? `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal S5 (Anti-Shakeout)</span>
+              <span class="stake-current-val">Aktif: $${s5Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-row">
+              <div class="stake-input-wrap">
+                <span class="currency-prefix">$</span>
+                <input type="number" id="s5StakeInput" value="${s5Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="1.00">
+              </div>
+              <button onclick="saveS5Stake()" class="btn-stake-save">💾 Simpan Modal S5</button>
+            </div>
+          </div>
         ` : (scId === 'sce6' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
@@ -157,7 +171,7 @@ export function render3ScenariosLiveHtml() {
             </div>
             <button onclick="saveS7Stake()" class="btn-stake-save" style="margin-top: 4px; width: 100%;">💾 Simpan Modal S7 (Pool 1 & 2)</button>
           </div>
-        ` : `
+        ` : (scId === 'sce8' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
               <span class="stake-section-title">⚙️ Konfigurasi Modal S8 (Front-Run Dev)</span>
@@ -174,7 +188,24 @@ export function render3ScenariosLiveHtml() {
             </div>
             <button onclick="saveS8Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S8</button>
           </div>
-        `))}
+        ` : `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal S9 (Dev Front-Run Sync)</span>
+              <span class="stake-current-val">Stake: $${s9Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-1" style="margin-top: 6px;">
+              <div>
+                <label class="stake-sublabel">Modal Entry Genesis:</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s9StakeInput" value="${s9Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="1.00">
+                </div>
+              </div>
+            </div>
+            <button onclick="saveS9Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S9</button>
+          </div>
+        `))))}
 
         <!-- Open Positions -->
         <div class="sub-section">
@@ -489,9 +520,11 @@ export function render3ScenariosLiveHtml() {
     .status-off { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569; }
     .status-dry_run, .status-dryrun { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.5); }
     .status-s4 { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.5); }
+    .status-s5 { background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.5); }
     .status-s6 { background: rgba(236, 72, 153, 0.2); color: #ec4899; border: 1px solid rgba(236, 72, 153, 0.5); }
     .status-s7 { background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid rgba(6, 182, 212, 0.5); }
     .status-s8 { background: rgba(168, 85, 247, 0.2); color: #a855f7; border: 1px solid rgba(168, 85, 247, 0.5); }
+    .status-s9 { background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.5); }
     .status-both { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.5); }
 
     .scenario-radio-grid {
@@ -572,6 +605,16 @@ export function render3ScenariosLiveHtml() {
       background: #f59e0b;
     }
 
+    .scenario-radio-card.active-s5 {
+      border-color: #f97316;
+      background: rgba(249, 115, 22, 0.12);
+      box-shadow: 0 0 12px rgba(249, 115, 22, 0.15);
+    }
+    .scenario-radio-card.active-s5 input[type="radio"]:checked {
+      border-color: #f97316;
+      background: #f97316;
+    }
+
     .scenario-radio-card.active-s6 {
       border-color: #ec4899;
       background: rgba(236, 72, 153, 0.12);
@@ -600,6 +643,16 @@ export function render3ScenariosLiveHtml() {
     .scenario-radio-card.active-s8 input[type="radio"]:checked {
       border-color: #a855f7;
       background: #a855f7;
+    }
+
+    .scenario-radio-card.active-s9 {
+      border-color: #3b82f6;
+      background: rgba(59, 130, 246, 0.12);
+      box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+    }
+    .scenario-radio-card.active-s9 input[type="radio"]:checked {
+      border-color: #3b82f6;
+      background: #3b82f6;
     }
 
     .scenario-radio-card.active-both {
@@ -648,8 +701,11 @@ export function render3ScenariosLiveHtml() {
         <a href="/add-fol/backtest-dynamic2" class="nav-btn">🚀 Backtest V2 ($20 Pool)</a>
         <a href="/add-fol/3scenarios" class="nav-btn active">📡 Live Radar Multi-Skenario</a>
         <a href="/add-fol/3scenarios/sce4" class="nav-btn" style="color:#f59e0b; border-color:rgba(245,158,11,0.4);">🔍 Detail S4</a>
+        <a href="/add-fol/3scenarios/sce5" class="nav-btn" style="color:#f97316; border-color:rgba(249,115,22,0.4);">🌊 Detail S5</a>
         <a href="/add-fol/3scenarios/sce6" class="nav-btn" style="color:#ec4899; border-color:rgba(236,72,153,0.4);">🚀 Detail S6</a>
         <a href="/add-fol/3scenarios/sce7" class="nav-btn" style="color:#06b6d4; border-color:rgba(6,182,212,0.4);">⏱️ Detail S7</a>
+        <a href="/add-fol/3scenarios/sce8" class="nav-btn" style="color:#a855f7; border-color:rgba(168,85,247,0.4);">⚡ Detail S8</a>
+        <a href="/add-fol/3scenarios/sce9" class="nav-btn" style="color:#3b82f6; border-color:rgba(59,130,246,0.4);">🔄 Detail S9</a>
       </div>
     </header>
 
@@ -659,7 +715,7 @@ export function render3ScenariosLiveHtml() {
         <div class="autobuy-title">
           <span>⚡ REAL AUTO-BUY & DRY-RUN CONTROLLER</span>
           <span class="status-pill status-${activeScenario.toLowerCase()}">
-            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : (activeScenario === 'DRY_RUN' ? '⚪ SEMUANYA DRY RUN REALISTIS' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : (activeScenario === 'S7' ? '🔵 S7 REAL AUTO-BUY AKTIF' : '🟢 SEMUA REAL AUTO-BUY AKTIF'))))}
+            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : (activeScenario === 'DRY_RUN' ? '⚪ SEMUANYA DRY RUN REALISTIS' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S5' ? '🟠 S5 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : (activeScenario === 'S7' ? '🔵 S7 REAL AUTO-BUY AKTIF' : (activeScenario === 'S8' ? '🟣 S8 REAL AUTO-BUY AKTIF' : (activeScenario === 'S9' ? '🔷 S9 REAL AUTO-BUY AKTIF' : '🟢 SEMUA REAL AUTO-BUY AKTIF')))))))}
           </span>
         </div>
         <div style="font-size: 0.78rem; color: #94a3b8;">
@@ -673,12 +729,18 @@ export function render3ScenariosLiveHtml() {
           : (activeScenario === 'DRY_RUN'
               ? '⚪ <strong>Semuanya Dry Run (Simulasi Swap Ganda):</strong> Mekanisme persis seperti buy asli! Hit batch_order diganti hit swap ke-2 untuk simulasi slippage riil. PnL dihitung murni dari harga swap DEX nyata tanpa memotong saldo SOL.'
               : (activeScenario === 'S4' 
-                  ? '🟡 <strong>Skenario 4 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S4 terpenuhi. Skenario 6 & 7 berjalan sebagai simulasi.' 
-                  : (activeScenario === 'S6' 
-                      ? '🟣 <strong>Skenario 6 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S6 terpenuhi (Re-Deploy Sniper: TP1 50% @ 5% & TP2 @ 15%). Skenario 4 & 7 berjalan sebagai simulasi.' 
-                      : (activeScenario === 'S7'
-                          ? '🔵 <strong>Skenario 7 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S7 terpenuhi (Time-Stop Sniper: TP1 50% @ 5% & Force Sell 100% @ 28s). Skenario 4 & 6 berjalan sebagai simulasi.'
-                          : '🟢 <strong>Semua Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain saat trigger masing-masing terpenuhi.'))))}
+                  ? '🟡 <strong>Skenario 4 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S4 terpenuhi (2-Lapis Shakeout Trap: Hold 8s & Dump on Buyback). Skenario lain berjalan sebagai simulasi.' 
+                  : (activeScenario === 'S5' 
+                      ? '🟠 <strong>Skenario 5 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S5 terpenuhi (Anti-Shakeout Runner: Hold >= 12s, TP +25%, Time-Stop 35s). Skenario lain berjalan sebagai simulasi.' 
+                      : (activeScenario === 'S6' 
+                          ? '🟣 <strong>Skenario 6 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S6 terpenuhi (Re-Deploy Sniper: TP1 50% @ 5% & TP2 @ 15%). Skenario lain berjalan sebagai simulasi.' 
+                          : (activeScenario === 'S7'
+                              ? '🔵 <strong>Skenario 7 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S7 terpenuhi (Time-Stop Sniper: TP1 50% @ 5% & Force Sell 100% @ 28s). Skenario lain berjalan sebagai simulasi.'
+                              : (activeScenario === 'S8'
+                                  ? '🟣 <strong>Skenario 8 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S8 terpenuhi (Front-Run Dev Re-Deploy & Dump on Target Entry). Skenario lain berjalan sebagai simulasi.'
+                                  : (activeScenario === 'S9'
+                                      ? '🔷 <strong>Skenario 9 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S9 terpenuhi (Dev Front-Run & 2-Way Target Sync: Detik 0 Genesis, Timeout 60s). Skenario lain berjalan sebagai simulasi.'
+                                      : '🟢 <strong>Semua Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain saat trigger masing-masing terpenuhi.')))))))}
       </div>
 
       <!-- Radio Buttons Selection -->
@@ -707,6 +769,14 @@ export function render3ScenariosLiveHtml() {
           </div>
         </label>
 
+        <label class="scenario-radio-card ${activeScenario === 'S5' ? 'active-s5' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S5" ${activeScenario === 'S5' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #f97316;">🟠 Skenario 5 Saja</span>
+            <span class="radio-hint">Anti-Shakeout (TP +25%) Real</span>
+          </div>
+        </label>
+
         <label class="scenario-radio-card ${activeScenario === 'S6' ? 'active-s6' : ''}">
           <input type="radio" name="autobuyScenarioRadio" value="S6" ${activeScenario === 'S6' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
@@ -728,6 +798,14 @@ export function render3ScenariosLiveHtml() {
           <div class="radio-text">
             <span class="radio-main" style="color: #a855f7;">🟣 Skenario 8 Saja</span>
             <span class="radio-hint">Front-Run Dev & Dump on Target</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'S9' ? 'active-s9' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S9" ${activeScenario === 'S9' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #3b82f6;">🔷 Skenario 9 Saja</span>
+            <span class="radio-hint">Dev Front-Run & 2-Way Sync Real</span>
           </div>
         </label>
 
@@ -849,6 +927,17 @@ export function render3ScenariosLiveHtml() {
       sendStakeUpdate({ stakeUsdS4: val }, 'Modal S4 berhasil disimpan: $' + val.toFixed(2));
     }
 
+    function saveS5Stake() {
+      const input = document.getElementById('s5StakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S5 minimal $0.05!');
+        return;
+      }
+      sendStakeUpdate({ stakeUsdS5: val }, 'Modal S5 berhasil disimpan: $' + val.toFixed(2));
+    }
+
     function saveS6Stake() {
       const p1 = document.getElementById('s6Pool1Input');
       const p2 = document.getElementById('s6Pool2Input');
@@ -892,6 +981,19 @@ export function render3ScenariosLiveHtml() {
       sendStakeUpdate({
         stakeUsdS8: val
       }, 'Modal S8 berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveS9Stake() {
+      const input = document.getElementById('s9StakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S9 minimal $0.05!');
+        return;
+      }
+      sendStakeUpdate({
+        stakeUsdS9: val
+      }, 'Modal S9 berhasil disimpan: $' + val.toFixed(2));
     }
 
     function sendStakeUpdate(payload, successMsg) {

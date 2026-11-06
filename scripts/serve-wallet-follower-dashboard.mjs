@@ -191,7 +191,7 @@ const server = createServer((req, res) => {
 
         if (patch.autobuyScenario !== undefined) {
           const sc = String(patch.autobuyScenario).toUpperCase();
-          if (['OFF', 'DRY_RUN', 'S4', 'S6', 'S7', 'S8', 'BOTH'].includes(sc)) {
+          if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'BOTH'].includes(sc)) {
             updated.autobuyScenario = sc;
             updated.enabled = (sc !== 'OFF');
           }
@@ -222,6 +222,11 @@ const server = createServer((req, res) => {
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS4 = val;
         }
 
+        if (patch.stakeUsdS5 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS5);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS5 = val;
+        }
+
         if (patch.stakeUsdS6Pool1 !== undefined) {
           const val = parseFloat(patch.stakeUsdS6Pool1);
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS6Pool1 = val;
@@ -245,6 +250,11 @@ const server = createServer((req, res) => {
         if (patch.stakeUsdS8 !== undefined) {
           const val = parseFloat(patch.stakeUsdS8);
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS8 = val;
+        }
+
+        if (patch.stakeUsdS9 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS9);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS9 = val;
         }
 
         if (patch.resetQuota) {

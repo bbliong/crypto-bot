@@ -1679,7 +1679,7 @@ export class WalletFollowerRunner {
     // eksekusi LANGSUNG secara paralel tanpa antre di belakang simulasi skenario lain!
     const config = readFollowerLiveConfig(this.dataDir);
     const isTargetReal = this.isScenarioAllowedForRealOrder(item.scenarioId, config);
-    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('FRONTRUN')) {
+    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('9') || item.scenarioId.includes('FRONTRUN')) {
       this.executeGmgnApiProbe(
         item.side,
         item.scenarioId,
@@ -1731,17 +1731,17 @@ export class WalletFollowerRunner {
     if (targetSc === 'S4' || targetSc === 'SCE4' || targetSc === 'SCENARIO_4') {
       return scUpper.includes('4') || scUpper.includes('SINGLE');
     }
+    if (targetSc === 'S5' || targetSc === 'SCE5' || targetSc === 'SCENARIO_5') {
+      return scUpper.includes('5') || scUpper.includes('ANTI_SHAKEOUT');
+    }
     if (targetSc === 'S6' || targetSc === 'SCE6' || targetSc === 'SCENARIO_6') {
       return scUpper.includes('6') || scUpper.includes('REDEPLOY');
     }
     if (targetSc === 'S7' || targetSc === 'SCE7' || targetSc === 'SCENARIO_7') {
       return scUpper.includes('7') || scUpper.includes('TIME_STOP');
     }
-    if (targetSc === 'S5' || targetSc === 'SCE5' || targetSc === 'SCENARIO_5') {
-      return scUpper.includes('5') || scUpper.includes('ANTI_SHAKEOUT');
-    }
     if (targetSc === 'S8' || targetSc === 'SCE8' || targetSc === 'SCENARIO_8') {
-      return scUpper.includes('8') || scUpper.includes('FRONTRUN');
+      return scUpper.includes('8') || scUpper.includes('FRONTRUN_DEV');
     }
     if (targetSc === 'S9' || targetSc === 'SCE9' || targetSc === 'SCENARIO_9') {
       return scUpper.includes('9') || scUpper.includes('DEV_FRONTRUN');
