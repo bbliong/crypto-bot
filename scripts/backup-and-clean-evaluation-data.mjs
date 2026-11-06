@@ -57,13 +57,13 @@ async function main() {
   console.log('\n🧹 [CLEAN] Mengosongkan data aktif untuk evaluasi fresh...');
 
   // Reset dryrun-3scenarios-live.json
-  let s4Stake = 0.25;
+  let s4Stake = 1.0;
   let s5Stake = 1.0;
-  let s6Pool1 = 5.0;
-  let s6Pool2 = 7.0;
+  let s6Pool1 = 1.0;
+  let s6Pool2 = 1.0;
   let s7Pool1 = 1.0;
-  let s7Pool2 = 2.0;
-  let s8Stake = 0.25;
+  let s7Pool2 = 1.0;
+  let s8Stake = 1.0;
   let s9Stake = 1.0;
   try {
     const s = JSON.parse(readFileSync(join(dataDir, 'follower-autobuy-settings.json'), 'utf8'));

@@ -41,12 +41,12 @@ export function render3ScenariosLiveHtml() {
   const isS9Real = activeScenario === 'S9' || activeScenario === 'BOTH';
   const isDryRun = activeScenario === 'DRY_RUN';
 
-  const s4Stake = Number(autobuyConfig.stakeUsdS4) || 5.0;
+  const s4Stake = Number(autobuyConfig.stakeUsdS4) || 1.0;
   const s5Stake = Number(autobuyConfig.stakeUsdS5) || 1.0;
-  const s6Pool1 = Number(autobuyConfig.stakeUsdS6Pool1) || 5.0;
-  const s6Pool2 = Number(autobuyConfig.stakeUsdS6Pool2) || 7.0;
+  const s6Pool1 = Number(autobuyConfig.stakeUsdS6Pool1) || 1.0;
+  const s6Pool2 = Number(autobuyConfig.stakeUsdS6Pool2) || 1.0;
   const s7Pool1 = Number(autobuyConfig.stakeUsdS7Pool1) || 1.0;
-  const s7Pool2 = Number(autobuyConfig.stakeUsdS7Pool2) || 2.0;
+  const s7Pool2 = Number(autobuyConfig.stakeUsdS7Pool2) || 1.0;
   const s8Stake = Number(autobuyConfig.stakeUsdS8) || 1.0;
   const s9Stake = Number(autobuyConfig.stakeUsdS9) || 1.0;
 

@@ -309,13 +309,13 @@ export class MultiScenarioDryRunEngine {
     const timeWib = formatWibDate(now);
     const targetUsd = signal.usdAmount > 0 ? signal.usdAmount : (signal.solAmount * 100);
 
-    // Baca konfigurasi stake dinamis (default: S4=$5, S5=$1, S6 Pool1=$5, S6 Pool2=$7, S7 Pool1=$1, S7 Pool2=$2)
-    let s4Stake = 5.0;
+    // Baca konfigurasi stake dinamis (default: semua skenario $1.00)
+    let s4Stake = 1.0;
     let s5Stake = 1.0;
-    let s6Pool1 = 5.0;
-    let s6Pool2 = 7.0;
+    let s6Pool1 = 1.0;
+    let s6Pool2 = 1.0;
     let s7Pool1 = 1.0;
-    let s7Pool2 = 2.0;
+    let s7Pool2 = 1.0;
     try {
       const cfg = readFollowerLiveConfig(this.dataDir);
       if (cfg.stakeUsdS4) s4Stake = Number(cfg.stakeUsdS4);
@@ -478,7 +478,7 @@ export class MultiScenarioDryRunEngine {
     let pool2Stake = customStakeUsd;
     if (!pool2Stake) {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      pool2Stake = liveCfg.stakeUsdS6Pool2 || 2.0;
+      pool2Stake = liveCfg.stakeUsdS6Pool2 || 1.0;
     }
 
     const targetExchange = evt.mainExchange === 'pumpswap' ? 'pump_amm' : (evt.mainExchange || 'meteora_dammv2');
