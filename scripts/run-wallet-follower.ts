@@ -1728,27 +1728,33 @@ export class WalletFollowerRunner {
   private isScenarioAllowedForRealOrder(scenarioId: string, config: any): boolean {
     if (!config.enabled) return false;
     const targetSc = String(config.autobuyScenario || 'OFF').toUpperCase();
-    if (targetSc === 'OFF') return false;
+    if (targetSc === 'OFF' || targetSc === 'DRY_RUN') return false;
     if (targetSc === 'BOTH' || targetSc === 'ALL') return true;
 
     const scUpper = scenarioId.toUpperCase();
-    if (targetSc === 'S4' || targetSc === 'SCE4' || targetSc === 'SCENARIO_4') {
-      return scUpper.includes('4') || scUpper.includes('SINGLE');
-    }
-    if (targetSc === 'S5' || targetSc === 'SCE5' || targetSc === 'SCENARIO_5') {
-      return scUpper.includes('5') || scUpper.includes('ANTI_SHAKEOUT');
-    }
-    if (targetSc === 'S6' || targetSc === 'SCE6' || targetSc === 'SCENARIO_6') {
-      return scUpper.includes('6') || scUpper.includes('REDEPLOY');
-    }
-    if (targetSc === 'S7' || targetSc === 'SCE7' || targetSc === 'SCENARIO_7') {
-      return scUpper.includes('7') || scUpper.includes('TIME_STOP');
-    }
-    if (targetSc === 'S8' || targetSc === 'SCE8' || targetSc === 'SCENARIO_8') {
-      return scUpper.includes('8') || scUpper.includes('FRONTRUN_DEV');
-    }
-    if (targetSc === 'S9' || targetSc === 'SCE9' || targetSc === 'SCENARIO_9') {
-      return scUpper.includes('9') || scUpper.includes('DEV_FRONTRUN');
+
+    // Support multi-scenario: "S5+S9", "S5,S9", "S9+S5", etc.
+    const parts = targetSc.split(/[+,\s]+/).map(s => s.trim()).filter(Boolean);
+
+    for (const part of parts) {
+      if (part === 'S4' || part === 'SCE4' || part === 'SCENARIO_4') {
+        if (scUpper.includes('4') || scUpper.includes('SINGLE')) return true;
+      }
+      if (part === 'S5' || part === 'SCE5' || part === 'SCENARIO_5') {
+        if (scUpper.includes('5') || scUpper.includes('ANTI_SHAKEOUT')) return true;
+      }
+      if (part === 'S6' || part === 'SCE6' || part === 'SCENARIO_6') {
+        if (scUpper.includes('6') || scUpper.includes('REDEPLOY')) return true;
+      }
+      if (part === 'S7' || part === 'SCE7' || part === 'SCENARIO_7') {
+        if (scUpper.includes('7') || scUpper.includes('TIME_STOP')) return true;
+      }
+      if (part === 'S8' || part === 'SCE8' || part === 'SCENARIO_8') {
+        if (scUpper.includes('8') || scUpper.includes('FRONTRUN_DEV')) return true;
+      }
+      if (part === 'S9' || part === 'SCE9' || part === 'SCENARIO_9') {
+        if (scUpper.includes('9') || scUpper.includes('DEV_FRONTRUN')) return true;
+      }
     }
     return false;
   }
