@@ -35,7 +35,8 @@ export async function getBrowserBuySwapRoute(
   stakeUsd: number = 5.0,
   solPriceUsd: number = 145.0,
   slippage: number = 15,
-  maxRetries: number = 3
+  maxRetries: number = 3,
+  pairAddress?: string
 ): Promise<SwapRouteResult> {
   // Hitung lamports berdasarkan stakeUsd / solPriceUsd
   const inputLamports = Math.floor((stakeUsd / (solPriceUsd > 0 ? solPriceUsd : 145.0)) * 1_000_000_000).toString();
@@ -52,7 +53,7 @@ export async function getBrowserBuySwapRoute(
 
     try {
       lastResult = await page.evaluate(
-        async ({ mint, fromAddress, inputLamports, curSlippage, SOL_MINT }) => {
+        async ({ mint, fromAddress, inputLamports, curSlippage, SOL_MINT, pairAddress }) => {
           const params = new URLSearchParams({
             web_from_source: 'token_poll',
             token_in_chain: 'sol',
@@ -68,6 +69,9 @@ export async function getBrowserBuySwapRoute(
             priority_fee: '0.0001',
             legacy: 'true',
           });
+          if (pairAddress) {
+            params.set('pair_address', pairAddress);
+          }
           const t0 = performance.now();
           try {
             const res = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });
@@ -149,7 +153,8 @@ export async function getBrowserSellSwapRoute(
   inputTokenAmountBaseUnits: string,
   tokenDecimals: number = 6,
   slippage: number = 20,
-  maxRetries: number = 5
+  maxRetries: number = 5,
+  pairAddress?: string
 ): Promise<SwapRouteResult> {
   let lastResult: SwapRouteResult = { status: null, latencyMs: 0, ok: false, error: 'NOT_ATTEMPTED' };
 
@@ -163,7 +168,7 @@ export async function getBrowserSellSwapRoute(
 
     try {
       lastResult = await page.evaluate(
-        async ({ mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT }) => {
+        async ({ mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT, pairAddress }) => {
           const params = new URLSearchParams({
             web_from_source: 'token_poll',
             token_in_chain: 'sol',
@@ -179,6 +184,9 @@ export async function getBrowserSellSwapRoute(
             priority_fee: '0.0001',
             legacy: 'true',
           });
+          if (pairAddress) {
+            params.set('pair_address', pairAddress);
+          }
           const t0 = performance.now();
           try {
             const res = await fetch(`/txproxy/v1/get_swap_route?${params}`, { credentials: 'include' });

@@ -10,6 +10,8 @@ export interface WatchedDevTarget {
   mint: string;
   symbol: string;
   devWallet: string;
+  fundingWallet?: string;
+  pairAddress?: string;
   ipfsUri?: string;
   ipfsHash?: string;
   subscribedAt: number;
@@ -72,9 +74,94 @@ export class SingleDevWalletWatcher extends EventEmitter {
     this.saveState();
   }
 
+  private devTokensPollerInterval: NodeJS.Timeout | null = null;
+  private knownDevTokenMints: Set<string> = new Set();
+
   public setBrowserPage(page: any): void {
     this.browserPage = page;
     console.log('[DEV-WATCHER] 🌐 Browser page terhubung untuk GMGN Dev API integration.');
+    if (this.activeTarget && this.activeTarget.devWallet) {
+      this.startDevTokensPoller();
+    }
+  }
+
+  public startDevTokensPoller(intervalMs: number = 2500): void {
+    if (this.devTokensPollerInterval) return;
+    this.devTokensPollerInterval = setInterval(async () => {
+      await this.pollDevCreatedTokens();
+    }, intervalMs);
+    setTimeout(() => this.pollDevCreatedTokens(), 200);
+  }
+
+  public stopDevTokensPoller(): void {
+    if (this.devTokensPollerInterval) {
+      clearInterval(this.devTokensPollerInterval);
+      this.devTokensPollerInterval = null;
+    }
+    this.knownDevTokenMints.clear();
+  }
+
+  public async pollDevCreatedTokens(): Promise<void> {
+    const target = this.activeTarget;
+    if (!target || !target.devWallet || !this.browserPage || this.browserPage.isClosed()) return;
+
+    try {
+      const devWallet = target.devWallet;
+      const tokens = await this.browserPage.evaluate(async (dev: string) => {
+        try {
+          const r = await fetch(`/api/v1/dev_created_tokens/sol/${dev}`);
+          const json = await r.json();
+          return json?.code === 0 ? json.data?.tokens : null;
+        } catch {
+          return null;
+        }
+      }, devWallet);
+
+      if (!tokens || !Array.isArray(tokens) || tokens.length === 0) return;
+
+      if (this.knownDevTokenMints.size === 0) {
+        for (const t of tokens) {
+          if (t.token_address) this.knownDevTokenMints.add(t.token_address);
+        }
+        console.log(`[DEV-RADAR-MENU] 📋 Memuat ${this.knownDevTokenMints.size} token terdahulu dari Dev Token menu GMGN (${devWallet.slice(0, 8)}...). Radar menu aktif!`);
+        return;
+      }
+
+      for (const t of tokens) {
+        const mint = t.token_address;
+        if (!mint || this.knownDevTokenMints.has(mint)) continue;
+
+        this.knownDevTokenMints.add(mint);
+
+        console.log(`\n=========================================================`);
+        console.log(`⚡ [GMGN DEV-TOKEN MENU DETECTED] Token baru terbit di menu Dev Token GMGN!`);
+        console.log(`   Simbol   : ${t.symbol}`);
+        console.log(`   Mint     : ${mint}`);
+        console.log(`   Pool PAIR: ${t.biggest_pool}`);
+        console.log(`   Platform : ${t.launchpad_platform}`);
+        console.log(`   Dev      : ${devWallet}`);
+        console.log(`=========================================================\n`);
+
+        const isPump = Boolean(t.is_pump || (t.launchpad_platform && t.launchpad_platform.includes('pump')));
+        const mainExchange = isPump ? 'pumpswap' : 'meteora';
+
+        const evt: RedeployDetectedEvent = {
+          oldMint: target.mint,
+          newMint: mint,
+          symbol: t.symbol || 'UNKNOWN',
+          devWallet,
+          signature: '',
+          timestamp: Date.now(),
+          initialMeteoraSol: Number(t.pool_liquidity || 0) / 90,
+          mainExchange,
+          mainPairAddress: t.biggest_pool || '',
+          isSameSymbol: (t.symbol || '').toUpperCase() === (target.symbol || '').toUpperCase(),
+        };
+
+        this.emit('redeploy_detected', evt);
+        break;
+      }
+    } catch {}
   }
 
   private saveState(): void {
@@ -94,27 +181,44 @@ export class SingleDevWalletWatcher extends EventEmitter {
   }
 
   /**
-   * Resolusi dev pembuat koin (GMGN Creator Tag -> On-Chain Genesis Fallback) & IPFS metadata
+   * Resolusi dev pembuat koin (GMGN multi_token_full_info -> Holder Creator Tag -> Genesis Fallback)
    */
-  public async resolveDevAndMetadata(mintAddress: string, defaultSymbol: string = 'UNKNOWN'): Promise<{ devWallet: string; symbol: string; uri: string } | null> {
-    // 1. Prioritas Pertama: Cek GMGN Token Holders API (< 100ms via Browser Session)
+  public async resolveDevAndMetadata(mintAddress: string, defaultSymbol: string = 'UNKNOWN'): Promise<{ devWallet: string; fundingWallet?: string; symbol: string; uri: string; pairAddress?: string } | null> {
+    // 1. Prioritas Pertama & Paling Akurat: GMGN multi_token_full_info API (< 150ms via Browser Session)
     if (this.browserPage && !this.browserPage.isClosed()) {
       try {
-        const gmgnDev = await this.browserPage.evaluate(async (m: string) => {
+        const gmgnInfo = await this.browserPage.evaluate(async (m: string) => {
           try {
-            const resp = await fetch(`https://gmgn.ai/vas/api/v1/token_holders/sol/${m}?limit=50&orderby=amount_percentage&direction=desc`);
+            const resp = await fetch('/mrwapi/v1/multi_token_full_info', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ chain: 'sol', addresses: [m] })
+            });
             const json = await resp.json();
-            const list = json?.data?.list || [];
-            const creator = list.find((h: any) => (h.maker_token_tags || []).includes('creator') || (h.tags || []).includes('creator'));
-            return creator ? creator.address : null;
+            const token = json?.data?.[0];
+            if (token && token.creator_address) {
+              return {
+                creator: token.creator_address,
+                fundingWallet: token.creator_stat?.from_address || '',
+                symbol: token.symbol || '',
+                pairAddress: token.biggest_pool_address || '',
+              };
+            }
+            return null;
           } catch {
             return null;
           }
         }, mintAddress);
 
-        if (gmgnDev) {
-          console.log(`[DEV-RESOLVER] ⚡ GMGN Creator Tag Terdeteksi Instan: ${gmgnDev}`);
-          return { devWallet: gmgnDev, symbol: defaultSymbol, uri: '' };
+        if (gmgnInfo && gmgnInfo.creator) {
+          console.log(`[DEV-RESOLVER] 🎯 GMGN Token Info Akurat: Dev=${gmgnInfo.creator} | Funding=${gmgnInfo.fundingWallet} | Pair=${gmgnInfo.pairAddress}`);
+          return {
+            devWallet: gmgnInfo.creator,
+            fundingWallet: gmgnInfo.fundingWallet,
+            symbol: gmgnInfo.symbol || defaultSymbol,
+            uri: '',
+            pairAddress: gmgnInfo.pairAddress,
+          };
         }
       } catch (err: any) {
         console.warn(`[DEV-RESOLVER-GMGN-WARN] ${err?.message}`);
@@ -184,7 +288,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     // 1. Resolusi alamat dev wallet SELALU via GMGN Creator Tag / On-Chain Genesis
     //    Field `ad` dari GMGN WebSocket BUKAN dev sesungguhnya (bisa sub-wallet/pool authority).
     //    Dev asli hanya bisa didapat dari holder tag 'creator' atau genesis tx fee payer.
-    let resolved: { devWallet: string; symbol: string; uri: string } | null = null;
+    let resolved: { devWallet: string; fundingWallet?: string; symbol: string; uri: string; pairAddress?: string } | null = null;
     console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev ASLI pembuat ${symbol} (${mintAddress.slice(0, 10)}...) via GMGN Creator Tag / On-Chain Genesis...`);
     resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
 
@@ -203,10 +307,13 @@ export class SingleDevWalletWatcher extends EventEmitter {
     if (this.activeTarget && this.activeTarget.devWallet === resolved.devWallet) {
       this.activeTarget.mint = mintAddress;
       this.activeTarget.symbol = resolved.symbol || symbol;
+      if (resolved.fundingWallet) this.activeTarget.fundingWallet = resolved.fundingWallet;
+      if (resolved.pairAddress) this.activeTarget.pairAddress = resolved.pairAddress;
       this.activeTarget.ipfsUri = resolved.uri;
       this.activeTarget.ipfsHash = extractIpfsHash(resolved.uri);
       this.saveState();
       console.log(`[DEV-WATCHER] 🎯 Dev wallet sama (${resolved.devWallet.slice(0, 8)}...). Memperbarui token target ke: ${this.activeTarget.symbol} [${mintAddress.slice(0, 8)}...]`);
+      this.startDevTokensPoller();
       return this.activeTarget;
     }
 
@@ -217,6 +324,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
       mint: mintAddress,
       symbol: resolved.symbol || symbol,
       devWallet: resolved.devWallet,
+      fundingWallet: resolved.fundingWallet,
+      pairAddress: resolved.pairAddress,
       ipfsUri: resolved.uri,
       ipfsHash: extractIpfsHash(resolved.uri),
       subscribedAt: Date.now()
@@ -224,10 +333,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
     this.activeTarget = target;
     this.saveState();
-    console.log(`[DEV-WATCHER] 🎯 Terkunci pada 1 Dev: ${target.devWallet} (Token: ${target.symbol} | IPFS: ${target.ipfsHash || '-'})`);
+    console.log(`[DEV-WATCHER] 🎯 Terkunci pada 1 Dev: ${target.devWallet} (Token: ${target.symbol} | Funding: ${target.fundingWallet || '-'} | Pair: ${target.pairAddress || '-'})`);
 
-    // 4. Sambungkan WebSocket logsSubscribe ke dev wallet tersebut (100% Real-time Pure WebSocket)
+    // 4. Sambungkan WebSocket logsSubscribe & mulai Dev Token menu poller
     this.connectAndSubscribe();
+    this.startDevTokensPoller();
     return target;
   }
 
@@ -238,6 +348,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     if (this.activeTarget) {
       console.log(`[DEV-WATCHER] 🛑 Melepas pengawasan dev: ${this.activeTarget.devWallet} (Token: ${this.activeTarget.symbol})`);
     }
+    this.stopDevTokensPoller();
     this.activeTarget = null;
     this.saveState();
     this.closeWs();

@@ -1523,7 +1523,8 @@ export class WalletFollowerRunner {
           stakeUsd,
           this.solPriceUsd,
           config.buySlippagePercent || 15,
-          1 // maxRetries = 1 agar probe cepat (< 200ms)
+          1, // maxRetries = 1 agar probe cepat (< 200ms)
+          signal.pairAddress
         );
       } else {
         // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil
@@ -1549,7 +1550,9 @@ export class WalletFollowerRunner {
           wallet,
           units,
           6,
-          config.sellSlippagePercent || 20
+          config.sellSlippagePercent || 20,
+          5,
+          signal.pairAddress
         );
 
         // Double-Catch Auto-Recovery jika terdeteksi selisih saldo di aggregator
@@ -1559,16 +1562,16 @@ export class WalletFollowerRunner {
             const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
             const onChain = await getOnChainTokenBalance(signal.mint, wallet);
             if (onChain && onChain.amount && onChain.amount !== '0') {
-              const isStage1Partial = reason && reason.includes('STAGE_1_TP_50%');
-              units = isStage1Partial ? (BigInt(onChain.amount) / 2n).toString() : onChain.amount;
-              console.log(`[DOUBLE-CATCH] Mengulang quote sell dengan saldo aktual: ${units} base units...`);
+              console.log(`[DOUBLE-CATCH] ✅ Saldo on-chain terverifikasi ulang: ${onChain.amount} base units. Menembak ulang sell route dengan pairAddress...`);
               route = await getBrowserSellSwapRoute(
                 this.page,
                 signal.mint,
                 wallet,
-                units,
+                onChain.amount,
                 6,
-                config.sellSlippagePercent || 20
+                config.sellSlippagePercent || 20,
+                5,
+                signal.pairAddress
               );
             }
           } catch (e: any) {
