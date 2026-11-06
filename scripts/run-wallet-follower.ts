@@ -145,6 +145,10 @@ export class WalletFollowerRunner {
 
     // Radar 1 Dev Wallet: Memantau 1 dev aktif dan mendeteksi koin baru sebelum target buy
     this.devWatcher = new SingleDevWalletWatcher({ targetWallet: this.targetWallet });
+    this.devWatcher.isHuntingMode = () => {
+      // Smart Gating: Hanya aktif polling jika S9 sedang TIDAK menahan posisi terbuka (sedang kosong / hunting mode)
+      return this.multiDryRunEngine.getS9OpenPositionsCount() === 0;
+    };
     this.devWatcher.on('redeploy_detected', (evt) => {
       console.log(`\n=========================================================`);
       console.log(`🚨 [DEV-RADAR TRIGGER] Terdeteksi Pool Baru Lahir dari Dev: ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);

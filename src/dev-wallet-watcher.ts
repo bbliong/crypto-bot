@@ -50,6 +50,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
   private dataDir: string;
   private browserPage: any = null;
   private targetWallet: string = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
+  public isHuntingMode: () => boolean = () => true;
 
   constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string; targetWallet?: string } = {}) {
     super();
@@ -85,7 +86,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     }
   }
 
-  public startDevTokensPoller(intervalMs: number = 2500): void {
+  public startDevTokensPoller(intervalMs: number = 6000): void {
     if (this.devTokensPollerInterval) return;
     this.devTokensPollerInterval = setInterval(async () => {
       await this.pollDevCreatedTokens();
@@ -104,6 +105,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
   public async pollDevCreatedTokens(): Promise<void> {
     const target = this.activeTarget;
     if (!target || !target.devWallet || !this.browserPage || this.browserPage.isClosed()) return;
+    if (!this.isHuntingMode()) return;
 
     try {
       const devWallet = target.devWallet;

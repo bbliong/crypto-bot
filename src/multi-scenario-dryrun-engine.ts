@@ -2226,4 +2226,8 @@ export class MultiScenarioDryRunEngine {
       this.saveState();
     }
   }
+
+  public getS9OpenPositionsCount(): number {
+    return this.scenarios.s9.openPositions.length;
+  }
 }
