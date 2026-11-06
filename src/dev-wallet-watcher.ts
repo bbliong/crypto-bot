@@ -360,6 +360,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
     const isPoolCreation = logs.some(l => 
       l.includes('InitializeCustomizablePool') || 
       l.includes('InitializePool') ||
+      l.includes('Instruction: CreatePool') ||
+      l.includes('Instruction: InitializeMint') ||
+      l.includes('Instruction: InitializeMint2') ||
+      l.includes('TokenMetadataInstruction: Initialize') ||
+      l.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA') ||
       (l.includes('TokenMetadataInstruction: Initialize') && l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'))
     );
 
@@ -380,7 +385,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
     }
 
     console.log(`\n=========================================================`);
-    console.log(`⚡ [DEV-RADAR TRIGGER] Dev ${target.devWallet.slice(0, 8)}... baru saja memanggil InitializePool (tx: ${sig.slice(0, 12)}...)!`);
+    console.log(`⚡ [DEV-RADAR TRIGGER] Dev ${target.devWallet.slice(0, 8)}... baru saja mendeploy token/pool baru (tx: ${sig.slice(0, 12)}...)!`);
     console.log(`=========================================================`);
 
     // Ambil detail transaksi genesis koin baru secara instan (retry hingga 4x / 600ms agar pasti ter-index)
@@ -400,25 +405,40 @@ export class SingleDevWalletWatcher extends EventEmitter {
         return;
       }
 
-      // Ekstrak mint koin baru secara presisi dari transferChecked / transfer di innerInstructions (Base Token liquidity deposit)
+      // 0. Ekstrak langsung dari parsed instruction jika ini tx pembuatan SPL Token (InitializeMint / InitializeMint2)
       let detectedMint = '';
-      const inner = (tx.meta as any)?.innerInstructions || [];
-      for (const g of inner) {
-        for (const ix of (g.instructions || [])) {
-          if (ix?.parsed?.type === 'transferChecked' || ix?.parsed?.type === 'transfer') {
-            const m = ix?.parsed?.info?.mint;
-            if (
-              m &&
-              m !== 'So11111111111111111111111111111111111111112' &&
-              m !== target.devWallet &&
-              m !== target.mint
-            ) {
-              detectedMint = m;
-              break;
-            }
+      let detectedSymbol = target.symbol;
+      for (const ix of (tx.transaction.message.instructions || [])) {
+        const parsed = (ix as any)?.parsed;
+        if (parsed?.type === 'initializeMint' || parsed?.type === 'initializeMint2' || parsed?.type === 'initializeTokenMetadata') {
+          if (parsed.info?.mint && parsed.info.mint !== target.devWallet) {
+            detectedMint = parsed.info.mint;
+            if (parsed.info?.symbol) detectedSymbol = parsed.info.symbol;
+            break;
           }
         }
-        if (detectedMint) break;
+      }
+
+      // Ekstrak mint koin baru secara presisi dari transferChecked / transfer di innerInstructions (Base Token liquidity deposit)
+      const inner = (tx.meta as any)?.innerInstructions || [];
+      if (!detectedMint) {
+        for (const g of inner) {
+          for (const ix of (g.instructions || [])) {
+            if (ix?.parsed?.type === 'transferChecked' || ix?.parsed?.type === 'transfer') {
+              const m = ix?.parsed?.info?.mint;
+              if (
+                m &&
+                m !== 'So11111111111111111111111111111111111111112' &&
+                m !== target.devWallet &&
+                m !== target.mint
+              ) {
+                detectedMint = m;
+                break;
+              }
+            }
+          }
+          if (detectedMint) break;
+        }
       }
 
       // Fallback 1: cek inner ix mint lain yang bukan WSOL
@@ -525,7 +545,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
           }
         }
 
-        let mainExchange: 'meteora' | 'pumpswap' | 'raydium' = 'meteora';
+        let mainExchange: 'meteora' | 'pumpswap' | 'raydium' = 'pumpswap';
         let mainPairAddress = '';
         let poolLiquidityUsd = 0;
 
@@ -533,30 +553,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
           mainExchange = 'meteora';
           console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL`);
         } else {
-          console.log(`[DEV-RADAR POOL WARN] ⚠️ Meteora pool cuma berisi ${initialMeteoraSol.toFixed(6)} SOL (< 0.1 SOL)! Mengecek kolam utama Pump.fun/PumpSwap...`);
-          try {
-            const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${detectedMint}`, { signal: AbortSignal.timeout(1500) });
-            if (res.ok) {
-              const data = await res.json() as any;
-              const pairs = (data.pairs || []).sort((a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-              const bestPair = pairs[0];
-              if (bestPair && (bestPair.liquidity?.usd || 0) > 500) {
-                mainPairAddress = bestPair.pairAddress;
-                poolLiquidityUsd = bestPair.liquidity.usd;
-                if (bestPair.dexId === 'pumpswap' || bestPair.dexId === 'pumpfun') {
-                  mainExchange = 'pumpswap';
-                } else if (bestPair.dexId === 'raydium') {
-                  mainExchange = 'raydium';
-                }
-                console.log(`[DEV-RADAR SMART-REDIRECT] 🎯 Mengalihkan front-run ke kolam utama: ${mainExchange.toUpperCase()} (${bestPair.pairAddress.slice(0, 8)}...) dengan Likuiditas $${poolLiquidityUsd.toLocaleString()}!`);
-              }
-            }
-          } catch {}
-
-          if (initialMeteoraSol < 0.05 && poolLiquidityUsd < 500) {
-            console.log(`[DEV-RADAR SKIP] 🚫 Kolam Meteora (${initialMeteoraSol.toFixed(6)} SOL) dan kolam alternatif tidak memiliki likuiditas valid. Melewati koin debu...`);
-            return;
-          }
+          mainExchange = 'pumpswap';
+          console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif untuk token baru ${detectedSymbol} [${detectedMint.slice(0, 8)}...]!`);
         }
 
         const evt: RedeployDetectedEvent = {
