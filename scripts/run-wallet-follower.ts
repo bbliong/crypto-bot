@@ -781,12 +781,13 @@ export class WalletFollowerRunner {
     const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
 
-    // DYNAMIC 1-DEV LOCK: Setiap kali target buy token baru / berganti token,
-    // langsung kunci radar Dev-Watcher ke Developer pembuat token ini (item.ad)
-    // tanpa dibatasi batas harga entry (agar S9 langsung mengunci dev aktif ini untuk front-run koin berikutnya)!
+    // DYNAMIC 1-DEV LOCK: Setiap kali target BUY token apapun (baik Ground Zero maupun Bukan Ground Zero / Mid-Flight),
+    // jika token atau dev pembuatnya berbeda dari yang sedang diawasi di radar,
+    // langsung kunci radar Dev-Watcher ke Developer pembuat token ini (item.ad)!
     const currentWatched = this.devWatcher.getActiveTarget();
-    const isNewToken = !currentWatched || currentWatched.mint !== signal.mint;
-    if (isNewToken || isGroundZero) {
+    const isDifferentDev = !currentWatched || (signal.devWallet && currentWatched.devWallet !== signal.devWallet);
+    const isDifferentToken = !currentWatched || currentWatched.mint !== signal.mint;
+    if (isDifferentDev || isDifferentToken) {
       this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch((err: any) => {
         console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
       });

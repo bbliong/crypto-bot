@@ -181,14 +181,17 @@ export class SingleDevWalletWatcher extends EventEmitter {
       return this.activeTarget;
     }
 
-    // 1. Resolusi alamat dev wallet (prioritaskan explicitDevWallet jika valid)
+    // 1. Resolusi alamat dev wallet SELALU via GMGN Creator Tag / On-Chain Genesis
+    //    Field `ad` dari GMGN WebSocket BUKAN dev sesungguhnya (bisa sub-wallet/pool authority).
+    //    Dev asli hanya bisa didapat dari holder tag 'creator' atau genesis tx fee payer.
     let resolved: { devWallet: string; symbol: string; uri: string } | null = null;
-    if (explicitDevWallet && explicitDevWallet !== this.targetWallet) {
-      console.log(`[DEV-WATCHER] ⚡ Menggunakan Dev Wallet eksplisit dari GMGN: ${explicitDevWallet} (${symbol})`);
+    console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev ASLI pembuat ${symbol} (${mintAddress.slice(0, 10)}...) via GMGN Creator Tag / On-Chain Genesis...`);
+    resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
+
+    // Fallback ke explicitDevWallet jika resolusi gagal (dan bukan target whale sendiri)
+    if (!resolved && explicitDevWallet && explicitDevWallet !== this.targetWallet) {
+      console.log(`[DEV-WATCHER] ⚠️ Resolusi on-chain gagal. Fallback ke GMGN WS ad field: ${explicitDevWallet} (${symbol})`);
       resolved = { devWallet: explicitDevWallet, symbol, uri: '' };
-    } else {
-      console.log(`[DEV-WATCHER] 🔎 Mencari alamat dev wallet pembuat ${symbol} (${mintAddress.slice(0, 10)}...)...`);
-      resolved = await this.resolveDevAndMetadata(mintAddress, symbol);
     }
 
     if (!resolved || !resolved.devWallet || resolved.devWallet === this.targetWallet) {
