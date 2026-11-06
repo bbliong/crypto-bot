@@ -71,12 +71,26 @@ export const SCENARIO_META = {
       const s = (id || '') + ' ' + (type || '');
       return s.includes('SCENARIO_8') || s.includes('FRONTRUN');
     }
+  },
+  sce9: {
+    id: 'sce9',
+    canonicalKey: 's9',
+    name: 'Skenario 9: Dev Front-Run & 2-Way Target Sync (Max 60s Timeout)',
+    shortName: 'Skenario 9',
+    description: 'Front-Run Bebas Simbol: Buy instan saat Dev rilis pool baru. Time-Stop 60s jika target tidak masuk. Komparasi 2-arah jika target beralih dev.',
+    ruleBadge: 'Front-Run Dev | 60s Timeout & 2-Way Sync',
+    color: '#3b82f6',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_9') || s.includes('DEV_FRONTRUN');
+    }
   }
 };
 
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('9') || str.includes('dev_frontrun') || str.includes('sync')) return 'sce9';
   if (str.includes('8') || str.includes('frontrun') || str.includes('target_inflow')) return 'sce8';
   if (str.includes('7') || str.includes('time_stop') || str.includes('timestop')) return 'sce7';
   if (str.includes('6') || str.includes('redeploy')) return 'sce6';

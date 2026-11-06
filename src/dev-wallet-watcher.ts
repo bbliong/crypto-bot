@@ -26,6 +26,7 @@ export interface RedeployDetectedEvent {
   initialMeteoraSol?: number;
   mainExchange?: 'meteora' | 'pumpswap' | 'raydium';
   mainPairAddress?: string;
+  isSameSymbol?: boolean;
 }
 
 export function extractIpfsHash(uri?: string): string | undefined {
@@ -487,9 +488,9 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
         const targetSym = (target.symbol || '').toUpperCase().trim();
         const newSym = (detectedSymbol || '').toUpperCase().trim();
-        if (targetSym && newSym && targetSym !== newSym) {
-          console.log(`[DEV-RADAR SKIP] Dev deploy pool baru '${detectedSymbol}', tapi target sedang aktif di '${target.symbol}'. Melewati (Bukan Re-Deploy)...`);
-          return;
+        const isSameSymbol = Boolean(targetSym && newSym && targetSym === newSym);
+        if (!isSameSymbol) {
+          console.log(`[DEV-RADAR INFO] Dev deploy pool baru '${detectedSymbol}', berbeda simbol dengan koin aktif '${target.symbol}'. Meneruskan untuk S9 Front-Run...`);
         }
 
         // 1. Hitung saldo awal SOL yang disetor dev ke pool Meteora
@@ -552,6 +553,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
           initialMeteoraSol,
           mainExchange,
           mainPairAddress,
+          isSameSymbol,
         };
 
         console.log(`🚀 [DEV-RADAR SUCCESS] DITEMUKAN TOKEN RE-DEPLOY GENERASI 2!`);

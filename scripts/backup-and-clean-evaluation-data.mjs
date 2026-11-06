@@ -64,6 +64,7 @@ async function main() {
   let s7Pool1 = 1.0;
   let s7Pool2 = 2.0;
   let s8Stake = 0.25;
+  let s9Stake = 1.0;
   try {
     const s = JSON.parse(readFileSync(join(dataDir, 'follower-autobuy-settings.json'), 'utf8'));
     if (s.stakeUsdS4) s4Stake = Number(s.stakeUsdS4);
@@ -73,6 +74,7 @@ async function main() {
     if (s.stakeUsdS7Pool1) s7Pool1 = Number(s.stakeUsdS7Pool1);
     if (s.stakeUsdS7Pool2) s7Pool2 = Number(s.stakeUsdS7Pool2);
     if (s.stakeUsdS8) s8Stake = Number(s.stakeUsdS8);
+    if (s.stakeUsdS9) s9Stake = Number(s.stakeUsdS9);
   } catch {}
 
   const freshScenarios = {
@@ -156,6 +158,25 @@ async function main() {
       id: 'SCENARIO_8_FRONTRUN_DEV',
       name: `Skenario 8: Front-Run Dev Floor & Hold 20s Post-Target ($${s8Stake.toFixed(2)})`,
       description: `Saldo Awal $20.00. Stake $${s8Stake.toFixed(2)} di Detik 0 lantai Dev Meteora DAMM v2. Tahan 20 detik pasca target whale masuk (TIME_STOP_20S_POST_TARGET_ENTRY) atau safety exit jika target dump >= 15%.`,
+      initialCash: 20.0,
+      availableCash: 20.0,
+      investedCash: 0.0,
+      totalFeesPaid: 0.0,
+      realizedPnl: 0.0,
+      unrealizedPnl: 0.0,
+      totalPortfolioValue: 20.0,
+      wins: 0,
+      losses: 0,
+      totalTrades: 0,
+      winRate: 0.0,
+      openPositions: [],
+      closedTrades: [],
+      recentEvents: [],
+    },
+    s9: {
+      id: 'SCENARIO_9_DEV_FRONTRUN_SYNC',
+      name: `Skenario 9: Dev Front-Run & 2-Way Target Sync ($${s9Stake.toFixed(2)})`,
+      description: `Saldo Awal $20.00. Modal $${s9Stake.toFixed(2)}. Proaktif Buy di Detik 0 saat Dev rilis pool baru sebelum target whale masuk. Jika target tidak masuk dalam 60s -> Force Sell. Komparasi 2-arah jika target beralih dev.`,
       initialCash: 20.0,
       availableCash: 20.0,
       investedCash: 0.0,

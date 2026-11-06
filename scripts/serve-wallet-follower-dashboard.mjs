@@ -460,6 +460,23 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // Dedicated Scenario 9 Detail Timeline (/3scenarios/sce9, /add-fol/3scenarios/sce9)
+  if (pathname.includes('/3scenarios/sce9') || pathname.includes('/4scenarios/sce9') || pathname.includes('/scenarios/sce9')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce9', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S9 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
   // Dedicated Live Multi-Scenario Dry-Run Dashboard (/3scenarios, /4scenarios, /scenarios)
   if (pathname.includes('/3scenarios') || pathname.includes('/4scenarios') || pathname.includes('/scenarios')) {
     const html = render3ScenariosLiveHtml();

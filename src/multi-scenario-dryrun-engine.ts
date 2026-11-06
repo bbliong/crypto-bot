@@ -127,6 +127,7 @@ export class MultiScenarioDryRunEngine {
     s6: ScenarioState;
     s7: ScenarioState;
     s8: ScenarioState;
+    s9: ScenarioState;
   };
 
   constructor(dataDir?: string) {
@@ -136,7 +137,7 @@ export class MultiScenarioDryRunEngine {
     this.scenarios = this.loadState();
   }
 
-  private initFreshScenarios(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState } {
+  private initFreshScenarios(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState } {
     return {
       s4: {
         id: 'SCENARIO_4_SINGLE_BUY_5USD',
@@ -179,7 +180,7 @@ export class MultiScenarioDryRunEngine {
       s6: {
         id: 'SCENARIO_6_REDEPLOY_SNIPER',
         name: 'Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)',
-        description: 'Saldo Awal $20.00. Pool 1: $5 flat, Pool 2+: $7 flat (Strict 1x Buy). Stage 1: TP 50% di >= 5% (Kunci Modal & Anti-Rug). Stage 2: 50% Tahan >= 15% (Mega Runner).',
+        description: 'Saldo Awal $20.00. Pool 1: $5 saat First Buy. Pool 2: Re-Deploy $7 saat dev rilis pool baru. TP1: Jual 50% di >= 5% (BEP). TP2: Jual 50% di >= 15%.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -233,27 +234,48 @@ export class MultiScenarioDryRunEngine {
         closedTrades: [],
         recentEvents: [],
       },
+      s9: {
+        id: 'SCENARIO_9_DEV_FRONTRUN_SYNC',
+        name: 'Skenario 9: Dev Front-Run & 2-Way Target Sync (Max 60s Timeout)',
+        description: 'Saldo Awal $20.00. Modal $1.00. Proaktif Buy di Detik 0 saat Dev rilis pool baru sebelum target whale masuk. Jika target tidak masuk dalam 60s -> Force Sell. Komparasi 2-arah jika target beralih dev.',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
     };
   }
 
-  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState } {
+  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8) {
+        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9) {
           const fresh = this.initFreshScenarios();
           const s4 = parsed.s4 || fresh.s4;
           const s5 = parsed.s5 || fresh.s5;
           const s6 = parsed.s6 || fresh.s6;
           const s7 = parsed.s7 || fresh.s7;
           const s8 = parsed.s8 || fresh.s8;
+          const s9 = parsed.s9 || fresh.s9;
           if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
           if (s5.totalFeesPaid === undefined) s5.totalFeesPaid = 0.0;
           if (s6.totalFeesPaid === undefined) s6.totalFeesPaid = 0.0;
           if (s7.totalFeesPaid === undefined) s7.totalFeesPaid = 0.0;
           if (s8.totalFeesPaid === undefined) s8.totalFeesPaid = 0.0;
-          return { s4, s5, s6, s7, s8 };
+          if (s9.totalFeesPaid === undefined) s9.totalFeesPaid = 0.0;
+          return { s4, s5, s6, s7, s8, s9 };
         }
       } catch {}
     }
@@ -262,7 +284,7 @@ export class MultiScenarioDryRunEngine {
 
   public saveState(): void {
     try {
-      for (const s of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8]) {
+      for (const s of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9]) {
         s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
         s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
@@ -383,6 +405,32 @@ export class MultiScenarioDryRunEngine {
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s8, signal, now, timeWib);
 
+    // 5. Skenario 9: Dev Front-Run & 2-Way Target Sync
+    for (let i = this.scenarios.s9.openPositions.length - 1; i >= 0; i--) {
+      const s9Pos = this.scenarios.s9.openPositions[i];
+      if (s9Pos.mint === signal.mint) {
+        if (!s9Pos.targetEnteredAt) {
+          s9Pos.targetEnteredAt = now;
+          s9Pos.lastPriceUsd = signal.priceUsd;
+          console.log(`\n=========================================================`);
+          console.log(`🎯 [SCENARIO 9 TARGET INFLOW DETECTED] Target Whale MASUK ke token Front-Run '${s9Pos.symbol}' ($${targetUsd.toFixed(0)})!`);
+          console.log(`   Token    : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
+          console.log(`   Harga In : $${s9Pos.avgEntryPriceUsd.toFixed(8)} (Floor Genesis)`);
+          console.log(`   Harga Out: $${signal.priceUsd.toFixed(8)} (Pumped by Target)`);
+          console.log(`   Strategi : Mengaktifkan proteksi runner (Anti-Shakeout 12s + Follow Whale Sell)...`);
+          console.log(`=========================================================\n`);
+        }
+      } else {
+        // Target beli token lain saat S9 masih nunggu target di token ini!
+        if (!s9Pos.targetEnteredAt) {
+          console.log(`[SCENARIO 9] ⚠️ Target BERALIH beli '${signal.symbol}'! Mengosongkan posisi koin lama '${s9Pos.symbol}'...`);
+          const reason = `TARGET_SWITCHED_DEV (Target beli '${signal.symbol}' bukan '${s9Pos.symbol}', batalkan front-run lama)`;
+          this.executeScenarioExit(this.scenarios.s9, i, s9Pos.lastPriceUsd, now, timeWib, reason);
+        }
+      }
+    }
+    this.autoRotateSameSymbolPositions(this.scenarios.s9, signal, now, timeWib);
+
     this.saveState();
   }
 
@@ -442,56 +490,81 @@ export class MultiScenarioDryRunEngine {
       exchange: targetExchange
     };
 
-    // Eksekusi buy di Skenario 6 & Skenario 7 jika posisi belum ada
-    if (!this.scenarios.s6.openPositions.some(p => p.mint === evt.newMint)) {
-      this.processScenarioBuy(this.scenarios.s6, earlySignal, true, 1380, now, timeWib, {
-        maxTokenExposure: pool2Stake,
-        getStake: () => pool2Stake,
-        disallowAccumulation: true,
-      });
-      this.autoRotateSameSymbolPositions(this.scenarios.s6, earlySignal, now, timeWib);
-      const s6CreatedPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
-      if (s6CreatedPos) {
-        s6CreatedPos.pairAddress = evt.mainPairAddress || '';
-        s6CreatedPos.exchange = targetExchange;
+    // Eksekusi buy di Skenario 6, Skenario 7 & Skenario 8 jika koin re-deploy nama sama (isSameSymbol !== false)
+    if (evt.isSameSymbol !== false) {
+      if (!this.scenarios.s6.openPositions.some(p => p.mint === evt.newMint)) {
+        this.processScenarioBuy(this.scenarios.s6, earlySignal, true, 1380, now, timeWib, {
+          maxTokenExposure: pool2Stake,
+          getStake: () => pool2Stake,
+          disallowAccumulation: true,
+        });
+        this.autoRotateSameSymbolPositions(this.scenarios.s6, earlySignal, now, timeWib);
+        const s6CreatedPos = this.scenarios.s6.openPositions.find(p => p.mint === evt.newMint);
+        if (s6CreatedPos) {
+          s6CreatedPos.pairAddress = evt.mainPairAddress || '';
+          s6CreatedPos.exchange = targetExchange;
+        }
       }
-    }
 
-    if (!this.scenarios.s7.openPositions.some(p => p.mint === evt.newMint)) {
-      this.processScenarioBuy(this.scenarios.s7, earlySignal, true, 1380, now, timeWib, {
-        maxTokenExposure: pool2Stake,
-        getStake: () => pool2Stake,
-        disallowAccumulation: true,
-      });
-      this.autoRotateSameSymbolPositions(this.scenarios.s7, earlySignal, now, timeWib);
-      const s7CreatedPos = this.scenarios.s7.openPositions.find(p => p.mint === evt.newMint);
-      if (s7CreatedPos) {
-        s7CreatedPos.pairAddress = evt.mainPairAddress || '';
-        s7CreatedPos.exchange = targetExchange;
+      if (!this.scenarios.s7.openPositions.some(p => p.mint === evt.newMint)) {
+        this.processScenarioBuy(this.scenarios.s7, earlySignal, true, 1380, now, timeWib, {
+          maxTokenExposure: pool2Stake,
+          getStake: () => pool2Stake,
+          disallowAccumulation: true,
+        });
+        this.autoRotateSameSymbolPositions(this.scenarios.s7, earlySignal, now, timeWib);
+        const s7CreatedPos = this.scenarios.s7.openPositions.find(p => p.mint === evt.newMint);
+        if (s7CreatedPos) {
+          s7CreatedPos.pairAddress = evt.mainPairAddress || '';
+          s7CreatedPos.exchange = targetExchange;
+        }
       }
-    }
 
-    // Eksekusi buy di Skenario 8 (Front-Run Dev Genesis) jika posisi belum ada
-    let s8Stake = customStakeUsd;
-    if (!s8Stake) {
-      const liveCfg = readFollowerLiveConfig(this.dataDir);
-      s8Stake = liveCfg.stakeUsdS8 || 1.0;
-    }
-    if (!this.scenarios.s8.openPositions.some(p => p.mint === evt.newMint)) {
-      this.processScenarioBuy(this.scenarios.s8, earlySignal, true, 1380, now, timeWib, {
-        maxTokenExposure: s8Stake,
-        getStake: () => s8Stake,
-        disallowAccumulation: true,
-      });
-      const s8CreatedPos = this.scenarios.s8.openPositions.find(p => p.mint === evt.newMint);
-      if (s8CreatedPos) {
-        s8CreatedPos.boughtAtGenesis = true;
-        s8CreatedPos.pairAddress = evt.mainPairAddress || '';
-        s8CreatedPos.exchange = targetExchange;
+      // Eksekusi buy di Skenario 8 (Front-Run Dev Genesis Nama Sama)
+      let s8Stake = customStakeUsd;
+      if (!s8Stake) {
+        const liveCfg = readFollowerLiveConfig(this.dataDir);
+        s8Stake = liveCfg.stakeUsdS8 || 1.0;
+      }
+      if (!this.scenarios.s8.openPositions.some(p => p.mint === evt.newMint)) {
+        this.processScenarioBuy(this.scenarios.s8, earlySignal, true, 1380, now, timeWib, {
+          maxTokenExposure: s8Stake,
+          getStake: () => s8Stake,
+          disallowAccumulation: true,
+        });
+        const s8CreatedPos = this.scenarios.s8.openPositions.find(p => p.mint === evt.newMint);
+        if (s8CreatedPos) {
+          s8CreatedPos.boughtAtGenesis = true;
+          s8CreatedPos.pairAddress = evt.mainPairAddress || '';
+          s8CreatedPos.exchange = targetExchange;
+        }
+        this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
       }
       this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
     }
-    this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
+
+    // Eksekusi buy di Skenario 9 (Dev Front-Run Bebas Simbol & 2-Way Sync)
+    // S9 MEMBELI SEMUA KOIN BARU DARI DEV APAPUN SIMBOLNYA!
+    let s9Stake = customStakeUsd;
+    if (!s9Stake) {
+      const liveCfg = readFollowerLiveConfig(this.dataDir);
+      s9Stake = liveCfg.stakeUsdS9 || 1.0;
+    }
+    if (!this.scenarios.s9.openPositions.some(p => p.mint === evt.newMint)) {
+      this.processScenarioBuy(this.scenarios.s9, earlySignal, true, 1380, now, timeWib, {
+        maxTokenExposure: s9Stake,
+        getStake: () => s9Stake,
+        disallowAccumulation: true,
+      });
+      const s9CreatedPos = this.scenarios.s9.openPositions.find(p => p.mint === evt.newMint);
+      if (s9CreatedPos) {
+        s9CreatedPos.boughtAtGenesis = true;
+        s9CreatedPos.pairAddress = evt.mainPairAddress || '';
+        s9CreatedPos.exchange = targetExchange;
+      }
+      this.autoRotateSameSymbolPositions(this.scenarios.s9, earlySignal, now, timeWib);
+    }
+    this.autoRotateSameSymbolPositions(this.scenarios.s9, earlySignal, now, timeWib);
 
     // Auto-rotasi: likuidasi koin lama
     this.autoRotateSameSymbolPositions(this.scenarios.s6, earlySignal, now, timeWib);
@@ -1012,12 +1085,50 @@ export class MultiScenarioDryRunEngine {
 
     if (isFullExit) sellRatio = 1.0;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === signal.mint);
       if (posIdx === -1) continue;
 
       const pos = scenario.openPositions[posIdx];
       if (pos.tokens <= 0) continue;
+
+      // Skenario 9: Dev Front-Run & 2-Way Target Sync (Anti-Shakeout 12s pasca-target masuk + Follow Whale Exit)
+      if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
+        pos.lastPriceUsd = pOut;
+        if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
+        const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
+        pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
+        pos.lastTargetSellAt = now;
+
+        const referenceTime = pos.targetEnteredAt || pos.openedAt;
+        const elapsedSec = (now - referenceTime) / 1000;
+        // ANTI-SHAKEOUT GATE: Dalam 12 detik pertama pasca target masuk, abaikan goyangan dump target!
+        if (elapsedSec < 12.0) {
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SKIP',
+            symbol: signal.symbol,
+            mint: signal.mint,
+            priceUsd: pOut,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: scenario.investedCash,
+            reason: `ANTI_SHAKEOUT_HOLD (Target sold ${currentSellRatioPct}% di detik ${elapsedSec.toFixed(1)}s < 12s, tahan posisi untuk wave pompa)`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+          continue;
+        }
+
+        // Pasca detik ke-12: jika target dump >= 15% atau Full Exit, ikuti whale keluar!
+        if (pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit) {
+          const exitReason = `S9_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol} ${pos.targetCumulativeSellRatioPct}% >= 15% pasca detik 12s)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+        continue;
+      }
 
       // Skenario 5: Anti-Shakeout Runner (Abaikan dump di detik 1-11, follow target sell pasca detik 12)
       if (scenario.id === 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER') {
@@ -1278,7 +1389,7 @@ export class MultiScenarioDryRunEngine {
     if (priceUsd <= 0) return;
     let changed = false;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
       if (posIdx !== -1) {
         const pos = scenario.openPositions[posIdx];
@@ -1287,8 +1398,8 @@ export class MultiScenarioDryRunEngine {
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
         changed = true;
 
-        // Khusus Skenario 5: Auto Take-Profit +25% & Stop Loss -15%
-        if (scenario.id === 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER' && pos.avgEntryPriceUsd > 0) {
+        // Khusus Skenario 5 & Skenario 9: Auto Take-Profit +25% & Stop Loss -15%
+        if ((scenario.id === 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER' || scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') && pos.avgEntryPriceUsd > 0) {
           const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
           if (gainPct >= 25.0) {
             const now = Date.now();
@@ -1477,7 +1588,7 @@ export class MultiScenarioDryRunEngine {
     const maxAgeMs = maxAgeMinutes * 60 * 1000;
     let changed = false;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9]) {
       for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
         const pos = scenario.openPositions[i];
         if (now - pos.openedAt >= maxAgeMs) {
@@ -1698,6 +1809,41 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
+    // 4. Cek Skenario 9 Time-Stop:
+    // - Gap 60s tanpa target masuk -> Force Sell
+    // - Wave limit 35s pasca target masuk -> Force Exit
+    const s9 = this.scenarios.s9;
+    for (let i = s9.openPositions.length - 1; i >= 0; i--) {
+      const pos = s9.openPositions[i];
+      if (pos.tokens <= 0) continue;
+
+      const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+
+      // Kasus A: Target sudah masuk, batasi wave 35s pasca-target masuk
+      if (pos.targetEnteredAt) {
+        const elapsedSinceTarget = now - pos.targetEnteredAt;
+        if (elapsedSinceTarget >= 35000) {
+          const timeWib = formatWibDate(now);
+          const elapsedSec = Math.round(elapsedSinceTarget / 1000);
+          const reason = `TIME_STOP_${elapsedSec}S_POST_TARGET_WAVE_EXIT (Reached 35s post-target wave limit, locked profit before minute 1-2 liquidity drain)`;
+          this.executeScenarioExit(s9, i, pOut, now, timeWib, reason);
+          changed = true;
+          continue;
+        }
+      } else {
+        // Kasus B: Target tidak kunjung masuk dalam 60s sejak genesis
+        const elapsedMs = now - pos.openedAt;
+        if (elapsedMs >= 60000) {
+          const timeWib = formatWibDate(now);
+          const elapsedSec = Math.round(elapsedMs / 1000);
+          const reason = `TARGET_SKIPPED_DEV_POOL (Dev Deploy Pool '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit)`;
+          this.executeScenarioExit(s9, i, pOut, now, timeWib, reason);
+          changed = true;
+          continue;
+        }
+      }
+    }
+
     if (changed) {
       this.saveState();
     }
@@ -1716,6 +1862,7 @@ export class MultiScenarioDryRunEngine {
     const targets = [
       { scenario: this.scenarios.s7, maxInactivity: 30000 },
       { scenario: this.scenarios.s5, maxInactivity: 35000 },
+      { scenario: this.scenarios.s9, maxInactivity: 35000 },
       { scenario: this.scenarios.s6, maxInactivity: inactivityMsS6 },
       { scenario: this.scenarios.s4, maxInactivity: inactivityMsS4 }
     ];
@@ -1837,7 +1984,7 @@ export class MultiScenarioDryRunEngine {
     stakeUsd: number
   ): void {
     if (realPriceUsd <= 0 || tokensBought <= 0) return;
-    const targetSc = scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)));
+    const targetSc = scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))));
     const pos = targetSc.openPositions.find(p => p.mint === mint);
     if (!pos) return;
 
@@ -1875,7 +2022,7 @@ export class MultiScenarioDryRunEngine {
     reason: string
   ): void {
     if (realUsdReturned < 0) return;
-    const targetSc = scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)));
+    const targetSc = scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))));
 
     // 1. Cek apakah ini sinkronisasi Stage 1 TP 50% (posisi masih open)
     if (reason && reason.includes('STAGE_1_TP_50%')) {

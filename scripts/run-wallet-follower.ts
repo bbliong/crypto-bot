@@ -1737,8 +1737,14 @@ export class WalletFollowerRunner {
     if (targetSc === 'S7' || targetSc === 'SCE7' || targetSc === 'SCENARIO_7') {
       return scUpper.includes('7') || scUpper.includes('TIME_STOP');
     }
+    if (targetSc === 'S5' || targetSc === 'SCE5' || targetSc === 'SCENARIO_5') {
+      return scUpper.includes('5') || scUpper.includes('ANTI_SHAKEOUT');
+    }
     if (targetSc === 'S8' || targetSc === 'SCE8' || targetSc === 'SCENARIO_8') {
       return scUpper.includes('8') || scUpper.includes('FRONTRUN');
+    }
+    if (targetSc === 'S9' || targetSc === 'SCE9' || targetSc === 'SCENARIO_9') {
+      return scUpper.includes('9') || scUpper.includes('DEV_FRONTRUN');
     }
     return false;
   }
