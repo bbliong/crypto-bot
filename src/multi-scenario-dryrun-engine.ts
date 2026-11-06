@@ -2164,4 +2164,66 @@ export class MultiScenarioDryRunEngine {
       this.saveState();
     }
   }
+
+  /**
+   * Batalkan Buy di Scenario jika rute swap AMM gagal (little pool hit / no route):
+   * Mencegah posisi hantu di dry-run yang menghasilkan profit palsu!
+   */
+  public abortScenarioBuy(scenarioId: string, mint: string, reason: string): void {
+    const targetSc = scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))));
+    const idx = targetSc.openPositions.findIndex(p => p.mint === mint);
+    if (idx >= 0) {
+      const pos = targetSc.openPositions[idx];
+      targetSc.openPositions.splice(idx, 1);
+      targetSc.availableCash = Number((targetSc.availableCash + pos.costBasisUsd).toFixed(2));
+      targetSc.investedCash = Math.max(0, Number((targetSc.investedCash - pos.costBasisUsd).toFixed(2)));
+      targetSc.recentEvents.unshift({
+        id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: Date.now(),
+        timeWib: formatWibDate(Date.now()),
+        scenarioId: targetSc.id,
+        action: 'SKIP',
+        symbol: pos.symbol,
+        mint: pos.mint,
+        priceUsd: pos.avgEntryPriceUsd,
+        availableCashAfter: targetSc.availableCash,
+        investedCashAfter: targetSc.investedCash,
+        reason: `BUY_ROUTE_FAILED (${reason}) - Posisi dibatalkan dari engine`,
+      });
+      if (targetSc.recentEvents.length > 50) targetSc.recentEvents.pop();
+      console.log(`[DRYRUN-ENGINE ABORT] 🚫 Posisi ${pos.symbol} [${scenarioId}] dibatalkan karena rute beli AMM gagal: ${reason}`);
+      this.saveState();
+    }
+  }
+
+  /**
+   * Catat Kegagalan Jual Riil di Scenario (little pool hit / unsellable):
+   * Mengoreksi trade agar tercatat sebagai rugi / proceeds = 0 jika token tidak bisa dijual!
+   */
+  public recordFailedSellExecution(scenarioId: string, mint: string, reason: string): void {
+    const targetSc = scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))));
+    const trade = targetSc.closedTrades.find(t => t.mint === mint);
+    if (trade) {
+      const oldPnl = trade.realizedPnlUsd;
+      const oldReturned = trade.totalReturnedUsd;
+
+      // Token tidak bisa dijual sama sekali (0 proceeds returned)
+      trade.totalReturnedUsd = 0;
+      trade.realizedPnlUsd = -trade.totalInvestedUsd;
+      trade.roiPct = -100.0;
+      trade.isWin = false;
+      trade.exitReason = `${trade.exitReason} (UNSELLABLE_AMM_DEAD_POOL: ${reason} | Return: $0.00)`;
+
+      const pnlDiff = trade.realizedPnlUsd - oldPnl;
+      const cashDiff = trade.totalReturnedUsd - oldReturned;
+      targetSc.realizedPnl = Number((targetSc.realizedPnl + pnlDiff).toFixed(2));
+      targetSc.availableCash = Math.max(0, Number((targetSc.availableCash + cashDiff).toFixed(2)));
+      targetSc.wins = targetSc.closedTrades.filter(t => t.isWin).length;
+      targetSc.losses = targetSc.closedTrades.filter(t => !t.isWin).length;
+      targetSc.winRate = targetSc.totalTrades > 0 ? Number(((targetSc.wins / targetSc.totalTrades) * 100).toFixed(1)) : 0.0;
+
+      console.log(`[DRYRUN-ENGINE SYNC] ⚠️ Trade ${trade.symbol} [${scenarioId}] dikoreksi menjadi LOSS 100% karena rute jual AMM ditolak (${reason})`);
+      this.saveState();
+    }
+  }
 }

@@ -409,6 +409,19 @@ export class SingleDevWalletWatcher extends EventEmitter {
         return;
       }
 
+      // Verifikasi Kriptografis: Pastikan target Dev kita ADALAH Fee Payer (Account 0) atau Signer dari transaksi ini!
+      // Jika dev hanya numpang nama (misal di mentions PumpAMM sebagai referrer/fee recipient), tolak mentah-mentah!
+      const feePayer = tx.transaction.message.accountKeys[0]?.pubkey
+        ? tx.transaction.message.accountKeys[0].pubkey.toBase58()
+        : tx.transaction.message.accountKeys[0]?.toString();
+      const isDevSigner = (tx.transaction.message.accountKeys || []).some(
+        (a: any) => a.signer && (a.pubkey ? a.pubkey.toBase58() === target.devWallet : a.toString() === target.devWallet)
+      );
+      if (feePayer !== target.devWallet && !isDevSigner) {
+        console.log(`[DEV-RADAR IGNORE] Tx ${sig.slice(0, 10)}... BUKAN dibuat oleh dev kita (Fee Payer: ${feePayer?.slice(0, 8)}..., Dev kita: ${target.devWallet.slice(0, 8)}...). Mengabaikan.`);
+        return;
+      }
+
       // 0. Ekstrak langsung dari parsed instruction jika ini tx pembuatan SPL Token (InitializeMint / InitializeMint2)
       let detectedMint = '';
       let detectedSymbol = target.symbol;

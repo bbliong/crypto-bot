@@ -1582,16 +1582,24 @@ export class WalletFollowerRunner {
 
       if (!route.ok || !route.routeData) {
         console.warn(`[GMGN API HIT ${side} ABORTED: ${scenarioId}] Route tidak ditemukan oleh AMM: ${route.error}`);
-        if (side === 'SELL' && this.isScenarioAllowedForRealOrder(scenarioId, config)) {
-          try {
-            const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
-            console.log(`[SAFETY-AUTO-RECLAIM] Rute sell tidak ada (${route.error}). Membakar sisa token & me-reclaim sewa rent SOL untuk ${signal.symbol || signal.mint}...`);
-            const burnRes = await burnAndCloseTokenAccount(signal.mint);
-            if (burnRes.ok) {
-              console.log(`[SAFETY-AUTO-RECLAIM] ✅ Berhasil burn & reclaim rent SOL: +${burnRes.reclaimedSol} SOL! Tx: ${burnRes.tx}`);
+        if (side === 'BUY') {
+          // Batalkan posisi di dry-run engine agar tidak menjadi posisi hantu yang menghasilkan profit palsu!
+          this.multiDryRunEngine.abortScenarioBuy(scenarioId, signal.mint, route.error || 'NO_AMM_ROUTE');
+        } else if (side === 'SELL') {
+          // Koreksi trade di dry-run engine agar dicatat sebagai loss / gagal jual jika AMM pool mati!
+          this.multiDryRunEngine.recordFailedSellExecution(scenarioId, signal.mint, route.error || 'NO_AMM_ROUTE');
+
+          if (this.isScenarioAllowedForRealOrder(scenarioId, config)) {
+            try {
+              const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
+              console.log(`[SAFETY-AUTO-RECLAIM] Rute sell tidak ada (${route.error}). Membakar sisa token & me-reclaim sewa rent SOL untuk ${signal.symbol || signal.mint}...`);
+              const burnRes = await burnAndCloseTokenAccount(signal.mint);
+              if (burnRes.ok) {
+                console.log(`[SAFETY-AUTO-RECLAIM] ✅ Berhasil burn & reclaim rent SOL: +${burnRes.reclaimedSol} SOL! Tx: ${burnRes.tx}`);
+              }
+            } catch (e: any) {
+              console.warn(`[SAFETY-AUTO-RECLAIM-WARN] ${e?.message}`);
             }
-          } catch (e: any) {
-            console.warn(`[SAFETY-AUTO-RECLAIM-WARN] ${e?.message}`);
           }
         }
         auditFollowerReal(this.dataDir, state, null, `API_PROBE_${side}_${scenarioId}_NO_ROUTE`, {
