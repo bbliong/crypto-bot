@@ -50,9 +50,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
   constructor(options: { wsUrl?: string; rpcUrl?: string; dataDir?: string } = {}) {
     super();
-    // Gunakan cluster public resmi Solana yang stabil dan bebas batas kuota bulanan
-    this.wsUrl = options.wsUrl || 'wss://api.mainnet-beta.solana.com';
-    this.rpcUrl = options.rpcUrl || 'https://api.mainnet-beta.solana.com';
+    this.wsUrl = options.wsUrl || getSolanaRpcWsUrl();
+    this.rpcUrl = options.rpcUrl || getSolanaRpcUrl();
     this.dataDir = options.dataDir || path.resolve(process.cwd(), 'data');
 
     // Pulihkan activeTarget yang tersimpan sebelumnya agar tidak reset saat service restart
