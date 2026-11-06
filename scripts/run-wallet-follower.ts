@@ -781,28 +781,26 @@ export class WalletFollowerRunner {
     const targetBalanceBefore = Math.max(0, signal.remainingHolding - signal.tokenAmount);
     const isGroundZero = (signal.isFirstBuy === true) || (targetBalanceBefore <= 0.05 * signal.tokenAmount || targetBalanceBefore <= 1000);
 
+    // DYNAMIC 1-DEV LOCK: Setiap kali target buy token baru / berganti token,
+    // langsung kunci radar Dev-Watcher ke Developer pembuat token ini (item.ad)
+    // tanpa dibatasi batas harga entry (agar S9 langsung mengunci dev aktif ini untuk front-run koin berikutnya)!
+    const currentWatched = this.devWatcher.getActiveTarget();
+    const isNewToken = !currentWatched || currentWatched.mint !== signal.mint;
+    if (isNewToken || isGroundZero) {
+      this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch((err: any) => {
+        console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
+      });
+    }
+
     // Filter Anti-Pucuk (Ground-Zero Price Cap): Jika ini First Buy, harga wajib <= $0.000020
     const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
     if (isGroundZero && signal.priceUsd > GROUND_ZERO_MAX_PRICE_USD) {
       console.log(`[PRICE CAP GATE] 🚫 Target First Buy pada $${signal.priceUsd.toFixed(8)} melebihi batas Ground Zero $${GROUND_ZERO_MAX_PRICE_USD.toFixed(6)}. Melewati buy (anti-pucuk)!`);
       this.multiDryRunEngine.handleTargetBuy(signal, false);
-      // Tetap pasang radar ke Dev pembuat koin ini agar S9 bisa front-run token berikutnya dari dev yang sama!
-      if (signal.devWallet || signal.mint) {
-        this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch(() => {});
-      }
       return;
     }
 
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
-
-    // Pantau HANYA 1 Dev Wallet secara real-time via Solana WebSocket (Sub-second radar)
-    const currentWatched = this.devWatcher.getActiveTarget();
-    const shouldWatch = (isGroundZero && signal.priceUsd <= GROUND_ZERO_MAX_PRICE_USD) || (!currentWatched && signal.priceUsd <= 0.000050) || (currentWatched && currentWatched.mint !== signal.mint && signal.priceUsd <= 0.000050);
-    if (shouldWatch) {
-      this.devWatcher.watchSingleDev(signal.mint, signal.symbol, signal.devWallet).catch((err: any) => {
-        console.warn(`[DEV-WATCHER-SETUP-ERR] ${err?.message}`);
-      });
-    }
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
