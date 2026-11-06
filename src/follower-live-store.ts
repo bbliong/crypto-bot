@@ -14,7 +14,7 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'S9' | 'BOTH';
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'S9' | 'S10' | 'BOTH';
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
@@ -25,6 +25,7 @@ export interface FollowerLiveConfig {
   stakeUsdS7Pool2?: number;
   stakeUsdS8?: number;
   stakeUsdS9?: number;
+  stakeUsdS10?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -53,6 +54,7 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   stakeUsdS7Pool2: 1.0,
   stakeUsdS8: 1.0,
   stakeUsdS9: 1.0,
+  stakeUsdS10: 1.0,
   maxBuysQuota: 3,
   maxActiveRealPositions: 1,
   buySlippagePercent: 15,
@@ -183,7 +185,7 @@ export function saveFollowerLiveConfig(
 
   if (patch.autobuyScenario !== undefined) {
     const sc = String(patch.autobuyScenario).toUpperCase();
-    if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'BOTH'].includes(sc)) {
+    if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'BOTH'].includes(sc)) {
       updated.autobuyScenario = sc as any;
       updated.enabled = sc !== 'OFF';
     }
@@ -222,6 +224,9 @@ export function saveFollowerLiveConfig(
   }
   if (patch.stakeUsdS9 !== undefined || updated.stakeUsdS9 === undefined) {
     updated.stakeUsdS9 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS9 !== undefined ? patch.stakeUsdS9 : updated.stakeUsdS9) || 1.0));
+  }
+  if (patch.stakeUsdS10 !== undefined || updated.stakeUsdS10 === undefined) {
+    updated.stakeUsdS10 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS10 !== undefined ? patch.stakeUsdS10 : updated.stakeUsdS10) || 1.0));
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;

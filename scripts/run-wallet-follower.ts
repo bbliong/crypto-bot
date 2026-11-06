@@ -146,8 +146,8 @@ export class WalletFollowerRunner {
     // Radar 1 Dev Wallet: Memantau 1 dev aktif dan mendeteksi koin baru sebelum target buy
     this.devWatcher = new SingleDevWalletWatcher({ targetWallet: this.targetWallet });
     this.devWatcher.isHuntingMode = () => {
-      // Smart Gating: Hanya aktif polling jika S9 sedang TIDAK menahan posisi terbuka (sedang kosong / hunting mode)
-      return this.multiDryRunEngine.getS9OpenPositionsCount() === 0;
+      // Smart Gating: Hanya aktif polling jika S9 dan S10 sedang TIDAK menahan posisi terbuka (sedang kosong / hunting mode)
+      return this.multiDryRunEngine.getS9OpenPositionsCount() === 0 && this.multiDryRunEngine.getS10OpenPositionsCount() === 0;
     };
     this.devWatcher.on('redeploy_detected', (evt) => {
       console.log(`\n=========================================================`);
@@ -1486,6 +1486,9 @@ export class WalletFollowerRunner {
       }
       if (part === 'S9' || part === 'SCE9' || part === 'SCENARIO_9') {
         if (scUpper.includes('9') || scUpper.includes('DEV_FRONTRUN')) return true;
+      }
+      if (part === 'S10' || part === 'SCE10' || part === 'SCENARIO_10') {
+        if (scUpper.includes('10') || scUpper.includes('DYNAMIC_WAVE')) return true;
       }
     }
     return false;

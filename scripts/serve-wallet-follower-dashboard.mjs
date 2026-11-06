@@ -257,6 +257,11 @@ const server = createServer((req, res) => {
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS9 = val;
         }
 
+        if (patch.stakeUsdS10 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS10);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS10 = val;
+        }
+
         if (patch.resetQuota) {
           updated.quotaResetAt = Date.now();
         }

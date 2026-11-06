@@ -39,6 +39,7 @@ export function render3ScenariosLiveHtml() {
   const isS7Real = activeScenario === 'S7' || activeScenario === 'BOTH';
   const isS8Real = activeScenario === 'S8' || activeScenario === 'BOTH';
   const isS9Real = activeScenario === 'S9' || activeScenario === 'BOTH';
+  const isS10Real = activeScenario === 'S10' || activeScenario === 'BOTH';
   const isDryRun = activeScenario === 'DRY_RUN';
 
   const s4Stake = Number(autobuyConfig.stakeUsdS4) || 1.0;
@@ -49,6 +50,7 @@ export function render3ScenariosLiveHtml() {
   const s7Pool2 = Number(autobuyConfig.stakeUsdS7Pool2) || 1.0;
   const s8Stake = Number(autobuyConfig.stakeUsdS8) || 1.0;
   const s9Stake = Number(autobuyConfig.stakeUsdS9) || 1.0;
+  const s10Stake = Number(autobuyConfig.stakeUsdS10) || 0.25;
 
   const s4 = data.s4 || { name: `Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)`, description: `Saldo Awal $20.00. Modal $${s4Stake.toFixed(2)}. Jika target sell <= 3s (shakeout): tahan hingga 8 detik. Begitu target buyback: LANGSUNG SELL 100% dump ke likuiditas target. Jika tidak buyback dlm 8s -> Safety Exit.`, availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s5 = data.s5 || { name: `Skenario 5: Anti-Shakeout Runner (TP +25% | Hold >= 12s | Time-Stop 35s)`, description: 'Saldo Awal $20.00. Modal $1.00. Abaikan goyangan dump target di 12 detik pertama (Anti-Shakeout). Auto Take-Profit +25%, Time-Stop 35s, atau ikuti sell target jika dump pasca detik 12.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
@@ -56,13 +58,14 @@ export function render3ScenariosLiveHtml() {
   const s7 = data.s7 || { name: 'Skenario 7: Time-Stop Sniper (Stage 1 @ 5% + Force Sell @ 28s)', description: 'Saldo Awal $20.00. Entry First Buy Ground Zero. Stage 1: TP 50% di >= 5% Anti-Rug. Stage 2: Kejar >= 15% ATAU Force Sell 100% tepat di Detik 28 (Puncak Pump) sebelum dev rugpull.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s8 = data.s8 || { name: 'Skenario 8: Front-Run Dev & Dump on Target Entry', description: 'Saldo Awal $20.00. Buy instan di Detik 0 saat Dev rilis pool baru. Begitu Target masuk beli (15-20 SOL), bot LANGSUNG SELL 100% dump ke likuiditas target!', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s9 = data.s9 || { name: 'Skenario 9: Dev Front-Run & 2-Way Target Sync (Max 60s Timeout)', description: 'Saldo Awal $20.00. Modal $1.00. Proaktif Buy di Detik 0 saat Dev rilis pool baru sebelum target whale masuk. Jika target tidak masuk dalam 60s -> Force Sell. Komparasi 2-arah jika target beralih dev.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s10 = data.s10 || { name: 'Skenario 10: Dynamic Wave Runner (Genesis Buy + MCap/Whale Sell Sync)', description: 'Saldo Awal $20.00. Modal $0.25. Proaktif Buy di Detik 0 saat Dev rilis pool baru. Tidak buru-buru TP kaku 25% jika whale masih hold koin. Begitu whale mulai dump >= 15% atau time-stop 30s pasca-inflow: LANGSUNG SELL 100% di puncak wave!', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
     const isPnlPositive = s.realizedPnl >= 0;
     const pnlSign = isPnlPositive ? '+' : '';
     const pnlClass = isPnlPositive ? 'val-emerald' : 'val-rose';
     const winRate = s.totalTrades > 0 ? ((s.wins / s.totalTrades) * 100).toFixed(1) : '0';
-    const isRealActive = scId === 'sce4' ? isS4Real : (scId === 'sce5' ? isS5Real : (scId === 'sce6' ? isS6Real : (scId === 'sce7' ? isS7Real : (scId === 'sce8' ? isS8Real : isS9Real))));
+    const isRealActive = scId === 'sce4' ? isS4Real : (scId === 'sce5' ? isS5Real : (scId === 'sce6' ? isS6Real : (scId === 'sce7' ? isS7Real : (scId === 'sce8' ? isS8Real : (scId === 'sce9' ? isS9Real : isS10Real)))));
 
     return `
       <div class="scenario-panel" style="border-top: 4px solid ${color};">
@@ -188,7 +191,7 @@ export function render3ScenariosLiveHtml() {
             </div>
             <button onclick="saveS8Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S8</button>
           </div>
-        ` : `
+        ` : (scId === 'sce9' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
               <span class="stake-section-title">⚙️ Konfigurasi Modal S9 (Dev Front-Run Sync)</span>
@@ -205,7 +208,24 @@ export function render3ScenariosLiveHtml() {
             </div>
             <button onclick="saveS9Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S9</button>
           </div>
-        `))))}
+        ` : `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal S10 (Dynamic Wave Runner)</span>
+              <span class="stake-current-val">Stake: $${s10Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-1" style="margin-top: 6px;">
+              <div>
+                <label class="stake-sublabel">Modal Entry Genesis:</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s10StakeInput" value="${s10Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="0.25">
+                </div>
+              </div>
+            </div>
+            <button onclick="saveS10Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S10</button>
+          </div>
+        `)))))}
 
         <!-- Open Positions -->
         <div class="sub-section">
@@ -525,6 +545,7 @@ export function render3ScenariosLiveHtml() {
     .status-s7 { background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid rgba(6, 182, 212, 0.5); }
     .status-s8 { background: rgba(168, 85, 247, 0.2); color: #a855f7; border: 1px solid rgba(168, 85, 247, 0.5); }
     .status-s9 { background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.5); }
+    .status-s10 { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.5); }
     .status-both { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.5); }
 
     .scenario-radio-grid {
@@ -653,6 +674,16 @@ export function render3ScenariosLiveHtml() {
     .scenario-radio-card.active-s9 input[type="radio"]:checked {
       border-color: #3b82f6;
       background: #3b82f6;
+    }
+
+    .scenario-radio-card.active-s10 {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.12);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+    }
+    .scenario-radio-card.active-s10 input[type="radio"]:checked {
+      border-color: #f59e0b;
+      background: #f59e0b;
     }
 
     .scenario-radio-card.active-both {
@@ -809,6 +840,14 @@ export function render3ScenariosLiveHtml() {
           </div>
         </label>
 
+        <label class="scenario-radio-card ${activeScenario === 'S10' ? 'active-s10' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S10" ${activeScenario === 'S10' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #f59e0b;">⚡ Skenario 10 Saja</span>
+            <span class="radio-hint">Dynamic Wave Runner (Whale Sync)</span>
+          </div>
+        </label>
+
         <label class="scenario-radio-card ${activeScenario === 'BOTH' ? 'active-both' : ''}">
           <input type="radio" name="autobuyScenarioRadio" value="BOTH" ${activeScenario === 'BOTH' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
@@ -876,10 +915,11 @@ export function render3ScenariosLiveHtml() {
       ${renderScenarioCard(s7, '#06b6d4', 'sce7')}
       ${renderScenarioCard(s8, '#a855f7', 'sce8')}
       ${renderScenarioCard(s9, '#3b82f6', 'sce9')}
+      ${renderScenarioCard(s10, '#f59e0b', 'sce10')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 6-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9) &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 7-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S10) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 
@@ -994,6 +1034,19 @@ export function render3ScenariosLiveHtml() {
       sendStakeUpdate({
         stakeUsdS9: val
       }, 'Modal S9 berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveS10Stake() {
+      const input = document.getElementById('s10StakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S10 minimal $0.05!');
+        return;
+      }
+      sendStakeUpdate({
+        stakeUsdS10: val
+      }, 'Modal S10 berhasil disimpan: $' + val.toFixed(2));
     }
 
     function sendStakeUpdate(payload, successMsg) {
