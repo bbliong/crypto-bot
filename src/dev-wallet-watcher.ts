@@ -309,13 +309,19 @@ export class SingleDevWalletWatcher extends EventEmitter {
       this.ws.on('error', (err: any) => {
         if (err.message && err.message.includes('before the connection was established')) return;
         console.warn(`[DEV-WATCHER-WS-ERR] ${err.message}`);
+        if (err.message && err.message.includes('429')) {
+          if (!this.wsUrl.includes('api.mainnet-beta.solana.com')) {
+            console.log(`[DEV-WATCHER] 🔄 Mengalihkan WebSocket ke public Solana cluster (wss://api.mainnet-beta.solana.com)...`);
+            this.wsUrl = 'wss://api.mainnet-beta.solana.com';
+          }
+        }
       });
 
       this.ws.on('close', () => {
         this.isConnecting = false;
         if (this.activeTarget) {
-          // Reconnect otomatis jika target masih aktif
-          setTimeout(() => this.connectAndSubscribe(), 3000);
+          const delay = this.wsUrl.includes('api.mainnet-beta.solana.com') ? 8000 : 3000;
+          setTimeout(() => this.connectAndSubscribe(), delay);
         }
       });
     } catch (err: any) {
