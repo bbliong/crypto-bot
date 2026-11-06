@@ -182,11 +182,6 @@ export class WalletFollowerRunner {
 
   private async processHeliusSignature(sig: string): Promise<void> {
     if (this.processedTxHashes.has(sig)) return;
-    this.processedTxHashes.add(sig);
-    if (this.processedTxHashes.size > 2000) {
-      const first = this.processedTxHashes.values().next().value;
-      if (first) this.processedTxHashes.delete(first);
-    }
 
     try {
       const url = `https://api.helius.xyz/v0/transactions?api-key=${this.heliusApiKey}`;
@@ -196,7 +191,11 @@ export class WalletFollowerRunner {
         body: JSON.stringify({ transactions: [sig] }),
         signal: AbortSignal.timeout(3000),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // JANGAN kunci sig di processedTxHashes jika Helius gagal/rate-limit
+        // agar GMGN WebSocket yang memiliki payload lengkap tetap bisa memprosesnya!
+        return;
+      }
       const txs = await res.json() as any[];
       if (!Array.isArray(txs) || txs.length === 0) return;
       const tx = txs[0];
@@ -217,6 +216,13 @@ export class WalletFollowerRunner {
       }
 
       if (!tokenMint || tokenDiff === 0) return;
+
+      // Kunci hash HANYA setelah transaksi valid dan siap diproses
+      this.processedTxHashes.add(sig);
+      if (this.processedTxHashes.size > 2000) {
+        const first = this.processedTxHashes.values().next().value;
+        if (first) this.processedTxHashes.delete(first);
+      }
 
       const action: 'buy' | 'sell' = tokenDiff > 0 ? 'buy' : 'sell';
       const tokenAmount = Math.abs(tokenDiff);
