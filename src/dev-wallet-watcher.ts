@@ -585,19 +585,23 @@ export class SingleDevWalletWatcher extends EventEmitter {
         }
       }
 
-      // Fallback 1: cek inner ix mint lain yang bukan WSOL
+      // Fallback 1: cek inner ix pembuatan mint baru (InitializeMint / InitializeMint2)
+      // DILARANG mengambil dari instruksi 'burn' karena itu adalah pembakaran LP Token oleh Dev, bukan koin baru!
       if (!detectedMint) {
         for (const g of inner) {
           for (const ix of (g.instructions || [])) {
-            const m = ix?.parsed?.info?.mint;
-            if (
-              m &&
-              m !== 'So11111111111111111111111111111111111111112' &&
-              m !== target.devWallet &&
-              m !== target.mint
-            ) {
-              detectedMint = m;
-              break;
+            if (ix?.parsed?.type === 'initializeMint' || ix?.parsed?.type === 'initializeMint2' || ix?.parsed?.type === 'initializeTokenMetadata') {
+              const m = ix?.parsed?.info?.mint;
+              if (
+                m &&
+                m !== 'So11111111111111111111111111111111111111112' &&
+                m !== target.devWallet &&
+                m !== target.mint
+              ) {
+                detectedMint = m;
+                if (ix?.parsed?.info?.symbol) detectedSymbol = ix.parsed.info.symbol;
+                break;
+              }
             }
           }
           if (detectedMint) break;
@@ -641,7 +645,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
               const accInfo = await conn.getParsedAccountInfo(new PublicKey(pk));
               if (accInfo.value && 'parsed' in accInfo.value.data) {
                 const info = accInfo.value.data.parsed?.info;
-                if (info && info.decimals !== undefined && info.supply !== undefined) {
+                // Koin memecoin di Solana memiliki 6 desimal, sedangkan LP Token AMM memiliki 9 desimal
+                if (info && info.decimals === 6 && info.supply !== undefined) {
                   detectedMint = pk;
                   break;
                 }
