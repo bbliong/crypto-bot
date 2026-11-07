@@ -1234,7 +1234,7 @@ export class MultiScenarioDryRunEngine {
         continue;
       }
 
-      // Skenario 9: Dev Front-Run & 2-Way Target Sync (Anti-Shakeout 12s pasca-target masuk + Follow Whale Exit)
+      // Skenario 9: Dev Front-Run & 2-Way Target Sync (Anti-Shakeout micro-sell + Emergency Dump Exit)
       if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
         pos.lastPriceUsd = pOut;
         if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
@@ -1244,7 +1244,16 @@ export class MultiScenarioDryRunEngine {
 
         const referenceTime = pos.targetEnteredAt || pos.openedAt;
         const elapsedSec = (now - referenceTime) / 1000;
-        // ANTI-SHAKEOUT GATE: Dalam 12 detik pertama pasca target masuk, abaikan goyangan dump target!
+
+        // 1. EMERGENCY EXIT: Jika Whale DUMP BESAR (>= 50% atau Full Exit), BATALKAN TAHANAN! LANGSUNG EXIT DETIK ITU JUGA!
+        // Menyelamatkan modal dari Dev rugpull (RemoveAllLiquidity) yang mengeksekusi 10-15s setelah whale dump 100%.
+        if (isFullExit || pos.targetCumulativeSellRatioPct >= 50.0 || currentSellRatioPct >= 50.0) {
+          const exitReason = `S9_EMERGENCY_WHALE_DUMP_EXIT (Whale dump ${pos.targetCumulativeSellRatioPct}% >= 50% / Full Exit di detik ${elapsedSec.toFixed(1)}s, kabur sebelum dev rugpull)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+
+        // 2. ANTI-SHAKEOUT GATE: Untuk micro-sell (< 50%) dalam 12 detik pertama pasca target masuk, tahan posisi untuk wave pompa!
         if (elapsedSec < 12.0) {
           scenario.recentEvents.unshift({
             id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1257,14 +1266,14 @@ export class MultiScenarioDryRunEngine {
             priceUsd: pOut,
             availableCashAfter: scenario.availableCash,
             investedCashAfter: scenario.investedCash,
-            reason: `ANTI_SHAKEOUT_HOLD (Target sold ${currentSellRatioPct}% di detik ${elapsedSec.toFixed(1)}s < 12s, tahan posisi untuk wave pompa)`,
+            reason: `ANTI_SHAKEOUT_HOLD (Whale micro sell ${currentSellRatioPct}% di detik ${elapsedSec.toFixed(1)}s < 12s, tahan posisi untuk wave pompa)`,
           });
           if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
           continue;
         }
 
-        // Pasca detik ke-12: jika target dump >= 15% atau Full Exit, ikuti whale keluar!
-        if (pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit) {
+        // 3. Pasca detik ke-12: jika target akumulasi jual >= 15%, ikuti whale keluar!
+        if (pos.targetCumulativeSellRatioPct >= 15.0) {
           const exitReason = `S9_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol} ${pos.targetCumulativeSellRatioPct}% >= 15% pasca detik 12s)`;
           this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
           continue;
@@ -1310,7 +1319,7 @@ export class MultiScenarioDryRunEngine {
         continue;
       }
 
-      // Skenario 5: Anti-Shakeout Runner (Abaikan dump di detik 1-11, follow target sell pasca detik 12)
+      // Skenario 5: Anti-Shakeout Runner (Anti-shakeout micro-sell + Emergency Whale Dump Exit)
       if (scenario.id === 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER') {
         pos.lastPriceUsd = pOut;
         if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
@@ -1319,7 +1328,15 @@ export class MultiScenarioDryRunEngine {
         pos.lastTargetSellAt = now;
 
         const elapsedSec = (now - pos.openedAt) / 1000;
-        // ANTI-SHAKEOUT GATE: Dalam 12 detik pertama, abaikan goyangan dump target!
+
+        // Emergency Exit jika Whale Dump >= 50% atau Full Exit
+        if (isFullExit || pos.targetCumulativeSellRatioPct >= 50.0 || currentSellRatioPct >= 50.0) {
+          const exitReason = `S5_EMERGENCY_WHALE_DUMP_EXIT (Whale dump ${pos.targetCumulativeSellRatioPct}% >= 50% / Full Exit di detik ${elapsedSec.toFixed(1)}s, kabur sebelum dev rugpull)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+
+        // ANTI-SHAKEOUT GATE: Dalam 12 detik pertama untuk micro-sell, abaikan goyangan dump target!
         if (elapsedSec < 12.0) {
           scenario.recentEvents.unshift({
             id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1338,8 +1355,8 @@ export class MultiScenarioDryRunEngine {
           continue;
         }
 
-        // Pasca detik ke-12: jika target dump >= 15% atau Full Exit, ikuti whale keluar!
-        if (pos.targetCumulativeSellRatioPct >= 15.0 || isFullExit) {
+        // Pasca detik ke-12: jika target akumulasi jual >= 15%, ikuti whale keluar!
+        if (pos.targetCumulativeSellRatioPct >= 15.0) {
           const exitReason = `S5_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol} ${pos.targetCumulativeSellRatioPct}% >= 15% pasca detik 12s)`;
           this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
           continue;
