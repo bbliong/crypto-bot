@@ -1072,15 +1072,16 @@ export class MultiScenarioDryRunEngine {
     if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
       const gen2 = this.gen2CycleTracker.get(pos.mint);
       if (gen2) {
-        const isProfitable = pos.realizedPnlUsd >= 0;
+        // Toleransi gas fee untuk exit pengaman TARGET_SKIPPED_DEV_POOL (hingga -$0.05)
+        const isSafeOrProfitable = pos.realizedPnlUsd >= 0 || (reason.includes('TARGET_SKIPPED_DEV_POOL') && pos.realizedPnlUsd >= -0.05);
         gen2.lastExitAt = now;
         gen2.lastExitPrice = pOut;
         gen2.lastExitReason = reason;
-        gen2.lastTradeProfitable = isProfitable;
+        gen2.lastTradeProfitable = isSafeOrProfitable;
 
-        if (!isProfitable) {
+        if (!isSafeOrProfitable) {
           gen2.status = 'TERMINATED';
-          console.log(`[GEN2 CYCLE TERMINATED] ⛔ Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] mengalami kerugian (PnL: $${pos.realizedPnlUsd}). Siklus dihentikan permanen!`);
+          console.log(`[GEN2 CYCLE TERMINATED] ⛔ Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] mengalami kerugian nyata (PnL: $${pos.realizedPnlUsd}). Siklus dihentikan permanen!`);
         } else if (gen2.cycleCount >= gen2.maxCycles) {
           gen2.status = 'TERMINATED';
           console.log(`[GEN2 CYCLE FINISHED] 🏁 Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] telah mencapai batas maksimal 5 siklus (${gen2.cycleCount}/${gen2.maxCycles}). Selesai!`);
