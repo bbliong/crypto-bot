@@ -700,6 +700,8 @@ export class MultiScenarioDryRunEngine {
         s9CreatedPos.pairAddress = evt.mainPairAddress || '';
         s9CreatedPos.exchange = targetExchange;
         s9CreatedPos.entryCount = sameMintTradesS9 + 1;
+        (s9CreatedPos as any).isSameSymbol = evt.isSameSymbol !== false;
+        (s9CreatedPos as any).isPool2 = evt.isSameSymbol !== false || sameMintTradesS9 > 0;
       }
       this.autoRotateSameSymbolPositions(this.scenarios.s9, earlySignal, now, timeWib);
     }
@@ -730,6 +732,8 @@ export class MultiScenarioDryRunEngine {
         s10CreatedPos.pairAddress = evt.mainPairAddress || '';
         s10CreatedPos.exchange = targetExchange;
         s10CreatedPos.entryCount = sameMintTradesS10 + 1;
+        (s10CreatedPos as any).isSameSymbol = evt.isSameSymbol !== false;
+        (s10CreatedPos as any).isPool2 = evt.isSameSymbol !== false || sameMintTradesS10 > 0;
       }
       this.autoRotateSameSymbolPositions(this.scenarios.s10, earlySignal, now, timeWib);
     }
@@ -2298,12 +2302,18 @@ export class MultiScenarioDryRunEngine {
           continue;
         }
       } else {
-        // Kasus B: Target tidak kunjung masuk dalam 60s sejak genesis
+        // Kasus B: Target tidak kunjung masuk sejak genesis
         const elapsedMs = now - pos.openedAt;
-        if (elapsedMs >= 60000) {
+        // JIKA Pool 1 Umpan (koin baru bukan Gen-2/Pool 2): batas waktu diperpendek menjadi 35 detik (sebelum dev rugpull di detik 45)
+        // JIKA Pool 2 / Gen-2 re-deploy: batas waktu 60 detik (memberi ruang pompa lebih longgar)
+        const isPool2OrGen2 = Boolean(this.gen2CycleTracker.get(pos.mint) || (pos as any).isPool2 || (pos as any).isSameSymbol);
+        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 35000;
+
+        if (elapsedMs >= timeoutLimitMs) {
           const timeWib = formatWibDate(now);
           const elapsedSec = Math.round(elapsedMs / 1000);
-          const reason = `TARGET_SKIPPED_DEV_POOL (Dev Deploy Pool '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit)`;
+          const poolTypeStr = isPool2OrGen2 ? 'Pool 2' : 'Pool 1 Umpan';
+          const reason = `TARGET_SKIPPED_DEV_POOL (${poolTypeStr} '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit sebelum dev rugpull)`;
           this.executeScenarioExit(s9, i, pOut, now, timeWib, reason);
           changed = true;
           continue;
@@ -2312,7 +2322,7 @@ export class MultiScenarioDryRunEngine {
     }
 
     // 4b. Cek Skenario 10 Time-Stop (Dynamic Wave Runner):
-    // - Gap 60s tanpa target masuk -> Force Sell (Safety Exit)
+    // - Gap 35s/60s tanpa target masuk -> Force Sell (Safety Exit)
     // - Wave limit 30s pasca target masuk -> Force Exit (Time-Stop pengaman sebelum dev rugpull)
     const s10 = this.scenarios.s10;
     for (let i = s10.openPositions.length - 1; i >= 0; i--) {
@@ -2333,10 +2343,14 @@ export class MultiScenarioDryRunEngine {
         }
       } else {
         const elapsedMs = now - pos.openedAt;
-        if (elapsedMs >= 60000) {
+        const isPool2OrGen2 = Boolean(this.gen2CycleTracker.get(pos.mint) || (pos as any).isPool2 || (pos as any).isSameSymbol);
+        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 35000;
+
+        if (elapsedMs >= timeoutLimitMs) {
           const timeWib = formatWibDate(now);
           const elapsedSec = Math.round(elapsedMs / 1000);
-          const reason = `TARGET_SKIPPED_DEV_POOL (Dev Deploy Pool '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit)`;
+          const poolTypeStr = isPool2OrGen2 ? 'Pool 2' : 'Pool 1 Umpan';
+          const reason = `TARGET_SKIPPED_DEV_POOL (${poolTypeStr} '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit sebelum dev rugpull)`;
           this.executeScenarioExit(s10, i, pOut, now, timeWib, reason);
           changed = true;
           continue;
