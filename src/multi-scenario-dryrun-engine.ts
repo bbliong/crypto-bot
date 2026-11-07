@@ -653,22 +653,25 @@ export class MultiScenarioDryRunEngine {
       this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
 
       // Daftarkan koin Gen-2 nama sama ke Multi-Cycle Tracker (Maksimal 5x Siklus)
-      this.gen2CycleTracker.set(evt.newMint, {
-        mint: evt.newMint,
-        symbol: evt.symbol,
-        pairAddress: evt.mainPairAddress || '',
-        exchange: targetExchange,
-        devWallet: evt.devWallet,
-        cycleCount: 1,
-        maxCycles: 5,
-        lastExitAt: 0,
-        lastExitPrice: 0,
-        lastExitReason: '',
-        lastTradeProfitable: true,
-        status: 'HOLDING',
-        cooldownUntil: 0,
-      });
-      console.log(`[GEN2 CYCLE TRACKER] 🔄 Koin Gen-2 '${evt.symbol}' [${evt.newMint.slice(0, 8)}...] terdaftar untuk evaluasi siklus berulang (Maks 5x, Cooldown 1m, Profit-Only)!`);
+      const existingGen2 = this.gen2CycleTracker.get(evt.newMint);
+      if (!existingGen2) {
+        this.gen2CycleTracker.set(evt.newMint, {
+          mint: evt.newMint,
+          symbol: evt.symbol,
+          pairAddress: evt.mainPairAddress || '',
+          exchange: targetExchange,
+          devWallet: evt.devWallet,
+          cycleCount: 1,
+          maxCycles: 5,
+          lastExitAt: 0,
+          lastExitPrice: 0,
+          lastExitReason: '',
+          lastTradeProfitable: true,
+          status: 'HOLDING',
+          cooldownUntil: 0,
+        });
+        console.log(`[GEN2 CYCLE TRACKER] 🔄 Koin Gen-2 '${evt.symbol}' [${evt.newMint.slice(0, 8)}...] terdaftar untuk evaluasi siklus berulang (Maks 5x, Cooldown 1m, Profit-Only)!`);
+      }
     }
 
     // Eksekusi buy di Skenario 9 (Dev Front-Run Bebas Simbol & 2-Way Sync)
@@ -678,17 +681,25 @@ export class MultiScenarioDryRunEngine {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
       s9Stake = liveCfg.stakeUsdS9 || 1.0;
     }
+    const closedTradeS9 = this.scenarios.s9.closedTrades.find(t => t.mint === evt.newMint);
+    const prevProfitableS9 = !closedTradeS9 || closedTradeS9.realizedPnlUsd >= 0;
+    const sameMintTradesS9 = this.scenarios.s9.closedTrades.filter(t => t.mint === evt.newMint).length;
+    const allowReEntryS9 = evt.isSameSymbol !== false && prevProfitableS9 && sameMintTradesS9 < 5;
+
     if (!this.scenarios.s9.openPositions.some(p => p.mint === evt.newMint)) {
       this.processScenarioBuy(this.scenarios.s9, earlySignal, true, 1380, now, timeWib, {
         maxTokenExposure: s9Stake,
         getStake: () => s9Stake,
         disallowAccumulation: true,
+        allowReEntryCycle: allowReEntryS9,
+        cycleIndex: sameMintTradesS9 + 1,
       });
       const s9CreatedPos = this.scenarios.s9.openPositions.find(p => p.mint === evt.newMint);
       if (s9CreatedPos) {
         s9CreatedPos.boughtAtGenesis = true;
         s9CreatedPos.pairAddress = evt.mainPairAddress || '';
         s9CreatedPos.exchange = targetExchange;
+        s9CreatedPos.entryCount = sameMintTradesS9 + 1;
       }
       this.autoRotateSameSymbolPositions(this.scenarios.s9, earlySignal, now, timeWib);
     }
@@ -700,17 +711,25 @@ export class MultiScenarioDryRunEngine {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
       s10Stake = (liveCfg as any).stakeUsdS10 || liveCfg.stakeUsdS9 || 0.25;
     }
+    const closedTradeS10 = this.scenarios.s10.closedTrades.find(t => t.mint === evt.newMint);
+    const prevProfitableS10 = !closedTradeS10 || closedTradeS10.realizedPnlUsd >= 0;
+    const sameMintTradesS10 = this.scenarios.s10.closedTrades.filter(t => t.mint === evt.newMint).length;
+    const allowReEntryS10 = evt.isSameSymbol !== false && prevProfitableS10 && sameMintTradesS10 < 5;
+
     if (!this.scenarios.s10.openPositions.some(p => p.mint === evt.newMint)) {
       this.processScenarioBuy(this.scenarios.s10, earlySignal, true, 1380, now, timeWib, {
         maxTokenExposure: s10Stake,
         getStake: () => s10Stake,
         disallowAccumulation: true,
+        allowReEntryCycle: allowReEntryS10,
+        cycleIndex: sameMintTradesS10 + 1,
       });
       const s10CreatedPos = this.scenarios.s10.openPositions.find(p => p.mint === evt.newMint);
       if (s10CreatedPos) {
         s10CreatedPos.boughtAtGenesis = true;
         s10CreatedPos.pairAddress = evt.mainPairAddress || '';
         s10CreatedPos.exchange = targetExchange;
+        s10CreatedPos.entryCount = sameMintTradesS10 + 1;
       }
       this.autoRotateSameSymbolPositions(this.scenarios.s10, earlySignal, now, timeWib);
     }
