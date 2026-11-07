@@ -170,6 +170,8 @@ export class WalletFollowerRunner {
         tokens: details.tokens,
         priceUsd: details.priceUsd,
         reason: details.reason,
+        isReEntryCycle: details.isReEntryCycle,
+        cycleIndex: details.cycleIndex,
       });
     };
   }
@@ -1241,9 +1243,11 @@ export class WalletFollowerRunner {
 
       // 1. Sinkronisasi subscribe token aktif dan batch price heartbeat
       const smartOpen = this.smartDipLane.getOpenPositions();
+      const gen2CooldownMints = this.multiDryRunEngine.getGen2CooldownMints();
       const allOpenMints = Array.from(new Set([
         ...openPositions.map(p => p.mint),
-        ...smartOpen.map(p => p.mint)
+        ...smartOpen.map(p => p.mint),
+        ...gen2CooldownMints,
       ]));
 
       for (const mint of allOpenMints) {
@@ -1410,6 +1414,8 @@ export class WalletFollowerRunner {
     tokens?: number;
     priceUsd: number;
     reason: string;
+    isReEntryCycle?: boolean;
+    cycleIndex?: number;
   }): void {
     // Jika skenario ini adalah target Real Auto-Buy aktif (misal S4) atau S8 (Genesis),
     // eksekusi LANGSUNG secara paralel tanpa antre di belakang simulasi skenario lain!
@@ -1422,7 +1428,9 @@ export class WalletFollowerRunner {
         item.signal,
         item.stakeUsd,
         item.reason,
-        item.tokens
+        item.tokens,
+        item.isReEntryCycle,
+        item.cycleIndex
       ).catch(err => console.warn(`[IMMEDIATE PROBE ERR: ${item.scenarioId}] ${err?.message}`));
       return;
     }
@@ -1444,7 +1452,9 @@ export class WalletFollowerRunner {
           item.signal,
           item.stakeUsd,
           item.reason,
-          item.tokens
+          item.tokens,
+          item.isReEntryCycle,
+          item.cycleIndex
         );
       } catch (err: any) {
         console.warn(`[PROBE EXEC ERR] ${err?.message}`);
@@ -1504,7 +1514,9 @@ export class WalletFollowerRunner {
     signal: WalletTradeSignal,
     stakeUsd: number = 5.0,
     reason: string = '',
-    tokens?: number
+    tokens?: number,
+    isReEntryCycle?: boolean,
+    cycleIndex?: number
   ): Promise<void> {
     if (!this.page || this.page.isClosed()) {
       return;
@@ -1658,10 +1670,16 @@ export class WalletFollowerRunner {
       const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
 
       if (isRealOrderTargeted && side === 'BUY') {
-        // Cek apakah token ini sudah pernah dibeli sebelumnya di state posisi riil (Strict 1 Token 1 Buy)
-        const alreadyBoughtReal = state.positions.some(p => p.mint === signal.mint);
-        if (alreadyBoughtReal) {
-          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Token ${signal.symbol} [${signal.mint.slice(0, 8)}...] sudah pernah dibeli di real wallet! Dilarang buy ulang koin yang sama.`);
+        // Cek posisi aktif riil di dompet:
+        const activeHoldingPos = state.positions.find(p => p.mint === signal.mint && (p.status === 'HOLDING' || p.status === 'ACTIVE'));
+        const sameMintBuysCount = state.positions.filter(p => p.mint === signal.mint).length;
+        const isReEntryAllowed = Boolean(isReEntryCycle) && !activeHoldingPos && sameMintBuysCount < 5;
+
+        if (activeHoldingPos) {
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Token ${signal.symbol} [${signal.mint.slice(0, 8)}...] sedang dalam status HOLDING aktif di real wallet! Dilarang buy akumulasi.`);
+          isRealOrderTargeted = false;
+        } else if (sameMintBuysCount >= 1 && !isReEntryAllowed) {
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Token ${signal.symbol} [${signal.mint.slice(0, 8)}...] sudah pernah dibeli (${sameMintBuysCount}x) dan bukan koin Gen-2 Re-Entry yang memenuhi syarat!`);
           isRealOrderTargeted = false;
         }
 

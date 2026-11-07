@@ -77,11 +77,27 @@ export interface TokenGenerationInfo {
   lastMint: string;
 }
 
+export interface Gen2CycleState {
+  mint: string;
+  symbol: string;
+  pairAddress: string;
+  exchange: string;
+  devWallet: string;
+  cycleCount: number; // 1 s/d 5
+  maxCycles: number; // default 5
+  lastExitAt: number;
+  lastExitPrice: number;
+  lastExitReason: string;
+  lastTradeProfitable: boolean;
+  status: 'COOLDOWN' | 'HOLDING' | 'TERMINATED';
+  cooldownUntil: number; // lastExitAt + 60_000
+}
+
 export type ScenarioTradeActionCallback = (
   action: 'BUY' | 'SELL',
   scenarioId: string,
   signal: WalletTradeSignal,
-  details: { stakeUsd?: number; tokens?: number; priceUsd: number; reason: string }
+  details: { stakeUsd?: number; tokens?: number; priceUsd: number; reason: string; isReEntryCycle?: boolean; cycleIndex?: number }
 ) => void | Promise<void>;
 
 export interface ScenarioState {
@@ -121,6 +137,8 @@ export class MultiScenarioDryRunEngine {
   private dataDir: string;
   private filePath: string;
   private tokenGenerations: Map<string, TokenGenerationInfo> = new Map();
+  private gen2CycleTracker: Map<string, Gen2CycleState> = new Map();
+  private lastObservedPrices: Map<string, number> = new Map();
   public onTradeAction?: ScenarioTradeActionCallback;
 
   public scenarios: {
@@ -633,6 +651,24 @@ export class MultiScenarioDryRunEngine {
         this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
       }
       this.autoRotateSameSymbolPositions(this.scenarios.s8, earlySignal, now, timeWib);
+
+      // Daftarkan koin Gen-2 nama sama ke Multi-Cycle Tracker (Maksimal 5x Siklus)
+      this.gen2CycleTracker.set(evt.newMint, {
+        mint: evt.newMint,
+        symbol: evt.symbol,
+        pairAddress: evt.mainPairAddress || '',
+        exchange: targetExchange,
+        devWallet: evt.devWallet,
+        cycleCount: 1,
+        maxCycles: 5,
+        lastExitAt: 0,
+        lastExitPrice: 0,
+        lastExitReason: '',
+        lastTradeProfitable: true,
+        status: 'HOLDING',
+        cooldownUntil: 0,
+      });
+      console.log(`[GEN2 CYCLE TRACKER] 🔄 Koin Gen-2 '${evt.symbol}' [${evt.newMint.slice(0, 8)}...] terdaftar untuk evaluasi siklus berulang (Maks 5x, Cooldown 1m, Profit-Only)!`);
     }
 
     // Eksekusi buy di Skenario 9 (Dev Front-Run Bebas Simbol & 2-Way Sync)
@@ -692,7 +728,7 @@ export class MultiScenarioDryRunEngine {
     targetUsd: number,
     now: number,
     timeWib: string,
-    rules: { maxTokenExposure: number; getStake: (tUsd: number) => number; disallowAccumulation?: boolean }
+    rules: { maxTokenExposure: number; getStake: (tUsd: number) => number; disallowAccumulation?: boolean; allowReEntryCycle?: boolean; cycleIndex?: number }
   ): void {
     const pIn = signal.priceUsd;
     if (pIn <= 0) return;
@@ -702,8 +738,9 @@ export class MultiScenarioDryRunEngine {
     // Jika posisi belum ada:
     if (!pos) {
       // 0. Strict 1-Cycle-Per-Token Rule: Dilarang keras buy ulang token yang sudah pernah ditradingkan / ada di closedTrades
+      // Kecuali jika diizinkan oleh Multi-Cycle Gen-2 Re-Entry (allowReEntryCycle = true)
       const alreadyTraded = scenario.closedTrades.some(t => t.mint === signal.mint);
-      if (alreadyTraded) {
+      if (alreadyTraded && !rules.allowReEntryCycle) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
           timestamp: now,
@@ -721,8 +758,8 @@ export class MultiScenarioDryRunEngine {
         return;
       }
 
-      // 1. Wajib First Buy (Ground Zero dari saldo 0)
-      if (!isGroundZero) {
+      // 1. Wajib First Buy (Ground Zero dari saldo 0) - dilewati jika Re-Entry Cycle
+      if (!isGroundZero && !rules.allowReEntryCycle) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
           timestamp: now,
@@ -740,9 +777,9 @@ export class MultiScenarioDryRunEngine {
         return;
       }
 
-      // 2. Filter Anti-Pucuk (Ground-Zero Price Cap): Target First Buy price wajib <= $0.000020
+      // 2. Filter Anti-Pucuk (Ground-Zero Price Cap): Target First Buy price wajib <= $0.000020 (hanya berlaku saat Genesis awal)
       const GROUND_ZERO_MAX_PRICE_USD = 0.000020;
-      if (pIn > GROUND_ZERO_MAX_PRICE_USD) {
+      if (!rules.allowReEntryCycle && pIn > GROUND_ZERO_MAX_PRICE_USD) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
           timestamp: now,
@@ -825,7 +862,7 @@ export class MultiScenarioDryRunEngine {
         priceUsd: pIn,
         availableCashAfter: scenario.availableCash,
         investedCashAfter: scenario.investedCash + actualStake,
-        reason: `ENTRY_1 (Target ~$${targetUsd.toFixed(0)} | Fee: $${REAL_SWAP_FEE_USD})`,
+        reason: rules.allowReEntryCycle ? `GEN2_CYCLE_${rules.cycleIndex || 2}_RE_ENTRY (Fee: $${REAL_SWAP_FEE_USD})` : `ENTRY_1 (Target ~$${targetUsd.toFixed(0)} | Fee: $${REAL_SWAP_FEE_USD})`,
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
 
@@ -836,7 +873,9 @@ export class MultiScenarioDryRunEngine {
             stakeUsd: actualStake,
             tokens: tokensBought,
             priceUsd: pIn,
-            reason: 'ENTRY_1',
+            reason: rules.allowReEntryCycle ? `GEN2_CYCLE_${rules.cycleIndex || 2}_RE_ENTRY` : 'ENTRY_1',
+            isReEntryCycle: Boolean(rules.allowReEntryCycle),
+            cycleIndex: rules.cycleIndex,
           });
         } catch {}
       }
@@ -1009,6 +1048,34 @@ export class MultiScenarioDryRunEngine {
       stage1RealUsdReturned: pos.stage1RealUsdReturned || 0,
     });
     if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+
+    // Update Multi-Cycle Tracker khusus S9:
+    if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
+      const gen2 = this.gen2CycleTracker.get(pos.mint);
+      if (gen2) {
+        const isProfitable = pos.realizedPnlUsd >= 0;
+        gen2.lastExitAt = now;
+        gen2.lastExitPrice = pOut;
+        gen2.lastExitReason = reason;
+        gen2.lastTradeProfitable = isProfitable;
+
+        if (!isProfitable) {
+          gen2.status = 'TERMINATED';
+          console.log(`[GEN2 CYCLE TERMINATED] ⛔ Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] mengalami kerugian (PnL: $${pos.realizedPnlUsd}). Siklus dihentikan permanen!`);
+        } else if (gen2.cycleCount >= gen2.maxCycles) {
+          gen2.status = 'TERMINATED';
+          console.log(`[GEN2 CYCLE FINISHED] 🏁 Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] telah mencapai batas maksimal 5 siklus (${gen2.cycleCount}/${gen2.maxCycles}). Selesai!`);
+        } else {
+          gen2.status = 'COOLDOWN';
+          gen2.cooldownUntil = now + 60000;
+          console.log(`\n=========================================================`);
+          console.log(`⏳ [GEN2 CYCLE COOLDOWN] Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] selesai Siklus #${gen2.cycleCount}/${gen2.maxCycles} via '${reason}' (Untung/BEP: +$${pos.realizedPnlUsd})!`);
+          console.log(`   Masa Cooldown  : 60 Detik (sampai ${formatWibDate(gen2.cooldownUntil)})`);
+          console.log(`   Syarat Siklus Berikutnya: Grafik meningkat (Spot > $${pOut.toFixed(8)}) pasca-cooldown`);
+          console.log(`=========================================================\n`);
+        }
+      }
+    }
 
     if (this.onTradeAction) {
       try {
@@ -1612,6 +1679,7 @@ export class MultiScenarioDryRunEngine {
    */
   public updatePriceTick(mint: string, priceUsd: number): void {
     if (priceUsd <= 0) return;
+    this.lastObservedPrices.set(mint, priceUsd);
     let changed = false;
 
     for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s10]) {
@@ -1847,6 +1915,115 @@ export class MultiScenarioDryRunEngine {
     if (changed) {
       this.saveState();
     }
+    this.checkGen2ReEntry(mint, priceUsd);
+  }
+
+  /**
+   * Pengecekan Re-Entry Otomatis untuk Koin Gen-2 Nama Sama:
+   * Jika token Gen-2 keluar via TARGET_SKIPPED_DEV_POOL (atau exit aman),
+   * bot menunggu cooldown 1 menit (60s). Jika harga / grafik meningkat,
+   * bot mengeksekusi BUY siklus berikutnya (hingga maksimal 5x siklus)!
+   */
+  public checkGen2ReEntry(targetMint?: string, currentPriceUsd?: number): void {
+    const now = Date.now();
+    const timeWib = formatWibDate(now);
+
+    for (const [mint, gen2] of this.gen2CycleTracker.entries()) {
+      if (targetMint && mint !== targetMint) continue;
+      if (gen2.status !== 'COOLDOWN') continue;
+
+      // 1. Cek apakah masa cooldown 60 detik (1 menit) sudah selesai
+      if (now < gen2.cooldownUntil) continue;
+
+      // 2. Cek apakah masih dalam batas 5 siklus
+      if (gen2.cycleCount >= gen2.maxCycles) {
+        gen2.status = 'TERMINATED';
+        continue;
+      }
+
+      // 3. Cek apakah trade sebelumnya untung/BEP
+      if (!gen2.lastTradeProfitable) {
+        gen2.status = 'TERMINATED';
+        continue;
+      }
+
+      // 4. Cek apakah S9 sedang memegang koin ini (jangan buy jika posisi masih terbuka)
+      const hasOpenPos = this.scenarios.s9.openPositions.some(p => p.mint === mint);
+      if (hasOpenPos) continue;
+
+      // 5. Cek harga spot saat ini:
+      const spotPrice = (currentPriceUsd && currentPriceUsd > 0) ? currentPriceUsd : (this.lastObservedPrices.get(mint) || 0);
+      if (spotPrice <= 0) continue;
+
+      // 6. Syarat Grafik / Harga Meningkat:
+      // Harga spot saat ini harus lebih tinggi dari harga exit terakhir (ada momentum naik)
+      if (spotPrice <= gen2.lastExitPrice) {
+        continue;
+      }
+
+      const gainSinceExitPct = ((spotPrice - gen2.lastExitPrice) / gen2.lastExitPrice) * 100;
+      gen2.cycleCount += 1;
+      gen2.status = 'HOLDING';
+
+      console.log(`\n=========================================================`);
+      console.log(`🚀 [GEN2 CYCLE RE-ENTRY TRIGGERED] Memulai Buy Putaran ke-${gen2.cycleCount}/${gen2.maxCycles}:`);
+      console.log(`   Token        : ${gen2.symbol} [${mint.slice(0, 8)}...]`);
+      console.log(`   Harga Exit   : $${gen2.lastExitPrice.toFixed(8)}`);
+      console.log(`   Harga Spot   : $${spotPrice.toFixed(8)} (+${gainSinceExitPct.toFixed(1)}% meningkat)`);
+      console.log(`   Timer Tunggu : 60 Detik untuk aksi whale / TP`);
+      console.log(`=========================================================\n`);
+
+      let s9Stake = 0.25;
+      try {
+        const liveCfg = readFollowerLiveConfig(this.dataDir);
+        s9Stake = liveCfg.stakeUsdS9 || 0.25;
+      } catch {}
+
+      const reEntrySignal: WalletTradeSignal = {
+        action: 'buy',
+        mint,
+        symbol: gen2.symbol,
+        tokenName: gen2.symbol,
+        tokenAmount: 0,
+        remainingHolding: 0,
+        solAmount: 0,
+        usdAmount: 0,
+        priceUsd: spotPrice,
+        txHash: `gen2_cycle${gen2.cycleCount}_${now}`,
+        timestamp: Math.floor(now / 1000),
+        isOpenOrClose: true,
+        isFirstBuy: false,
+        pairAddress: gen2.pairAddress,
+        exchange: gen2.exchange,
+      };
+
+      this.processScenarioBuy(this.scenarios.s9, reEntrySignal, true, 1380, now, timeWib, {
+        maxTokenExposure: s9Stake,
+        getStake: () => s9Stake,
+        disallowAccumulation: true,
+        allowReEntryCycle: true,
+        cycleIndex: gen2.cycleCount,
+      });
+
+      const newPos = this.scenarios.s9.openPositions.find(p => p.mint === mint);
+      if (newPos) {
+        newPos.boughtAtGenesis = true; // Enables TARGET_SKIPPED_DEV_POOL 60s timer!
+        newPos.openedAt = now; // Fresh 60s timer!
+        newPos.pairAddress = gen2.pairAddress;
+        newPos.exchange = gen2.exchange;
+        newPos.entryCount = gen2.cycleCount;
+      }
+
+      this.saveState();
+    }
+  }
+
+  public getGen2CooldownMints(): string[] {
+    const mints: string[] = [];
+    for (const [mint, gen2] of this.gen2CycleTracker.entries()) {
+      if (gen2.status === 'COOLDOWN') mints.push(mint);
+    }
+    return mints;
   }
 
   /**
@@ -1925,6 +2102,7 @@ export class MultiScenarioDryRunEngine {
   public checkTimeStopExits(maxTimeMs: number = 28000): void {
     const now = Date.now();
     let changed = false;
+    this.checkGen2ReEntry();
     const scenario = this.scenarios.s7;
 
     for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
