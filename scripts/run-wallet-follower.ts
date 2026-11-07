@@ -1689,7 +1689,8 @@ export class WalletFollowerRunner {
               stakeUsd,
               this.solPriceUsd,
               config.buySlippagePercent || 15,
-              1
+              1,
+              signal.pairAddress
             );
             if (route2.ok && route2.routeData?.quote) {
               finalQuote = route2.routeData.quote;

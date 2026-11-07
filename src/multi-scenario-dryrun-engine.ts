@@ -427,6 +427,19 @@ export class MultiScenarioDryRunEngine {
     });
     this.autoRotateSameSymbolPositions(this.scenarios.s7, signal, now, timeWib);
 
+    // Sinkronkan alamat Pool aktif ke posisi yang dipegang:
+    // Jika target whale masuk bertransaksi di pool tertentu (signal.pairAddress),
+    // seluruh skenario otomatis mengalihkan tujuan SELL ke pool whale tersebut!
+    if (signal.pairAddress) {
+      for (const sc of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s10]) {
+        const p = sc.openPositions.find(pos => pos.mint === signal.mint);
+        if (p && p.pairAddress !== signal.pairAddress) {
+          console.log(`[DYNAMIC POOL REDIRECTION] 🔄 Mengalihkan pool ${p.symbol} [${sc.id}] dari ${p.pairAddress ? p.pairAddress.slice(0, 8) + '...' : 'none'} ke Pool Whale: ${signal.pairAddress.slice(0, 8)}...`);
+          p.pairAddress = signal.pairAddress;
+        }
+      }
+    }
+
     // 4. Skenario 8 (Front-Run Dev & Hold 20s Post-Target Inflow)
     // Jika S8 memiliki posisi terbuka pada koin ini yang dibeli di Genesis:
     // TARGET SUDAH MASUK (15-20 SOL)! Kurva harga terpompa! Kunci waktu masuk target & tahan hingga 20 detik!
@@ -1193,6 +1206,10 @@ export class MultiScenarioDryRunEngine {
       const pos = scenario.openPositions[posIdx];
       if (pos.tokens <= 0) continue;
 
+      if (signal.pairAddress && pos.pairAddress !== signal.pairAddress) {
+        pos.pairAddress = signal.pairAddress;
+      }
+
       // Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)
       if (scenario.id === 'SCENARIO_4_SINGLE_BUY_5USD') {
         pos.lastPriceUsd = pOut;
@@ -1618,6 +1635,10 @@ export class MultiScenarioDryRunEngine {
           }
           if (gainPct <= -15.0) {
             const now = Date.now();
+            // Grace Period 12 Detik: Jika whale baru masuk (< 12s), tahan cut-loss agar tidak terkena shakeout tick saat pompa sedang berjalan
+            if (pos.targetEnteredAt && (now - pos.targetEnteredAt) < 12000) {
+              continue;
+            }
             const timeWib = formatWibDate(now);
             const exitReason = `STOP_LOSS_15% (Drop: ${gainPct.toFixed(1)}% <= -15% | Cut-loss pengaman)`;
             this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
@@ -1636,6 +1657,10 @@ export class MultiScenarioDryRunEngine {
           // 1. Cut Loss Pengaman (-15%)
           if (gainPct <= -15.0) {
             const now = Date.now();
+            // Grace Period 12 Detik: Jika whale baru masuk (< 12s), tahan cut-loss agar tidak terkena shakeout tick saat pompa sedang berjalan
+            if (pos.targetEnteredAt && (now - pos.targetEnteredAt) < 12000) {
+              continue;
+            }
             const timeWib = formatWibDate(now);
             const exitReason = `STOP_LOSS_15% (Drop: ${gainPct.toFixed(1)}% <= -15% | Cut-loss pengaman)`;
             this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
