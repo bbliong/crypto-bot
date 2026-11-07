@@ -36,7 +36,9 @@ export async function getBrowserBuySwapRoute(
   solPriceUsd: number = 145.0,
   slippage: number = 15,
   maxRetries: number = 3,
-  pairAddress?: string
+  pairAddress?: string,
+  retryDelayMs: number = 1000,
+  abortIfTargetEntered?: () => boolean
 ): Promise<SwapRouteResult> {
   // Hitung lamports berdasarkan stakeUsd / solPriceUsd
   const inputLamports = Math.floor((stakeUsd / (solPriceUsd > 0 ? solPriceUsd : 145.0)) * 1_000_000_000).toString();
@@ -48,12 +50,29 @@ export async function getBrowserBuySwapRoute(
       return { status: 499, latencyMs: 0, ok: false, error: 'PAGE_CLOSED' };
     }
 
+    // Cek anti-chasing sebelum memulai attempt jika bukan attempt pertama
+    if (attempt > 1 && abortIfTargetEntered && abortIfTargetEntered()) {
+      console.warn(`[SWAP BUY ABORT] ⛔ Target Whale sudah masuk duluan saat retry #${attempt}. Membatalkan probe agar tidak beli di pucuk!`);
+      return { status: 409, latencyMs: 0, ok: false, error: 'ABORT_TARGET_ALREADY_ENTERED' };
+    }
+
     // Naikkan toleransi slippage sedikit jika retry (misal 15% -> 18% -> 22%)
     const curSlippage = attempt === 1 ? slippage : Math.min(30, slippage + (attempt - 1) * 5);
 
     try {
       lastResult = await page.evaluate(
         async ({ mint, fromAddress, inputLamports, curSlippage, SOL_MINT, pairAddress }) => {
+          let resolvedPair = pairAddress;
+          if (!resolvedPair) {
+            try {
+              const infoRes = await fetch(`/api/v1/token_info/sol/${mint}`);
+              const infoJson = await infoRes.json();
+              if (infoJson?.data?.token?.biggest_pool) {
+                resolvedPair = infoJson.data.token.biggest_pool;
+              }
+            } catch {}
+          }
+
           const params = new URLSearchParams({
             web_from_source: 'token_poll',
             token_in_chain: 'sol',
@@ -69,8 +88,8 @@ export async function getBrowserBuySwapRoute(
             priority_fee: '0.0001',
             legacy: 'true',
           });
-          if (pairAddress) {
-            params.set('pair_address', pairAddress);
+          if (resolvedPair) {
+            params.set('pair_address', resolvedPair);
           }
           const t0 = performance.now();
           try {
@@ -133,9 +152,17 @@ export async function getBrowserBuySwapRoute(
     }
 
     if (attempt < maxRetries) {
-      const waitMs = attempt * 350;
-      console.warn(`[SWAP BUY RETRY] Attempt #${attempt}/${maxRetries} gagal (${lastResult.error}). Mencoba ulang slippage=${Math.min(30, slippage + attempt * 5)}% dalam ${waitMs}ms...`);
+      if (abortIfTargetEntered && abortIfTargetEntered()) {
+        console.warn(`[SWAP BUY ABORT] ⛔ Target Whale sudah masuk duluan saat retry #${attempt}. Membatalkan probe agar tidak beli di pucuk!`);
+        return { status: 409, latencyMs: 0, ok: false, error: 'ABORT_TARGET_ALREADY_ENTERED' };
+      }
+      const waitMs = retryDelayMs > 0 ? retryDelayMs : 1000;
+      console.warn(`[SWAP BUY RETRY] Attempt #${attempt}/${maxRetries} gagal (${lastResult.error}). Menunggu ${waitMs}ms untuk indeks likuiditas AMM...`);
       await delay(waitMs);
+      if (abortIfTargetEntered && abortIfTargetEntered()) {
+        console.warn(`[SWAP BUY ABORT] ⛔ Target Whale sudah masuk duluan saat jeda retry #${attempt}. Membatalkan probe agar tidak beli di pucuk!`);
+        return { status: 409, latencyMs: 0, ok: false, error: 'ABORT_TARGET_ALREADY_ENTERED' };
+      }
     }
   }
 

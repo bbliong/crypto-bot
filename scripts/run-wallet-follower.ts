@@ -1415,7 +1415,7 @@ export class WalletFollowerRunner {
     // eksekusi LANGSUNG secara paralel tanpa antre di belakang simulasi skenario lain!
     const config = readFollowerLiveConfig(this.dataDir);
     const isTargetReal = this.isScenarioAllowedForRealOrder(item.scenarioId, config);
-    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('9') || item.scenarioId.includes('FRONTRUN')) {
+    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('9') || item.scenarioId.includes('10') || item.scenarioId.includes('FRONTRUN')) {
       this.executeGmgnApiProbe(
         item.side,
         item.scenarioId,
@@ -1522,7 +1522,12 @@ export class WalletFollowerRunner {
       let unitsToSubmit: string = '0';
 
       if (side === 'BUY') {
-        // Fast 1-attempt tanpa delay sleep agar tidak blocking skenario lain
+        // Khusus Early Genesis / Dev Front-Run (S8/S9/S10): Coba ulang per 1 detik (maks 5x)
+        // jika kena little pool hit / jupiter has no route agar pool sempat terindeks sebelum whale masuk.
+        const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
+        const maxRetries = isGenesisOrEarly ? 5 : 1;
+        const retryDelayMs = 1000;
+
         route = await getBrowserBuySwapRoute(
           this.page,
           signal.mint,
@@ -1530,8 +1535,10 @@ export class WalletFollowerRunner {
           stakeUsd,
           this.solPriceUsd,
           config.buySlippagePercent || 15,
-          1, // maxRetries = 1 agar probe cepat (< 200ms)
-          signal.pairAddress
+          maxRetries,
+          signal.pairAddress,
+          retryDelayMs,
+          () => this.multiDryRunEngine.isTargetEntered(signal.mint)
         );
       } else {
         // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil

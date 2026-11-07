@@ -2413,4 +2413,12 @@ export class MultiScenarioDryRunEngine {
   public getS10OpenPositionsCount(): number {
     return this.scenarios.s10.openPositions.length;
   }
+
+  public isTargetEntered(mint: string): boolean {
+    for (const sc of [this.scenarios.s9, this.scenarios.s10, this.scenarios.s8]) {
+      const pos = sc.openPositions.find(p => p.mint === mint);
+      if (pos && pos.targetEnteredAt && pos.targetEnteredAt > 0) return true;
+    }
+    return false;
+  }
 }
