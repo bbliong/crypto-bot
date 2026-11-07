@@ -167,6 +167,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
         console.log(`=========================================================\n`);
 
         const isPump = Boolean(t.is_pump || (t.launchpad_platform && t.launchpad_platform.includes('pump')));
+        const poolLiq = Number(t.pool_liquidity || 0);
+        if (!isPump && poolLiq < 100) {
+          console.log(`[GMGN DEV-TOKEN MENU] ⚠️ Token ${t.symbol} non-pump dengan likuiditas rendah ($${poolLiq.toFixed(1)} < $100). Melewati pool kosong...`);
+          continue;
+        }
         const mainExchange = isPump ? 'pumpswap' : 'meteora';
 
         const evt: RedeployDetectedEvent = {
@@ -176,7 +181,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
           devWallet,
           signature: '',
           timestamp: Date.now(),
-          initialMeteoraSol: Number(t.pool_liquidity || 0) / 90,
+          initialMeteoraSol: poolLiq / 90,
           mainExchange,
           mainPairAddress: t.biggest_pool || '',
           isSameSymbol: (t.symbol || '').toUpperCase() === (target.symbol || '').toUpperCase(),
@@ -709,13 +714,21 @@ export class SingleDevWalletWatcher extends EventEmitter {
         const matchedAmm = detectedExchangeOwner ? KNOWN_AMM_PROGRAMS[detectedExchangeOwner] : null;
         if (matchedAmm) {
           mainExchange = matchedAmm.exchange;
+          // Filter Pool Kosong: Jika non-Pump (Meteora/Raydium) tapi SOL awal < 0.5 SOL, itu adalah pool umpan/kosong!
+          if (mainExchange !== 'pumpswap' && initialMeteoraSol < 0.5) {
+            console.log(`[DEV-RADAR POOL] ⚠️ ${matchedAmm.name} terdeteksi tapi KOSONG (Initial SOL: ${initialMeteoraSol.toFixed(3)} < 0.5 SOL). Melewati pool umpan kosong, menunggu pool riil...`);
+            return;
+          }
           console.log(`[DEV-RADAR POOL] 🟢 ${matchedAmm.name} valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
-        } else if (initialMeteoraSol >= 0.1) {
+        } else if (initialMeteoraSol >= 0.5) {
           mainExchange = 'meteora';
           console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM fallback (SOL: ${initialMeteoraSol.toFixed(3)})`);
-        } else {
+        } else if (mainPairAddress) {
           mainExchange = 'pumpswap';
           console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif untuk token baru ${detectedSymbol} [${detectedMint.slice(0, 8)}...]!`);
+        } else {
+          console.log(`[DEV-RADAR POOL] ⚠️ Token mint ${detectedSymbol} [${detectedMint.slice(0, 8)}...] terdeteksi tapi belum ada pool AMM aktif. Menunggu tx pembuatan pool...`);
+          return;
         }
 
         const evt: RedeployDetectedEvent = {
