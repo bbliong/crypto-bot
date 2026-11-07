@@ -17,6 +17,28 @@ export interface WatchedDevTarget {
   subscribedAt: number;
 }
 
+export const KNOWN_AMM_PROGRAMS: Record<string, { name: string; exchange: 'meteora' | 'pumpswap' | 'raydium' }> = {
+  // Pump.fun / PumpSwap
+  'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA': { name: 'PumpAMM', exchange: 'pumpswap' },
+  '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P': { name: 'Pump.fun Bonding Curve', exchange: 'pumpswap' },
+
+  // Meteora
+  'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG': { name: 'Meteora CPMM', exchange: 'meteora' },
+  'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB': { name: 'Meteora DAMM', exchange: 'meteora' },
+  'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo': { name: 'Meteora DLMM', exchange: 'meteora' },
+
+  // Raydium
+  '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': { name: 'Raydium AMM v4', exchange: 'raydium' },
+  'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C': { name: 'Raydium CPMM', exchange: 'raydium' },
+  'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': { name: 'Raydium CLMM', exchange: 'raydium' },
+
+  // Moonshot (DexScreener)
+  'MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG': { name: 'Moonshot', exchange: 'pumpswap' },
+
+  // Orca
+  'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc': { name: 'Orca Whirlpool', exchange: 'raydium' },
+};
+
 export interface RedeployDetectedEvent {
   oldMint: string;
   newMint: string;
@@ -473,18 +495,16 @@ export class SingleDevWalletWatcher extends EventEmitter {
       l.includes('Instruction: InitializeMint') ||
       l.includes('Instruction: InitializeMint2') ||
       l.includes('TokenMetadataInstruction: Initialize') ||
-      l.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA') ||
-      (l.includes('TokenMetadataInstruction: Initialize') && l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'))
+      Object.keys(KNOWN_AMM_PROGRAMS).some(pid => l.includes(pid))
     );
 
     if (!isPoolCreation) {
       // Periksa apakah ini transaksi transfer rotasi modal dev (SystemProgram.transfer)
       // Hanya cek jika transaksi transfer murni (bukan interaksi DEX/Token program yang memicu spam RPC)
       const isDexOrTokenTx = logs.some(l => 
-        l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG') || 
+        Object.keys(KNOWN_AMM_PROGRAMS).some(pid => l.includes(pid)) ||
         l.includes('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') || 
-        l.includes('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') ||
-        l.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA')
+        l.includes('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
       );
       const hasSystemTransfer = !isDexOrTokenTx && logs.some(l => l.includes('11111111111111111111111111111111'));
       const now = Date.now();
@@ -663,11 +683,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
           for (const ix of (g.instructions || [])) {
             if (ix?.parsed?.type === 'createAccount') {
               const owner = ix?.parsed?.info?.owner;
-              if (
-                owner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA' ||
-                owner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB' ||
-                owner === 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'
-              ) {
+              if (owner && KNOWN_AMM_PROGRAMS[owner]) {
                 mainPairAddress = ix.parsed.info.newAccount;
                 detectedExchangeOwner = owner;
               }
@@ -685,12 +701,10 @@ export class SingleDevWalletWatcher extends EventEmitter {
         let mainExchange: 'meteora' | 'pumpswap' | 'raydium' = 'pumpswap';
         let poolLiquidityUsd = 0;
 
-        if (detectedExchangeOwner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB' || detectedExchangeOwner === 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG') {
-          mainExchange = 'meteora';
-          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM/CPMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
-        } else if (detectedExchangeOwner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA') {
-          mainExchange = 'pumpswap';
-          console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
+        const matchedAmm = detectedExchangeOwner ? KNOWN_AMM_PROGRAMS[detectedExchangeOwner] : null;
+        if (matchedAmm) {
+          mainExchange = matchedAmm.exchange;
+          console.log(`[DEV-RADAR POOL] 🟢 ${matchedAmm.name} valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
         } else if (initialMeteoraSol >= 0.1) {
           mainExchange = 'meteora';
           console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM fallback (SOL: ${initialMeteoraSol.toFixed(3)})`);
