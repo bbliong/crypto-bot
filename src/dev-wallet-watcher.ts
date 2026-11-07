@@ -578,8 +578,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
               if (
                 m &&
                 m !== 'So11111111111111111111111111111111111111112' &&
-                m !== target.devWallet &&
-                m !== target.mint
+                m !== target.devWallet
               ) {
                 detectedMint = m;
                 break;
@@ -600,8 +599,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
               if (
                 m &&
                 m !== 'So11111111111111111111111111111111111111112' &&
-                m !== target.devWallet &&
-                m !== target.mint
+                m !== target.devWallet
               ) {
                 detectedMint = m;
                 if (ix?.parsed?.info?.symbol) detectedSymbol = ix.parsed.info.symbol;
@@ -620,8 +618,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
           if (
             b.mint &&
             b.mint !== 'So11111111111111111111111111111111111111112' &&
-            b.mint !== target.devWallet &&
-            b.mint !== target.mint
+            b.mint !== target.devWallet
           ) {
             detectedMint = b.mint;
             break;
