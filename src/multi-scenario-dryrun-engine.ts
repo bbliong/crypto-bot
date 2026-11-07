@@ -459,6 +459,17 @@ export class MultiScenarioDryRunEngine {
           console.log(`   Token    : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
           console.log(`   Harga In : $${s9Pos.avgEntryPriceUsd.toFixed(8)} (Floor Genesis)`);
           console.log(`   Harga Out: $${signal.priceUsd.toFixed(8)} (Pumped by Target)`);
+
+          // JIKA MODAL MASUK WHALE KECIL (< $300 atau < 3 SOL): LANGSUNG DUMP SELL 100%!
+          // Menyelamatkan cuan di harga pompa whale sebelum whale membanting 2-10 detik kemudian!
+          if (targetUsd > 0 && targetUsd < 300) {
+            console.log(`   Strategi : ⚡ MICRO-INFLOW HARVEST (Modal whale $${targetUsd.toFixed(0)} < $300, langsung dump jual sebelum whale membanting)!`);
+            console.log(`=========================================================\n`);
+            const exitReason = `S9_MICRO_WHALE_INFLOW_HARVEST (Whale masuk modal kecil $${targetUsd.toFixed(0)} < $300, langsung dump jual sebelum whale membanting)`;
+            this.executeScenarioExit(this.scenarios.s9, i, signal.priceUsd, now, timeWib, exitReason);
+            continue;
+          }
+
           console.log(`   Strategi : Mengaktifkan proteksi runner (Anti-Shakeout 12s + Follow Whale Sell)...`);
           console.log(`=========================================================\n`);
         }
