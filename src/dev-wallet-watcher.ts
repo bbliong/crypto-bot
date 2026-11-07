@@ -663,7 +663,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
           for (const ix of (g.instructions || [])) {
             if (ix?.parsed?.type === 'createAccount') {
               const owner = ix?.parsed?.info?.owner;
-              if (owner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA' || owner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB') {
+              if (
+                owner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA' ||
+                owner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB' ||
+                owner === 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'
+              ) {
                 mainPairAddress = ix.parsed.info.newAccount;
                 detectedExchangeOwner = owner;
               }
@@ -681,9 +685,9 @@ export class SingleDevWalletWatcher extends EventEmitter {
         let mainExchange: 'meteora' | 'pumpswap' | 'raydium' = 'pumpswap';
         let poolLiquidityUsd = 0;
 
-        if (detectedExchangeOwner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB') {
+        if (detectedExchangeOwner === 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB' || detectedExchangeOwner === 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG') {
           mainExchange = 'meteora';
-          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
+          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM/CPMM valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
         } else if (detectedExchangeOwner === 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA') {
           mainExchange = 'pumpswap';
           console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
