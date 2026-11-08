@@ -494,7 +494,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
 
     const logs: string[] = val.logs || [];
 
-    // Filter Kuras / Rug-Pull Dev: Abaikan transaksi jika Dev sedang menarik modal / membakar posisi
+    // 1. Filter Kuras / Rug-Pull Dev: Abaikan transaksi jika Dev sedang menarik modal / membakar posisi
     const isDrainOrWithdraw = logs.some(l => 
       l.includes('Instruction: RemoveAllLiquidity') ||
       l.includes('Instruction: Withdraw') ||
@@ -506,17 +506,36 @@ export class SingleDevWalletWatcher extends EventEmitter {
       return;
     }
 
-    const isPoolCreation = logs.some(l => 
+    // 2. Filter Instruksi Pembuatan Pool / Token Mint Baru yang Otentik
+    // Harus secara eksplisit mengandung instruksi pembuatan kolam (CreatePool, InitializePool) atau mint baru (InitializeMint).
+    // DILARANG menganggap transaksi hanya karena menyentuh program AMM (seperti swap/buy/sell) sebagai pool baru!
+    const hasPoolOrMintCreation = logs.some(l => 
       l.includes('InitializeCustomizablePool') || 
       l.includes('InitializePool') ||
       l.includes('Instruction: CreatePool') ||
       l.includes('Instruction: InitializeMint') ||
       l.includes('Instruction: InitializeMint2') ||
-      l.includes('TokenMetadataInstruction: Initialize') ||
-      Object.keys(KNOWN_AMM_PROGRAMS).some(pid => l.includes(pid))
+      l.includes('Instruction: Initialize2') ||
+      l.includes('Instruction: Create') ||
+      l.includes('TokenMetadataInstruction: Initialize')
     );
 
-    if (!isPoolCreation) {
+    // 3. Filter Transaksi Perdagangan / Swap Murni (Whale / Dev Buy / Sell)
+    // Pada bundled transaction, Target Whale membeli token dengan Dev sebagai Co-Signer.
+    // Jika transaksi ini adalah swap/buy/sell dan tidak ada instruksi pembuatan pool/mint, tolak langsung!
+    const isPureTradeOrSwap = logs.some(l => 
+      l.includes('Instruction: Swap') ||
+      l.includes('Instruction: Buy') ||
+      l.includes('Instruction: Sell') ||
+      l.includes('Instruction: Route')
+    ) && !hasPoolOrMintCreation;
+
+    if (isPureTradeOrSwap) {
+      console.log(`[DEV-RADAR IGNORE] Tx ${sig.slice(0, 10)}... adalah transaksi swap/perdagangan Whale/Dev (Buy/Sell/Swap), bukan pembuatan pool baru.`);
+      return;
+    }
+
+    if (!hasPoolOrMintCreation) {
       // Periksa apakah ini transaksi transfer rotasi modal dev (SystemProgram.transfer)
       // Hanya cek jika transaksi transfer murni (bukan interaksi DEX/Token program yang memicu spam RPC)
       const isDexOrTokenTx = logs.some(l => 
@@ -724,7 +743,7 @@ export class SingleDevWalletWatcher extends EventEmitter {
         let poolLiquidityUsd = 0;
 
         const matchedAmm = detectedExchangeOwner ? KNOWN_AMM_PROGRAMS[detectedExchangeOwner] : null;
-        if (matchedAmm) {
+        if (matchedAmm && mainPairAddress) {
           mainExchange = matchedAmm.exchange;
           // Filter Pool Kosong: Jika non-Pump (Meteora/Raydium) tapi SOL awal < 0.5 SOL, itu adalah pool umpan/kosong!
           if (mainExchange !== 'pumpswap' && initialMeteoraSol < 0.5) {
@@ -732,14 +751,11 @@ export class SingleDevWalletWatcher extends EventEmitter {
             return;
           }
           console.log(`[DEV-RADAR POOL] 🟢 ${matchedAmm.name} valid! Initial SOL: ${initialMeteoraSol.toFixed(3)} SOL | Pool: ${mainPairAddress}`);
-        } else if (initialMeteoraSol >= 0.5) {
-          mainExchange = 'meteora';
-          console.log(`[DEV-RADAR POOL] 🟢 Meteora DAMM fallback (SOL: ${initialMeteoraSol.toFixed(3)})`);
         } else if (mainPairAddress) {
           mainExchange = 'pumpswap';
-          console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif untuk token baru ${detectedSymbol} [${detectedMint.slice(0, 8)}...]!`);
+          console.log(`[DEV-RADAR POOL] 🟢 Pool PumpAMM/PumpSwap aktif untuk token baru ${detectedSymbol} [${detectedMint.slice(0, 8)}...]! | Pool: ${mainPairAddress}`);
         } else {
-          console.log(`[DEV-RADAR POOL] ⚠️ Token mint ${detectedSymbol} [${detectedMint.slice(0, 8)}...] terdeteksi tapi belum ada pool AMM aktif. Menunggu tx pembuatan pool...`);
+          console.log(`[DEV-RADAR POOL] ⚠️ Token mint ${detectedSymbol} [${detectedMint.slice(0, 8)}...] terdeteksi tapi belum ada pembuatan pool AMM on-chain (tidak ada pair address). Menunggu tx pembuatan pool...`);
           return;
         }
 
