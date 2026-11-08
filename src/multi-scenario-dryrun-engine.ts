@@ -682,9 +682,11 @@ export class MultiScenarioDryRunEngine {
       s9Stake = liveCfg.stakeUsdS9 || 1.0;
     }
     const closedTradeS9 = this.scenarios.s9.closedTrades.find(t => t.mint === evt.newMint);
-    const prevProfitableS9 = !closedTradeS9 || closedTradeS9.realizedPnlUsd >= 0;
+    // Re-entry HANYA boleh jika trade sebelumnya keluar karena TARGET_SKIPPED_DEV_POOL (Whale belum masuk saat peluncuran).
+    // Jika trade sebelumnya sudah sukses panen cuan (TAKE_PROFIT/HARVEST/WHALE_SELL), ombak selesai: DILARANG re-entry!
+    const prevExitedViaSkippedPoolS9 = !closedTradeS9 || (closedTradeS9.exitReason.includes('TARGET_SKIPPED_DEV_POOL') && closedTradeS9.realizedPnlUsd >= -0.05);
     const sameMintTradesS9 = this.scenarios.s9.closedTrades.filter(t => t.mint === evt.newMint).length;
-    const allowReEntryS9 = evt.isSameSymbol !== false && prevProfitableS9 && sameMintTradesS9 < 5;
+    const allowReEntryS9 = evt.isSameSymbol !== false && prevExitedViaSkippedPoolS9 && sameMintTradesS9 < 5;
 
     if (!this.scenarios.s9.openPositions.some(p => p.mint === evt.newMint)) {
       this.processScenarioBuy(this.scenarios.s9, earlySignal, true, 1380, now, timeWib, {
@@ -714,9 +716,11 @@ export class MultiScenarioDryRunEngine {
       s10Stake = (liveCfg as any).stakeUsdS10 || liveCfg.stakeUsdS9 || 0.25;
     }
     const closedTradeS10 = this.scenarios.s10.closedTrades.find(t => t.mint === evt.newMint);
-    const prevProfitableS10 = !closedTradeS10 || closedTradeS10.realizedPnlUsd >= 0;
+    // Re-entry HANYA boleh jika trade sebelumnya keluar karena TARGET_SKIPPED_DEV_POOL (Whale belum masuk saat peluncuran).
+    // Jika trade sebelumnya sudah sukses panen cuan (TAKE_PROFIT/HARVEST/WHALE_SELL), ombak selesai: DILARANG re-entry!
+    const prevExitedViaSkippedPoolS10 = !closedTradeS10 || (closedTradeS10.exitReason.includes('TARGET_SKIPPED_DEV_POOL') && closedTradeS10.realizedPnlUsd >= -0.05);
     const sameMintTradesS10 = this.scenarios.s10.closedTrades.filter(t => t.mint === evt.newMint).length;
-    const allowReEntryS10 = evt.isSameSymbol !== false && prevProfitableS10 && sameMintTradesS10 < 5;
+    const allowReEntryS10 = evt.isSameSymbol !== false && prevExitedViaSkippedPoolS10 && sameMintTradesS10 < 5;
 
     if (!this.scenarios.s10.openPositions.some(p => p.mint === evt.newMint)) {
       this.processScenarioBuy(this.scenarios.s10, earlySignal, true, 1380, now, timeWib, {
@@ -1076,16 +1080,22 @@ export class MultiScenarioDryRunEngine {
     if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
       const gen2 = this.gen2CycleTracker.get(pos.mint);
       if (gen2) {
-        // Toleransi gas fee untuk exit pengaman TARGET_SKIPPED_DEV_POOL (hingga -$0.05)
-        const isSafeOrProfitable = pos.realizedPnlUsd >= 0 || (reason.includes('TARGET_SKIPPED_DEV_POOL') && pos.realizedPnlUsd >= -0.05);
+        const isTargetSkipped = reason.includes('TARGET_SKIPPED_DEV_POOL');
+        // Re-Entry HANYA diizinkan jika exit sebelumnya adalah TARGET_SKIPPED_DEV_POOL (Whale belum masuk saat peluncuran) dan fee net aman (>= -$0.05).
+        // Jika koin keluar via Take Profit, Micro Inflow Harvest, Whale Sell, atau Stop Loss, ombak utama sudah selesai dipanen: DILARANG re-entry!
+        const isEligibleForReEntry = isTargetSkipped && pos.realizedPnlUsd >= -0.05;
+
         gen2.lastExitAt = now;
         gen2.lastExitPrice = pOut;
         gen2.lastExitReason = reason;
-        gen2.lastTradeProfitable = isSafeOrProfitable;
+        gen2.lastTradeProfitable = isEligibleForReEntry;
 
-        if (!isSafeOrProfitable) {
+        if (reason.includes('TAKE_PROFIT') || reason.includes('HARD_TP') || reason.includes('HARVEST') || reason.includes('WHALE')) {
           gen2.status = 'TERMINATED';
-          console.log(`[GEN2 CYCLE TERMINATED] ⛔ Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] mengalami kerugian nyata (PnL: $${pos.realizedPnlUsd}). Siklus dihentikan permanen!`);
+          console.log(`[GEN2 CYCLE COMPLETED] 🏆 Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] sudah sukses panen cuan/wave via '${reason}'. Siklus selesai permanen (tidak re-entry)!`);
+        } else if (!isEligibleForReEntry) {
+          gen2.status = 'TERMINATED';
+          console.log(`[GEN2 CYCLE TERMINATED] ⛔ Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] keluar via '${reason}' (PnL: $${pos.realizedPnlUsd}). Siklus dihentikan permanen!`);
         } else if (gen2.cycleCount >= gen2.maxCycles) {
           gen2.status = 'TERMINATED';
           console.log(`[GEN2 CYCLE FINISHED] 🏁 Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] telah mencapai batas maksimal 5 siklus (${gen2.cycleCount}/${gen2.maxCycles}). Selesai!`);
@@ -1093,9 +1103,9 @@ export class MultiScenarioDryRunEngine {
           gen2.status = 'COOLDOWN';
           gen2.cooldownUntil = now + 60000;
           console.log(`\n=========================================================`);
-          console.log(`⏳ [GEN2 CYCLE COOLDOWN] Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] selesai Siklus #${gen2.cycleCount}/${gen2.maxCycles} via '${reason}' (Untung/BEP: +$${pos.realizedPnlUsd})!`);
+          console.log(`⏳ [GEN2 CYCLE COOLDOWN] Koin ${pos.symbol} [${pos.mint.slice(0, 8)}...] selesai Siklus #${gen2.cycleCount}/${gen2.maxCycles} via '${reason}' (Whale belum masuk, modal aman)!`);
           console.log(`   Masa Cooldown  : 60 Detik (sampai ${formatWibDate(gen2.cooldownUntil)})`);
-          console.log(`   Syarat Siklus Berikutnya: Grafik meningkat (Spot > $${pOut.toFixed(8)}) pasca-cooldown`);
+          console.log(`   Syarat Siklus Berikutnya: Grafik meningkat (Spot > $${pOut.toFixed(8)}) jika Whale masuk belakangan`);
           console.log(`=========================================================\n`);
         }
       }
@@ -1965,13 +1975,19 @@ export class MultiScenarioDryRunEngine {
         continue;
       }
 
-      // 3. Cek apakah trade sebelumnya untung/BEP
+      // 3. Re-entry HANYA boleh jika exit sebelumnya adalah TARGET_SKIPPED_DEV_POOL (Whale belum masuk saat peluncuran)
+      if (!gen2.lastExitReason || !gen2.lastExitReason.includes('TARGET_SKIPPED_DEV_POOL')) {
+        gen2.status = 'TERMINATED';
+        continue;
+      }
+
+      // 4. Cek apakah trade sebelumnya aman/BEP (toleransi gas fee -$0.05)
       if (!gen2.lastTradeProfitable) {
         gen2.status = 'TERMINATED';
         continue;
       }
 
-      // 4. Cek apakah S9 sedang memegang koin ini (jangan buy jika posisi masih terbuka)
+      // 5. Cek apakah S9 sedang memegang koin ini (jangan buy jika posisi masih terbuka)
       const hasOpenPos = this.scenarios.s9.openPositions.some(p => p.mint === mint);
       if (hasOpenPos) continue;
 
