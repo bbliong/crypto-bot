@@ -41,6 +41,7 @@ export function render3ScenariosLiveHtml() {
   const isS9Real = activeScenario === 'S9' || activeScenario === 'BOTH';
   const isS95Real = activeScenario === 'S95' || activeScenario === 'S9_5' || activeScenario === 'BOTH';
   const isS10Real = activeScenario === 'S10' || activeScenario === 'BOTH';
+  const isS13Real = activeScenario === 'S13' || activeScenario === 'BOTH';
   const isDryRun = activeScenario === 'DRY_RUN';
 
   const s4Stake = Number(autobuyConfig.stakeUsdS4) || 1.0;
@@ -53,6 +54,7 @@ export function render3ScenariosLiveHtml() {
   const s9Stake = Number(autobuyConfig.stakeUsdS9) || 1.0;
   const s95Stake = Number(autobuyConfig.stakeUsdS95) || Number(autobuyConfig.stakeUsdS9) || 0.25;
   const s10Stake = Number(autobuyConfig.stakeUsdS10) || 0.25;
+  const s13Stake = Number(autobuyConfig.stakeUsdS13) || 5.0;
 
   const s4 = data.s4 || { name: `Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)`, description: `Saldo Awal $20.00. Modal $${s4Stake.toFixed(2)}. Jika target sell <= 3s (shakeout): tahan hingga 8 detik. Begitu target buyback: LANGSUNG SELL 100% dump ke likuiditas target. Jika tidak buyback dlm 8s -> Safety Exit.`, availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s5 = data.s5 || { name: `Skenario 5: Anti-Shakeout Runner (TP +25% | Hold >= 12s | Time-Stop 35s)`, description: 'Saldo Awal $20.00. Modal $1.00. Abaikan goyangan dump target di 12 detik pertama (Anti-Shakeout). Auto Take-Profit +25%, Time-Stop 35s, atau ikuti sell target jika dump pasca detik 12.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
@@ -62,13 +64,14 @@ export function render3ScenariosLiveHtml() {
   const s9 = data.s9 || { name: 'Skenario 9: Dev Front-Run & 2-Way Target Sync (Max 60s Timeout)', description: 'Saldo Awal $20.00. Modal $1.00. Proaktif Buy di Detik 0 saat Dev rilis pool baru sebelum target whale masuk. Jika target tidak masuk dalam 60s -> Force Sell. Komparasi 2-arah jika target beralih dev.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s9_5 = data.s9_5 || { name: 'Skenario 9.5: Split TP 50/50 + 1-Min Moonbag (TP 50% @ >=300% & 50% Hold 1m / Dump on Whale Exit)', description: 'Saldo Awal $20.00. Modal $0.25 (sama seperti S9). Masuk Detik-0 dari sinyal Dev. Jika gain >= +300% (lonjakan awal swap): JUAL 50% untuk amankan profit masif, sisa 50% DITAHAN selama 1 menit (Moonbag). Jika target whale dump 100%, LANGSUNG JUAL SEMUA seketika. Jika gain < 300%: TP normal di +25%.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s10 = data.s10 || { name: 'Skenario 10: Dynamic Wave Runner (Genesis Buy + MCap/Whale Sell Sync)', description: 'Saldo Awal $20.00. Modal $0.25. Proaktif Buy di Detik 0 saat Dev rilis pool baru. Tidak buru-buru TP kaku 25% jika whale masih hold koin. Begitu whale mulai dump >= 15% atau time-stop 30s pasca-inflow: LANGSUNG SELL 100% di puncak wave!', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s13 = data.s13 || { name: 'Skenario 13: Multi-Cycle Ping-Pong Scalper (Post-Whale Dip & Buyback Harvester)', description: 'Saldo Awal $20.00. Modal $5.00/entry (Maks 10x Siklus). MASUK SETELAH WHALE MASUK. Syarat: Whale masuk >= 20 SOL & usia koin < 15m. Beli saat Whale SELL (tampung harga diskon). Jual saat TP +10% atau Whale BUYBACK (+5%). Cut-loss -10%. Stop jika Whale dump >= 40%.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
     const isPnlPositive = s.realizedPnl >= 0;
     const pnlSign = isPnlPositive ? '+' : '';
     const pnlClass = isPnlPositive ? 'val-emerald' : 'val-rose';
     const winRate = s.totalTrades > 0 ? ((s.wins / s.totalTrades) * 100).toFixed(1) : '0';
-    const isRealActive = scId === 'sce4' ? isS4Real : (scId === 'sce5' ? isS5Real : (scId === 'sce6' ? isS6Real : (scId === 'sce7' ? isS7Real : (scId === 'sce8' ? isS8Real : (scId === 'sce9' ? isS9Real : (scId === 'sce9_5' ? isS95Real : isS10Real))))));
+    const isRealActive = scId === 'sce4' ? isS4Real : (scId === 'sce5' ? isS5Real : (scId === 'sce6' ? isS6Real : (scId === 'sce7' ? isS7Real : (scId === 'sce8' ? isS8Real : (scId === 'sce9' ? isS9Real : (scId === 'sce9_5' ? isS95Real : (scId === 'sce10' ? isS10Real : isS13Real)))))));
 
     return `
       <div class="scenario-panel" style="border-top: 4px solid ${color};">
@@ -742,6 +745,7 @@ export function render3ScenariosLiveHtml() {
         <a href="/add-fol/3scenarios/sce9" class="nav-btn" style="color:#3b82f6; border-color:rgba(59,130,246,0.4);">🔄 Detail S9</a>
         <a href="/add-fol/3scenarios/sce9_5" class="nav-btn" style="color:#8b5cf6; border-color:rgba(139,92,246,0.4);">🌙 Detail S9.5</a>
         <a href="/add-fol/3scenarios/sce10" class="nav-btn" style="color:#f59e0b; border-color:rgba(245,158,11,0.4);">🌊 Detail S10</a>
+        <a href="/add-fol/3scenarios/sce13" class="nav-btn" style="color:#10b981; border-color:rgba(16,185,129,0.4);">🏓 Detail S13</a>
       </div>
     </header>
 
@@ -922,10 +926,11 @@ export function render3ScenariosLiveHtml() {
       ${renderScenarioCard(s9, '#3b82f6', 'sce9')}
       ${renderScenarioCard(s9_5, '#8b5cf6', 'sce9_5')}
       ${renderScenarioCard(s10, '#f59e0b', 'sce10')}
+      ${renderScenarioCard(s13, '#10b981', 'sce13')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 8-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S9.5 vs S10) &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 9-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S9.5 vs S10 vs S13) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 

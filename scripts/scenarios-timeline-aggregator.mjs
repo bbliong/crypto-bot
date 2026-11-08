@@ -110,12 +110,26 @@ export const SCENARIO_META = {
       const s = (id || '') + ' ' + (type || '');
       return s.includes('SCENARIO_10') || s.includes('WAVE_RUNNER');
     }
+  },
+  sce13: {
+    id: 'sce13',
+    canonicalKey: 's13',
+    name: 'Skenario 13: Multi-Cycle Ping-Pong Scalper (Post-Whale Dip & Buyback Harvester)',
+    shortName: 'Skenario 13',
+    description: 'Multi-Cycle Ping-Pong Scalper: Masuk SETELAH Whale masuk (modal >= 20 SOL). Beli saat Whale SELL (harga diskon), jual saat TP +10% atau Whale BUYBACK. Maksimal 10 siklus per koin dalam 15 menit.',
+    ruleBadge: 'Ping-Pong Scalper | Post-Whale Dip & Buyback TP +10%',
+    color: '#10b981',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_13') || s.includes('PINGPONG');
+    }
   }
 };
 
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('13') || str.includes('pingpong')) return 'sce13';
   if (str.includes('9_5') || str.includes('9.5') || str.includes('moonbag')) return 'sce9_5';
   if (str.includes('10') || str.includes('wave_runner')) return 'sce10';
   if (str.includes('9') || str.includes('dev_frontrun') || str.includes('sync')) return 'sce9';

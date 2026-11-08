@@ -1424,7 +1424,7 @@ export class WalletFollowerRunner {
     // eksekusi LANGSUNG secara paralel tanpa antre di belakang simulasi skenario lain!
     const config = readFollowerLiveConfig(this.dataDir);
     const isTargetReal = this.isScenarioAllowedForRealOrder(item.scenarioId, config);
-    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('9') || item.scenarioId.includes('10') || item.scenarioId.includes('FRONTRUN')) {
+    if (isTargetReal || item.scenarioId.includes('8') || item.scenarioId.includes('9') || item.scenarioId.includes('10') || item.scenarioId.includes('13') || item.scenarioId.includes('FRONTRUN')) {
       this.executeGmgnApiProbe(
         item.side,
         item.scenarioId,
@@ -1502,6 +1502,9 @@ export class WalletFollowerRunner {
       }
       if (part === 'S10' || part === 'SCE10' || part === 'SCENARIO_10') {
         if (scUpper.includes('10') || scUpper.includes('DYNAMIC_WAVE')) return true;
+      }
+      if (part === 'S13' || part === 'SCE13' || part === 'SCENARIO_13') {
+        if (scUpper.includes('13') || scUpper.includes('PINGPONG')) return true;
       }
     }
     return false;

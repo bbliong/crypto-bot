@@ -430,6 +430,7 @@ export async function renderScenarioTimelineHtml({ scenarioId = 'sce4', tokenQue
         <a href="/add-fol/3scenarios/sce9?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce9' ? 'active' : ''}">🔄 S9 (2-Way Sync)</a>
         <a href="/add-fol/3scenarios/sce9_5?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce9_5' ? 'active' : ''}">🌙 S9.5 (Moonbag)</a>
         <a href="/add-fol/3scenarios/sce10?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce10' ? 'active' : ''}">🌊 S10 (Runner)</a>
+        <a href="/add-fol/3scenarios/sce13?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce13' ? 'active' : ''}">🏓 S13 (PingPong)</a>
       </div>
     </header>
 

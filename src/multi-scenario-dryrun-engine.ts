@@ -94,6 +94,22 @@ export interface Gen2CycleState {
   cooldownUntil: number; // lastExitAt + 60_000
 }
 
+export interface S13PingPongState {
+  mint: string;
+  symbol: string;
+  pairAddress?: string;
+  exchange?: string;
+  whaleFirstBuyAt: number;
+  whaleFirstBuyUsd: number;
+  whaleFirstBuySol: number;
+  whaleRemainingHolding: number;
+  whalePeakHolding: number;
+  cycleCount: number;
+  maxCycles: number;
+  status: 'ACTIVE' | 'TERMINATED';
+  lastExitAt: number;
+}
+
 export type ScenarioTradeActionCallback = (
   action: 'BUY' | 'SELL',
   scenarioId: string,
@@ -139,6 +155,7 @@ export class MultiScenarioDryRunEngine {
   private filePath: string;
   private tokenGenerations: Map<string, TokenGenerationInfo> = new Map();
   private gen2CycleTracker: Map<string, Gen2CycleState> = new Map();
+  private s13PingPongTrackers: Map<string, S13PingPongState> = new Map();
   private lastObservedPrices: Map<string, number> = new Map();
   public onTradeAction?: ScenarioTradeActionCallback;
 
@@ -151,6 +168,7 @@ export class MultiScenarioDryRunEngine {
     s9: ScenarioState;
     s9_5: ScenarioState;
     s10: ScenarioState;
+    s13: ScenarioState;
   };
 
   constructor(dataDir?: string) {
@@ -160,7 +178,7 @@ export class MultiScenarioDryRunEngine {
     this.scenarios = this.loadState();
   }
 
-  private initFreshScenarios(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState } {
+  private initFreshScenarios(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState; s13: ScenarioState } {
     return {
       s4: {
         id: 'SCENARIO_4_SINGLE_BUY_5USD',
@@ -314,15 +332,34 @@ export class MultiScenarioDryRunEngine {
         closedTrades: [],
         recentEvents: [],
       },
+      s13: {
+        id: 'SCENARIO_13_PINGPONG_SCALPER',
+        name: 'Skenario 13: Multi-Cycle Ping-Pong Scalper (Post-Whale Dip & Buyback Harvester)',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry (Maks 10x Siklus). MASUK SETELAH WHALE MASUK. Syarat: Whale masuk >= 20 SOL & usia koin < 15m. Beli saat Whale SELL (tampung harga diskon). Jual saat TP +10% atau Whale BUYBACK (+5%). Cut-loss -10%. Stop jika Whale dump >= 40%.',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
     };
   }
 
-  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState } {
+  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState; s13: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10) {
+        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10 || parsed.s13) {
           const fresh = this.initFreshScenarios();
           const s4 = parsed.s4 || fresh.s4;
           const s5 = parsed.s5 || fresh.s5;
@@ -332,6 +369,7 @@ export class MultiScenarioDryRunEngine {
           const s9 = parsed.s9 || fresh.s9;
           const s9_5 = parsed.s9_5 || fresh.s9_5;
           const s10 = parsed.s10 || fresh.s10;
+          const s13 = parsed.s13 || fresh.s13;
           if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
           if (s5.totalFeesPaid === undefined) s5.totalFeesPaid = 0.0;
           if (s6.totalFeesPaid === undefined) s6.totalFeesPaid = 0.0;
@@ -340,7 +378,8 @@ export class MultiScenarioDryRunEngine {
           if (s9.totalFeesPaid === undefined) s9.totalFeesPaid = 0.0;
           if (s9_5.totalFeesPaid === undefined) s9_5.totalFeesPaid = 0.0;
           if (s10.totalFeesPaid === undefined) s10.totalFeesPaid = 0.0;
-          return { s4, s5, s6, s7, s8, s9, s9_5, s10 };
+          if (s13.totalFeesPaid === undefined) s13.totalFeesPaid = 0.0;
+          return { s4, s5, s6, s7, s8, s9, s9_5, s10, s13 };
         }
       } catch {}
     }
@@ -349,7 +388,7 @@ export class MultiScenarioDryRunEngine {
 
   public saveState(): void {
     try {
-      for (const s of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
+      for (const s of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s13]) {
         s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
         s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
@@ -472,7 +511,7 @@ export class MultiScenarioDryRunEngine {
     // Jika target whale masuk bertransaksi di pool tertentu (signal.pairAddress),
     // seluruh skenario otomatis mengalihkan tujuan SELL ke pool whale tersebut!
     if (signal.pairAddress) {
-      for (const sc of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
+      for (const sc of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s13]) {
         const p = sc.openPositions.find(pos => pos.mint === signal.mint);
         if (p && p.pairAddress !== signal.pairAddress) {
           console.log(`[DYNAMIC POOL REDIRECTION] 🔄 Mengalihkan pool ${p.symbol} [${sc.id}] dari ${p.pairAddress ? p.pairAddress.slice(0, 8) + '...' : 'none'} ke Pool Whale: ${signal.pairAddress.slice(0, 8)}...`);
@@ -607,6 +646,48 @@ export class MultiScenarioDryRunEngine {
       }
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s10, signal, now, timeWib);
+
+    // 7. Skenario 13: Multi-Cycle Ping-Pong Scalper (Aktivasi Radar & Eksekusi Jual pada Whale Buyback)
+    const existingS13Tracker = this.s13PingPongTrackers.get(signal.mint);
+
+    // Kasus 7A: Whale First Buy -> Cek apakah memenuhi syarat High Conviction (>= 20 SOL / >= $1800) untuk mulai sesi pingpong!
+    if (!existingS13Tracker) {
+      const isHighConvictionInflow = (targetUsd >= 1800 || (signal.solAmount && signal.solAmount >= 20));
+      if (isHighConvictionInflow && (isGroundZero || signal.isFirstBuy)) {
+        this.s13PingPongTrackers.set(signal.mint, {
+          mint: signal.mint,
+          symbol: signal.symbol,
+          pairAddress: signal.pairAddress || '',
+          exchange: signal.exchange || 'pump_amm',
+          whaleFirstBuyAt: now,
+          whaleFirstBuyUsd: targetUsd,
+          whaleFirstBuySol: signal.solAmount || (targetUsd / 90),
+          whaleRemainingHolding: signal.remainingHolding,
+          whalePeakHolding: signal.remainingHolding,
+          cycleCount: 0,
+          maxCycles: 10,
+          status: 'ACTIVE',
+          lastExitAt: 0,
+        });
+        console.log(`\n=========================================================`);
+        console.log(`🏓 [SCENARIO 13 PING-PONG RADAR ACTIVATED] Target Whale Masuk ${signal.solAmount || (targetUsd / 90).toFixed(1)} SOL ($${targetUsd.toFixed(0)}) di '${signal.symbol}'!`);
+        console.log(`   Status      : Skenario 13 AKTIF untuk Multi-Cycle Scalping (Maks 10 Siklus / 15 Menit)!`);
+        console.log(`   Aturan Masuk: Beli di Lembah (saat Whale SELL kecil) -> Jual di Puncak TP +10% atau Whale Buyback!`);
+        console.log(`=========================================================\n`);
+      }
+    } else if (existingS13Tracker.status === 'ACTIVE') {
+      // Kasus 7B: S13 sedang memegang koin dan Target Whale melakukan BUYBACK!
+      const s13PosIdx = this.scenarios.s13.openPositions.findIndex(p => p.mint === signal.mint);
+      if (s13PosIdx >= 0) {
+        const pos = this.scenarios.s13.openPositions[s13PosIdx];
+        const gainPct = pos.avgEntryPriceUsd > 0 ? ((signal.priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100 : 0;
+        if (gainPct >= 4.0 || signal.priceUsd > pos.avgEntryPriceUsd) {
+          const reason = `S13_PINGPONG_DUMP_ON_BUYBACK (Whale buyback $${targetUsd.toFixed(0)}, dump ke likuiditas whale | Gain: +${gainPct.toFixed(1)}% | Siklus #${pos.entryCount})`;
+          this.executeScenarioExit(this.scenarios.s13, s13PosIdx, signal.priceUsd, now, timeWib, reason);
+          existingS13Tracker.lastExitAt = now;
+        }
+      }
+    }
 
     this.saveState();
   }
@@ -1490,6 +1571,8 @@ export class MultiScenarioDryRunEngine {
       targetRemaining < 100;
 
     if (isFullExit) sellRatio = 1.0;
+    const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
+    const targetUsd = signal.usdAmount || (targetSold * pOut);
 
     for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === signal.mint);
@@ -1954,6 +2037,88 @@ export class MultiScenarioDryRunEngine {
       if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
     }
 
+    // Skenario 13: Multi-Cycle Ping-Pong Scalper (Masuk di Lembah saat Whale Sell kecil)
+    const s13Tracker = this.s13PingPongTrackers.get(signal.mint);
+    if (s13Tracker && s13Tracker.status === 'ACTIVE') {
+      const s13PosIdx = this.scenarios.s13.openPositions.findIndex(p => p.mint === signal.mint);
+
+      // Kasus A: Jika S13 sedang memegang posisi
+      if (s13PosIdx >= 0) {
+        const s13Pos = this.scenarios.s13.openPositions[s13PosIdx];
+        s13Pos.lastPriceUsd = pOut;
+
+        // 1. Rem Darurat / Emergency Dump Exit: Jika Whale DUMP BESAR (>= 40% atau Full Exit)
+        if (isFullExit || sellRatio >= 0.40 || currentSellRatioPct >= 40.0) {
+          s13Tracker.status = 'TERMINATED';
+          const reason = `S13_EMERGENCY_WHALE_DUMP_EXIT (Whale dump ${currentSellRatioPct}% >= 40% | Emergency Exit & Terminate Ping-Pong)`;
+          this.executeScenarioExit(this.scenarios.s13, s13PosIdx, pOut, now, timeWib, reason);
+          s13Tracker.lastExitAt = now;
+        }
+      } else {
+        // Kasus B: S13 TIDAK memegang posisi -> CEK APAKAH BOLEH BELI DI LEMBAH (DIP ENTRY)!
+        const elapsedSinceFirstBuy = now - s13Tracker.whaleFirstBuyAt;
+        const isWithin15M = elapsedSinceFirstBuy < 15 * 60 * 1000; // < 15 menit
+        const isNotMajorDump = !isFullExit && sellRatio < 0.35 && currentSellRatioPct < 35.0; // Bukan dump besar
+        const isCycleAvailable = s13Tracker.cycleCount < s13Tracker.maxCycles;
+        const cooldownOk = (now - s13Tracker.lastExitAt) >= 3000; // jeda 3 detik pasca exit terakhir
+
+        if (isWithin15M && isNotMajorDump && isCycleAvailable && cooldownOk && pOut > 0) {
+          s13Tracker.cycleCount += 1;
+          let s13Stake = 5.0;
+          try {
+            const liveCfg = readFollowerLiveConfig(this.dataDir);
+            s13Stake = (liveCfg as any).stakeUsdS13 || 5.0;
+          } catch {}
+
+          const dipBuySignal: WalletTradeSignal = {
+            action: 'buy',
+            mint: signal.mint,
+            symbol: signal.symbol,
+            tokenName: signal.tokenName,
+            tokenAmount: 0,
+            remainingHolding: 0,
+            solAmount: 0,
+            usdAmount: targetUsd,
+            priceUsd: pOut,
+            txHash: `s13_cycle${s13Tracker.cycleCount}_${now}`,
+            timestamp: Math.floor(now / 1000),
+            isOpenOrClose: true,
+            isFirstBuy: false,
+            pairAddress: signal.pairAddress || s13Tracker.pairAddress || '',
+            exchange: s13Tracker.exchange || 'pump_amm'
+          };
+
+          this.processScenarioBuy(this.scenarios.s13, dipBuySignal, false, targetUsd, now, timeWib, {
+            maxTokenExposure: s13Stake,
+            getStake: () => s13Stake,
+            disallowAccumulation: true,
+            allowReEntryCycle: true,
+            cycleIndex: s13Tracker.cycleCount
+          });
+
+          const createdPos = this.scenarios.s13.openPositions.find(p => p.mint === signal.mint);
+          if (createdPos) {
+            createdPos.pairAddress = signal.pairAddress || s13Tracker.pairAddress || '';
+            createdPos.entryCount = s13Tracker.cycleCount;
+          }
+
+          console.log(`\n=========================================================`);
+          console.log(`🏓 [SCENARIO 13 PINGPONG DIP BUY] Masuk Siklus #${s13Tracker.cycleCount}/${s13Tracker.maxCycles}:`);
+          console.log(`   Token        : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
+          console.log(`   Harga Lembah : $${pOut.toFixed(8)} (Saat Whale Sell ${currentSellRatioPct}%)`);
+          console.log(`   Modal Siklus : $${s13Stake.toFixed(2)}`);
+          console.log(`   Target Jual  : TP +10% atau saat Whale Buyback berikutnya!`);
+          console.log(`=========================================================\n`);
+        } else if (!isWithin15M) {
+          s13Tracker.status = 'TERMINATED';
+          console.log(`[SCENARIO 13] 🏁 Koin ${signal.symbol} sudah berumur >= 15 menit. Siklus ping-pong selesai permanen!`);
+        } else if (isFullExit || sellRatio >= 0.40) {
+          s13Tracker.status = 'TERMINATED';
+          console.log(`[SCENARIO 13] ⛔ Whale DUMP BESAR (${currentSellRatioPct}% >= 40%). Siklus ping-pong koin ${signal.symbol} dihentikan!`);
+        }
+      }
+    }
+
     this.saveState();
   }
 
@@ -1965,7 +2130,7 @@ export class MultiScenarioDryRunEngine {
     this.lastObservedPrices.set(mint, priceUsd);
     let changed = false;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s13]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
       if (posIdx !== -1) {
         const pos = scenario.openPositions[posIdx];
@@ -1973,6 +2138,31 @@ export class MultiScenarioDryRunEngine {
         const curVal = pos.tokens * priceUsd;
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
         changed = true;
+
+        // Khusus Skenario 13: Multi-Cycle Ping-Pong Scalper (TP +10% & Stop Loss -10%)
+        if (scenario.id === 'SCENARIO_13_PINGPONG_SCALPER' && pos.avgEntryPriceUsd > 0) {
+          const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+
+          // 1. Take Profit +10% (Kunci Cuan Cepat di Ayunan Ping-Pong)
+          if (gainPct >= 10.0) {
+            const exitReason = `TP_10%_PINGPONG_SWING (Gain: +${gainPct.toFixed(1)}% >= +10% | Kunci profit siklus #${pos.entryCount})`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            const tracker = this.s13PingPongTrackers.get(mint);
+            if (tracker) tracker.lastExitAt = now;
+            continue;
+          }
+
+          // 2. Cut Loss Ketat (-10%)
+          if (gainPct <= -10.0) {
+            const exitReason = `STOP_LOSS_10% (Drop: ${gainPct.toFixed(1)}% <= -10% | Cut-loss pengaman siklus #${pos.entryCount})`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            const tracker = this.s13PingPongTrackers.get(mint);
+            if (tracker) tracker.lastExitAt = now;
+            continue;
+          }
+        }
 
         // Khusus Skenario 5 & Skenario 9: Auto Take-Profit +25% & Stop Loss -15%
         if ((scenario.id === 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER' || scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') && pos.avgEntryPriceUsd > 0) {
@@ -2729,6 +2919,38 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
+    // 6. Cek Skenario 13: 60s Cycle Timeout & 15m Session Max Age:
+    const s13 = this.scenarios.s13;
+    for (let i = s13.openPositions.length - 1; i >= 0; i--) {
+      const pos = s13.openPositions[i];
+      if (pos.tokens <= 0) continue;
+      const tracker = this.s13PingPongTrackers.get(pos.mint);
+
+      // 1. Cek apakah sesi ping-pong sudah lewat 15 menit
+      if (tracker && (now - tracker.whaleFirstBuyAt) >= 15 * 60 * 1000) {
+        tracker.status = 'TERMINATED';
+        const timeWib = formatWibDate(now);
+        const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+        const reason = `S13_MAX_AGE_15M_TIMEOUT_EXIT (Koin berumur >= 15m, akhiri pingpong sebelum rugpull)`;
+        this.executeScenarioExit(s13, i, pOut, now, timeWib, reason);
+        changed = true;
+        continue;
+      }
+
+      // 2. Cek apakah posisi siklus saat ini sudah menggantung >= 60 detik tanpa buyback/TP
+      const elapsedSinceEntry = now - pos.openedAt;
+      if (elapsedSinceEntry >= 60000) {
+        const timeWib = formatWibDate(now);
+        const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+        const elapsedSec = Math.round(elapsedSinceEntry / 1000);
+        const reason = `TIMEOUT_${elapsedSec}S_CYCLE_EXIT (Tidak ada buyback whale dalam 60s, rotasi siklus)`;
+        this.executeScenarioExit(s13, i, pOut, now, timeWib, reason);
+        if (tracker) tracker.lastExitAt = now;
+        changed = true;
+        continue;
+      }
+    }
+
     if (changed) {
       this.saveState();
     }
@@ -2870,7 +3092,7 @@ export class MultiScenarioDryRunEngine {
     stakeUsd: number
   ): void {
     if (realPriceUsd <= 0 || tokensBought <= 0) return;
-    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
+    const targetSc = scenarioId.includes('13') ? this.scenarios.s13 : ((scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))))));
     const pos = targetSc.openPositions.find(p => p.mint === mint);
     if (!pos) return;
 
@@ -2908,7 +3130,7 @@ export class MultiScenarioDryRunEngine {
     reason: string
   ): void {
     if (realUsdReturned < 0) return;
-    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
+    const targetSc = scenarioId.includes('13') ? this.scenarios.s13 : ((scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))))));
 
     // 1. Cek apakah ini sinkronisasi Stage 1 TP 50% (posisi masih open)
     if (reason && reason.includes('STAGE_1_TP_50%')) {
@@ -2966,7 +3188,7 @@ export class MultiScenarioDryRunEngine {
    * Mencegah posisi hantu di dry-run yang menghasilkan profit palsu!
    */
   public abortScenarioBuy(scenarioId: string, mint: string, reason: string): void {
-    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
+    const targetSc = scenarioId.includes('13') ? this.scenarios.s13 : ((scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))))));
     const idx = targetSc.openPositions.findIndex(p => p.mint === mint);
     if (idx >= 0) {
       const pos = targetSc.openPositions[idx];
@@ -2997,7 +3219,7 @@ export class MultiScenarioDryRunEngine {
    * Mengoreksi trade agar tercatat sebagai rugi / proceeds = 0 jika token tidak bisa dijual!
    */
   public recordFailedSellExecution(scenarioId: string, mint: string, reason: string): void {
-    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
+    const targetSc = scenarioId.includes('13') ? this.scenarios.s13 : ((scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))))));
     const trade = targetSc.closedTrades.find(t => t.mint === mint);
     if (trade) {
       const oldPnl = trade.realizedPnlUsd;
@@ -3035,8 +3257,12 @@ export class MultiScenarioDryRunEngine {
     return this.scenarios.s10.openPositions.length;
   }
 
+  public getS13OpenPositionsCount(): number {
+    return this.scenarios.s13.openPositions.length;
+  }
+
   public isTargetEntered(mint: string): boolean {
-    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8]) {
+    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8, this.scenarios.s13]) {
       const pos = sc.openPositions.find(p => p.mint === mint);
       if (pos && pos.targetEnteredAt && pos.targetEnteredAt > 0) return true;
     }
