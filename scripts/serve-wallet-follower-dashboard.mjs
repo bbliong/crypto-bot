@@ -476,6 +476,23 @@ const server = createServer((req, res) => {
   }
 
   // Dedicated Scenario 9 Detail Timeline (/3scenarios/sce9, /add-fol/3scenarios/sce9)
+  if (pathname.includes('/3scenarios/sce9_5') || pathname.includes('/4scenarios/sce9_5') || pathname.includes('/scenarios/sce9_5') || pathname.includes('/3scenarios/sce95')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce9_5', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S9.5 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 9 Detail Timeline (/3scenarios/sce9, /add-fol/3scenarios/sce9)
   if (pathname.includes('/3scenarios/sce9') || pathname.includes('/4scenarios/sce9') || pathname.includes('/scenarios/sce9')) {
     (async () => {
       try {

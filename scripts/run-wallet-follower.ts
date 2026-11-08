@@ -146,8 +146,10 @@ export class WalletFollowerRunner {
     // Radar 1 Dev Wallet: Memantau 1 dev aktif dan mendeteksi koin baru sebelum target buy
     this.devWatcher = new SingleDevWalletWatcher({ targetWallet: this.targetWallet });
     this.devWatcher.isHuntingMode = () => {
-      // Smart Gating: Hanya aktif polling jika S9 dan S10 sedang TIDAK menahan posisi terbuka (sedang kosong / hunting mode)
-      return this.multiDryRunEngine.getS9OpenPositionsCount() === 0 && this.multiDryRunEngine.getS10OpenPositionsCount() === 0;
+      // Smart Gating: Hanya aktif polling jika S9, S9.5, dan S10 sedang TIDAK menahan posisi terbuka (sedang kosong / hunting mode)
+      return this.multiDryRunEngine.getS9OpenPositionsCount() === 0 &&
+        this.multiDryRunEngine.getS95OpenPositionsCount() === 0 &&
+        this.multiDryRunEngine.getS10OpenPositionsCount() === 0;
     };
     this.devWatcher.on('redeploy_detected', (evt) => {
       console.log(`\n=========================================================`);
@@ -155,7 +157,7 @@ export class WalletFollowerRunner {
       console.log(`   Dev Wallet   : ${evt.devWallet}`);
       console.log(`   Tx Genesis   : ${evt.signature}`);
       console.log(`   Tipe Pool    : ${evt.isSameSymbol ? 'Pool 2 (Re-Deploy Gen-2)' : 'Pool 1 (Koin Baru)'}`);
-      console.log(`   Mengeksekusi BUY Proaktif S6/S7/S8/S9/S10 (SEBELUM Target Masuk)!`);
+      console.log(`   Mengeksekusi BUY Proaktif S6/S7/S8/S9/S9.5/S10 (SEBELUM Target Masuk)!`);
       console.log(`=========================================================\n`);
       this.multiDryRunEngine.handleEarlyRedeployBuy(evt);
     });

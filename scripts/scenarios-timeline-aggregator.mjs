@@ -82,7 +82,33 @@ export const SCENARIO_META = {
     color: '#3b82f6',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('SCENARIO_9') || s.includes('DEV_FRONTRUN');
+      return (s.includes('SCENARIO_9') && !s.includes('SCENARIO_9_5')) || s.includes('DEV_FRONTRUN');
+    }
+  },
+  sce9_5: {
+    id: 'sce9_5',
+    canonicalKey: 's9_5',
+    name: 'Skenario 9.5: Split TP 50/50 + 1-Min Moonbag (TP 50% @ >=300% & 50% Hold 1m / Dump on Whale Exit)',
+    shortName: 'Skenario 9.5',
+    description: 'Beli Detik-0 dari sinyal Dev. Jika gain >= +300%: Jual 50%, sisa 50% tahan 1 menit. Jika target jual 100%, langsung dump semua. Gain < 300%: TP normal +25%.',
+    ruleBadge: 'Split TP 50% @ >=300% | 1-Min Moonbag',
+    color: '#8b5cf6',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_9_5') || s.includes('9_5') || s.includes('MOONBAG');
+    }
+  },
+  sce10: {
+    id: 'sce10',
+    canonicalKey: 's10',
+    name: 'Skenario 10: Dynamic Wave Runner (Genesis Buy + MCap/Whale Sell Sync)',
+    shortName: 'Skenario 10',
+    description: 'Dynamic Wave Runner: Beli Detik-0 genesis. Tahan selama whale hold (Hard TP +300% / ikuti whale sell >= 15%).',
+    ruleBadge: 'Wave Runner | Whale Sell Sync & +300% Hard TP',
+    color: '#f59e0b',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_10') || s.includes('WAVE_RUNNER');
     }
   }
 };
@@ -90,6 +116,8 @@ export const SCENARIO_META = {
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('9_5') || str.includes('9.5') || str.includes('moonbag')) return 'sce9_5';
+  if (str.includes('10') || str.includes('wave_runner')) return 'sce10';
   if (str.includes('9') || str.includes('dev_frontrun') || str.includes('sync')) return 'sce9';
   if (str.includes('8') || str.includes('frontrun') || str.includes('target_inflow')) return 'sce8';
   if (str.includes('7') || str.includes('time_stop') || str.includes('timestop')) return 'sce7';

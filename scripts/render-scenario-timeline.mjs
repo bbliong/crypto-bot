@@ -428,6 +428,8 @@ export async function renderScenarioTimelineHtml({ scenarioId = 'sce4', tokenQue
         <a href="/add-fol/3scenarios/sce7?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce7' ? 'active' : ''}">⏱️ S7 (Time-Stop)</a>
         <a href="/add-fol/3scenarios/sce8?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce8' ? 'active' : ''}">⚡ S8 (Front-Run)</a>
         <a href="/add-fol/3scenarios/sce9?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce9' ? 'active' : ''}">🔄 S9 (2-Way Sync)</a>
+        <a href="/add-fol/3scenarios/sce9_5?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce9_5' ? 'active' : ''}">🌙 S9.5 (Moonbag)</a>
+        <a href="/add-fol/3scenarios/sce10?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce10' ? 'active' : ''}">🌊 S10 (Runner)</a>
       </div>
     </header>
 

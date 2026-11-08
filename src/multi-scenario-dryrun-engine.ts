@@ -24,6 +24,7 @@ export interface ScenarioPosition {
   targetCumulativeSellRatioPct?: number;
   lastTargetSellAt?: number;
   stage1Exited?: boolean;
+  stage1ExitedAt?: number;
   stage1RealUsdReturned?: number;
   initialTokens?: number;
   initialCostBasisUsd?: number;
@@ -148,6 +149,7 @@ export class MultiScenarioDryRunEngine {
     s7: ScenarioState;
     s8: ScenarioState;
     s9: ScenarioState;
+    s9_5: ScenarioState;
     s10: ScenarioState;
   };
 
@@ -158,7 +160,7 @@ export class MultiScenarioDryRunEngine {
     this.scenarios = this.loadState();
   }
 
-  private initFreshScenarios(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s10: ScenarioState } {
+  private initFreshScenarios(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState } {
     return {
       s4: {
         id: 'SCENARIO_4_SINGLE_BUY_5USD',
@@ -274,6 +276,25 @@ export class MultiScenarioDryRunEngine {
         closedTrades: [],
         recentEvents: [],
       },
+      s9_5: {
+        id: 'SCENARIO_9_5_SPLIT_TP_MOONBAG',
+        name: 'Skenario 9.5: Split TP 50/50 + 1-Min Moonbag (TP 50% @ >=300% & 50% Hold 1m / Dump on Whale Exit)',
+        description: 'Saldo Awal $20.00. Modal $0.25 (sama seperti S9). Masuk Detik-0 dari sinyal Dev. Jika gain >= +300% (lonjakan awal swap): JUAL 50% untuk amankan profit masif, sisa 50% DITAHAN selama 1 menit (Moonbag). Jika target whale dump 100%, LANGSUNG JUAL SEMUA seketika. Jika gain < 300%: TP normal di +25%.',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
       s10: {
         id: 'SCENARIO_10_DYNAMIC_WAVE_RUNNER',
         name: 'Skenario 10: Dynamic Wave Runner (Genesis Buy + MCap/Whale Sell Sync)',
@@ -296,12 +317,12 @@ export class MultiScenarioDryRunEngine {
     };
   }
 
-  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s10: ScenarioState } {
+  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s10) {
+        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10) {
           const fresh = this.initFreshScenarios();
           const s4 = parsed.s4 || fresh.s4;
           const s5 = parsed.s5 || fresh.s5;
@@ -309,6 +330,7 @@ export class MultiScenarioDryRunEngine {
           const s7 = parsed.s7 || fresh.s7;
           const s8 = parsed.s8 || fresh.s8;
           const s9 = parsed.s9 || fresh.s9;
+          const s9_5 = parsed.s9_5 || fresh.s9_5;
           const s10 = parsed.s10 || fresh.s10;
           if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
           if (s5.totalFeesPaid === undefined) s5.totalFeesPaid = 0.0;
@@ -316,8 +338,9 @@ export class MultiScenarioDryRunEngine {
           if (s7.totalFeesPaid === undefined) s7.totalFeesPaid = 0.0;
           if (s8.totalFeesPaid === undefined) s8.totalFeesPaid = 0.0;
           if (s9.totalFeesPaid === undefined) s9.totalFeesPaid = 0.0;
+          if (s9_5.totalFeesPaid === undefined) s9_5.totalFeesPaid = 0.0;
           if (s10.totalFeesPaid === undefined) s10.totalFeesPaid = 0.0;
-          return { s4, s5, s6, s7, s8, s9, s10 };
+          return { s4, s5, s6, s7, s8, s9, s9_5, s10 };
         }
       } catch {}
     }
@@ -326,7 +349,7 @@ export class MultiScenarioDryRunEngine {
 
   public saveState(): void {
     try {
-      for (const s of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s10]) {
+      for (const s of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
         s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
         s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
@@ -449,7 +472,7 @@ export class MultiScenarioDryRunEngine {
     // Jika target whale masuk bertransaksi di pool tertentu (signal.pairAddress),
     // seluruh skenario otomatis mengalihkan tujuan SELL ke pool whale tersebut!
     if (signal.pairAddress) {
-      for (const sc of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s10]) {
+      for (const sc of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
         const p = sc.openPositions.find(pos => pos.mint === signal.mint);
         if (p && p.pairAddress !== signal.pairAddress) {
           console.log(`[DYNAMIC POOL REDIRECTION] 🔄 Mengalihkan pool ${p.symbol} [${sc.id}] dari ${p.pairAddress ? p.pairAddress.slice(0, 8) + '...' : 'none'} ke Pool Whale: ${signal.pairAddress.slice(0, 8)}...`);
@@ -514,6 +537,50 @@ export class MultiScenarioDryRunEngine {
       }
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s9, signal, now, timeWib);
+
+    // 5b. Skenario 9.5: Split TP 50/50 + 1-Min Moonbag (Genesis Buy + 50% TP @ >=300% & 50% Hold 1m / Dump on Whale Exit)
+    for (let i = this.scenarios.s9_5.openPositions.length - 1; i >= 0; i--) {
+      const s95Pos = this.scenarios.s9_5.openPositions[i];
+      if (s95Pos.mint === signal.mint) {
+        if (!s95Pos.targetEnteredAt) {
+          s95Pos.targetEnteredAt = now;
+          s95Pos.lastPriceUsd = signal.priceUsd;
+          console.log(`\n=========================================================`);
+          console.log(`🎯 [SCENARIO 9.5 TARGET INFLOW DETECTED] Target Whale MASUK ke token Front-Run '${s95Pos.symbol}' ($${targetUsd.toFixed(0)})!`);
+          console.log(`   Token    : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
+          console.log(`   Harga In : $${s95Pos.avgEntryPriceUsd.toFixed(8)} (Floor Genesis)`);
+          console.log(`   Harga Out: $${signal.priceUsd.toFixed(8)} (Pumped by Target)`);
+
+          // JIKA MODAL MASUK WHALE KECIL (< $300 atau < 3 SOL): LANGSUNG DUMP SELL 100%!
+          if (targetUsd > 0 && targetUsd < 300) {
+            console.log(`   Strategi : ⚡ MICRO-INFLOW HARVEST (Modal whale $${targetUsd.toFixed(0)} < $300, langsung dump jual sebelum whale membanting)!`);
+            console.log(`=========================================================\n`);
+            const exitReason = `S95_MICRO_WHALE_INFLOW_HARVEST (Whale masuk modal kecil $${targetUsd.toFixed(0)} < $300, langsung dump jual sebelum whale membanting)`;
+            this.executeScenarioExit(this.scenarios.s9_5, i, signal.priceUsd, now, timeWib, exitReason);
+            continue;
+          }
+
+          // Cek apakah lonjakan awal swap saat whale masuk sudah tembus >= +300%
+          const initialGainPct = s95Pos.avgEntryPriceUsd > 0 ? ((signal.priceUsd - s95Pos.avgEntryPriceUsd) / s95Pos.avgEntryPriceUsd) * 100 : 0;
+          if (initialGainPct >= 300.0 && !s95Pos.stage1Exited) {
+            console.log(`   Strategi : 🚀 GAIN AWAL >= +300% (+${initialGainPct.toFixed(1)}%) -> JUAL 50% SEKARANG, SISA 50% DITAHAN 1 MENIT!`);
+            console.log(`=========================================================\n`);
+            this.executeScenarioPartial50Exit(this.scenarios.s9_5, i, signal.priceUsd, now, timeWib, `STAGE_1_TP_50%_MOONBAG (Initial Gain +${initialGainPct.toFixed(1)}% >= +300% | Kunci modal & 50% profit masif)`);
+            continue;
+          }
+
+          console.log(`   Strategi : Mengaktifkan proteksi runner (Anti-Shakeout 12s + Follow Whale Sell)...`);
+          console.log(`=========================================================\n`);
+        }
+      } else {
+        if (!s95Pos.targetEnteredAt) {
+          console.log(`[SCENARIO 9.5] ⚠️ Target BERALIH beli '${signal.symbol}'! Mengosongkan posisi koin lama '${s95Pos.symbol}'...`);
+          const reason = `TARGET_SWITCHED_DEV (Target beli '${signal.symbol}' bukan '${s95Pos.symbol}', batalkan front-run lama)`;
+          this.executeScenarioExit(this.scenarios.s9_5, i, s95Pos.lastPriceUsd, now, timeWib, reason);
+        }
+      }
+    }
+    this.autoRotateSameSymbolPositions(this.scenarios.s9_5, signal, now, timeWib);
 
     // 6. Skenario 10: Dynamic Wave Runner (Genesis Buy + MCap/Whale Sell Sync)
     for (let i = this.scenarios.s10.openPositions.length - 1; i >= 0; i--) {
@@ -708,6 +775,38 @@ export class MultiScenarioDryRunEngine {
       this.autoRotateSameSymbolPositions(this.scenarios.s9, earlySignal, now, timeWib);
     }
     this.autoRotateSameSymbolPositions(this.scenarios.s9, earlySignal, now, timeWib);
+
+    // Eksekusi buy di Skenario 9.5 (Split TP 50/50 + 1-Min Moonbag)
+    let s95Stake = customStakeUsd;
+    if (!s95Stake) {
+      const liveCfg = readFollowerLiveConfig(this.dataDir);
+      s95Stake = (liveCfg as any).stakeUsdS95 || liveCfg.stakeUsdS9 || 0.25;
+    }
+    const closedTradeS95 = this.scenarios.s9_5.closedTrades.find(t => t.mint === evt.newMint);
+    const prevExitedViaSkippedPoolS95 = !closedTradeS95 || (closedTradeS95.exitReason.includes('TARGET_SKIPPED_DEV_POOL') && closedTradeS95.realizedPnlUsd >= -0.05);
+    const sameMintTradesS95 = this.scenarios.s9_5.closedTrades.filter(t => t.mint === evt.newMint).length;
+    const allowReEntryS95 = evt.isSameSymbol !== false && prevExitedViaSkippedPoolS95 && sameMintTradesS95 < 5;
+
+    if (!this.scenarios.s9_5.openPositions.some(p => p.mint === evt.newMint)) {
+      this.processScenarioBuy(this.scenarios.s9_5, earlySignal, true, 1380, now, timeWib, {
+        maxTokenExposure: s95Stake,
+        getStake: () => s95Stake,
+        disallowAccumulation: true,
+        allowReEntryCycle: allowReEntryS95,
+        cycleIndex: sameMintTradesS95 + 1,
+      });
+      const s95CreatedPos = this.scenarios.s9_5.openPositions.find(p => p.mint === evt.newMint);
+      if (s95CreatedPos) {
+        s95CreatedPos.boughtAtGenesis = true;
+        s95CreatedPos.pairAddress = evt.mainPairAddress || '';
+        s95CreatedPos.exchange = targetExchange;
+        s95CreatedPos.entryCount = sameMintTradesS95 + 1;
+        (s95CreatedPos as any).isSameSymbol = evt.isSameSymbol !== false;
+        (s95CreatedPos as any).isPool2 = evt.isSameSymbol !== false || sameMintTradesS95 > 0;
+      }
+      this.autoRotateSameSymbolPositions(this.scenarios.s9_5, earlySignal, now, timeWib);
+    }
+    this.autoRotateSameSymbolPositions(this.scenarios.s9_5, earlySignal, now, timeWib);
 
     // Eksekusi buy di Skenario 10 (Dynamic Wave Runner)
     let s10Stake = customStakeUsd;
@@ -1076,8 +1175,8 @@ export class MultiScenarioDryRunEngine {
     });
     if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
 
-    // Update Multi-Cycle Tracker khusus S9:
-    if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') {
+    // Update Multi-Cycle Tracker khusus S9 & S9.5:
+    if (scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC' || scenario.id === 'SCENARIO_9_5_SPLIT_TP_MOONBAG') {
       const gen2 = this.gen2CycleTracker.get(pos.mint);
       if (gen2) {
         const isTargetSkipped = reason.includes('TARGET_SKIPPED_DEV_POOL');
@@ -1140,6 +1239,98 @@ export class MultiScenarioDryRunEngine {
         }
       } catch (err: any) {
         console.warn(`[ON-TRADE-ACTION-SELL-ERR] ${err?.message}`);
+      }
+    }
+  }
+
+  /**
+   * Eksekusi Jual Sebagian (50%) untuk Skenario 9.5 (atau Split TP Moonbag):
+   * Menjual 50% token, mengamankan modal & cuan, menyisakan 50% token untuk moonbag 1 menit.
+   */
+  public executeScenarioPartial50Exit(
+    scenario: ScenarioState,
+    posIdx: number,
+    exitPriceUsd: number,
+    now: number,
+    timeWib: string,
+    reason: string
+  ): void {
+    const pos = scenario.openPositions[posIdx];
+    if (!pos || pos.tokens <= 0 || pos.stage1Exited) return;
+
+    const pOut = exitPriceUsd > 0 ? exitPriceUsd : pos.avgEntryPriceUsd;
+    const tokensToSell = Number((pos.tokens * 0.5).toFixed(6));
+    const costBasisSold = Number((pos.costBasisUsd * 0.5).toFixed(2));
+    const grossReceived = tokensToSell * pOut;
+    const netReceived = Math.max(0.0, Number((grossReceived - REAL_SWAP_FEE_USD).toFixed(2)));
+    const pnlUsd = Number((netReceived - costBasisSold).toFixed(2));
+
+    scenario.availableCash = Number((scenario.availableCash + netReceived).toFixed(2));
+    scenario.totalFeesPaid = Number((scenario.totalFeesPaid + REAL_SWAP_FEE_USD).toFixed(3));
+    scenario.realizedPnl = Number((scenario.realizedPnl + pnlUsd).toFixed(2));
+
+    if (!pos.initialTokens) pos.initialTokens = pos.tokens;
+    if (!pos.initialCostBasisUsd) pos.initialCostBasisUsd = pos.costBasisUsd;
+
+    pos.tokens = Number((pos.tokens - tokensToSell).toFixed(6));
+    pos.costBasisUsd = Number((pos.costBasisUsd - costBasisSold).toFixed(2));
+    pos.feesPaidUsd += REAL_SWAP_FEE_USD;
+    pos.realizedPnlUsd += pnlUsd;
+    pos.lastPriceUsd = pOut;
+    pos.updatedAt = now;
+    pos.stage1Exited = true;
+    pos.stage1ExitedAt = now;
+    pos.stage1RealUsdReturned = netReceived;
+
+    scenario.recentEvents.unshift({
+      id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: now,
+      timeWib,
+      scenarioId: scenario.id,
+      action: 'SELL',
+      symbol: pos.symbol,
+      mint: pos.mint,
+      usdReceived: netReceived,
+      feeUsd: REAL_SWAP_FEE_USD,
+      tokens: tokensToSell,
+      priceUsd: pOut,
+      pnlUsd: pnlUsd,
+      availableCashAfter: scenario.availableCash,
+      investedCashAfter: Math.max(0, scenario.investedCash - costBasisSold),
+      reason: `${reason} (Fee: $${REAL_SWAP_FEE_USD})`,
+    });
+    if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+    if (this.onTradeAction) {
+      try {
+        const signal: WalletTradeSignal = {
+          action: 'sell',
+          mint: pos.mint,
+          symbol: pos.symbol,
+          tokenName: pos.tokenName,
+          tokenAmount: tokensToSell,
+          remainingHolding: 0,
+          solAmount: 0,
+          usdAmount: netReceived,
+          priceUsd: pOut,
+          txHash: '',
+          timestamp: Math.floor(now / 1000),
+          isOpenOrClose: false,
+          isFirstBuy: false,
+          pairAddress: pos.pairAddress || '',
+          exchange: pos.exchange || '',
+        };
+        const p = this.onTradeAction('SELL', scenario.id, signal, {
+          stakeUsd: netReceived,
+          tokens: tokensToSell,
+          priceUsd: pOut,
+          reason,
+        });
+        if (p && typeof p.then === 'function') {
+          p.catch(err => console.warn(`[ASYNC-PARTIAL-SELL-ACTION-WARN] ${err?.message}`));
+        }
+      } catch (err: any) {
+        console.warn(`[ON-TRADE-ACTION-PARTIAL-SELL-ERR] ${err?.message}`);
       }
     }
   }
@@ -1300,7 +1491,7 @@ export class MultiScenarioDryRunEngine {
 
     if (isFullExit) sellRatio = 1.0;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s10]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === signal.mint);
       if (posIdx === -1) continue;
 
@@ -1404,6 +1595,64 @@ export class MultiScenarioDryRunEngine {
         // 3. Pasca detik ke-12: jika target akumulasi jual >= 15%, ikuti whale keluar!
         if (pos.targetCumulativeSellRatioPct >= 15.0) {
           const exitReason = `S9_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol} ${pos.targetCumulativeSellRatioPct}% >= 15% pasca detik 12s)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+        continue;
+      }
+
+      // Skenario 9.5: Split TP 50/50 + 1-Min Moonbag (TP 50% @ >=300% & 50% Hold 1m / Dump on Whale Exit)
+      if (scenario.id === 'SCENARIO_9_5_SPLIT_TP_MOONBAG') {
+        pos.lastPriceUsd = pOut;
+        if (!pos.targetCumulativeSellRatioPct) pos.targetCumulativeSellRatioPct = 0.0;
+        const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
+        pos.targetCumulativeSellRatioPct = Number((pos.targetCumulativeSellRatioPct + currentSellRatioPct).toFixed(1));
+        pos.lastTargetSellAt = now;
+
+        const referenceTime = pos.targetEnteredAt || pos.openedAt;
+        const elapsedSec = (now - referenceTime) / 1000;
+
+        // 1. JIKA TARGET JUAL 100% (isFullExit / dump >= 50% / sisa debu): LANGSUNG JUAL SEMUANYA SEKETIKA!
+        // Ini berlaku baik jika belum Stage 1 maupun jika sudah Stage 1 (menjual sisa 50% moonbag seketika)
+        if (isFullExit || pos.targetCumulativeSellRatioPct >= 50.0 || currentSellRatioPct >= 50.0) {
+          const exitReason = pos.stage1Exited
+            ? `S95_TARGET_WHALE_FULL_DUMP_EXIT (Whale dump 100% / >= 50% | Jual sisa 50% moonbag seketika)`
+            : `S95_EMERGENCY_WHALE_DUMP_EXIT (Whale dump ${pos.targetCumulativeSellRatioPct}% >= 50% / Full Exit di detik ${elapsedSec.toFixed(1)}s, kabur sebelum dev rugpull)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+
+        // 2. Jika SUDAH Stage 1 (sisa 50% moonbag):
+        // Pasca detik 12 jika whale mulai buang >= 15%: ikuti whale keluar sisa moonbag
+        if (pos.stage1Exited && pos.targetCumulativeSellRatioPct >= 15.0) {
+          const exitReason = `S95_MOONBAG_WHALE_SELL_FOLLOW_EXIT (Whale akumulasi sell ${pos.targetCumulativeSellRatioPct}% >= 15% | Jual sisa 50% moonbag)`;
+          this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
+          continue;
+        }
+
+        // 3. Jika BELUM Stage 1:
+        // Anti-shakeout 12 detik pasca masuk
+        if (elapsedSec < 12.0) {
+          scenario.recentEvents.unshift({
+            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            timeWib,
+            scenarioId: scenario.id,
+            action: 'SKIP',
+            symbol: signal.symbol,
+            mint: signal.mint,
+            priceUsd: pOut,
+            availableCashAfter: scenario.availableCash,
+            investedCashAfter: scenario.investedCash,
+            reason: `ANTI_SHAKEOUT_HOLD (Whale micro sell ${currentSellRatioPct}% di detik ${elapsedSec.toFixed(1)}s < 12s, tahan posisi untuk wave pompa)`,
+          });
+          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+          continue;
+        }
+
+        // Pasca detik 12 jika whale akumulasi jual >= 15%: ikuti whale keluar!
+        if (pos.targetCumulativeSellRatioPct >= 15.0) {
+          const exitReason = `S95_TARGET_SELL_FOLLOW_EXIT (Target sold ${signal.symbol} ${pos.targetCumulativeSellRatioPct}% >= 15% pasca detik 12s)`;
           this.executeScenarioExit(scenario, posIdx, pOut, now, timeWib, exitReason);
           continue;
         }
@@ -1716,7 +1965,7 @@ export class MultiScenarioDryRunEngine {
     this.lastObservedPrices.set(mint, priceUsd);
     let changed = false;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s10]) {
+    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10]) {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
       if (posIdx !== -1) {
         const pos = scenario.openPositions[posIdx];
@@ -1743,6 +1992,46 @@ export class MultiScenarioDryRunEngine {
             }
             const timeWib = formatWibDate(now);
             const exitReason = `STOP_LOSS_15% (Drop: ${gainPct.toFixed(1)}% <= -15% | Cut-loss pengaman)`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            continue;
+          }
+        }
+
+        // Khusus Skenario 9.5: Split TP 50/50 + 1-Min Moonbag
+        // Jika dari awal swap / pergerakan harga gain >= +300%: JUAL 50% saja, sisa 50% tahan 1 menit!
+        // Jika target dump 100%: langsung jual semua. Jika gain < 300%: TP normal +25%.
+        if (scenario.id === 'SCENARIO_9_5_SPLIT_TP_MOONBAG' && pos.avgEntryPriceUsd > 0) {
+          const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+
+          // 1. Cut Loss Pengaman (-15%)
+          if (gainPct <= -15.0) {
+            if (pos.targetEnteredAt && (now - pos.targetEnteredAt) < 12000) {
+              continue; // Grace period 12s saat whale baru masuk
+            }
+            const exitReason = `STOP_LOSS_15% (Drop: ${gainPct.toFixed(1)}% <= -15% | Cut-loss pengaman)`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            continue;
+          }
+
+          // 2. Stage 1 TP 50%: Jika gain >= +300% dan BELUM jual Stage 1
+          if (gainPct >= 300.0 && !pos.stage1Exited) {
+            const stage1Reason = `STAGE_1_TP_50%_MOONBAG (Gain: +${gainPct.toFixed(1)}% >= +300% | Jual 50%, tahan 50% moonbag 1m)`;
+            this.executeScenarioPartial50Exit(scenario, posIdx, priceUsd, now, timeWib, stage1Reason);
+            continue;
+          }
+
+          // 3. Normal TP +25%: Jika gain >= +25% tapi < +300%, dan BELUM jual Stage 1
+          if (gainPct >= 25.0 && !pos.stage1Exited) {
+            const exitReason = `AUTO_TAKE_PROFIT_25% (Gain: +${gainPct.toFixed(1)}% >= +25% | Mengunci cuan normal)`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            continue;
+          }
+
+          // 4. Stage 2 Timeout 1 Menit: Jika SUDAH jual Stage 1 (pos.stage1Exited === true) dan sudah lewat 60 detik
+          if (pos.stage1Exited && pos.stage1ExitedAt && (now - pos.stage1ExitedAt) >= 60000) {
+            const exitReason = `STAGE_2_MOONBAG_60S_TIMEOUT_EXIT (Sisa 50% token ditahan 1 menit pasca-TP, kunci cuan sisa)`;
             this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
             continue;
           }
@@ -2374,6 +2663,53 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
+    // 4c. Cek Skenario 9.5: Split TP 50/50 + 1-Min Moonbag:
+    const s95 = this.scenarios.s9_5;
+    for (let i = s95.openPositions.length - 1; i >= 0; i--) {
+      const pos = s95.openPositions[i];
+      if (pos.tokens <= 0) continue;
+
+      const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+
+      // Kasus A: Sudah pernah Stage 1 (sisa 50% moonbag ditahan 1 menit)
+      if (pos.stage1Exited && pos.stage1ExitedAt) {
+        const elapsedSinceStage1 = now - pos.stage1ExitedAt;
+        if (elapsedSinceStage1 >= 60000) {
+          const timeWib = formatWibDate(now);
+          const reason = `STAGE_2_MOONBAG_60S_TIMEOUT_EXIT (Sisa 50% token ditahan 1 menit pasca-TP, kunci cuan sisa)`;
+          this.executeScenarioExit(s95, i, pOut, now, timeWib, reason);
+          changed = true;
+          continue;
+        }
+      } else if (pos.targetEnteredAt) {
+        // Belum Stage 1, tapi target sudah masuk -> batas waktu wave 35s
+        const elapsedSinceTarget = now - pos.targetEnteredAt;
+        if (elapsedSinceTarget >= 35000) {
+          const timeWib = formatWibDate(now);
+          const elapsedSec = Math.round(elapsedSinceTarget / 1000);
+          const reason = `TIME_STOP_${elapsedSec}S_POST_TARGET_WAVE_EXIT (Reached 35s post-target wave limit, locked profit before minute 1-2 liquidity drain)`;
+          this.executeScenarioExit(s95, i, pOut, now, timeWib, reason);
+          changed = true;
+          continue;
+        }
+      } else {
+        // Target tidak kunjung masuk sejak genesis
+        const elapsedMs = now - pos.openedAt;
+        const isPool2OrGen2 = Boolean(this.gen2CycleTracker.get(pos.mint) || (pos as any).isPool2 || (pos as any).isSameSymbol);
+        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 30000;
+
+        if (elapsedMs >= timeoutLimitMs) {
+          const timeWib = formatWibDate(now);
+          const elapsedSec = Math.round(elapsedMs / 1000);
+          const poolTypeStr = isPool2OrGen2 ? 'Pool 2' : 'Pool 1 Umpan';
+          const reason = `TARGET_SKIPPED_DEV_POOL (${poolTypeStr} '${pos.symbol}' tapi Target TIDAK Beli dalam ${elapsedSec}s, safety exit sebelum dev rugpull)`;
+          this.executeScenarioExit(s95, i, pOut, now, timeWib, reason);
+          changed = true;
+          continue;
+        }
+      }
+    }
+
     // 5. Cek Skenario 4: 8s Buyback Timeout
     const s4 = this.scenarios.s4;
     for (let i = s4.openPositions.length - 1; i >= 0; i--) {
@@ -2534,7 +2870,7 @@ export class MultiScenarioDryRunEngine {
     stakeUsd: number
   ): void {
     if (realPriceUsd <= 0 || tokensBought <= 0) return;
-    const targetSc = scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))));
+    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
     const pos = targetSc.openPositions.find(p => p.mint === mint);
     if (!pos) return;
 
@@ -2572,7 +2908,7 @@ export class MultiScenarioDryRunEngine {
     reason: string
   ): void {
     if (realUsdReturned < 0) return;
-    const targetSc = scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))));
+    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
 
     // 1. Cek apakah ini sinkronisasi Stage 1 TP 50% (posisi masih open)
     if (reason && reason.includes('STAGE_1_TP_50%')) {
@@ -2630,7 +2966,7 @@ export class MultiScenarioDryRunEngine {
    * Mencegah posisi hantu di dry-run yang menghasilkan profit palsu!
    */
   public abortScenarioBuy(scenarioId: string, mint: string, reason: string): void {
-    const targetSc = scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))));
+    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
     const idx = targetSc.openPositions.findIndex(p => p.mint === mint);
     if (idx >= 0) {
       const pos = targetSc.openPositions[idx];
@@ -2661,7 +2997,7 @@ export class MultiScenarioDryRunEngine {
    * Mengoreksi trade agar tercatat sebagai rugi / proceeds = 0 jika token tidak bisa dijual!
    */
   public recordFailedSellExecution(scenarioId: string, mint: string, reason: string): void {
-    const targetSc = scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))));
+    const targetSc = (scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4))))));
     const trade = targetSc.closedTrades.find(t => t.mint === mint);
     if (trade) {
       const oldPnl = trade.realizedPnlUsd;
@@ -2691,12 +3027,16 @@ export class MultiScenarioDryRunEngine {
     return this.scenarios.s9.openPositions.length;
   }
 
+  public getS95OpenPositionsCount(): number {
+    return this.scenarios.s9_5.openPositions.length;
+  }
+
   public getS10OpenPositionsCount(): number {
     return this.scenarios.s10.openPositions.length;
   }
 
   public isTargetEntered(mint: string): boolean {
-    for (const sc of [this.scenarios.s9, this.scenarios.s10, this.scenarios.s8]) {
+    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8]) {
       const pos = sc.openPositions.find(p => p.mint === mint);
       if (pos && pos.targetEnteredAt && pos.targetEnteredAt > 0) return true;
     }
