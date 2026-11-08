@@ -121,7 +121,20 @@ export const SCENARIO_META = {
     color: '#10b981',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('SCENARIO_13') || s.includes('PINGPONG');
+      return (s.includes('SCENARIO_13') && !s.includes('13_5') && !s.includes('13.5')) || (s.includes('PINGPONG') && !s.includes('DYNAMIC'));
+    }
+  },
+  sce13_5: {
+    id: 'sce13_5',
+    canonicalKey: 's13_5',
+    name: 'Skenario 13.5: Adaptive Ping-Pong Runner (Uncapped Cycles | 3 Consecutive Sells & Dynamic Health Gates)',
+    shortName: 'Skenario 13.5',
+    description: 'Adaptive Ping-Pong Runner: Tanpa batas 10 siklus. Masuk di lembah Sell #1. Bekukan beli jika Sell beruntun >= 2x. Keluar jika Whale sell 3x beruntun tanpa buyback, kumulatif dump >= 35%, sell tunggal >= $300, atau usia >= 10m.',
+    ruleBadge: 'Adaptive Ping-Pong | 3 Consecutive Sells & Health Gates',
+    color: '#06b6d4',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_13_5') || s.includes('13.5') || s.includes('DYNAMIC_PINGPONG');
     }
   }
 };
@@ -129,6 +142,7 @@ export const SCENARIO_META = {
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('13_5') || str.includes('13.5') || str.includes('dynamic_pingpong') || str.includes('14')) return 'sce13_5';
   if (str.includes('13') || str.includes('pingpong')) return 'sce13';
   if (str.includes('9_5') || str.includes('9.5') || str.includes('moonbag')) return 'sce9_5';
   if (str.includes('10') || str.includes('wave_runner')) return 'sce10';
