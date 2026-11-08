@@ -149,33 +149,12 @@ export class WalletFollowerRunner {
       // Smart Gating: Hanya aktif polling jika S9 dan S10 sedang TIDAK menahan posisi terbuka (sedang kosong / hunting mode)
       return this.multiDryRunEngine.getS9OpenPositionsCount() === 0 && this.multiDryRunEngine.getS10OpenPositionsCount() === 0;
     };
-    this.devWatcher.on('redeploy_detected', async (evt) => {
-      // 1. Cek Saldo Kas SOL Target Whale (Syarat Amunisi Pompa Min 0.5 SOL)
-      let targetBalSol = 1.0;
-      try {
-        const { Connection, PublicKey } = await import('@solana/web3.js');
-        const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-        const lamports = await conn.getBalance(new PublicKey(this.targetWallet));
-        targetBalSol = lamports / 1e9;
-      } catch (err: any) {
-        console.warn(`[TARGET WHALE BALANCE CHECK WARN] ${err?.message}`);
-      }
-
-      if (targetBalSol < 0.5) {
-        console.log(`\n=========================================================`);
-        console.log(`⛔ [DEV-RADAR TRIGGER DITOLAK] Target Whale (${this.targetWallet.slice(0, 8)}...) hanya memiliki saldo ${targetBalSol.toFixed(3)} SOL (< 0.5 SOL)!`);
-        console.log(`   Whale tidak memiliki kas amunisi untuk memompa koin ini.`);
-        console.log(`   Menolak buy umpan pada token: ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
-        console.log(`=========================================================\n`);
-        return;
-      }
-
+    this.devWatcher.on('redeploy_detected', (evt) => {
       console.log(`\n=========================================================`);
       console.log(`🚨 [DEV-RADAR TRIGGER] Terdeteksi Pool Baru Lahir dari Dev: ${evt.symbol} [${evt.newMint.slice(0, 8)}...]`);
       console.log(`   Dev Wallet   : ${evt.devWallet}`);
       console.log(`   Tx Genesis   : ${evt.signature}`);
-      console.log(`   Whale Saldo  : ${targetBalSol.toFixed(3)} SOL (Amunisi Siap)`);
-      console.log(`   Tipe Pool    : ${evt.isSameSymbol ? 'Pool 2 (Re-Deploy Gen-2)' : 'Pool 1 (Koin Baru / Umpan)'}`);
+      console.log(`   Tipe Pool    : ${evt.isSameSymbol ? 'Pool 2 (Re-Deploy Gen-2)' : 'Pool 1 (Koin Baru)'}`);
       console.log(`   Mengeksekusi BUY Proaktif S6/S7/S8/S9/S10 (SEBELUM Target Masuk)!`);
       console.log(`=========================================================\n`);
       this.multiDryRunEngine.handleEarlyRedeployBuy(evt);

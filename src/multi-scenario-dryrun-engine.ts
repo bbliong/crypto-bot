@@ -2304,10 +2304,10 @@ export class MultiScenarioDryRunEngine {
       } else {
         // Kasus B: Target tidak kunjung masuk sejak genesis
         const elapsedMs = now - pos.openedAt;
-        // JIKA Pool 1 Umpan (koin baru bukan Gen-2/Pool 2): batas waktu diperpendek menjadi 35 detik (sebelum dev rugpull di detik 45)
+        // JIKA Pool 1 Umpan (koin baru bukan Gen-2/Pool 2): batas waktu diperpendek menjadi 30 detik (sebelum dev rugpull di detik 45)
         // JIKA Pool 2 / Gen-2 re-deploy: batas waktu 60 detik (memberi ruang pompa lebih longgar)
         const isPool2OrGen2 = Boolean(this.gen2CycleTracker.get(pos.mint) || (pos as any).isPool2 || (pos as any).isSameSymbol);
-        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 35000;
+        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 30000;
 
         if (elapsedMs >= timeoutLimitMs) {
           const timeWib = formatWibDate(now);
@@ -2322,7 +2322,7 @@ export class MultiScenarioDryRunEngine {
     }
 
     // 4b. Cek Skenario 10 Time-Stop (Dynamic Wave Runner):
-    // - Gap 35s/60s tanpa target masuk -> Force Sell (Safety Exit)
+    // - Gap 30s/60s tanpa target masuk -> Force Sell (Safety Exit)
     // - Wave limit 30s pasca target masuk -> Force Exit (Time-Stop pengaman sebelum dev rugpull)
     const s10 = this.scenarios.s10;
     for (let i = s10.openPositions.length - 1; i >= 0; i--) {
@@ -2344,7 +2344,7 @@ export class MultiScenarioDryRunEngine {
       } else {
         const elapsedMs = now - pos.openedAt;
         const isPool2OrGen2 = Boolean(this.gen2CycleTracker.get(pos.mint) || (pos as any).isPool2 || (pos as any).isSameSymbol);
-        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 35000;
+        const timeoutLimitMs = isPool2OrGen2 ? 60000 : 30000;
 
         if (elapsedMs >= timeoutLimitMs) {
           const timeWib = formatWibDate(now);

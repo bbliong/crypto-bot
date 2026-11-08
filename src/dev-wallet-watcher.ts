@@ -493,6 +493,19 @@ export class SingleDevWalletWatcher extends EventEmitter {
     }
 
     const logs: string[] = val.logs || [];
+
+    // Filter Kuras / Rug-Pull Dev: Abaikan transaksi jika Dev sedang menarik modal / membakar posisi
+    const isDrainOrWithdraw = logs.some(l => 
+      l.includes('Instruction: RemoveAllLiquidity') ||
+      l.includes('Instruction: Withdraw') ||
+      l.includes('Instruction: ClosePosition') ||
+      l.includes('Instruction: ClaimPositionFee')
+    );
+    if (isDrainOrWithdraw) {
+      console.log(`[DEV-RADAR IGNORE] Tx ${sig.slice(0, 10)}... adalah transaksi penarikan/kuras kas Dev (RemoveLiquidity/Withdraw). Bukan pembuatan pool baru!`);
+      return;
+    }
+
     const isPoolCreation = logs.some(l => 
       l.includes('InitializeCustomizablePool') || 
       l.includes('InitializePool') ||
@@ -698,6 +711,8 @@ export class SingleDevWalletWatcher extends EventEmitter {
             if (ix?.parsed?.type === 'transferChecked' || ix?.parsed?.type === 'transfer') {
               const m = ix?.parsed?.info?.mint;
               if (m === 'So11111111111111111111111111111111111111112') {
+                const dest = ix?.parsed?.info?.destination;
+                if (dest && dest === target.devWallet) continue; // Jangan hitung jika dev menerima SOL (withdraw)
                 const amt = ix?.parsed?.info?.tokenAmount?.uiAmount ?? (ix?.parsed?.info?.lamports ? ix.parsed.info.lamports / 1e9 : 0);
                 if (amt > initialMeteoraSol) initialMeteoraSol = amt;
               }
