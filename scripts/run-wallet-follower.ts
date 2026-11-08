@@ -1537,11 +1537,12 @@ export class WalletFollowerRunner {
       let unitsToSubmit: string = '0';
 
       if (side === 'BUY') {
-        // Khusus Early Genesis / Dev Front-Run (S8/S9/S10): Coba ulang per 1 detik (maks 5x)
+        // Khusus Early Genesis / Dev Front-Run (S8/S9/S9.5/S10): Coba ulang per 1 detik (maks 5x)
         // jika kena little pool hit / jupiter has no route agar pool sempat terindeks sebelum whale masuk.
         const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
         const maxRetries = isGenesisOrEarly ? 5 : 1;
         const retryDelayMs = 1000;
+        const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
 
         route = await getBrowserBuySwapRoute(
           this.page,
@@ -1553,7 +1554,8 @@ export class WalletFollowerRunner {
           maxRetries,
           signal.pairAddress,
           retryDelayMs,
-          () => this.multiDryRunEngine.isTargetEntered(signal.mint)
+          () => this.multiDryRunEngine.isTargetEntered(signal.mint),
+          maxFloorPriceUsd
         );
       } else {
         // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil
@@ -1673,6 +1675,14 @@ export class WalletFollowerRunner {
       const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
 
       if (isRealOrderTargeted && side === 'BUY') {
+        const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
+        const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
+        if (isGenesisOrEarly && maxFloorPriceUsd && route.impliedPriceUsd && route.impliedPriceUsd > maxFloorPriceUsd) {
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] 🚫 Harga swap AMM ($${route.impliedPriceUsd.toFixed(8)}) melebihi batas Ground Zero ($${maxFloorPriceUsd.toFixed(8)}). Terdeteksi harga sudah terpompa! Batal kirim order riil ke blockchain.`);
+          this.multiDryRunEngine.abortScenarioBuy(scenarioId, signal.mint, `PRICE_CAP_EXCEEDED ($${route.impliedPriceUsd.toFixed(8)} > $${maxFloorPriceUsd.toFixed(8)})`);
+          return;
+        }
+
         // Cek posisi aktif riil di dompet:
         const activeHoldingPos = state.positions.find(p => p.mint === signal.mint && (p.status === 'HOLDING' || p.status === 'ACTIVE'));
         const sameMintBuysCount = state.positions.filter(p => p.mint === signal.mint).length;
@@ -1703,6 +1713,8 @@ export class WalletFollowerRunner {
           console.log(`[DRY RUN REALISTIS: ${scenarioId}] 🔄 Menembak swap ke-2 untuk simulasi slippage riil (menggantikan batch_order)...`);
           try {
             await new Promise(r => setTimeout(r, 300));
+            const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
+            const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
             const route2 = await getBrowserBuySwapRoute(
               this.page,
               signal.mint,
@@ -1711,12 +1723,19 @@ export class WalletFollowerRunner {
               this.solPriceUsd,
               config.buySlippagePercent || 15,
               1,
-              signal.pairAddress
+              signal.pairAddress,
+              0,
+              () => this.multiDryRunEngine.isTargetEntered(signal.mint),
+              maxFloorPriceUsd
             );
             if (route2.ok && route2.routeData?.quote) {
               finalQuote = route2.routeData.quote;
               finalPriceUsd = route2.impliedPriceUsd || (stakeUsd / (Number(finalQuote.outAmount) / 1e6));
               console.log(`[DRY RUN REALISTIS: ${scenarioId}] ✅ Swap ke-2 berhasil (${route2.routeData.exchange || '-'} | ${route2.latencyMs}ms). Harga AMM ke-2: $${finalPriceUsd?.toFixed(8)}`);
+            } else if (!route2.ok) {
+              console.warn(`[DRY RUN REALISTIS: ${scenarioId}] ⛔ Swap ke-2 gagal/dibatalkan (${route2.error}). Membatalkan posisi agar tidak ada posisi hantu di harga pucuk!`);
+              this.multiDryRunEngine.abortScenarioBuy(scenarioId, signal.mint, route2.error || 'SWAP2_FAILED');
+              return;
             }
           } catch (e: any) {
             console.warn(`[DRY-RUN-SWAP2-WARN] ${e?.message}`);

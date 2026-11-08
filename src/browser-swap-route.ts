@@ -38,7 +38,8 @@ export async function getBrowserBuySwapRoute(
   maxRetries: number = 3,
   pairAddress?: string,
   retryDelayMs: number = 1000,
-  abortIfTargetEntered?: () => boolean
+  abortIfTargetEntered?: () => boolean,
+  maxPriceUsd?: number
 ): Promise<SwapRouteResult> {
   // Hitung lamports berdasarkan stakeUsd / solPriceUsd
   const inputLamports = Math.floor((stakeUsd / (solPriceUsd > 0 ? solPriceUsd : 145.0)) * 1_000_000_000).toString();
@@ -50,9 +51,9 @@ export async function getBrowserBuySwapRoute(
       return { status: 499, latencyMs: 0, ok: false, error: 'PAGE_CLOSED' };
     }
 
-    // Cek anti-chasing sebelum memulai attempt jika bukan attempt pertama
-    if (attempt > 1 && abortIfTargetEntered && abortIfTargetEntered()) {
-      console.warn(`[SWAP BUY ABORT] ⛔ Target Whale sudah masuk duluan saat retry #${attempt}. Membatalkan probe agar tidak beli di pucuk!`);
+    // Cek anti-chasing sebelum memulai attempt (bahkan di attempt 1)
+    if (abortIfTargetEntered && abortIfTargetEntered()) {
+      console.warn(`[SWAP BUY ABORT] ⛔ Target Whale sudah masuk duluan saat probe attempt #${attempt}. Membatalkan probe agar tidak beli di pucuk!`);
       return { status: 409, latencyMs: 0, ok: false, error: 'ABORT_TARGET_ALREADY_ENTERED' };
     }
 
@@ -145,6 +146,14 @@ export async function getBrowserBuySwapRoute(
       );
 
       if (lastResult.ok) {
+        if (abortIfTargetEntered && abortIfTargetEntered()) {
+          console.warn(`[SWAP BUY ABORT] ⛔ Target Whale terdeteksi masuk duluan pasca evaluasi rute. Membatalkan buy agar tidak beli di pucuk!`);
+          return { status: 409, latencyMs: lastResult.latencyMs, ok: false, error: 'ABORT_TARGET_ALREADY_ENTERED' };
+        }
+        if (maxPriceUsd && maxPriceUsd > 0 && lastResult.impliedPriceUsd && lastResult.impliedPriceUsd > maxPriceUsd) {
+          console.warn(`[SWAP BUY ABORT] 🚫 Harga kuotasi swap AMM ($${lastResult.impliedPriceUsd.toFixed(8)}) melebihi batas Ground Zero ($${maxPriceUsd.toFixed(8)}). Terdeteksi harga sudah terpompa! Membatalkan buy (Anti-Pucuk).`);
+          return { status: 422, latencyMs: lastResult.latencyMs, ok: false, error: `ABORT_PRICE_CAP_EXCEEDED (Price $${lastResult.impliedPriceUsd.toFixed(8)} > $${maxPriceUsd.toFixed(8)})` };
+        }
         return lastResult;
       }
     } catch (err: any) {
