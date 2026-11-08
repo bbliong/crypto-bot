@@ -157,6 +157,7 @@ export class MultiScenarioDryRunEngine {
   private gen2CycleTracker: Map<string, Gen2CycleState> = new Map();
   private s13PingPongTrackers: Map<string, S13PingPongState> = new Map();
   private lastObservedPrices: Map<string, number> = new Map();
+  private abortedBuyKeys: Set<string> = new Set();
   public onTradeAction?: ScenarioTradeActionCallback;
 
   public scenarios: {
@@ -3130,6 +3131,10 @@ export class MultiScenarioDryRunEngine {
     reason: string
   ): void {
     if (realUsdReturned < 0) return;
+    if (this.abortedBuyKeys.has(`${scenarioId}_${mint}`)) {
+      console.warn(`[DRYRUN-ENGINE SYNC] ⛔ Mengabaikan sync rute jual untuk ${mint} [${scenarioId}] karena pembelian sebelumnya telah dibatalkan (ABORTED)!`);
+      return;
+    }
     const targetSc = scenarioId.includes('13') ? this.scenarios.s13 : ((scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))))));
 
     // 1. Cek apakah ini sinkronisasi Stage 1 TP 50% (posisi masih open)
@@ -3188,13 +3193,16 @@ export class MultiScenarioDryRunEngine {
    * Mencegah posisi hantu di dry-run yang menghasilkan profit palsu!
    */
   public abortScenarioBuy(scenarioId: string, mint: string, reason: string): void {
+    this.abortedBuyKeys.add(`${scenarioId}_${mint}`);
     const targetSc = scenarioId.includes('13') ? this.scenarios.s13 : ((scenarioId.includes('9_5') || scenarioId.includes('9.5')) ? this.scenarios.s9_5 : (scenarioId.includes('10') ? this.scenarios.s10 : (scenarioId.includes('9') ? this.scenarios.s9 : (scenarioId.includes('8') ? this.scenarios.s8 : (scenarioId.includes('7') ? this.scenarios.s7 : (scenarioId.includes('6') ? this.scenarios.s6 : (scenarioId.includes('5') ? this.scenarios.s5 : this.scenarios.s4)))))));
     const idx = targetSc.openPositions.findIndex(p => p.mint === mint);
     if (idx >= 0) {
       const pos = targetSc.openPositions[idx];
       targetSc.openPositions.splice(idx, 1);
-      targetSc.availableCash = Number((targetSc.availableCash + pos.costBasisUsd).toFixed(2));
+      const refundedFee = pos.feesPaidUsd || REAL_SWAP_FEE_USD;
+      targetSc.availableCash = Number((targetSc.availableCash + pos.costBasisUsd + refundedFee).toFixed(2));
       targetSc.investedCash = Math.max(0, Number((targetSc.investedCash - pos.costBasisUsd).toFixed(2)));
+      targetSc.totalFeesPaid = Math.max(0, Number((targetSc.totalFeesPaid - refundedFee).toFixed(3)));
       targetSc.recentEvents.unshift({
         id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         timestamp: Date.now(),
@@ -3211,6 +3219,44 @@ export class MultiScenarioDryRunEngine {
       if (targetSc.recentEvents.length > 50) targetSc.recentEvents.pop();
       console.log(`[DRYRUN-ENGINE ABORT] 🚫 Posisi ${pos.symbol} [${scenarioId}] dibatalkan karena rute beli AMM gagal: ${reason}`);
       this.saveState();
+    } else {
+      // Cek apakah posisi sudah terlanjur dipindahkan ke closedTrades oleh fast-tick sebelum rute selesai dicek!
+      const closedIdx = targetSc.closedTrades.findIndex(t => t.mint === mint);
+      if (closedIdx >= 0) {
+        const trade = targetSc.closedTrades[closedIdx];
+        targetSc.closedTrades.splice(closedIdx, 1);
+
+        // Kembalikan saldo kas & hapus laba/rugi hantu beserta fee transaksi beli
+        const buyFeeToRefund = REAL_SWAP_FEE_USD;
+        targetSc.availableCash = Number((targetSc.availableCash - trade.totalReturnedUsd + trade.totalInvestedUsd + buyFeeToRefund).toFixed(2));
+        targetSc.realizedPnl = Number((targetSc.realizedPnl - trade.realizedPnlUsd).toFixed(2));
+        targetSc.totalFeesPaid = Math.max(0, Number((targetSc.totalFeesPaid - (trade.totalFeesPaidUsd || (REAL_SWAP_FEE_USD * 2))).toFixed(3)));
+        targetSc.totalTrades = Math.max(0, targetSc.totalTrades - 1);
+        if (targetSc.totalInvested) targetSc.totalInvested = Math.max(0, Number((targetSc.totalInvested - trade.totalInvestedUsd).toFixed(2)));
+        if (trade.isWin) {
+          targetSc.wins = Math.max(0, targetSc.wins - 1);
+        } else {
+          targetSc.losses = Math.max(0, targetSc.losses - 1);
+        }
+        targetSc.winRate = targetSc.totalTrades > 0 ? Number(((targetSc.wins / targetSc.totalTrades) * 100).toFixed(1)) : 0.0;
+
+        targetSc.recentEvents.unshift({
+          id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: Date.now(),
+          timeWib: formatWibDate(Date.now()),
+          scenarioId: targetSc.id,
+          action: 'SKIP',
+          symbol: trade.symbol,
+          mint: trade.mint,
+          priceUsd: 0,
+          availableCashAfter: targetSc.availableCash,
+          investedCashAfter: targetSc.investedCash,
+          reason: `BUY_ROUTE_FAILED_REVERT (${reason}) - Trade hantu dihapus karena rute beli AMM ditolak / anti-pucuk`,
+        });
+        if (targetSc.recentEvents.length > 50) targetSc.recentEvents.pop();
+        console.log(`[DRYRUN-ENGINE ABORT] 🚫 Trade tertutup ${trade.symbol} [${scenarioId}] dibatalkan & laba hantu dikurangkan karena rute beli AMM gagal: ${reason}`);
+        this.saveState();
+      }
     }
   }
 
