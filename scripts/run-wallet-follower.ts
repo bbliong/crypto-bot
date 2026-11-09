@@ -1590,8 +1590,9 @@ export class WalletFollowerRunner {
         // karena skenario follower memang baru masuk SETELAH Target Whale masuk!
         const isFrontRun = scenarioId.includes('SCENARIO_6') || scenarioId.includes('SCENARIO_7') || scenarioId.includes('SCENARIO_8') || scenarioId.includes('SCENARIO_9') || scenarioId.includes('SCENARIO_10');
         const isGenesisOrEarly = isFrontRun && (reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10'));
-        const maxRetries = isGenesisOrEarly ? 5 : 1;
-        const retryDelayMs = 1000;
+        const isBeta = scenarioId.includes('BETA');
+        const maxRetries = isGenesisOrEarly ? 5 : (isBeta ? 3 : 1);
+        const retryDelayMs = isBeta ? 500 : 1000;
         const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
         const abortCheck = isFrontRun ? (() => this.multiDryRunEngine.isTargetEntered(signal.mint)) : undefined;
 

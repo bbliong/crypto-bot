@@ -205,6 +205,17 @@ export async function getBrowserSellSwapRoute(
     try {
       lastResult = await page.evaluate(
         async ({ mint, fromAddress, inputTokenAmountBaseUnits, tokenDecimals, curSlippage, SOL_MINT, pairAddress }) => {
+          let resolvedPair = pairAddress;
+          if (!resolvedPair) {
+            try {
+              const infoRes = await fetch(`/api/v1/token_info/sol/${mint}`);
+              const infoJson = await infoRes.json();
+              if (infoJson?.data?.token?.biggest_pool) {
+                resolvedPair = infoJson.data.token.biggest_pool;
+              }
+            } catch {}
+          }
+
           const params = new URLSearchParams({
             web_from_source: 'token_poll',
             token_in_chain: 'sol',
@@ -220,8 +231,8 @@ export async function getBrowserSellSwapRoute(
             priority_fee: '0.0001',
             legacy: 'true',
           });
-          if (pairAddress) {
-            params.set('pair_address', pairAddress);
+          if (resolvedPair) {
+            params.set('pair_address', resolvedPair);
           }
           const t0 = performance.now();
           try {
