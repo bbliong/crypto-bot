@@ -1578,12 +1578,16 @@ export class WalletFollowerRunner {
       let unitsToSubmit: string = '0';
 
       if (side === 'BUY') {
-        // Khusus Early Genesis / Dev Front-Run (S8/S9/S9.5/S10): Coba ulang per 1 detik (maks 5x)
+        // Khusus Early Genesis / Dev Front-Run (S6/S7/S8/S9/S9.5/S10): Coba ulang per 1 detik (maks 5x)
         // jika kena little pool hit / jupiter has no route agar pool sempat terindeks sebelum whale masuk.
-        const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
+        // PENTING: Jangan pasang abortCheck isTargetEntered untuk skenario follower (S13/S13-Alpha/S13-Beta dll)
+        // karena skenario follower memang baru masuk SETELAH Target Whale masuk!
+        const isFrontRun = scenarioId.includes('SCENARIO_6') || scenarioId.includes('SCENARIO_7') || scenarioId.includes('SCENARIO_8') || scenarioId.includes('SCENARIO_9') || scenarioId.includes('SCENARIO_10');
+        const isGenesisOrEarly = isFrontRun && (reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10'));
         const maxRetries = isGenesisOrEarly ? 5 : 1;
         const retryDelayMs = 1000;
         const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
+        const abortCheck = isFrontRun ? (() => this.multiDryRunEngine.isTargetEntered(signal.mint)) : undefined;
 
         route = await getBrowserBuySwapRoute(
           this.page,
@@ -1595,7 +1599,7 @@ export class WalletFollowerRunner {
           maxRetries,
           signal.pairAddress,
           retryDelayMs,
-          () => this.multiDryRunEngine.isTargetEntered(signal.mint),
+          abortCheck,
           maxFloorPriceUsd
         );
       } else {
@@ -1716,7 +1720,8 @@ export class WalletFollowerRunner {
       const autobuySc = String(config.autobuyScenario || (config.enabled ? 'BOTH' : 'OFF')).toUpperCase();
 
       if (isRealOrderTargeted && side === 'BUY') {
-        const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
+        const isFrontRun = scenarioId.includes('SCENARIO_6') || scenarioId.includes('SCENARIO_7') || scenarioId.includes('SCENARIO_8') || scenarioId.includes('SCENARIO_9') || scenarioId.includes('SCENARIO_10');
+        const isGenesisOrEarly = isFrontRun && (reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10'));
         const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
         if (isGenesisOrEarly && maxFloorPriceUsd && route.impliedPriceUsd && route.impliedPriceUsd > maxFloorPriceUsd) {
           console.warn(`[AUTO-BUY REAL ORDER ABORTED] 🚫 Harga swap AMM ($${route.impliedPriceUsd.toFixed(8)}) melebihi batas Ground Zero ($${maxFloorPriceUsd.toFixed(8)}). Terdeteksi harga sudah terpompa! Batal kirim order riil ke blockchain.`);
@@ -1754,8 +1759,10 @@ export class WalletFollowerRunner {
           console.log(`[DRY RUN REALISTIS: ${scenarioId}] 🔄 Menembak swap ke-2 untuk simulasi slippage riil (menggantikan batch_order)...`);
           try {
             await new Promise(r => setTimeout(r, 300));
-            const isGenesisOrEarly = reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10');
+            const isFrontRun = scenarioId.includes('SCENARIO_6') || scenarioId.includes('SCENARIO_7') || scenarioId.includes('SCENARIO_8') || scenarioId.includes('SCENARIO_9') || scenarioId.includes('SCENARIO_10');
+            const isGenesisOrEarly = isFrontRun && (reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10'));
             const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
+            const abortCheck = isFrontRun ? (() => this.multiDryRunEngine.isTargetEntered(signal.mint)) : undefined;
             const route2 = await getBrowserBuySwapRoute(
               this.page,
               signal.mint,
@@ -1766,7 +1773,7 @@ export class WalletFollowerRunner {
               1,
               signal.pairAddress,
               0,
-              () => this.multiDryRunEngine.isTargetEntered(signal.mint),
+              abortCheck,
               maxFloorPriceUsd
             );
             if (route2.ok && route2.routeData?.quote) {
