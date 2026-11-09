@@ -1535,20 +1535,20 @@ export class WalletFollowerRunner {
       if (part === 'S10' || part === 'SCE10' || part === 'SCENARIO_10') {
         if (scUpper.includes('10') || scUpper.includes('DYNAMIC_WAVE')) return true;
       }
-      if (part === 'S13' || part === 'SCE13' || part === 'SCENARIO_13') {
-        if (scUpper.includes('13') || scUpper.includes('PINGPONG')) return true;
+      if (part === 'S13_BETA_1' || part === 'BETA_1' || part === 'BETA1') {
+        if (scUpper.includes('BETA_1') || scUpper.includes('BETA-1')) return true;
+      }
+      if (part === 'S13_BETA' || part === 'BETA') {
+        if ((scUpper.includes('BETA') || scUpper.includes('13_BETA')) && !scUpper.includes('BETA_1') && !scUpper.includes('BETA-1')) return true;
       }
       if (part === 'S13_ALPHA_1' || part === 'ALPHA_1' || part === 'ALPHA1') {
         if (scUpper.includes('ALPHA_1') || scUpper.includes('ALPHA-1')) return true;
       }
-      if (part === 'S13_BETA_1' || part === 'BETA_1' || part === 'BETA1') {
-        if (scUpper.includes('BETA_1') || scUpper.includes('BETA-1')) return true;
-      }
       if (part === 'S13_ALPHA' || part === 'ALPHA') {
-        if (scUpper.includes('ALPHA')) return true;
+        if ((scUpper.includes('ALPHA') || scUpper.includes('13_ALPHA')) && !scUpper.includes('ALPHA_1') && !scUpper.includes('ALPHA-1')) return true;
       }
-      if (part === 'S13_BETA' || part === 'BETA') {
-        if (scUpper.includes('BETA')) return true;
+      if (part === 'S13' || part === 'SCE13' || part === 'SCENARIO_13') {
+        if (scUpper.includes('13') && !scUpper.includes('ALPHA') && !scUpper.includes('BETA')) return true;
       }
     }
     return false;
@@ -1745,6 +1745,12 @@ export class WalletFollowerRunner {
           isRealOrderTargeted = false;
         } else if (sameMintBuysCount >= 1 && !isReEntryAllowed) {
           console.warn(`[AUTO-BUY REAL ORDER ABORTED] Token ${signal.symbol} [${signal.mint.slice(0, 8)}...] sudah pernah dibeli (${sameMintBuysCount}x) dan bukan koin Gen-2 Re-Entry yang memenuhi syarat!`);
+          isRealOrderTargeted = false;
+        }
+
+        const activeRealCount = state.positions.filter(p => p.status === 'HOLDING' || p.status === 'ACTIVE').length;
+        if (config.maxActiveRealPositions > 0 && activeRealCount >= config.maxActiveRealPositions && !activeHoldingPos) {
+          console.warn(`[AUTO-BUY REAL ORDER ABORTED] Max Active Real Positions tercapai (${activeRealCount}/${config.maxActiveRealPositions})! Melewati order riil.`);
           isRealOrderTargeted = false;
         }
 

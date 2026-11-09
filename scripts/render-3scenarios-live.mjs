@@ -763,7 +763,7 @@ export function render3ScenariosLiveHtml() {
         <div class="autobuy-title">
           <span>⚡ REAL AUTO-BUY & DRY-RUN CONTROLLER</span>
           <span class="status-pill status-${activeScenario.toLowerCase()}">
-            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : (activeScenario === 'DRY_RUN' ? '⚪ SEMUANYA DRY RUN REALISTIS' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S5' ? '🟠 S5 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : (activeScenario === 'S7' ? '🔵 S7 REAL AUTO-BUY AKTIF' : (activeScenario === 'S8' ? '🟣 S8 REAL AUTO-BUY AKTIF' : (activeScenario === 'S9' ? '🔷 S9 REAL AUTO-BUY AKTIF' : '🟢 SEMUA REAL AUTO-BUY AKTIF')))))))}
+            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : (activeScenario === 'DRY_RUN' ? '⚪ SEMUANYA DRY RUN REALISTIS' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S5' ? '🟠 S5 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : (activeScenario === 'S7' ? '🔵 S7 REAL AUTO-BUY AKTIF' : (activeScenario === 'S8' ? '🟣 S8 REAL AUTO-BUY AKTIF' : (activeScenario === 'S9' ? '🔷 S9 REAL AUTO-BUY AKTIF' : (activeScenario === 'S13_BETA' ? '⚡ S13-BETA REAL AUTO-BUY AKTIF' : '🟢 SEMUA REAL AUTO-BUY AKTIF'))))))))}
           </span>
         </div>
         <div style="font-size: 0.78rem; color: #94a3b8;">
@@ -862,6 +862,14 @@ export function render3ScenariosLiveHtml() {
           <div class="radio-text">
             <span class="radio-main" style="color: #f59e0b;">⚡ Skenario 10 Saja</span>
             <span class="radio-hint">Dynamic Wave Runner (Whale Sync)</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'S13_BETA' ? 'active-s13-beta' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S13_BETA" ${activeScenario === 'S13_BETA' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #ec4899;">⚡ Skenario 13-Beta</span>
+            <span class="radio-hint">Instant Buy + 1.5s Panic Rescue ($0.25)</span>
           </div>
         </label>
 

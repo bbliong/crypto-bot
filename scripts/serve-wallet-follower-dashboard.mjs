@@ -191,9 +191,9 @@ const server = createServer((req, res) => {
 
         if (patch.autobuyScenario !== undefined) {
           const sc = String(patch.autobuyScenario).toUpperCase();
-          if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'BOTH'].includes(sc)) {
+          if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S13', 'S13_BETA', 'S13_ALPHA', 'S13_BETA_1', 'S13_ALPHA_1', 'BOTH'].includes(sc) || sc.includes('BETA') || sc.includes('ALPHA')) {
             updated.autobuyScenario = sc;
-            updated.enabled = (sc !== 'OFF');
+            updated.enabled = (sc !== 'OFF' && sc !== 'DRY_RUN');
           }
         } else if (patch.enabled !== undefined) {
           updated.enabled = Boolean(patch.enabled);

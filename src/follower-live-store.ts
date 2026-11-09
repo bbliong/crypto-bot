@@ -14,7 +14,7 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'S9' | 'S10' | 'BOTH';
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'S9' | 'S10' | 'S13' | 'S13_ALPHA' | 'S13_BETA' | 'S13_ALPHA_1' | 'S13_BETA_1' | 'BOTH' | string;
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
@@ -26,6 +26,11 @@ export interface FollowerLiveConfig {
   stakeUsdS8?: number;
   stakeUsdS9?: number;
   stakeUsdS10?: number;
+  stakeUsdS13?: number;
+  stakeUsdS13Beta?: number;
+  stakeUsdS13Alpha?: number;
+  stakeUsdS13Beta1?: number;
+  stakeUsdS13Alpha1?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -55,6 +60,11 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   stakeUsdS8: 1.0,
   stakeUsdS9: 1.0,
   stakeUsdS10: 1.0,
+  stakeUsdS13: 5.0,
+  stakeUsdS13Beta: 0.25,
+  stakeUsdS13Alpha: 5.0,
+  stakeUsdS13Beta1: 0.25,
+  stakeUsdS13Alpha1: 5.0,
   maxBuysQuota: 3,
   maxActiveRealPositions: 1,
   buySlippagePercent: 15,
@@ -185,9 +195,9 @@ export function saveFollowerLiveConfig(
 
   if (patch.autobuyScenario !== undefined) {
     const sc = String(patch.autobuyScenario).toUpperCase();
-    if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'BOTH'].includes(sc)) {
+    if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S13', 'S13_ALPHA', 'S13_BETA', 'S13_ALPHA_1', 'S13_BETA_1', 'BOTH'].includes(sc) || sc.includes('BETA') || sc.includes('ALPHA')) {
       updated.autobuyScenario = sc as any;
-      updated.enabled = sc !== 'OFF';
+      updated.enabled = sc !== 'OFF' && sc !== 'DRY_RUN';
     }
   } else if (patch.enabled !== undefined) {
     updated.enabled = Boolean(patch.enabled);
@@ -227,6 +237,21 @@ export function saveFollowerLiveConfig(
   }
   if (patch.stakeUsdS10 !== undefined || updated.stakeUsdS10 === undefined) {
     updated.stakeUsdS10 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS10 !== undefined ? patch.stakeUsdS10 : updated.stakeUsdS10) || 1.0));
+  }
+  if (patch.stakeUsdS13 !== undefined || updated.stakeUsdS13 === undefined) {
+    updated.stakeUsdS13 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13 !== undefined ? patch.stakeUsdS13 : updated.stakeUsdS13) || 5.0));
+  }
+  if (patch.stakeUsdS13Beta !== undefined || updated.stakeUsdS13Beta === undefined) {
+    updated.stakeUsdS13Beta = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13Beta !== undefined ? patch.stakeUsdS13Beta : updated.stakeUsdS13Beta) || 0.25));
+  }
+  if (patch.stakeUsdS13Alpha !== undefined || updated.stakeUsdS13Alpha === undefined) {
+    updated.stakeUsdS13Alpha = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13Alpha !== undefined ? patch.stakeUsdS13Alpha : updated.stakeUsdS13Alpha) || 5.0));
+  }
+  if (patch.stakeUsdS13Beta1 !== undefined || updated.stakeUsdS13Beta1 === undefined) {
+    updated.stakeUsdS13Beta1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13Beta1 !== undefined ? patch.stakeUsdS13Beta1 : updated.stakeUsdS13Beta1) || 0.25));
+  }
+  if (patch.stakeUsdS13Alpha1 !== undefined || updated.stakeUsdS13Alpha1 === undefined) {
+    updated.stakeUsdS13Alpha1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13Alpha1 !== undefined ? patch.stakeUsdS13Alpha1 : updated.stakeUsdS13Alpha1) || 5.0));
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;
