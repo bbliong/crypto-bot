@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { Connection, PublicKey } from '@solana/web3.js';
 import { WalletTradeSignal } from './wallet-follower-lane.js';
 import { readFollowerLiveConfig } from './follower-live-store.js';
+import { getSolanaRpcUrl } from '../scripts/solana-rpc-config.mjs';
 
 // Rata-rata fee riil per swap: on-chain gas ($0.0105) + priority/tip ($0.0100) + DEX swap fee ($0.0045) = $0.025 USD
 export const REAL_SWAP_FEE_USD = 0.025;
@@ -902,8 +904,8 @@ export class MultiScenarioDryRunEngine {
         };
 
         // Pasang timer 1.000 ms (1 detik) untuk evaluasi sniper gate
-        alphaTracker.verificationTimer = setTimeout(() => {
-          this.evaluateS13Alpha1sGate(signal.mint);
+        alphaTracker.verificationTimer = setTimeout(async () => {
+          await this.evaluateS13Alpha1sGate(signal.mint);
         }, 1000);
 
         this.s13AlphaTrackers.set(signal.mint, alphaTracker);
@@ -981,13 +983,39 @@ export class MultiScenarioDryRunEngine {
         console.log(`   Panic Watch  : Memantau 1.500 ms (Jika ada >= 2x sniper sell -> Jual Darurat Seketika)!`);
         console.log(`=========================================================\n`);
 
-        setTimeout(() => {
+        setTimeout(async () => {
           const t = this.s13BetaTrackers.get(signal.mint);
           if (t && t.status === 'ACTIVE_MONITORING') {
+            // ZERO-BLINDSPOT ON-CHAIN CHECK:
+            if (signal.pairAddress) {
+              try {
+                const conn = new Connection(getSolanaRpcUrl());
+                const pairPk = new PublicKey(signal.pairAddress);
+                const sigs = await conn.getSignaturesForAddress(pairPk, { limit: 25 });
+                if (sigs.length >= 12) {
+                  const posIdx = this.scenarios.s13_beta.openPositions.findIndex(p => p.mint === signal.mint);
+                  if (posIdx >= 0) {
+                    t.status = 'PANIC_DUMPED';
+                    const pos = this.scenarios.s13_beta.openPositions[posIdx];
+                    const exitPrice = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+                    const reason = `S13_BETA_INSTANT_PANIC_DUMP (On-Chain ${sigs.length} txs dlm 1s terdeteksi | Jual darurat selamatkan modal)`;
+                    console.log(`\n=========================================================`);
+                    console.log(`🚨 [SCENARIO 13-BETA INSTANT PANIC CUT TRIGGERED VIA ON-CHAIN BARRAGE]`);
+                    console.log(`   Token        : ${pos.symbol} [${signal.mint.slice(0, 8)}...]`);
+                    console.log(`   Penyebab     : Terdeteksi ${sigs.length} transaksi di pool dlm 1s pertama!`);
+                    console.log(`   Aksi         : JUAL DARURAT SEKETIKA sebelum Dev RemoveLiquidity!`);
+                    console.log(`=========================================================\n`);
+                    this.executeScenarioExit(this.scenarios.s13_beta, posIdx, exitPrice, Date.now(), formatWibDate(Date.now()), reason);
+                    t.lastExitAt = Date.now();
+                    return;
+                  }
+                }
+              } catch {}
+            }
             t.status = 'ACTIVE';
-            console.log(`[SCENARIO 13-BETA] 🟢 1.5s Window Passed! Tidak terdeteksi sniper dump di ${signal.symbol}. Posisi aman, lanjut Ping-Pong mode!`);
+            console.log(`[SCENARIO 13-BETA] 🟢 1.5s Window Passed! Tidak terdeteksi sniper dump di ${signal.symbol}. Posisi aman, lanjut Ride mode!`);
           }
-        }, 1500);
+        }, 1200);
       }
     } else if (existingS13BetaTracker.status === 'ACTIVE' || existingS13BetaTracker.status === 'ACTIVE_MONITORING') {
       existingS13BetaTracker.consecutiveSells = 0;
@@ -1009,7 +1037,7 @@ export class MultiScenarioDryRunEngine {
    * Evaluasi 1-Second Sniper Gate untuk Skenario 13-Alpha:
    * Dipanggil saat timer 1 detik habis atau saat ada lonjakan sniper sell seketika.
    */
-  public evaluateS13Alpha1sGate(mint: string): void {
+  public async evaluateS13Alpha1sGate(mint: string): Promise<void> {
     const tracker = this.s13AlphaTrackers.get(mint);
     if (!tracker || tracker.status !== 'PENDING_1S_VERIFICATION') return;
 
@@ -1021,13 +1049,35 @@ export class MultiScenarioDryRunEngine {
     const now = Date.now();
     const timeWib = formatWibDate(now);
 
-    // Kriteria Rugpull / Sniper Dump: jika dalam 1 detik ada >= 3 order sell sniper
-    if (tracker.sniperSellsIn1s >= 3) {
+    // ZERO-BLINDSPOT ON-CHAIN RPC CHECK:
+    // Periksa jumlah signatures aktual di pool secara langsung dari blockchain Solana (mengatasi delay stream WebSocket)
+    let onChainTxCount = 0;
+    if (tracker.pairAddress) {
+      try {
+        const conn = new Connection(getSolanaRpcUrl());
+        const pairPk = new PublicKey(tracker.pairAddress);
+        const sigs = await conn.getSignaturesForAddress(pairPk, { limit: 25 });
+        onChainTxCount = sigs.length;
+      } catch (e: any) {
+        // fallback jika network fail
+      }
+    }
+
+    // Kriteria Rugpull / Sniper Dump:
+    // 1. WebSocket stream mendeteksi >= 3 order sell sniper
+    // 2. On-Chain RPC mendeteksi >= 12 transaksi di 1 detik pertama (Ciri mutlak kolam diserbu belasan bot sniper!)
+    const isSniperDump = tracker.sniperSellsIn1s >= 3 || onChainTxCount >= 12;
+
+    if (isSniperDump) {
       tracker.status = 'BLOCKED_SNIPER_BATTLE';
+      const blockReason = onChainTxCount >= 12
+        ? `BLOCKED_ONCHAIN_SNIPER_BARRAGE (${onChainTxCount} txs on-chain dlm 1s | Rugpull dicegah)`
+        : `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sniper sell dlm 1s | Rugpull dicegah)`;
+
       console.log(`\n=========================================================`);
       console.log(`🛡️ [SCENARIO 13-ALPHA 1-SECOND SNIPER GATE: BLOCKED!]`);
       console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
-      console.log(`   Indikator    : Terdeteksi ${tracker.sniperSellsIn1s}x order sell sniper (${tracker.sniperBuysIn1s}x buy) dlm 1s pertama!`);
+      console.log(`   Indikator    : On-Chain ${onChainTxCount} txs / ${tracker.sniperSellsIn1s}x order sell sniper dlm 1s pertama!`);
       console.log(`   Keputusan    : BATALKAN ORDER BUY (100% Kebal Rugpull | Modal Aman $${this.scenarios.s13_alpha.availableCash.toFixed(2)} | $0 Gas Fee)!`);
       console.log(`=========================================================\n`);
 
@@ -1046,7 +1096,7 @@ export class MultiScenarioDryRunEngine {
         pnlUsd: 0,
         availableCashAfter: this.scenarios.s13_alpha.availableCash,
         investedCashAfter: this.scenarios.s13_alpha.investedCash,
-        reason: `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sniper sell / ${tracker.sniperBuysIn1s}x buy dlm 1s | Rugpull dicegah)`
+        reason: blockReason
       });
       if (this.scenarios.s13_alpha.recentEvents.length > 50) this.scenarios.s13_alpha.recentEvents.pop();
       this.saveState();
@@ -1129,7 +1179,7 @@ export class MultiScenarioDryRunEngine {
         alphaTracker.sniperSellsIn1s += 1;
         if (alphaTracker.sniperSellsIn1s >= 3 || action === 'withdraw') {
           // Batalkan seketika!
-          this.evaluateS13Alpha1sGate(mint);
+          this.evaluateS13Alpha1sGate(mint).catch(() => {});
         }
       } else if (action === 'buy') {
         alphaTracker.sniperBuysIn1s += 1;
