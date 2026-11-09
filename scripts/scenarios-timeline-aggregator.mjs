@@ -147,7 +147,7 @@ export const SCENARIO_META = {
     color: '#8b5cf6',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('13_ALPHA') || s.includes('13-ALPHA') || s.includes('ALPHA');
+      return (s.includes('13_ALPHA') || s.includes('13-ALPHA') || s.includes('ALPHA')) && !s.includes('ALPHA_1') && !s.includes('ALPHA-1') && !s.includes('ALPHA1');
     }
   },
   sce13_beta: {
@@ -160,7 +160,33 @@ export const SCENARIO_META = {
     color: '#f59e0b',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('13_BETA') || s.includes('13-BETA') || s.includes('BETA');
+      return (s.includes('13_BETA') || s.includes('13-BETA') || s.includes('BETA')) && !s.includes('BETA_1') && !s.includes('BETA-1') && !s.includes('BETA1');
+    }
+  },
+  sce13_alpha_1: {
+    id: 'sce13_alpha_1',
+    canonicalKey: 's13_alpha_1',
+    name: 'Skenario 13-Alpha-1: 1s Sniper Gate + Whale Wave Rider (Max Profit on Whale Sell Signals)',
+    shortName: 'Skenario 13-Alpha-1',
+    description: 'Whale Wave Rider: 1s Sniper Gate. Tahan selama Whale ping-pong normal. Exit jika Whale sell 3x beruntun, sell tunggal >= 2.5 SOL, trailing stop -20% dari peak, atau timeout 10m.',
+    ruleBadge: 'Whale Wave Rider | Exit on Whale Dump Signals',
+    color: '#ec4899',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('ALPHA_1') || s.includes('ALPHA-1') || s.includes('ALPHA1');
+    }
+  },
+  sce13_beta_1: {
+    id: 'sce13_beta_1',
+    canonicalKey: 's13_beta_1',
+    name: 'Skenario 13-Beta-1: Instant Buy + 1.5s Rescue + Whale Wave Rider (Max Profit on Whale Sell Signals)',
+    shortName: 'Skenario 13-Beta-1',
+    description: 'Whale Wave Rider: Instant Buy + 1.5s Rescue. Tahan selama Whale ping-pong normal. Exit jika Whale sell 3x beruntun, sell tunggal >= 2.5 SOL, trailing stop -20% dari peak, atau timeout 10m.',
+    ruleBadge: 'Instant Buy + Wave Rider | Exit on Whale Dump Signals',
+    color: '#10b981',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('BETA_1') || s.includes('BETA-1') || s.includes('BETA1');
     }
   }
 };
@@ -168,6 +194,8 @@ export const SCENARIO_META = {
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('alpha_1') || str.includes('alpha-1') || str.includes('alpha1')) return 'sce13_alpha_1';
+  if (str.includes('beta_1') || str.includes('beta-1') || str.includes('beta1')) return 'sce13_beta_1';
   if (str.includes('alpha')) return 'sce13_alpha';
   if (str.includes('beta')) return 'sce13_beta';
   if (str.includes('13_5') || str.includes('13.5') || str.includes('dynamic_pingpong') || str.includes('14')) return 'sce13_5';

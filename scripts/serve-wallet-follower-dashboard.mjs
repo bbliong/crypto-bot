@@ -492,6 +492,40 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // Dedicated Scenario 13-Alpha-1 Detail Timeline (/3scenarios/sce13_alpha_1, /add-fol/3scenarios/sce13_alpha_1)
+  if (pathname.includes('/3scenarios/sce13_alpha_1') || pathname.includes('/4scenarios/sce13_alpha_1') || pathname.includes('/scenarios/sce13_alpha_1') || pathname.includes('/3scenarios/alpha1') || pathname.includes('/3scenarios/alpha_1')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce13_alpha_1', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S13-Alpha-1 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 13-Beta-1 Detail Timeline (/3scenarios/sce13_beta_1, /add-fol/3scenarios/sce13_beta_1)
+  if (pathname.includes('/3scenarios/sce13_beta_1') || pathname.includes('/4scenarios/sce13_beta_1') || pathname.includes('/scenarios/sce13_beta_1') || pathname.includes('/3scenarios/beta1') || pathname.includes('/3scenarios/beta_1')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce13_beta_1', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S13-Beta-1 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
   // Dedicated Scenario 13-Alpha Detail Timeline (/3scenarios/sce13_alpha, /add-fol/3scenarios/sce13_alpha)
   if (pathname.includes('/3scenarios/sce13_alpha') || pathname.includes('/4scenarios/sce13_alpha') || pathname.includes('/scenarios/sce13_alpha') || pathname.includes('/3scenarios/alpha')) {
     (async () => {

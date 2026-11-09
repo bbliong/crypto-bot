@@ -1538,6 +1538,12 @@ export class WalletFollowerRunner {
       if (part === 'S13' || part === 'SCE13' || part === 'SCENARIO_13') {
         if (scUpper.includes('13') || scUpper.includes('PINGPONG')) return true;
       }
+      if (part === 'S13_ALPHA_1' || part === 'ALPHA_1' || part === 'ALPHA1') {
+        if (scUpper.includes('ALPHA_1') || scUpper.includes('ALPHA-1')) return true;
+      }
+      if (part === 'S13_BETA_1' || part === 'BETA_1' || part === 'BETA1') {
+        if (scUpper.includes('BETA_1') || scUpper.includes('BETA-1')) return true;
+      }
       if (part === 'S13_ALPHA' || part === 'ALPHA') {
         if (scUpper.includes('ALPHA')) return true;
       }

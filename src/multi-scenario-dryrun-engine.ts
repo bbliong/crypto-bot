@@ -36,6 +36,7 @@ export interface ScenarioPosition {
   exchange?: string;
   waitingBuybackSince?: number;
   peakGainPct?: number;
+  peakPriceUsd?: number;
 }
 
 export interface ScenarioTradeRecord {
@@ -216,6 +217,8 @@ export class MultiScenarioDryRunEngine {
   private s13_5PingPongTrackers: Map<string, S13_5_PingPongState> = new Map();
   private s13AlphaTrackers: Map<string, S13AlphaState> = new Map();
   private s13BetaTrackers: Map<string, S13BetaState> = new Map();
+  private s13Alpha1Trackers: Map<string, S13AlphaState> = new Map();
+  private s13Beta1Trackers: Map<string, S13BetaState> = new Map();
   private lastObservedPrices: Map<string, number> = new Map();
   private abortedBuyKeys: Set<string> = new Set();
   public onTradeAction?: ScenarioTradeActionCallback;
@@ -233,6 +236,8 @@ export class MultiScenarioDryRunEngine {
     s13_5: ScenarioState;
     s13_alpha: ScenarioState;
     s13_beta: ScenarioState;
+    s13_alpha_1: ScenarioState;
+    s13_beta_1: ScenarioState;
   };
 
   constructor(dataDir?: string) {
@@ -255,6 +260,8 @@ export class MultiScenarioDryRunEngine {
     s13_5: ScenarioState;
     s13_alpha: ScenarioState;
     s13_beta: ScenarioState;
+    s13_alpha_1: ScenarioState;
+    s13_beta_1: ScenarioState;
   } {
     return {
       s4: {
@@ -485,15 +492,53 @@ export class MultiScenarioDryRunEngine {
         closedTrades: [],
         recentEvents: [],
       },
+      s13_alpha_1: {
+        id: 'SCENARIO_13_ALPHA_1_WAVE_RIDER',
+        name: 'Skenario 13-Alpha-1: 1s Sniper Gate + Whale Wave Rider (Max Profit on Whale Sell Signals)',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Ride). Detik 0: Whale masuk >= 20 SOL, Alpha-1 verifikasi 1s on-chain. Jika ada >= 3 sniper sell atau >= 12 txs -> ABORT (100% Kebal Rugpull). Jika aman, BUY di detik 1. TAHAN SELAMA WHALE PING-PONG! Exit HANYA jika: (1) Whale sell 3x beruntun tanpa buyback, (2) Whale sell tunggal >= 2.5 SOL, (3) Trailing stop -20% dari peak setelah gain >= +100%, atau (4) Stop loss -10% / Max age 10m.',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
+      s13_beta_1: {
+        id: 'SCENARIO_13_BETA_1_WAVE_RIDER',
+        name: 'Skenario 13-Beta-1: Instant Buy + 1.5s Rescue + Whale Wave Rider (Max Profit on Whale Sell Signals)',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Ride). Detik 0: Langsung BUY bersama Whale. Jika dalam 1.5s terdeteksi >= 2 sniper sell atau >= 12 on-chain txs -> Instant Emergency Dump selamatkan modal. Jika aman, TAHAN SELAMA WHALE PING-PONG! Exit HANYA jika: (1) Whale sell 3x beruntun tanpa buyback, (2) Whale sell tunggal >= 2.5 SOL, (3) Trailing stop -20% dari peak setelah gain >= +100%, atau (4) Stop loss -10% / Max age 10m.',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
     };
   }
 
-  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState; s13: ScenarioState; s13_5: ScenarioState; s13_alpha: ScenarioState; s13_beta: ScenarioState } {
+  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState; s13: ScenarioState; s13_5: ScenarioState; s13_alpha: ScenarioState; s13_beta: ScenarioState; s13_alpha_1: ScenarioState; s13_beta_1: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10 || parsed.s13 || parsed.s13_5 || parsed.s13_alpha || parsed.s13_beta) {
+        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10 || parsed.s13 || parsed.s13_5 || parsed.s13_alpha || parsed.s13_beta || parsed.s13_alpha_1 || parsed.s13_beta_1) {
           const fresh = this.initFreshScenarios();
           const s4 = parsed.s4 || fresh.s4;
           const s5 = parsed.s5 || fresh.s5;
@@ -507,10 +552,16 @@ export class MultiScenarioDryRunEngine {
           const s13_5 = parsed.s13_5 || fresh.s13_5;
           const s13_alpha = parsed.s13_alpha || fresh.s13_alpha;
           const s13_beta = parsed.s13_beta || fresh.s13_beta;
+          const s13_alpha_1 = parsed.s13_alpha_1 || fresh.s13_alpha_1;
+          const s13_beta_1 = parsed.s13_beta_1 || fresh.s13_beta_1;
           s13_alpha.name = fresh.s13_alpha.name;
           s13_alpha.description = fresh.s13_alpha.description;
           s13_beta.name = fresh.s13_beta.name;
           s13_beta.description = fresh.s13_beta.description;
+          s13_alpha_1.name = fresh.s13_alpha_1.name;
+          s13_alpha_1.description = fresh.s13_alpha_1.description;
+          s13_beta_1.name = fresh.s13_beta_1.name;
+          s13_beta_1.description = fresh.s13_beta_1.description;
           if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
           if (s5.totalFeesPaid === undefined) s5.totalFeesPaid = 0.0;
           if (s6.totalFeesPaid === undefined) s6.totalFeesPaid = 0.0;
@@ -523,7 +574,9 @@ export class MultiScenarioDryRunEngine {
           if (s13_5.totalFeesPaid === undefined) s13_5.totalFeesPaid = 0.0;
           if (s13_alpha.totalFeesPaid === undefined) s13_alpha.totalFeesPaid = 0.0;
           if (s13_beta.totalFeesPaid === undefined) s13_beta.totalFeesPaid = 0.0;
-          return { s4, s5, s6, s7, s8, s9, s9_5, s10, s13, s13_5, s13_alpha, s13_beta };
+          if (s13_alpha_1.totalFeesPaid === undefined) s13_alpha_1.totalFeesPaid = 0.0;
+          if (s13_beta_1.totalFeesPaid === undefined) s13_beta_1.totalFeesPaid = 0.0;
+          return { s4, s5, s6, s7, s8, s9, s9_5, s10, s13, s13_5, s13_alpha, s13_beta, s13_alpha_1, s13_beta_1 };
         }
       } catch {}
     }
@@ -910,11 +963,21 @@ export class MultiScenarioDryRunEngine {
 
         this.s13AlphaTrackers.set(signal.mint, alphaTracker);
 
+        // Pasang juga untuk S13-Alpha-1 (Whale Wave Rider)
+        const alpha1Tracker: S13AlphaState = {
+          ...alphaTracker,
+          verificationTimer: setTimeout(async () => {
+            await this.evaluateS13Alpha1Gate(signal.mint);
+          }, 1000)
+        };
+        this.s13Alpha1Trackers.set(signal.mint, alpha1Tracker);
+
         console.log(`\n=========================================================`);
-        console.log(`🛡️ [SCENARIO 13-ALPHA 1S SNIPER GATE ACTIVATED] Target Whale Masuk ${signal.solAmount || (targetUsd / 90).toFixed(1)} SOL ($${targetUsd.toFixed(0)}) di '${signal.symbol}'!`);
+        console.log(`🛡️ [SCENARIO 13-ALPHA & ALPHA-1 1S GATE ACTIVATED] Target Whale Masuk ${signal.solAmount || (targetUsd / 90).toFixed(1)} SOL ($${targetUsd.toFixed(0)}) di '${signal.symbol}'!`);
         console.log(`   Status      : Membuka Jendela Verifikasi 1.000 ms (Detik 0 -> Detik 1)...`);
-        console.log(`   Aturan Gate : Jika dalam 1s terdeteksi >= 3 sniper sell -> BATALKAN BUY (100% Kebal Rugpull).`);
-        console.log(`                 Jika sniper sell <= 2 -> EKSEKUSI BUY di detik 1 (Terkonfirmasi Winner)!`);
+        console.log(`   Aturan Gate : Jika dalam 1s terdeteksi >= 3 sniper sell atau >= 12 txs -> BATALKAN BUY.`);
+        console.log(`                 Jika aman -> EKSEKUSI BUY di detik 1!`);
+        console.log(`                 S13-Alpha: Target TP +100% | S13-Alpha-1: Wave Rider (Cuan Maksimal)`);
         console.log(`=========================================================\n`);
       }
     } else if (existingS13AlphaTracker.status === 'ACTIVE') {
@@ -927,6 +990,20 @@ export class MultiScenarioDryRunEngine {
       if (s13AlphaPosIdx >= 0) {
         const pos = this.scenarios.s13_alpha.openPositions[s13AlphaPosIdx];
         pos.lastPriceUsd = signal.priceUsd;
+      }
+    }
+
+    // Update S13-Alpha-1 saat Whale Buyback / Buy More
+    const existingS13Alpha1Tracker = this.s13Alpha1Trackers.get(signal.mint);
+    if (existingS13Alpha1Tracker && existingS13Alpha1Tracker.status === 'ACTIVE') {
+      existingS13Alpha1Tracker.consecutiveSells = 0;
+      existingS13Alpha1Tracker.whaleRemainingHolding = signal.remainingHolding;
+      if (signal.remainingHolding > existingS13Alpha1Tracker.whalePeakHolding) {
+        existingS13Alpha1Tracker.whalePeakHolding = signal.remainingHolding;
+      }
+      const posIdx = this.scenarios.s13_alpha_1.openPositions.findIndex(p => p.mint === signal.mint);
+      if (posIdx >= 0) {
+        this.scenarios.s13_alpha_1.openPositions[posIdx].lastPriceUsd = signal.priceUsd;
       }
     }
 
@@ -976,16 +1053,40 @@ export class MultiScenarioDryRunEngine {
           createdBetaPos.entryCount = 1;
         }
 
+        // S13-Beta-1 (Wave Rider) juga langsung BUY di Detik 0 bersama Whale!
+        const beta1Tracker: S13BetaState = { ...betaTracker };
+        this.s13Beta1Trackers.set(signal.mint, beta1Tracker);
+        let s13Beta1Stake = 5.0;
+        try {
+          const liveCfg = readFollowerLiveConfig(this.dataDir);
+          s13Beta1Stake = (liveCfg as any).stakeUsdS13Beta1 || (liveCfg as any).stakeUsdS13 || 5.0;
+        } catch {}
+
+        this.processScenarioBuy(this.scenarios.s13_beta_1, signal, isGroundZero, targetUsd, now, timeWib, {
+          maxTokenExposure: s13Beta1Stake,
+          getStake: () => s13Beta1Stake,
+          disallowAccumulation: true,
+          allowReEntryCycle: true,
+          cycleIndex: 1
+        });
+        const createdBeta1Pos = this.scenarios.s13_beta_1.openPositions.find(p => p.mint === signal.mint);
+        if (createdBeta1Pos) {
+          createdBeta1Pos.pairAddress = signal.pairAddress || '';
+          createdBeta1Pos.entryCount = 1;
+        }
+
         console.log(`\n=========================================================`);
-        console.log(`⚡ [SCENARIO 13-BETA INSTANT BUY AT DETIK 0]`);
+        console.log(`⚡ [SCENARIO 13-BETA & BETA-1 INSTANT BUY AT DETIK 0]`);
         console.log(`   Token        : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
         console.log(`   Modal Siklus : $${s13BetaStake.toFixed(2)} (Masuk bersama Whale ${signal.solAmount || (targetUsd/90).toFixed(1)} SOL)`);
-        console.log(`   Panic Watch  : Memantau 1.500 ms (Jika ada >= 2x sniper sell -> Jual Darurat Seketika)!`);
+        console.log(`   Panic Watch  : Memantau 1.500 ms (Jika ada >= 2x sniper sell atau >= 12 txs -> Jual Darurat Seketika)!`);
+        console.log(`   S13-Beta: Target TP +100% | S13-Beta-1: Wave Rider (Cuan Maksimal)`);
         console.log(`=========================================================\n`);
 
         setTimeout(async () => {
           const t = this.s13BetaTrackers.get(signal.mint);
-          if (t && t.status === 'ACTIVE_MONITORING') {
+          const t1 = this.s13Beta1Trackers.get(signal.mint);
+          if ((t && t.status === 'ACTIVE_MONITORING') || (t1 && t1.status === 'ACTIVE_MONITORING')) {
             // ZERO-BLINDSPOT ON-CHAIN CHECK:
             if (signal.pairAddress) {
               try {
@@ -994,26 +1095,36 @@ export class MultiScenarioDryRunEngine {
                 const sigs = await conn.getSignaturesForAddress(pairPk, { limit: 25 });
                 if (sigs.length >= 12) {
                   const posIdx = this.scenarios.s13_beta.openPositions.findIndex(p => p.mint === signal.mint);
-                  if (posIdx >= 0) {
+                  if (posIdx >= 0 && t) {
                     t.status = 'PANIC_DUMPED';
                     const pos = this.scenarios.s13_beta.openPositions[posIdx];
                     const exitPrice = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
                     const reason = `S13_BETA_INSTANT_PANIC_DUMP (On-Chain ${sigs.length} txs dlm 1s terdeteksi | Jual darurat selamatkan modal)`;
-                    console.log(`\n=========================================================`);
-                    console.log(`🚨 [SCENARIO 13-BETA INSTANT PANIC CUT TRIGGERED VIA ON-CHAIN BARRAGE]`);
-                    console.log(`   Token        : ${pos.symbol} [${signal.mint.slice(0, 8)}...]`);
-                    console.log(`   Penyebab     : Terdeteksi ${sigs.length} transaksi di pool dlm 1s pertama!`);
-                    console.log(`   Aksi         : JUAL DARURAT SEKETIKA sebelum Dev RemoveLiquidity!`);
-                    console.log(`=========================================================\n`);
                     this.executeScenarioExit(this.scenarios.s13_beta, posIdx, exitPrice, Date.now(), formatWibDate(Date.now()), reason);
                     t.lastExitAt = Date.now();
-                    return;
                   }
+                  const pos1Idx = this.scenarios.s13_beta_1.openPositions.findIndex(p => p.mint === signal.mint);
+                  if (pos1Idx >= 0 && t1) {
+                    t1.status = 'PANIC_DUMPED';
+                    const pos1 = this.scenarios.s13_beta_1.openPositions[pos1Idx];
+                    const exitPrice1 = pos1.lastPriceUsd > 0 ? pos1.lastPriceUsd : pos1.avgEntryPriceUsd;
+                    const reason1 = `S13_BETA_1_INSTANT_PANIC_DUMP (On-Chain ${sigs.length} txs dlm 1s terdeteksi | Jual darurat selamatkan modal)`;
+                    this.executeScenarioExit(this.scenarios.s13_beta_1, pos1Idx, exitPrice1, Date.now(), formatWibDate(Date.now()), reason1);
+                    t1.lastExitAt = Date.now();
+                  }
+                  console.log(`\n=========================================================`);
+                  console.log(`🚨 [SCENARIO 13-BETA & BETA-1 INSTANT PANIC CUT TRIGGERED VIA ON-CHAIN BARRAGE]`);
+                  console.log(`   Token        : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
+                  console.log(`   Penyebab     : Terdeteksi ${sigs.length} transaksi di pool dlm 1s pertama!`);
+                  console.log(`   Aksi         : JUAL DARURAT SEKETIKA sebelum Dev RemoveLiquidity!`);
+                  console.log(`=========================================================\n`);
+                  return;
                 }
               } catch {}
             }
-            t.status = 'ACTIVE';
-            console.log(`[SCENARIO 13-BETA] 🟢 1.5s Window Passed! Tidak terdeteksi sniper dump di ${signal.symbol}. Posisi aman, lanjut Ride mode!`);
+            if (t) t.status = 'ACTIVE';
+            if (t1) t1.status = 'ACTIVE';
+            console.log(`[SCENARIO 13-BETA & BETA-1] 🟢 1.5s Window Passed! Tidak terdeteksi sniper dump di ${signal.symbol}. Posisi aman, lanjut Ride mode!`);
           }
         }, 1200);
       }
@@ -1027,6 +1138,20 @@ export class MultiScenarioDryRunEngine {
       if (s13BetaPosIdx >= 0) {
         const pos = this.scenarios.s13_beta.openPositions[s13BetaPosIdx];
         pos.lastPriceUsd = signal.priceUsd;
+      }
+    }
+
+    // Update S13-Beta-1 saat Whale Buyback / Buy More
+    const existingS13Beta1Tracker = this.s13Beta1Trackers.get(signal.mint);
+    if (existingS13Beta1Tracker && (existingS13Beta1Tracker.status === 'ACTIVE' || existingS13Beta1Tracker.status === 'ACTIVE_MONITORING')) {
+      existingS13Beta1Tracker.consecutiveSells = 0;
+      existingS13Beta1Tracker.whaleRemainingHolding = signal.remainingHolding;
+      if (signal.remainingHolding > existingS13Beta1Tracker.whalePeakHolding) {
+        existingS13Beta1Tracker.whalePeakHolding = signal.remainingHolding;
+      }
+      const posIdx = this.scenarios.s13_beta_1.openPositions.findIndex(p => p.mint === signal.mint);
+      if (posIdx >= 0) {
+        this.scenarios.s13_beta_1.openPositions[posIdx].lastPriceUsd = signal.priceUsd;
       }
     }
 
@@ -1158,6 +1283,114 @@ export class MultiScenarioDryRunEngine {
   }
 
   /**
+   * Evaluasi 1-Second Sniper Gate untuk Skenario 13-Alpha-1:
+   */
+  public async evaluateS13Alpha1Gate(mint: string): Promise<void> {
+    const tracker = this.s13Alpha1Trackers.get(mint);
+    if (!tracker || tracker.status !== 'PENDING_1S_VERIFICATION') return;
+
+    if (tracker.verificationTimer) {
+      clearTimeout(tracker.verificationTimer);
+      tracker.verificationTimer = undefined;
+    }
+
+    const now = Date.now();
+    const timeWib = formatWibDate(now);
+
+    let onChainTxCount = 0;
+    if (tracker.pairAddress) {
+      try {
+        const conn = new Connection(getSolanaRpcUrl());
+        const pairPk = new PublicKey(tracker.pairAddress);
+        const sigs = await conn.getSignaturesForAddress(pairPk, { limit: 25 });
+        onChainTxCount = sigs.length;
+      } catch (e: any) {}
+    }
+
+    const isSniperDump = tracker.sniperSellsIn1s >= 3 || onChainTxCount >= 12;
+
+    if (isSniperDump) {
+      tracker.status = 'BLOCKED_SNIPER_BATTLE';
+      const blockReason = onChainTxCount >= 12
+        ? `BLOCKED_ONCHAIN_SNIPER_BARRAGE (${onChainTxCount} txs on-chain dlm 1s | Rugpull dicegah)`
+        : `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sniper sell dlm 1s | Rugpull dicegah)`;
+
+      this.scenarios.s13_alpha_1.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s13_alpha_1.id,
+        action: 'BUY',
+        symbol: tracker.symbol,
+        mint: tracker.mint,
+        usdReceived: 0,
+        feeUsd: 0,
+        tokens: 0,
+        priceUsd: 0,
+        pnlUsd: 0,
+        availableCashAfter: this.scenarios.s13_alpha_1.availableCash,
+        investedCashAfter: this.scenarios.s13_alpha_1.investedCash,
+        reason: blockReason
+      });
+      if (this.scenarios.s13_alpha_1.recentEvents.length > 50) this.scenarios.s13_alpha_1.recentEvents.pop();
+      this.saveState();
+      return;
+    }
+
+    tracker.status = 'ACTIVE';
+    tracker.verifiedAt = now;
+    tracker.cycleCount = 1;
+
+    let stakeUsd = 5.0;
+    try {
+      const liveCfg = readFollowerLiveConfig(this.dataDir);
+      stakeUsd = (liveCfg as any).stakeUsdS13Alpha1 || (liveCfg as any).stakeUsdS13 || 5.0;
+    } catch {}
+
+    const buySignal = tracker.targetBuySignal || {
+      action: 'buy',
+      mint: tracker.mint,
+      symbol: tracker.symbol,
+      tokenName: tracker.symbol,
+      tokenAmount: 0,
+      remainingHolding: tracker.whaleRemainingHolding,
+      solAmount: tracker.whaleFirstBuySol,
+      usdAmount: tracker.whaleFirstBuyUsd,
+      priceUsd: tracker.whaleFirstBuyUsd > 0 ? (tracker.whaleFirstBuyUsd / (tracker.whaleFirstBuySol * 1e6)) : 0.000038,
+      txHash: `s13_alpha1_entry1_${now}`,
+      timestamp: Math.floor(now / 1000),
+      isOpenOrClose: true,
+      isFirstBuy: true,
+      pairAddress: tracker.pairAddress,
+      exchange: tracker.exchange
+    };
+
+    console.log(`\n=========================================================`);
+    console.log(`🟢 [SCENARIO 13-ALPHA-1 1S SNIPER GATE: PASSED!]`);
+    console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
+    console.log(`   Indikator    : Akumulasi Bersih! (Hanya ${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy dlm 1s).`);
+    console.log(`   Keputusan    : TERKONFIRMASI WINNER (Main Pool)! Masuk Mode Wave Rider di detik ke-1...`);
+    console.log(`   Modal Siklus : $${stakeUsd.toFixed(2)}`);
+    console.log(`=========================================================\n`);
+
+    this.processScenarioBuy(this.scenarios.s13_alpha_1, buySignal, false, tracker.whaleFirstBuyUsd, now, timeWib, {
+      maxTokenExposure: stakeUsd,
+      getStake: () => stakeUsd,
+      disallowAccumulation: true,
+      allowReEntryCycle: true,
+      cycleIndex: 1
+    });
+
+    const createdPos = this.scenarios.s13_alpha_1.openPositions.find(p => p.mint === mint);
+    if (createdPos) {
+      createdPos.pairAddress = tracker.pairAddress || '';
+      createdPos.entryCount = 1;
+    }
+
+    this.saveState();
+  }
+
+  /**
    * Rekam aktivitas trade (Buy / Sell / Withdraw) dari kolam / pembeli luar (sniper)
    * Digunakan untuk:
    * 1. S13-Alpha: Menghitung order sell sniper di 1s pertama (jika >= 3x -> batalkan buy)
@@ -1172,13 +1405,12 @@ export class MultiScenarioDryRunEngine {
     const now = Date.now();
     const timeWib = formatWibDate(now);
 
-    // 1. S13-Alpha Evaluation
+    // 1. S13-Alpha & S13-Alpha-1 Evaluation
     const alphaTracker = this.s13AlphaTrackers.get(mint);
     if (alphaTracker && alphaTracker.status === 'PENDING_1S_VERIFICATION') {
       if (action === 'sell' || action === 'withdraw') {
         alphaTracker.sniperSellsIn1s += 1;
         if (alphaTracker.sniperSellsIn1s >= 3 || action === 'withdraw') {
-          // Batalkan seketika!
           this.evaluateS13Alpha1sGate(mint).catch(() => {});
         }
       } else if (action === 'buy') {
@@ -1186,13 +1418,24 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
-    // 2. S13-Beta Evaluation
+    const alpha1Tracker = this.s13Alpha1Trackers.get(mint);
+    if (alpha1Tracker && alpha1Tracker.status === 'PENDING_1S_VERIFICATION') {
+      if (action === 'sell' || action === 'withdraw') {
+        alpha1Tracker.sniperSellsIn1s += 1;
+        if (alpha1Tracker.sniperSellsIn1s >= 3 || action === 'withdraw') {
+          this.evaluateS13Alpha1Gate(mint).catch(() => {});
+        }
+      } else if (action === 'buy') {
+        alpha1Tracker.sniperBuysIn1s += 1;
+      }
+    }
+
+    // 2. S13-Beta & S13-Beta-1 Evaluation
     const betaTracker = this.s13BetaTrackers.get(mint);
     if (betaTracker && betaTracker.status === 'ACTIVE_MONITORING') {
       if (action === 'sell' || action === 'withdraw') {
         betaTracker.sniperSellsIn1s += 1;
         if (betaTracker.sniperSellsIn1s >= 2 || action === 'withdraw') {
-          // Trigger Instant Panic Dump!
           const posIdx = this.scenarios.s13_beta.openPositions.findIndex(p => p.mint === mint);
           if (posIdx >= 0) {
             betaTracker.status = 'PANIC_DUMPED';
@@ -1212,6 +1455,33 @@ export class MultiScenarioDryRunEngine {
         }
       } else if (action === 'buy') {
         betaTracker.sniperBuysIn1s += 1;
+      }
+    }
+
+    const beta1Tracker = this.s13Beta1Trackers.get(mint);
+    if (beta1Tracker && beta1Tracker.status === 'ACTIVE_MONITORING') {
+      if (action === 'sell' || action === 'withdraw') {
+        beta1Tracker.sniperSellsIn1s += 1;
+        if (beta1Tracker.sniperSellsIn1s >= 2 || action === 'withdraw') {
+          const posIdx = this.scenarios.s13_beta_1.openPositions.findIndex(p => p.mint === mint);
+          if (posIdx >= 0) {
+            beta1Tracker.status = 'PANIC_DUMPED';
+            const pos = this.scenarios.s13_beta_1.openPositions[posIdx];
+            const exitPrice = (priceUsd && priceUsd > 0) ? priceUsd : (pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd);
+            const reason = `S13_BETA_1_INSTANT_PANIC_DUMP (${beta1Tracker.sniperSellsIn1s}x sniper sell dlm 1s terdeteksi | Jual darurat selamatkan modal)`;
+            console.log(`\n=========================================================`);
+            console.log(`🚨 [SCENARIO 13-BETA-1 INSTANT PANIC CUT TRIGGERED]`);
+            console.log(`   Token        : ${pos.symbol} [${mint.slice(0, 8)}...]`);
+            console.log(`   Penyebab     : Terdeteksi ${beta1Tracker.sniperSellsIn1s}x order sell sniper di 1s pertama!`);
+            console.log(`   Aksi         : JUAL DARURAT SEKETIKA sebelum Dev RemoveLiquidity!`);
+            console.log(`   Harga Keluar : $${exitPrice.toFixed(8)}`);
+            console.log(`=========================================================\n`);
+            this.executeScenarioExit(this.scenarios.s13_beta_1, posIdx, exitPrice, now, timeWib, reason);
+            beta1Tracker.lastExitAt = now;
+          }
+        }
+      } else if (action === 'buy') {
+        beta1Tracker.sniperBuysIn1s += 1;
       }
     }
   }
@@ -2792,7 +3062,7 @@ export class MultiScenarioDryRunEngine {
 
     // 10. Skenario 13-Beta: Emergency Dump Exit (Tanpa Ping-Pong Dip Buy)
     const s13BetaTracker = this.s13BetaTrackers.get(signal.mint);
-    if (s13BetaTracker && s13BetaTracker.status === 'ACTIVE') {
+    if (s13BetaTracker && (s13BetaTracker.status === 'ACTIVE' || s13BetaTracker.status === 'ACTIVE_MONITORING')) {
       s13BetaTracker.consecutiveSells += 1;
       s13BetaTracker.whaleRemainingHolding = signal.remainingHolding;
       const peakHolding = s13BetaTracker.whalePeakHolding || 1;
@@ -2824,6 +3094,80 @@ export class MultiScenarioDryRunEngine {
         // Tanpa Ping-Pong: Sekali keluar, tidak re-enter beli lembah!
         if (isDanger3ConsecutiveSells || isDangerCumSold35 || isDangerLargeSingleSell || isPast10M) {
           s13BetaTracker.status = 'TERMINATED';
+        }
+      }
+    }
+
+    // 11. Skenario 13-Alpha-1: Whale Wave Rider Exit on Dump Signals
+    const s13Alpha1Tracker = this.s13Alpha1Trackers.get(signal.mint);
+    if (s13Alpha1Tracker && s13Alpha1Tracker.status === 'ACTIVE') {
+      s13Alpha1Tracker.consecutiveSells += 1;
+      s13Alpha1Tracker.whaleRemainingHolding = signal.remainingHolding;
+      const peakHolding = s13Alpha1Tracker.whalePeakHolding || 1;
+      const cumSoldPct = Math.max(0, ((peakHolding - signal.remainingHolding) / peakHolding) * 100);
+      const singleSellUsd = targetUsd;
+      const elapsedSinceFirstBuy = now - s13Alpha1Tracker.whaleFirstBuyAt;
+      const isPast10M = elapsedSinceFirstBuy >= 10 * 60 * 1000;
+
+      const posIdx = this.scenarios.s13_alpha_1.openPositions.findIndex(p => p.mint === signal.mint);
+      const isWhale3ConsecutiveSells = s13Alpha1Tracker.consecutiveSells >= 3;
+      const isWhaleLargeSell = singleSellUsd >= 220.0 || (signal.solAmount && signal.solAmount >= 2.5);
+      const isDangerCumSold35 = cumSoldPct >= 35.0 || sellRatio >= 0.35 || isFullExit;
+
+      if (posIdx >= 0) {
+        const pos = this.scenarios.s13_alpha_1.openPositions[posIdx];
+        pos.lastPriceUsd = pOut;
+
+        if (isWhale3ConsecutiveSells || isWhaleLargeSell || isDangerCumSold35 || isPast10M) {
+          s13Alpha1Tracker.status = 'TERMINATED';
+          let reason = '';
+          if (isWhale3ConsecutiveSells) reason = `S13_ALPHA_1_WHALE_3_CONSECUTIVE_SELLS (Whale sell ${s13Alpha1Tracker.consecutiveSells}x beruntun tanpa buyback | Cuan Max Exit)`;
+          else if (isWhaleLargeSell) reason = `S13_ALPHA_1_LARGE_WHALE_SELL (Whale sell tunggal $${singleSellUsd.toFixed(0)} >= $220 | Cuan Max Exit)`;
+          else if (isDangerCumSold35) reason = `S13_ALPHA_1_EMERGENCY_CUM_DUMP_EXIT`;
+          else reason = `S13_ALPHA_1_MAX_AGE_10M_TIMEOUT_EXIT`;
+          this.executeScenarioExit(this.scenarios.s13_alpha_1, posIdx, pOut, now, timeWib, reason);
+          s13Alpha1Tracker.lastExitAt = now;
+        }
+      } else {
+        if (isWhale3ConsecutiveSells || isWhaleLargeSell || isDangerCumSold35 || isPast10M) {
+          s13Alpha1Tracker.status = 'TERMINATED';
+        }
+      }
+    }
+
+    // 12. Skenario 13-Beta-1: Whale Wave Rider Exit on Dump Signals
+    const s13Beta1Tracker = this.s13Beta1Trackers.get(signal.mint);
+    if (s13Beta1Tracker && (s13Beta1Tracker.status === 'ACTIVE' || s13Beta1Tracker.status === 'ACTIVE_MONITORING')) {
+      s13Beta1Tracker.consecutiveSells += 1;
+      s13Beta1Tracker.whaleRemainingHolding = signal.remainingHolding;
+      const peakHolding = s13Beta1Tracker.whalePeakHolding || 1;
+      const cumSoldPct = Math.max(0, ((peakHolding - signal.remainingHolding) / peakHolding) * 100);
+      const singleSellUsd = targetUsd;
+      const elapsedSinceFirstBuy = now - s13Beta1Tracker.whaleFirstBuyAt;
+      const isPast10M = elapsedSinceFirstBuy >= 10 * 60 * 1000;
+
+      const posIdx = this.scenarios.s13_beta_1.openPositions.findIndex(p => p.mint === signal.mint);
+      const isWhale3ConsecutiveSells = s13Beta1Tracker.consecutiveSells >= 3;
+      const isWhaleLargeSell = singleSellUsd >= 220.0 || (signal.solAmount && signal.solAmount >= 2.5);
+      const isDangerCumSold35 = cumSoldPct >= 35.0 || sellRatio >= 0.35 || isFullExit;
+
+      if (posIdx >= 0) {
+        const pos = this.scenarios.s13_beta_1.openPositions[posIdx];
+        pos.lastPriceUsd = pOut;
+
+        if (isWhale3ConsecutiveSells || isWhaleLargeSell || isDangerCumSold35 || isPast10M) {
+          s13Beta1Tracker.status = 'TERMINATED';
+          let reason = '';
+          if (isWhale3ConsecutiveSells) reason = `S13_BETA_1_WHALE_3_CONSECUTIVE_SELLS (Whale sell ${s13Beta1Tracker.consecutiveSells}x beruntun tanpa buyback | Cuan Max Exit)`;
+          else if (isWhaleLargeSell) reason = `S13_BETA_1_LARGE_WHALE_SELL (Whale sell tunggal $${singleSellUsd.toFixed(0)} >= $220 | Cuan Max Exit)`;
+          else if (isDangerCumSold35) reason = `S13_BETA_1_EMERGENCY_CUM_DUMP_EXIT`;
+          else reason = `S13_BETA_1_MAX_AGE_10M_TIMEOUT_EXIT`;
+          this.executeScenarioExit(this.scenarios.s13_beta_1, posIdx, pOut, now, timeWib, reason);
+          s13Beta1Tracker.lastExitAt = now;
+        }
+      } else {
+        if (isWhale3ConsecutiveSells || isWhaleLargeSell || isDangerCumSold35 || isPast10M) {
+          s13Beta1Tracker.status = 'TERMINATED';
         }
       }
     }
@@ -2902,6 +3246,43 @@ export class MultiScenarioDryRunEngine {
             if (trackerAlpha) { trackerAlpha.status = 'TERMINATED'; trackerAlpha.lastExitAt = now; }
             const trackerBeta = this.s13BetaTrackers.get(mint);
             if (trackerBeta) { trackerBeta.status = 'TERMINATED'; trackerBeta.lastExitAt = now; }
+            continue;
+          }
+        }
+
+        // Khusus Skenario 13-Alpha-1 & Skenario 13-Beta-1: Whale Wave Rider (Max Profit Riding + Trailing Stop -20% from Peak)
+        if ((scenario.id === 'SCENARIO_13_ALPHA_1_WAVE_RIDER' || scenario.id === 'SCENARIO_13_BETA_1_WAVE_RIDER') && pos.avgEntryPriceUsd > 0) {
+          const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+
+          // Update peak price
+          if (!pos.peakPriceUsd || priceUsd > pos.peakPriceUsd) {
+            pos.peakPriceUsd = priceUsd;
+          }
+
+          // 1. Trailing Stop: Jika sudah mencapai profit >= +100% dan harga terkoreksi >= 20% dari puncak
+          if (gainPct >= 100.0) {
+            const dropFromPeak = ((pos.peakPriceUsd - priceUsd) / pos.peakPriceUsd) * 100;
+            if (dropFromPeak >= 20.0) {
+              const exitReason = `TRAILING_STOP_20%_LOCK (Gain: +${gainPct.toFixed(1)}% | Drop ${dropFromPeak.toFixed(1)}% dari Peak $${pos.peakPriceUsd.toFixed(8)} | Lock Cuan Max!)`;
+              this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+              const trackerAlpha1 = this.s13Alpha1Trackers.get(mint);
+              if (trackerAlpha1) { trackerAlpha1.status = 'TERMINATED'; trackerAlpha1.lastExitAt = now; }
+              const trackerBeta1 = this.s13Beta1Trackers.get(mint);
+              if (trackerBeta1) { trackerBeta1.status = 'TERMINATED'; trackerBeta1.lastExitAt = now; }
+              continue;
+            }
+          }
+
+          // 2. Cut Loss Pengaman (-10%)
+          if (gainPct <= -10.0) {
+            const exitReason = `STOP_LOSS_10% (Drop: ${gainPct.toFixed(1)}% <= -10% | Cut-loss pengaman)`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            const trackerAlpha1 = this.s13Alpha1Trackers.get(mint);
+            if (trackerAlpha1) { trackerAlpha1.status = 'TERMINATED'; trackerAlpha1.lastExitAt = now; }
+            const trackerBeta1 = this.s13Beta1Trackers.get(mint);
+            if (trackerBeta1) { trackerBeta1.status = 'TERMINATED'; trackerBeta1.lastExitAt = now; }
             continue;
           }
         }
@@ -3011,7 +3392,8 @@ export class MultiScenarioDryRunEngine {
 
         // 1. Hard Take-Profit Gate: Jika harga melonjak >= +200% (>= 3x dari harga entry)
         // Eksekusi sell 100% instan untuk mengamankan profit multi-bagger sebelum dev rugpull
-        if (pos.avgEntryPriceUsd > 0 && priceUsd >= pos.avgEntryPriceUsd * 3.0) {
+        // (Dikecualikan untuk S13-Alpha-1 & S13-Beta-1 yang merupakan Wave Rider pelari bebas cuan maksimal)
+        if (pos.avgEntryPriceUsd > 0 && priceUsd >= pos.avgEntryPriceUsd * 3.0 && scenario.id !== 'SCENARIO_13_ALPHA_1_WAVE_RIDER' && scenario.id !== 'SCENARIO_13_BETA_1_WAVE_RIDER') {
           const now = Date.now();
           const timeWib = formatWibDate(now);
           const tokensToSell = pos.tokens;
@@ -3725,7 +4107,7 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
-    // 8. Cek Skenario 13-Alpha: 60s Cycle Timeout & 10m Session Max Age
+    // 8. Cek Skenario 13-Alpha: 10m Session Max Age
     const s13_alpha = this.scenarios.s13_alpha;
     for (let i = s13_alpha.openPositions.length - 1; i >= 0; i--) {
       const pos = s13_alpha.openPositions[i];
@@ -3740,20 +4122,9 @@ export class MultiScenarioDryRunEngine {
         changed = true;
         continue;
       }
-      const elapsedSinceEntry = now - pos.openedAt;
-      if (elapsedSinceEntry >= 60000) {
-        const timeWib = formatWibDate(now);
-        const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
-        const elapsedSec = Math.round(elapsedSinceEntry / 1000);
-        const reason = `TIMEOUT_${elapsedSec}S_CYCLE_EXIT`;
-        this.executeScenarioExit(s13_alpha, i, pOut, now, timeWib, reason);
-        if (tracker) tracker.lastExitAt = now;
-        changed = true;
-        continue;
-      }
     }
 
-    // 9. Cek Skenario 13-Beta: 60s Cycle Timeout & 10m Session Max Age
+    // 9. Cek Skenario 13-Beta: 10m Session Max Age
     const s13_beta = this.scenarios.s13_beta;
     for (let i = s13_beta.openPositions.length - 1; i >= 0; i--) {
       const pos = s13_beta.openPositions[i];
@@ -3768,14 +4139,37 @@ export class MultiScenarioDryRunEngine {
         changed = true;
         continue;
       }
-      const elapsedSinceEntry = now - pos.openedAt;
-      if (elapsedSinceEntry >= 60000) {
+    }
+
+    // 10. Cek Skenario 13-Alpha-1: 10m Session Max Age
+    const s13_alpha_1 = this.scenarios.s13_alpha_1;
+    for (let i = s13_alpha_1.openPositions.length - 1; i >= 0; i--) {
+      const pos = s13_alpha_1.openPositions[i];
+      if (pos.tokens <= 0) continue;
+      const tracker = this.s13Alpha1Trackers.get(pos.mint);
+      if (tracker && (now - tracker.whaleFirstBuyAt) >= 10 * 60 * 1000) {
+        tracker.status = 'TERMINATED';
         const timeWib = formatWibDate(now);
         const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
-        const elapsedSec = Math.round(elapsedSinceEntry / 1000);
-        const reason = `TIMEOUT_${elapsedSec}S_CYCLE_EXIT`;
-        this.executeScenarioExit(s13_beta, i, pOut, now, timeWib, reason);
-        if (tracker) tracker.lastExitAt = now;
+        const reason = `S13_ALPHA_1_MAX_AGE_10M_TIMEOUT_EXIT`;
+        this.executeScenarioExit(s13_alpha_1, i, pOut, now, timeWib, reason);
+        changed = true;
+        continue;
+      }
+    }
+
+    // 11. Cek Skenario 13-Beta-1: 10m Session Max Age
+    const s13_beta_1 = this.scenarios.s13_beta_1;
+    for (let i = s13_beta_1.openPositions.length - 1; i >= 0; i--) {
+      const pos = s13_beta_1.openPositions[i];
+      if (pos.tokens <= 0) continue;
+      const tracker = this.s13Beta1Trackers.get(pos.mint);
+      if (tracker && (now - tracker.whaleFirstBuyAt) >= 10 * 60 * 1000) {
+        tracker.status = 'TERMINATED';
+        const timeWib = formatWibDate(now);
+        const pOut = pos.lastPriceUsd > 0 ? pos.lastPriceUsd : pos.avgEntryPriceUsd;
+        const reason = `S13_BETA_1_MAX_AGE_10M_TIMEOUT_EXIT`;
+        this.executeScenarioExit(s13_beta_1, i, pOut, now, timeWib, reason);
         changed = true;
         continue;
       }
@@ -3912,6 +4306,8 @@ export class MultiScenarioDryRunEngine {
 
   public getScenarioById(scenarioId: string): ScenarioState {
     const id = (scenarioId || '').toLowerCase();
+    if (id.includes('13_alpha_1') || id.includes('13-alpha-1') || id.includes('alpha_1') || id.includes('alpha-1')) return this.scenarios.s13_alpha_1;
+    if (id.includes('13_beta_1') || id.includes('13-beta-1') || id.includes('beta_1') || id.includes('beta-1')) return this.scenarios.s13_beta_1;
     if (id.includes('13_alpha') || id.includes('13-alpha') || id.includes('alpha')) return this.scenarios.s13_alpha;
     if (id.includes('13_beta') || id.includes('13-beta') || id.includes('beta')) return this.scenarios.s13_beta;
     if (id.includes('13_5') || id.includes('13.5')) return this.scenarios.s13_5;
@@ -4164,8 +4560,16 @@ export class MultiScenarioDryRunEngine {
     return this.scenarios.s13_beta.openPositions.length;
   }
 
+  public getS13Alpha1OpenPositionsCount(): number {
+    return this.scenarios.s13_alpha_1.openPositions.length;
+  }
+
+  public getS13Beta1OpenPositionsCount(): number {
+    return this.scenarios.s13_beta_1.openPositions.length;
+  }
+
   public isTargetEntered(mint: string): boolean {
-    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8, this.scenarios.s13, this.scenarios.s13_5, this.scenarios.s13_alpha, this.scenarios.s13_beta]) {
+    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8, this.scenarios.s13, this.scenarios.s13_5, this.scenarios.s13_alpha, this.scenarios.s13_beta, this.scenarios.s13_alpha_1, this.scenarios.s13_beta_1]) {
       const pos = sc.openPositions.find(p => p.mint === mint);
       if (pos && pos.targetEnteredAt && pos.targetEnteredAt > 0) return true;
     }
