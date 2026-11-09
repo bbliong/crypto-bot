@@ -1228,6 +1228,56 @@ export class WalletFollowerRunner {
               await this.maybeExecuteRealSell('LANE_1', rp.mint, rp.exitPriceUsd || 0, rp.pendingSellRatio, isFull);
             }
           }
+        } else if (rp.lane.includes('SCENARIO_13_BETA') || rp.lane.includes('S13_BETA')) {
+          // S13-Beta Real Position: Cek apakah di engine S13-Beta posisi token ini sudah closed (Panic Dump triggered)
+          const betaClosed = this.multiDryRunEngine.scenarios.s13_beta.closedTrades.some(t => t.mint === rp.mint);
+          const beta1Closed = this.multiDryRunEngine.scenarios.s13_beta_1.closedTrades.some(t => t.mint === rp.mint);
+          if (betaClosed || beta1Closed) {
+            if (!this.inFlightSellMints.has(rp.mint)) {
+              console.log(`[FAST SELL RETRY 1.5s] ⚡ Menjual posisi riil S13-Beta ${rp.symbol} (${rp.remainingTokens} tokens) pasca Panic Dump...`);
+              this.inFlightSellMints.add(rp.mint);
+              try {
+                const config = readFollowerLiveConfig(this.dataDir);
+                const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
+                const onChain = await getOnChainTokenBalance(rp.mint, rp.wallet);
+                const units = onChain && onChain.amount && onChain.amount !== '0' ? onChain.amount : Math.floor(rp.remainingTokens * 1e6).toString();
+                
+                const sellRoute = await getBrowserSellSwapRoute(
+                  this.page,
+                  rp.mint,
+                  rp.wallet,
+                  units,
+                  6,
+                  config.sellSlippagePercent || 20,
+                  5
+                );
+                if (sellRoute.ok && sellRoute.routeData) {
+                  const submitRes = await this.liveAdapter.submitSwapOrder(this.page, {
+                    side: 'SELL',
+                    mint: rp.mint,
+                    wallet: rp.wallet,
+                    amountBaseUnits: units,
+                    routeData: sellRoute.routeData,
+                    config,
+                    solUsd: this.solPriceUsd,
+                    tokenPriceUsd: sellRoute.impliedPriceUsd || 0,
+                  });
+                  if (submitRes.ok) {
+                    console.log(`[FAST SELL SUCCESS] ✅ Posisi riil S13-Beta ${rp.symbol} berhasil dijual 100%!`);
+                    rp.status = 'CLOSED';
+                    rp.updatedAt = Date.now();
+                    writeFollowerRealState(this.dataDir, realState);
+                    const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
+                    burnAndCloseTokenAccount(rp.mint).catch(() => {});
+                  }
+                }
+              } catch (e: any) {
+                console.warn(`[FAST SELL RETRY ERR] ${e?.message}`);
+              } finally {
+                this.inFlightSellMints.delete(rp.mint);
+              }
+            }
+          }
         }
       }
     } catch {}
