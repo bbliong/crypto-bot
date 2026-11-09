@@ -140,10 +140,10 @@ export const SCENARIO_META = {
   sce13_alpha: {
     id: 'sce13_alpha',
     canonicalKey: 's13_alpha',
-    name: 'Skenario 13-Alpha: 1-Second Sniper Gate (Pre-Entry Verification | 100% Anti-Rugpull)',
+    name: 'Skenario 13-Alpha: 1-Second Sniper Gate (Pre-Entry 1s Verification | Target TP +100% Full Exit)',
     shortName: 'Skenario 13-Alpha',
-    description: '1-Second Sniper Gate: Verifikasi 1.000 ms sebelum buy. Jika dalam 1s terdeteksi >= 3 sniper sell, batalkan buy (100% kebal rugpull). Jika <= 1 sell, eksekusi buy di detik 1.',
-    ruleBadge: '1-Second Sniper Gate | 100% Anti-Rugpull',
+    description: '1-Second Sniper Gate: Verifikasi 1.000 ms sebelum buy. Jika dalam 1s terdeteksi >= 3 sniper sell, batalkan buy (100% kebal rugpull). Jika aman (<= 2 sell), eksekusi buy di detik 1. Target Take Profit +100% (2x Lipat Modal) lalu langsung Full Exit.',
+    ruleBadge: '1-Second Sniper Gate | Target TP +100% Full Exit',
     color: '#8b5cf6',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
@@ -153,10 +153,10 @@ export const SCENARIO_META = {
   sce13_beta: {
     id: 'sce13_beta',
     canonicalKey: 's13_beta',
-    name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue on Sniper Sells)',
+    name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue | Target TP +100% Full Exit)',
     shortName: 'Skenario 13-Beta',
-    description: 'Instant Buy + 1.5s Panic Cut: Buy instan di Detik 0 bersama Whale. Jika dalam 1.5s terdeteksi >= 2 sniper sell, LANGSUNG JUAL DARURAT seketika untuk amankan modal.',
-    ruleBadge: 'Instant Buy + 1.5s Panic Cut | Rescue on Sniper Sell',
+    description: 'Instant Buy + 1.5s Panic Cut: Buy instan di Detik 0 bersama Whale. Jika dalam 1.5s terdeteksi >= 2 sniper sell, LANGSUNG JUAL DARURAT seketika untuk amankan modal. Jika aman, tahan hingga Target Take Profit +100% (2x Lipat Modal) lalu langsung Full Exit.',
+    ruleBadge: 'Instant Buy + 1.5s Panic Cut | Target TP +100% Full Exit',
     color: '#f59e0b',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');

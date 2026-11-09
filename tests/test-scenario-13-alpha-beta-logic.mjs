@@ -109,15 +109,65 @@ async function runTests() {
   // Posisi S13-Beta tetap aman karena hanya ada 1 sell (< 2):
   assert(engine.scenarios.s13_beta.openPositions.length === 1, 'S13-Beta tetap memegang posisi karena sell luar hanya 1x (bukan sniper dump)!');
 
-  // TEST 4: Take Profit +10% di Ayunan Pompa
-  console.log('\n4. Simulasi Kenaikan Harga +15% (TP +10% Target):');
-  const pumpPrice = 0.000038 * 1.15; // +15%
-  engine.updatePriceTick(winMint, pumpPrice);
+  // TEST 4: Tahan saat gain +15% & saat Whale Buyback (Tidak Ping-Pong / Tidak Jual Dini)
+  console.log('\n4. Simulasi Kenaikan Harga +15% & Whale Buyback (Tahan Menuju Target +100%):');
+  const smallPumpPrice = 0.000038 * 1.15; // +15%
+  engine.updatePriceTick(winMint, smallPumpPrice);
+  assert(engine.scenarios.s13_alpha.openPositions.length === 1, 'S13-Alpha TAHAN posisi saat gain +15% (menuju target +100%)');
+  assert(engine.scenarios.s13_beta.openPositions.length === 1, 'S13-Beta TAHAN posisi saat gain +15% (menuju target +100%)');
 
-  assert(engine.scenarios.s13_alpha.openPositions.length === 0, 'S13-Alpha sukses Take Profit +10%');
-  assert(engine.scenarios.s13_beta.openPositions.length === 0, 'S13-Beta sukses Take Profit +10%');
+  // Whale Buyback:
+  engine.handleTargetBuy({
+    action: 'buy',
+    mint: winMint,
+    symbol: 'WINNER',
+    tokenName: 'Winner Coin',
+    tokenAmount: 10000000,
+    remainingHolding: 80000000,
+    solAmount: 1.5,
+    usdAmount: 130,
+    priceUsd: smallPumpPrice,
+    txHash: 'win_whale_buyback_tx',
+    timestamp: Math.floor(Date.now() / 1000),
+    isOpenOrClose: false,
+    isFirstBuy: false,
+    pairAddress: 'WinPoolAddress22222222222222222222222222222'
+  }, false);
+  assert(engine.scenarios.s13_alpha.openPositions.length === 1, 'S13-Alpha TIDAK dump dini saat Whale buyback (tetap hold)');
+  assert(engine.scenarios.s13_beta.openPositions.length === 1, 'S13-Beta TIDAK dump dini saat Whale buyback (tetap hold)');
+
+  // TEST 5: Kenaikan Harga +100% (Double-Up Cuan 2x Lipat Modal)
+  console.log('\n5. Simulasi Kenaikan Harga +105% (Target TP +100% Tercapai):');
+  const doubleUpPrice = 0.000038 * 2.05; // +105%
+  engine.updatePriceTick(winMint, doubleUpPrice);
+
+  assert(engine.scenarios.s13_alpha.openPositions.length === 0, 'S13-Alpha sukses Take Profit +100% (Double-Up Full Exit)');
+  assert(engine.scenarios.s13_beta.openPositions.length === 0, 'S13-Beta sukses Take Profit +100% (Double-Up Full Exit)');
+  assert(engine.scenarios.s13_alpha.closedTrades[0].exitReason.includes('TP_100%_DOUBLE_UP'), 'Reason S13-Alpha adalah TP_100%_DOUBLE_UP');
+  assert(engine.scenarios.s13_beta.closedTrades.find(t => t.mint === winMint).exitReason.includes('TP_100%_DOUBLE_UP'), 'Reason S13-Beta adalah TP_100%_DOUBLE_UP');
   assert(engine.scenarios.s13_alpha.closedTrades[0].isWin === true, 'S13-Alpha membukukan trade WIN');
   assert(engine.scenarios.s13_beta.closedTrades.find(t => t.mint === winMint).isWin === true, 'S13-Beta membukukan trade WIN');
+
+  // TEST 6: Whale Sell Dip Datang -> S13-Alpha & Beta TIDAK Re-entry (Tanpa Ping-Pong)
+  console.log('\n6. Simulasi Whale Micro-Sell (Dip):');
+  engine.handleTargetSell({
+    action: 'sell',
+    mint: winMint,
+    symbol: 'WINNER',
+    tokenName: 'Winner Coin',
+    tokenAmount: 5000000,
+    remainingHolding: 75000000,
+    solAmount: 0.8,
+    usdAmount: 70,
+    priceUsd: 0.000070,
+    txHash: 'win_whale_micro_sell_tx',
+    timestamp: Math.floor(Date.now() / 1000),
+    isOpenOrClose: false,
+    isFirstBuy: false,
+    pairAddress: 'WinPoolAddress22222222222222222222222222222'
+  });
+  assert(engine.scenarios.s13_alpha.openPositions.length === 0, 'S13-Alpha TIDAK re-entry serok lembah (Tanpa Ping-Pong)');
+  assert(engine.scenarios.s13_beta.openPositions.length === 0, 'S13-Beta TIDAK re-entry serok lembah (Tanpa Ping-Pong)');
 
   console.log('\n' + '='.repeat(60));
   console.log(`HASIL AKHIR: ${testsPassed}/${totalTests} TESTS PASSED (100% SUKSES)!`);

@@ -447,8 +447,8 @@ export class MultiScenarioDryRunEngine {
       },
       s13_alpha: {
         id: 'SCENARIO_13_ALPHA_SNIPER_GATE',
-        name: 'Skenario 13-Alpha: 1-Second Sniper Gate (Pre-Entry 1s Verification | 100% Anti-Rugpull)',
-        description: 'Saldo Awal $20.00. Modal $5.00/entry. Detik 0: Whale masuk (>= 20 SOL), Alpha pasang delay observasi 1.000 ms. Jika dalam 1s terdeteksi >= 3 sniper sells (indikator kolam rugpull), ABORT BUY (kebal rugpull 100%, $0 fee). Jika dalam 1s sniper sell <= 1 (akumulasi murni koin pemenang), eksekusi BUY di detik 1. TP +10%, Stop Loss -10%, dump ke Buyback Whale.',
+        name: 'Skenario 13-Alpha: 1-Second Sniper Gate (Pre-Entry 1s Verification | Target TP +100% Full Exit)',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Entry, Tanpa Ping-Pong). Detik 0: Whale masuk (>= 20 SOL), Alpha pasang delay observasi 1.000 ms. Jika dalam 1s terdeteksi >= 3 sniper sells (indikator kolam rugpull), ABORT BUY (kebal rugpull 100%, $0 fee). Jika dalam 1s sniper sell <= 2 (akumulasi murni koin pemenang), eksekusi BUY di detik 1. Target Take Profit +100% (2x Lipat Modal) lalu LANGSUNG SELL SEMUA. Stop Loss -10% / Whale Dump.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -466,8 +466,8 @@ export class MultiScenarioDryRunEngine {
       },
       s13_beta: {
         id: 'SCENARIO_13_BETA_INSTANT_DUMP',
-        name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue on Sniper Sells)',
-        description: 'Saldo Awal $20.00. Modal $5.00/entry. Detik 0: Langsung BUY bersama Whale. Selama 1.5 detik pertama (1500 ms), pasang radar deteksi sniper sell. Jika terdeteksi >= 2 sniper sell, LANGSUNG JUAL DI DETIK ITU JUGA (Instant Emergency Dump), mengamankan modal sebelum Dev RemoveLiquidity di detik 5. Jika tidak ada sniper sell, tahan posisi untuk panen TP +10% / Buyback Whale.',
+        name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue | Target TP +100% Full Exit)',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Entry, Tanpa Ping-Pong). Detik 0: Langsung BUY bersama Whale. Selama 1.5 detik pertama (1500 ms), pasang radar deteksi sniper sell. Jika terdeteksi >= 2 sniper sell, LANGSUNG JUAL DI DETIK ITU JUGA (Instant Emergency Dump), mengamankan modal sebelum Dev RemoveLiquidity di detik 5. Jika aman, tahan posisi hingga Take Profit +100% (2x Lipat Modal) lalu LANGSUNG SELL SEMUA. Stop Loss -10% / Whale Dump.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -505,6 +505,10 @@ export class MultiScenarioDryRunEngine {
           const s13_5 = parsed.s13_5 || fresh.s13_5;
           const s13_alpha = parsed.s13_alpha || fresh.s13_alpha;
           const s13_beta = parsed.s13_beta || fresh.s13_beta;
+          s13_alpha.name = fresh.s13_alpha.name;
+          s13_alpha.description = fresh.s13_alpha.description;
+          s13_beta.name = fresh.s13_beta.name;
+          s13_beta.description = fresh.s13_beta.description;
           if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
           if (s5.totalFeesPaid === undefined) s5.totalFeesPaid = 0.0;
           if (s6.totalFeesPaid === undefined) s6.totalFeesPaid = 0.0;
@@ -920,12 +924,7 @@ export class MultiScenarioDryRunEngine {
       const s13AlphaPosIdx = this.scenarios.s13_alpha.openPositions.findIndex(p => p.mint === signal.mint);
       if (s13AlphaPosIdx >= 0) {
         const pos = this.scenarios.s13_alpha.openPositions[s13AlphaPosIdx];
-        const gainPct = pos.avgEntryPriceUsd > 0 ? ((signal.priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100 : 0;
-        if (gainPct >= 4.0 || signal.priceUsd > pos.avgEntryPriceUsd) {
-          const reason = `S13_ALPHA_PINGPONG_DUMP_ON_BUYBACK (Whale buyback $${targetUsd.toFixed(0)}, dump ke likuiditas whale | Gain: +${gainPct.toFixed(1)}% | Siklus #${pos.entryCount})`;
-          this.executeScenarioExit(this.scenarios.s13_alpha, s13AlphaPosIdx, signal.priceUsd, now, timeWib, reason);
-          existingS13AlphaTracker.lastExitAt = now;
-        }
+        pos.lastPriceUsd = signal.priceUsd;
       }
     }
 
@@ -999,12 +998,7 @@ export class MultiScenarioDryRunEngine {
       const s13BetaPosIdx = this.scenarios.s13_beta.openPositions.findIndex(p => p.mint === signal.mint);
       if (s13BetaPosIdx >= 0) {
         const pos = this.scenarios.s13_beta.openPositions[s13BetaPosIdx];
-        const gainPct = pos.avgEntryPriceUsd > 0 ? ((signal.priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100 : 0;
-        if (gainPct >= 4.0 || signal.priceUsd > pos.avgEntryPriceUsd) {
-          const reason = `S13_BETA_PINGPONG_DUMP_ON_BUYBACK (Whale buyback $${targetUsd.toFixed(0)}, dump ke likuiditas whale | Gain: +${gainPct.toFixed(1)}% | Siklus #${pos.entryCount})`;
-          this.executeScenarioExit(this.scenarios.s13_beta, s13BetaPosIdx, signal.priceUsd, now, timeWib, reason);
-          existingS13BetaTracker.lastExitAt = now;
-        }
+        pos.lastPriceUsd = signal.priceUsd;
       }
     }
 
@@ -2739,57 +2733,14 @@ export class MultiScenarioDryRunEngine {
           s13AlphaTracker.lastExitAt = now;
         }
       } else {
+        // Tanpa Ping-Pong: Sekali keluar, tidak re-enter beli lembah!
         if (isDanger3ConsecutiveSells || isDangerCumSold35 || isDangerLargeSingleSell || isPast10M) {
           s13AlphaTracker.status = 'TERMINATED';
-        } else {
-          const isSingleSellDip = s13AlphaTracker.consecutiveSells === 1;
-          const cooldownOk = (now - s13AlphaTracker.lastExitAt) >= 3000;
-          const isNotLargeSell = singleSellUsd < 250.0;
-          if (isSingleSellDip && cooldownOk && isNotLargeSell && pOut > 0) {
-            s13AlphaTracker.cycleCount += 1;
-            let stake = 5.0;
-            try {
-              const liveCfg = readFollowerLiveConfig(this.dataDir);
-              stake = (liveCfg as any).stakeUsdS13Alpha || (liveCfg as any).stakeUsdS13 || 5.0;
-            } catch {}
-
-            const dipBuySignal: WalletTradeSignal = {
-              action: 'buy',
-              mint: signal.mint,
-              symbol: signal.symbol,
-              tokenName: signal.tokenName,
-              tokenAmount: 0,
-              remainingHolding: 0,
-              solAmount: 0,
-              usdAmount: targetUsd,
-              priceUsd: pOut,
-              txHash: `s13_alpha_cycle${s13AlphaTracker.cycleCount}_${now}`,
-              timestamp: Math.floor(now / 1000),
-              isOpenOrClose: true,
-              isFirstBuy: false,
-              pairAddress: signal.pairAddress || s13AlphaTracker.pairAddress || '',
-              exchange: s13AlphaTracker.exchange || 'pump_amm'
-            };
-
-            this.processScenarioBuy(this.scenarios.s13_alpha, dipBuySignal, false, targetUsd, now, timeWib, {
-              maxTokenExposure: stake,
-              getStake: () => stake,
-              disallowAccumulation: true,
-              allowReEntryCycle: true,
-              cycleIndex: s13AlphaTracker.cycleCount
-            });
-
-            const createdPos = this.scenarios.s13_alpha.openPositions.find(p => p.mint === signal.mint);
-            if (createdPos) {
-              createdPos.pairAddress = signal.pairAddress || s13AlphaTracker.pairAddress || '';
-              createdPos.entryCount = s13AlphaTracker.cycleCount;
-            }
-          }
         }
       }
     }
 
-    // 10. Skenario 13-Beta: Ping-Pong Dip Buy & Emergency Dump Exit
+    // 10. Skenario 13-Beta: Emergency Dump Exit (Tanpa Ping-Pong Dip Buy)
     const s13BetaTracker = this.s13BetaTrackers.get(signal.mint);
     if (s13BetaTracker && s13BetaTracker.status === 'ACTIVE') {
       s13BetaTracker.consecutiveSells += 1;
@@ -2820,52 +2771,9 @@ export class MultiScenarioDryRunEngine {
           s13BetaTracker.lastExitAt = now;
         }
       } else {
+        // Tanpa Ping-Pong: Sekali keluar, tidak re-enter beli lembah!
         if (isDanger3ConsecutiveSells || isDangerCumSold35 || isDangerLargeSingleSell || isPast10M) {
           s13BetaTracker.status = 'TERMINATED';
-        } else {
-          const isSingleSellDip = s13BetaTracker.consecutiveSells === 1;
-          const cooldownOk = (now - s13BetaTracker.lastExitAt) >= 3000;
-          const isNotLargeSell = singleSellUsd < 250.0;
-          if (isSingleSellDip && cooldownOk && isNotLargeSell && pOut > 0) {
-            s13BetaTracker.cycleCount += 1;
-            let stake = 5.0;
-            try {
-              const liveCfg = readFollowerLiveConfig(this.dataDir);
-              stake = (liveCfg as any).stakeUsdS13Beta || (liveCfg as any).stakeUsdS13 || 5.0;
-            } catch {}
-
-            const dipBuySignal: WalletTradeSignal = {
-              action: 'buy',
-              mint: signal.mint,
-              symbol: signal.symbol,
-              tokenName: signal.tokenName,
-              tokenAmount: 0,
-              remainingHolding: 0,
-              solAmount: 0,
-              usdAmount: targetUsd,
-              priceUsd: pOut,
-              txHash: `s13_beta_cycle${s13BetaTracker.cycleCount}_${now}`,
-              timestamp: Math.floor(now / 1000),
-              isOpenOrClose: true,
-              isFirstBuy: false,
-              pairAddress: signal.pairAddress || s13BetaTracker.pairAddress || '',
-              exchange: s13BetaTracker.exchange || 'pump_amm'
-            };
-
-            this.processScenarioBuy(this.scenarios.s13_beta, dipBuySignal, false, targetUsd, now, timeWib, {
-              maxTokenExposure: stake,
-              getStake: () => stake,
-              disallowAccumulation: true,
-              allowReEntryCycle: true,
-              cycleIndex: s13BetaTracker.cycleCount
-            });
-
-            const createdPos = this.scenarios.s13_beta.openPositions.find(p => p.mint === signal.mint);
-            if (createdPos) {
-              createdPos.pairAddress = signal.pairAddress || s13BetaTracker.pairAddress || '';
-              createdPos.entryCount = s13BetaTracker.cycleCount;
-            }
-          }
         }
       }
     }
@@ -2890,8 +2798,8 @@ export class MultiScenarioDryRunEngine {
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
         changed = true;
 
-        // Khusus Skenario 13, 13.5, 13-Alpha, & 13-Beta: Multi-Cycle Ping-Pong Scalper (TP +10% & Stop Loss -10%)
-        if ((scenario.id === 'SCENARIO_13_PINGPONG_SCALPER' || scenario.id === 'SCENARIO_13_5_DYNAMIC_PINGPONG' || scenario.id === 'SCENARIO_13_ALPHA_SNIPER_GATE' || scenario.id === 'SCENARIO_13_BETA_INSTANT_DUMP') && pos.avgEntryPriceUsd > 0) {
+        // Khusus Skenario 13 & Skenario 13.5: Multi-Cycle Ping-Pong Scalper (TP +10% & Stop Loss -10%)
+        if ((scenario.id === 'SCENARIO_13_PINGPONG_SCALPER' || scenario.id === 'SCENARIO_13_5_DYNAMIC_PINGPONG') && pos.avgEntryPriceUsd > 0) {
           const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
           const now = Date.now();
           const timeWib = formatWibDate(now);
@@ -2904,10 +2812,6 @@ export class MultiScenarioDryRunEngine {
             if (tracker13) tracker13.lastExitAt = now;
             const tracker13_5 = this.s13_5PingPongTrackers.get(mint);
             if (tracker13_5) tracker13_5.lastExitAt = now;
-            const trackerAlpha = this.s13AlphaTrackers.get(mint);
-            if (trackerAlpha) trackerAlpha.lastExitAt = now;
-            const trackerBeta = this.s13BetaTrackers.get(mint);
-            if (trackerBeta) trackerBeta.lastExitAt = now;
             continue;
           }
 
@@ -2919,10 +2823,35 @@ export class MultiScenarioDryRunEngine {
             if (tracker13) tracker13.lastExitAt = now;
             const tracker13_5 = this.s13_5PingPongTrackers.get(mint);
             if (tracker13_5) tracker13_5.lastExitAt = now;
+            continue;
+          }
+        }
+
+        // Khusus Skenario 13-Alpha & Skenario 13-Beta: Target Take Profit +100% (2x Lipat Modal | Tanpa Ping-Pong)
+        if ((scenario.id === 'SCENARIO_13_ALPHA_SNIPER_GATE' || scenario.id === 'SCENARIO_13_BETA_INSTANT_DUMP') && pos.avgEntryPriceUsd > 0) {
+          const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+
+          // 1. Take Profit +100% (Target 2x Lipat Modal -> Full Exit Selesai)
+          if (gainPct >= 100.0) {
+            const exitReason = `TP_100%_DOUBLE_UP (Gain: +${gainPct.toFixed(1)}% >= +100% | Cuan 2x Lipat Modal Tercapai -> Full Exit)`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
             const trackerAlpha = this.s13AlphaTrackers.get(mint);
-            if (trackerAlpha) trackerAlpha.lastExitAt = now;
+            if (trackerAlpha) { trackerAlpha.status = 'TERMINATED'; trackerAlpha.lastExitAt = now; }
             const trackerBeta = this.s13BetaTrackers.get(mint);
-            if (trackerBeta) trackerBeta.lastExitAt = now;
+            if (trackerBeta) { trackerBeta.status = 'TERMINATED'; trackerBeta.lastExitAt = now; }
+            continue;
+          }
+
+          // 2. Cut Loss Pengaman (-10%)
+          if (gainPct <= -10.0) {
+            const exitReason = `STOP_LOSS_10% (Drop: ${gainPct.toFixed(1)}% <= -10% | Cut-loss pengaman)`;
+            this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+            const trackerAlpha = this.s13AlphaTrackers.get(mint);
+            if (trackerAlpha) { trackerAlpha.status = 'TERMINATED'; trackerAlpha.lastExitAt = now; }
+            const trackerBeta = this.s13BetaTrackers.get(mint);
+            if (trackerBeta) { trackerBeta.status = 'TERMINATED'; trackerBeta.lastExitAt = now; }
             continue;
           }
         }
