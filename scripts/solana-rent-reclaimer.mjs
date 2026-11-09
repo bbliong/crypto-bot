@@ -205,8 +205,8 @@ export async function burnAndCloseTokenAccount(mintAddress, options = {}) {
 
   try {
     const scan = await scanEmptyTokenAccounts(connection, keypair.publicKey);
-    const target = scan.activeAccounts.find(a => a.mint === mintAddress);
-    if (!target) return { ok: false, message: 'Akun tidak ditemukan atau sudah kosong' };
+    let target = scan.emptyAccounts.find(a => a.mint === mintAddress) || scan.activeAccounts.find(a => a.mint === mintAddress);
+    if (!target) return { ok: false, message: 'Akun tidak ditemukan' };
 
     const progId = target.program === 'Token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
     const { createBurnCheckedInstruction, createCloseAccountInstruction } = await import('@solana/spl-token');
@@ -215,17 +215,20 @@ export async function burnAndCloseTokenAccount(mintAddress, options = {}) {
     if (ComputeBudgetProgram) {
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 200000 }));
     }
-    tx.add(
-      createBurnCheckedInstruction(
-        new PublicKey(target.pubkey),
-        new PublicKey(mintAddress),
-        keypair.publicKey,
-        BigInt(target.tokenAmount),
-        target.decimals ?? 6,
-        [],
-        progId
-      )
-    );
+    const tokenAmountBig = target.tokenAmount ? BigInt(target.tokenAmount) : 0n;
+    if (tokenAmountBig > 0n) {
+      tx.add(
+        createBurnCheckedInstruction(
+          new PublicKey(target.pubkey),
+          new PublicKey(mintAddress),
+          keypair.publicKey,
+          tokenAmountBig,
+          target.decimals ?? 6,
+          [],
+          progId
+        )
+      );
+    }
     tx.add(
       createCloseAccountInstruction(
         new PublicKey(target.pubkey),
