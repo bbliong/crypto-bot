@@ -432,6 +432,8 @@ export async function renderScenarioTimelineHtml({ scenarioId = 'sce4', tokenQue
         <a href="/add-fol/3scenarios/sce10?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce10' ? 'active' : ''}">🌊 S10 (Runner)</a>
         <a href="/add-fol/3scenarios/sce13?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce13' ? 'active' : ''}">🏓 S13 (PingPong)</a>
         <a href="/add-fol/3scenarios/sce13_5?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce13_5' ? 'active' : ''}">⚡ S13.5 (Adaptive)</a>
+        <a href="/add-fol/3scenarios/sce13_alpha?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce13_alpha' ? 'active' : ''}">🛡️ S13-Alpha (Gate)</a>
+        <a href="/add-fol/3scenarios/sce13_beta?token=${encodeURIComponent(activeToken.symbol || '')}" class="nav-btn ${scId === 'sce13_beta' ? 'active' : ''}">⚡ S13-Beta (Instant)</a>
       </div>
     </header>
 

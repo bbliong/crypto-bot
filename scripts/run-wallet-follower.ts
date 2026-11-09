@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { Connection, PublicKey } from '@solana/web3.js';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
 import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
 import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.js';
@@ -62,6 +63,7 @@ export class WalletFollowerRunner {
   public readonly smartDipLane: SmartDipFollowerLane;
   public readonly multiDryRunEngine: MultiScenarioDryRunEngine;
   public readonly devWatcher: SingleDevWalletWatcher;
+  private solConnection: Connection = new Connection(getSolanaRpcUrl());
   private browser: Browser | null = null;
   private page: Page | null = null;
   private cdp: CDPSession | null = null;
@@ -335,7 +337,11 @@ export class WalletFollowerRunner {
       if (msg.channel === 'token_activity' && Array.isArray(msg.data)) {
         for (const act of msg.data) {
           if (act.a) {
+            const action = act.e === 'buy' ? 'buy' : 'sell';
+            const price = Number(act.p) || 0;
+            const sol = Number(act.qa) || 0;
             this.smartDipLane.recordTokenActivity(act.a);
+            this.multiDryRunEngine.recordPoolTradeActivity(act.a, action, price, sol);
           }
         }
       }
@@ -539,6 +545,32 @@ export class WalletFollowerRunner {
     }
 
     this.multiDryRunEngine.handleTargetBuy(signal, isGroundZero);
+
+    // Aktifkan sub-second dynamic WS dan onLogs listener untuk koin High Conviction
+    if (signal.usdAmount >= 1800 || (signal.solAmount && signal.solAmount >= 20)) {
+      this.ensureTokenSubscribed(signal.mint).catch(() => {});
+      if (signal.pairAddress) {
+        try {
+          const pairPk = new PublicKey(signal.pairAddress);
+          const subId = this.solConnection.onLogs(pairPk, (logCtx) => {
+            const logs = logCtx.logs || [];
+            const isWithdraw = logs.some(l => l.includes('Withdraw') || l.includes('RemoveAllLiquidity') || l.includes('ClosePosition'));
+            const isSell = logs.some(l => l.includes('Instruction: Sell'));
+            const isBuy = logs.some(l => l.includes('Instruction: Buy'));
+            if (isWithdraw) {
+              this.multiDryRunEngine.recordPoolTradeActivity(signal.mint, 'withdraw');
+            } else if (isSell) {
+              this.multiDryRunEngine.recordPoolTradeActivity(signal.mint, 'sell');
+            } else if (isBuy) {
+              this.multiDryRunEngine.recordPoolTradeActivity(signal.mint, 'buy');
+            }
+          }, 'processed');
+          setTimeout(() => {
+            try { this.solConnection.removeOnLogsListener(subId); } catch {}
+          }, 15000);
+        } catch {}
+      }
+    }
 
     const evalBuy = this.lane.evaluateBuySignal(signal, { isFreshToken: isFresh, tokenAgeMinutes });
     const nowMs = signal.timestamp ? signal.timestamp * 1000 : Date.now();
@@ -1505,6 +1537,12 @@ export class WalletFollowerRunner {
       }
       if (part === 'S13' || part === 'SCE13' || part === 'SCENARIO_13') {
         if (scUpper.includes('13') || scUpper.includes('PINGPONG')) return true;
+      }
+      if (part === 'S13_ALPHA' || part === 'ALPHA') {
+        if (scUpper.includes('ALPHA')) return true;
+      }
+      if (part === 'S13_BETA' || part === 'BETA') {
+        if (scUpper.includes('BETA')) return true;
       }
     }
     return false;

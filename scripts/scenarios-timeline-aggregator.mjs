@@ -134,7 +134,33 @@ export const SCENARIO_META = {
     color: '#06b6d4',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('SCENARIO_13_5') || s.includes('13.5') || s.includes('DYNAMIC_PINGPONG');
+      return (s.includes('SCENARIO_13_5') || s.includes('13.5') || s.includes('DYNAMIC_PINGPONG')) && !s.includes('ALPHA') && !s.includes('BETA');
+    }
+  },
+  sce13_alpha: {
+    id: 'sce13_alpha',
+    canonicalKey: 's13_alpha',
+    name: 'Skenario 13-Alpha: 1-Second Sniper Gate (Pre-Entry Verification | 100% Anti-Rugpull)',
+    shortName: 'Skenario 13-Alpha',
+    description: '1-Second Sniper Gate: Verifikasi 1.000 ms sebelum buy. Jika dalam 1s terdeteksi >= 3 sniper sell, batalkan buy (100% kebal rugpull). Jika <= 1 sell, eksekusi buy di detik 1.',
+    ruleBadge: '1-Second Sniper Gate | 100% Anti-Rugpull',
+    color: '#8b5cf6',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('13_ALPHA') || s.includes('13-ALPHA') || s.includes('ALPHA');
+    }
+  },
+  sce13_beta: {
+    id: 'sce13_beta',
+    canonicalKey: 's13_beta',
+    name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue on Sniper Sells)',
+    shortName: 'Skenario 13-Beta',
+    description: 'Instant Buy + 1.5s Panic Cut: Buy instan di Detik 0 bersama Whale. Jika dalam 1.5s terdeteksi >= 2 sniper sell, LANGSUNG JUAL DARURAT seketika untuk amankan modal.',
+    ruleBadge: 'Instant Buy + 1.5s Panic Cut | Rescue on Sniper Sell',
+    color: '#f59e0b',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('13_BETA') || s.includes('13-BETA') || s.includes('BETA');
     }
   }
 };
@@ -142,6 +168,8 @@ export const SCENARIO_META = {
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('alpha')) return 'sce13_alpha';
+  if (str.includes('beta')) return 'sce13_beta';
   if (str.includes('13_5') || str.includes('13.5') || str.includes('dynamic_pingpong') || str.includes('14')) return 'sce13_5';
   if (str.includes('13') || str.includes('pingpong')) return 'sce13';
   if (str.includes('9_5') || str.includes('9.5') || str.includes('moonbag')) return 'sce9_5';

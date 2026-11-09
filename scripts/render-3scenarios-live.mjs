@@ -68,6 +68,8 @@ export function render3ScenariosLiveHtml() {
   const s10 = data.s10 || { name: 'Skenario 10: Dynamic Wave Runner (Genesis Buy + MCap/Whale Sell Sync)', description: 'Saldo Awal $20.00. Modal $0.25. Proaktif Buy di Detik 0 saat Dev rilis pool baru. Tidak buru-buru TP kaku 25% jika whale masih hold koin. Begitu whale mulai dump >= 15% atau time-stop 30s pasca-inflow: LANGSUNG SELL 100% di puncak wave!', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s13 = data.s13 || { name: 'Skenario 13: Multi-Cycle Ping-Pong Scalper (Post-Whale Dip & Buyback Harvester)', description: 'Saldo Awal $20.00. Modal $5.00/entry (Maks 10x Siklus). MASUK SETELAH WHALE MASUK. Syarat: Whale masuk >= 20 SOL & usia koin < 15m. Beli saat Whale SELL (tampung harga diskon). Jual saat TP +10% atau Whale BUYBACK (+5%). Cut-loss -10%. Stop jika Whale dump >= 40%.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s13_5 = data.s13_5 || { name: 'Skenario 13.5: Adaptive Ping-Pong Runner (Uncapped Cycles | 3 Consecutive Sells & Dynamic Health Gates)', description: 'Saldo Awal $20.00. Modal $5.00/entry (Tanpa Batas 10 Siklus). MASUK SETELAH WHALE MASUK (Inflow >= 20 SOL). Beli di lembah Sell #1 (Normal Dip). Bekukan beli jika Sell beruntun >= 2x. Jual di TP +10% atau Whale BUYBACK. Rem Darurat: jika Whale sell 3x beruntun tanpa buyback, kumulatif dump >= 35%, sell tunggal >= $300, atau usia koin >= 10m.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s13_alpha = data.s13_alpha || { name: 'Skenario 13-Alpha: 1-Second Sniper Gate (Pre-Entry Verification | 100% Anti-Rugpull)', description: 'Saldo Awal $20.00. Modal $5.00/entry. Detik 0: Whale masuk (>= 20 SOL), Alpha pasang delay observasi 1.000 ms. Jika dalam 1s terdeteksi >= 3 sniper sells (indikator kolam rugpull), ABORT BUY (kebal rugpull 100%, $0 fee). Jika dalam 1s sniper sell <= 1 (akumulasi murni koin pemenang), eksekusi BUY di detik 1. TP +10%, Stop Loss -10%, dump ke Buyback Whale.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s13_beta = data.s13_beta || { name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue on Sniper Sells)', description: 'Saldo Awal $20.00. Modal $5.00/entry. Detik 0: Langsung BUY bersama Whale. Selama 1.5 detik pertama (1500 ms), pasang radar deteksi sniper sell. Jika terdeteksi >= 2 sniper sell, LANGSUNG JUAL DI DETIK ITU JUGA (Instant Emergency Dump), mengamankan modal sebelum Dev RemoveLiquidity di detik 5. Jika tidak ada sniper sell, tahan posisi untuk panen TP +10% / Buyback Whale.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
     const isPnlPositive = s.realizedPnl >= 0;
@@ -932,10 +934,12 @@ export function render3ScenariosLiveHtml() {
       ${renderScenarioCard(s10, '#f59e0b', 'sce10')}
       ${renderScenarioCard(s13, '#10b981', 'sce13')}
       ${renderScenarioCard(s13_5, '#06b6d4', 'sce13_5')}
+      ${renderScenarioCard(s13_alpha, '#8b5cf6', 'sce13_alpha')}
+      ${renderScenarioCard(s13_beta, '#f59e0b', 'sce13_beta')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 10-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S9.5 vs S10 vs S13 vs S13.5) &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 12-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S9.5 vs S10 vs S13 vs S13.5 vs S13-Alpha vs S13-Beta) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 
