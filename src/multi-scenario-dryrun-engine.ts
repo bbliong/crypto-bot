@@ -192,6 +192,28 @@ export interface S13CentaurState {
   bundlerRate?: number | null;
 }
 
+export interface S14BundlerRunnerState {
+  mint: string;
+  symbol: string;
+  pairAddress?: string;
+  exchange?: string;
+  whaleWallet: string;
+  whaleFirstBuyAt: number;
+  whaleFirstBuyUsd: number;
+  whaleFirstBuySol: number;
+  whalePeakHolding: number;
+  whaleRemainingHolding: number;
+  whaleBuysCount: number;
+  whaleSellsCount: number;
+  consecutiveWhaleSells: number;
+  hasEntered: boolean;
+  status: 'OBSERVING_BUNDLER' | 'ACTIVE_RIDING' | 'EXITED_TRAILING_STOP' | 'EXITED_WHALE_DUMP' | 'TERMINATED';
+  bundlerPct: number;
+  peakPriceUsd: number;
+  lastExitAt: number;
+  targetBuySignal?: WalletTradeSignal;
+}
+
 export type ScenarioTradeActionCallback = (
   action: 'BUY' | 'SELL',
   scenarioId: string,
@@ -244,6 +266,7 @@ export class MultiScenarioDryRunEngine {
   private s13Alpha1Trackers: Map<string, S13AlphaState> = new Map();
   private s13Beta1Trackers: Map<string, S13BetaState> = new Map();
   private s13CentaurTrackers: Map<string, S13CentaurState> = new Map();
+  private s14Trackers: Map<string, S14BundlerRunnerState> = new Map();
   private lastObservedPrices: Map<string, number> = new Map();
   private abortedBuyKeys: Set<string> = new Set();
   public onTradeAction?: ScenarioTradeActionCallback;
@@ -426,6 +449,9 @@ export class MultiScenarioDryRunEngine {
         fs.appendFileSync(timeseriesPath, JSON.stringify(entry) + '\n', 'utf8');
       } catch {}
 
+      // Evaluasi Entry untuk Skenario 14 (Bundler-Confirmed Runner Wave Rider):
+      this.evaluateS14BundlerEntry(mint, bundlerPct);
+
       // Log ke console
       if (status === 'INCREASED') {
         console.log(`📈 [BUNDLER MENINGKAT! #${trackerState.sampleCount} | +${ageSec}s] ${symbol}: ${prev?.toFixed(2)}% -> ${bundlerPct.toFixed(2)}% (+${delta.toFixed(2)}%) | Holders: ${holders}`);
@@ -463,6 +489,7 @@ export class MultiScenarioDryRunEngine {
     s13_alpha_1: ScenarioState;
     s13_beta_1: ScenarioState;
     s13_centaur: ScenarioState;
+    s14: ScenarioState;
   };
 
   constructor(dataDir?: string) {
@@ -488,6 +515,7 @@ export class MultiScenarioDryRunEngine {
     s13_alpha_1: ScenarioState;
     s13_beta_1: ScenarioState;
     s13_centaur: ScenarioState;
+    s14: ScenarioState;
   } {
     return {
       s4: {
@@ -775,15 +803,34 @@ export class MultiScenarioDryRunEngine {
         closedTrades: [],
         recentEvents: [],
       },
+      s14: {
+        id: 'SCENARIO_14_BUNDLER_RUNNER',
+        name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry. Tidak masuk di Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00 dan aktifkan Wave Rider (Trailing Stop -20% pasca +100%, Whale Giant Sell >= 15 SOL, Whale Exhaustion 3x sell, atau Timeout 30m).',
+        initialCash: 20.0,
+        availableCash: 20.0,
+        investedCash: 0.0,
+        totalFeesPaid: 0.0,
+        realizedPnl: 0.0,
+        unrealizedPnl: 0.0,
+        totalPortfolioValue: 20.0,
+        wins: 0,
+        losses: 0,
+        totalTrades: 0,
+        winRate: 0.0,
+        openPositions: [],
+        closedTrades: [],
+        recentEvents: [],
+      },
     };
   }
 
-  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState; s13: ScenarioState; s13_5: ScenarioState; s13_alpha: ScenarioState; s13_beta: ScenarioState; s13_alpha_1: ScenarioState; s13_beta_1: ScenarioState; s13_centaur: ScenarioState } {
+  private loadState(): { s4: ScenarioState; s5: ScenarioState; s6: ScenarioState; s7: ScenarioState; s8: ScenarioState; s9: ScenarioState; s9_5: ScenarioState; s10: ScenarioState; s13: ScenarioState; s13_5: ScenarioState; s13_alpha: ScenarioState; s13_beta: ScenarioState; s13_alpha_1: ScenarioState; s13_beta_1: ScenarioState; s13_centaur: ScenarioState; s14: ScenarioState } {
     if (fs.existsSync(this.filePath)) {
       try {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10 || parsed.s13 || parsed.s13_5 || parsed.s13_alpha || parsed.s13_beta || parsed.s13_alpha_1 || parsed.s13_beta_1 || parsed.s13_centaur) {
+        if (parsed.s4 || parsed.s5 || parsed.s6 || parsed.s7 || parsed.s8 || parsed.s9 || parsed.s9_5 || parsed.s10 || parsed.s13 || parsed.s13_5 || parsed.s13_alpha || parsed.s13_beta || parsed.s13_alpha_1 || parsed.s13_beta_1 || parsed.s13_centaur || parsed.s14) {
           const fresh = this.initFreshScenarios();
           const s4 = parsed.s4 || fresh.s4;
           const s5 = parsed.s5 || fresh.s5;
@@ -800,6 +847,7 @@ export class MultiScenarioDryRunEngine {
           const s13_alpha_1 = parsed.s13_alpha_1 || fresh.s13_alpha_1;
           const s13_beta_1 = parsed.s13_beta_1 || fresh.s13_beta_1;
           const s13_centaur = parsed.s13_centaur || fresh.s13_centaur;
+          const s14 = parsed.s14 || fresh.s14;
           s13_alpha.name = fresh.s13_alpha.name;
           s13_alpha.description = fresh.s13_alpha.description;
           s13_beta.name = fresh.s13_beta.name;
@@ -810,6 +858,8 @@ export class MultiScenarioDryRunEngine {
           s13_beta_1.description = fresh.s13_beta_1.description;
           s13_centaur.name = fresh.s13_centaur.name;
           s13_centaur.description = fresh.s13_centaur.description;
+          s14.name = fresh.s14.name;
+          s14.description = fresh.s14.description;
           if (s4.totalFeesPaid === undefined) s4.totalFeesPaid = 0.0;
           if (s5.totalFeesPaid === undefined) s5.totalFeesPaid = 0.0;
           if (s6.totalFeesPaid === undefined) s6.totalFeesPaid = 0.0;
@@ -825,7 +875,8 @@ export class MultiScenarioDryRunEngine {
           if (s13_alpha_1.totalFeesPaid === undefined) s13_alpha_1.totalFeesPaid = 0.0;
           if (s13_beta_1.totalFeesPaid === undefined) s13_beta_1.totalFeesPaid = 0.0;
           if (s13_centaur.totalFeesPaid === undefined) s13_centaur.totalFeesPaid = 0.0;
-          return { s4, s5, s6, s7, s8, s9, s9_5, s10, s13, s13_5, s13_alpha, s13_beta, s13_alpha_1, s13_beta_1, s13_centaur };
+          if (s14.totalFeesPaid === undefined) s14.totalFeesPaid = 0.0;
+          return { s4, s5, s6, s7, s8, s9, s9_5, s10, s13, s13_5, s13_alpha, s13_beta, s13_alpha_1, s13_beta_1, s13_centaur, s14 };
         }
       } catch {}
     }
@@ -1352,6 +1403,36 @@ export class MultiScenarioDryRunEngine {
         };
         this.s13CentaurTrackers.set(signal.mint, centaurTracker);
 
+        const s14Tracker: S14BundlerRunnerState = {
+          mint: signal.mint,
+          symbol: signal.symbol,
+          pairAddress: signal.pairAddress,
+          exchange: signal.exchange,
+          whaleWallet: (signal as any).ad || (signal as any).devWallet || '',
+          whaleFirstBuyAt: now,
+          whaleFirstBuyUsd: targetUsd,
+          whaleFirstBuySol: signal.solAmount || (targetUsd / 90),
+          whalePeakHolding: signal.remainingHolding || signal.tokenAmount || 1,
+          whaleRemainingHolding: signal.remainingHolding || signal.tokenAmount || 1,
+          whaleBuysCount: 1,
+          whaleSellsCount: 0,
+          consecutiveWhaleSells: 0,
+          hasEntered: false,
+          status: 'OBSERVING_BUNDLER',
+          bundlerPct: 0,
+          peakPriceUsd: signal.priceUsd,
+          lastExitAt: 0,
+          targetBuySignal: signal,
+        };
+        this.s14Trackers.set(signal.mint, s14Tracker);
+
+        console.log(`\n=========================================================`);
+        console.log(`💎 [SCENARIO 14 RADAR ACTIVATED] Target Whale Masuk ${signal.solAmount || (targetUsd/90).toFixed(1)} SOL ($${targetUsd.toFixed(0)}) di '${signal.symbol}'!`);
+        console.log(`   Status      : Standby Cash (Menunggu Konfirmasi On-Chain Bundler >= 5.0%)...`);
+        console.log(`   Aturan Masuk: Masuk saat Bundler Rate >= 5% & Whale aktif buyback/ping-pong.`);
+        console.log(`   Aturan Jual : Wave Rider (Trailing Stop -20% pasca +100%, Whale Giant Sell >= 15 SOL, Streak 3x Sell).`);
+        console.log(`=========================================================\n`);
+
         console.log(`\n=========================================================`);
         console.log(`🐎 [SCENARIO 13-CENTAUR 1S MEV GATE ACTIVATED]`);
         console.log(`   Token        : ${signal.symbol} [${signal.mint.slice(0, 8)}...]`);
@@ -1443,6 +1524,25 @@ export class MultiScenarioDryRunEngine {
       const posIdx = this.scenarios.s13_centaur.openPositions.findIndex(p => p.mint === signal.mint);
       if (posIdx >= 0) {
         this.scenarios.s13_centaur.openPositions[posIdx].lastPriceUsd = signal.priceUsd;
+      }
+    }
+
+    // Update S14 saat Whale Buyback / Buy More
+    const existingS14Tracker = this.s14Trackers.get(signal.mint);
+    if (existingS14Tracker && existingS14Tracker.status !== 'TERMINATED' && existingS14Tracker.status !== 'EXITED_TRAILING_STOP' && existingS14Tracker.status !== 'EXITED_WHALE_DUMP') {
+      existingS14Tracker.whaleBuysCount++;
+      existingS14Tracker.consecutiveWhaleSells = 0;
+      existingS14Tracker.whaleRemainingHolding = signal.remainingHolding;
+      if (signal.remainingHolding > existingS14Tracker.whalePeakHolding) {
+        existingS14Tracker.whalePeakHolding = signal.remainingHolding;
+      }
+      const posIdx = this.scenarios.s14.openPositions.findIndex(p => p.mint === signal.mint);
+      if (posIdx >= 0) {
+        this.scenarios.s14.openPositions[posIdx].lastPriceUsd = signal.priceUsd;
+      }
+      // Jika belum masuk dan bundler sudah >= 5%: coba evaluasi entry!
+      if (!existingS14Tracker.hasEntered && existingS14Tracker.bundlerPct >= 5.0) {
+        this.evaluateS14BundlerEntry(signal.mint, existingS14Tracker.bundlerPct, signal.priceUsd);
       }
     }
 
@@ -1829,6 +1929,98 @@ export class MultiScenarioDryRunEngine {
     if (createdPos) {
       createdPos.pairAddress = tracker.pairAddress || '';
       createdPos.entryCount = 1;
+    }
+
+    this.saveState();
+  }
+
+  /**
+   * Evaluasi Entry Skenario 14: Bundler-Confirmed Runner Wave Rider
+   * Dipanggil saat polling mendeteksi metrik Bundler Rate dari GMGN (>= 5.0%).
+   * Tidak dibatasi oleh umur koin (tanpa batas umur 300s).
+   */
+  public evaluateS14BundlerEntry(mint: string, bundlerPct: number, currentPrice?: number): void {
+    const tracker = this.s14Trackers.get(mint);
+    if (!tracker || tracker.hasEntered || tracker.status !== 'OBSERVING_BUNDLER') return;
+
+    tracker.bundlerPct = bundlerPct;
+
+    // 1. Syarat Bundler Rate >= 5.0%
+    if (bundlerPct < 5.0) return;
+
+    // 2. Syarat Whale masih aktif (tidak kabur / abandon)
+    const peak = tracker.whalePeakHolding || 1;
+    const remRatio = tracker.whaleRemainingHolding / peak;
+    if (remRatio < 0.40) {
+      console.log(`[SCENARIO 14 SKIP ENTRY] Token ${tracker.symbol}: Bundler ${bundlerPct.toFixed(2)}% >= 5% tapi Whale sudah buang muatan (${(remRatio * 100).toFixed(1)}% < 40%). Lewati.`);
+      tracker.status = 'TERMINATED';
+      return;
+    }
+
+    // 3. Syarat Whale memiliki aktivitas perdagangan (bukan 0 aktivitas)
+    const isWhaleActive = tracker.whaleBuysCount >= 1;
+    if (!isWhaleActive) return;
+
+    // TERKONFIRMASI RUNNER! Eksekusi BUY S14:
+    tracker.hasEntered = true;
+    tracker.status = 'ACTIVE_RIDING';
+
+    const now = Date.now();
+    const timeWib = formatWibDate(now);
+
+    let stakeUsd = 5.0;
+    try {
+      const liveCfg = readFollowerLiveConfig(this.dataDir);
+      stakeUsd = (liveCfg as any).stakeUsdS14 || (liveCfg as any).stakeUsdS13Centaur || (liveCfg as any).stakeUsdS13 || 5.0;
+    } catch {}
+
+    const entryPrice = (currentPrice && currentPrice > 0)
+      ? currentPrice
+      : (this.lastObservedPrices.get(mint) || tracker.peakPriceUsd || 0.000038);
+
+    tracker.peakPriceUsd = entryPrice;
+
+    const buySignal = tracker.targetBuySignal || {
+      action: 'buy',
+      mint: tracker.mint,
+      symbol: tracker.symbol,
+      tokenName: tracker.symbol,
+      tokenAmount: 0,
+      remainingHolding: tracker.whaleRemainingHolding,
+      solAmount: tracker.whaleFirstBuySol,
+      usdAmount: tracker.whaleFirstBuyUsd,
+      priceUsd: entryPrice,
+      txHash: `s14_bundler_entry_${now}`,
+      timestamp: Math.floor(now / 1000),
+      isOpenOrClose: true,
+      isFirstBuy: false,
+      pairAddress: tracker.pairAddress,
+      exchange: tracker.exchange
+    };
+
+    console.log(`\n=========================================================`);
+    console.log(`💎 [SCENARIO 14: BUNDLER CONFIRMED RUNNER ENTRY!]`);
+    console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
+    console.log(`   Bundler Rate : ${bundlerPct.toFixed(2)}% (>= 5.0% Sindikat Terkonfirmasi)`);
+    console.log(`   Whale Status : Aktif (${tracker.whaleBuysCount}x buy, sisa ${(remRatio * 100).toFixed(1)}% bag)`);
+    console.log(`   Harga Masuk  : $${entryPrice.toFixed(8)}`);
+    console.log(`   Modal Siklus : $${stakeUsd.toFixed(2)}`);
+    console.log(`   Aksi         : MASUK MODE WAVE RIDER (Trailing Stop -20% pasca +100%)!`);
+    console.log(`=========================================================\n`);
+
+    this.processScenarioBuy(this.scenarios.s14, buySignal, false, tracker.whaleFirstBuyUsd, now, timeWib, {
+      maxTokenExposure: stakeUsd,
+      getStake: () => stakeUsd,
+      disallowAccumulation: true,
+      allowReEntryCycle: true,
+      cycleIndex: 1
+    });
+
+    const createdPos = this.scenarios.s14.openPositions.find(p => p.mint === mint);
+    if (createdPos) {
+      createdPos.pairAddress = tracker.pairAddress || '';
+      createdPos.entryCount = 1;
+      createdPos.peakPriceUsd = entryPrice;
     }
 
     this.saveState();
@@ -3664,6 +3856,34 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
+    // 14. Skenario 14: Bundler-Confirmed Runner Wave Rider
+    const s14Tracker = this.s14Trackers.get(signal.mint);
+    if (s14Tracker && s14Tracker.status !== 'TERMINATED' && s14Tracker.status !== 'EXITED_TRAILING_STOP' && s14Tracker.status !== 'EXITED_WHALE_DUMP') {
+      const ageSec = (now - s14Tracker.whaleFirstBuyAt) / 1000;
+      s14Tracker.whaleSellsCount++;
+      s14Tracker.consecutiveWhaleSells++;
+      s14Tracker.whaleRemainingHolding = signal.remainingHolding;
+
+      if (s14Tracker.status === 'ACTIVE_RIDING') {
+        const posIdx = this.scenarios.s14.openPositions.findIndex(p => p.mint === signal.mint);
+        if (posIdx >= 0) {
+          const isWhale3ConsecutiveSells = s14Tracker.consecutiveWhaleSells >= 3;
+          const isWhaleGiantSell = (signal.solAmount && signal.solAmount >= 15.0) || targetUsd >= 1300;
+          const isPast30M = ageSec >= 1800;
+
+          if (isWhale3ConsecutiveSells || isWhaleGiantSell || isPast30M) {
+            s14Tracker.status = 'EXITED_WHALE_DUMP';
+            let reason = '';
+            if (isWhale3ConsecutiveSells) reason = `S14_WHALE_3_CONSECUTIVE_SELLS (Whale sell 3x beruntun tanpa buyback | Wave Ride Complete)`;
+            else if (isWhaleGiantSell) reason = `S14_WHALE_GIANT_SELL (Whale dump $${targetUsd.toFixed(0)} >= 15 SOL | Wave Ride Complete)`;
+            else reason = `S14_MAX_AGE_30M_TIMEOUT`;
+            this.executeScenarioExit(this.scenarios.s14, posIdx, pOut, now, timeWib, reason);
+            s14Tracker.lastExitAt = now;
+          }
+        }
+      }
+    }
+
     this.saveState();
   }
 
@@ -3812,6 +4032,39 @@ export class MultiScenarioDryRunEngine {
           }
         }
 
+        // Khusus Skenario 14: Bundler-Confirmed Runner Wave Rider
+        if (scenario.id === 'SCENARIO_14_BUNDLER_RUNNER' && pos.avgEntryPriceUsd > 0) {
+          const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
+          const now = Date.now();
+          const timeWib = formatWibDate(now);
+          const s14Tracker = this.s14Trackers.get(mint);
+
+          if (!pos.peakPriceUsd || priceUsd > pos.peakPriceUsd) {
+            pos.peakPriceUsd = priceUsd;
+          }
+
+          if (s14Tracker && s14Tracker.status === 'ACTIVE_RIDING') {
+            if (gainPct >= 100.0) {
+              const dropFromPeak = ((pos.peakPriceUsd - priceUsd) / pos.peakPriceUsd) * 100;
+              if (dropFromPeak >= 20.0) {
+                const exitReason = `S14_TRAILING_STOP_20%_LOCK (Gain: +${gainPct.toFixed(1)}% | Drop ${dropFromPeak.toFixed(1)}% dari Peak $${pos.peakPriceUsd.toFixed(8)} | Lock Cuan Max!)`;
+                this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+                s14Tracker.status = 'EXITED_TRAILING_STOP';
+                s14Tracker.lastExitAt = now;
+                continue;
+              }
+            }
+
+            if (gainPct <= -10.0) {
+              const exitReason = `STOP_LOSS_10% (Drop: ${gainPct.toFixed(1)}% <= -10% | Cut-loss pengaman)`;
+              this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+              s14Tracker.status = 'TERMINATED';
+              s14Tracker.lastExitAt = now;
+              continue;
+            }
+          }
+        }
+
         // Khusus Skenario 5 & Skenario 9: Auto Take-Profit +25% & Stop Loss -15%
         if ((scenario.id === 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER' || scenario.id === 'SCENARIO_9_DEV_FRONTRUN_SYNC') && pos.avgEntryPriceUsd > 0) {
           const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
@@ -3917,8 +4170,8 @@ export class MultiScenarioDryRunEngine {
 
         // 1. Hard Take-Profit Gate: Jika harga melonjak >= +200% (>= 3x dari harga entry)
         // Eksekusi sell 100% instan untuk mengamankan profit multi-bagger sebelum dev rugpull
-        // (Dikecualikan untuk S13-Alpha-1, S13-Beta-1 & S13-Centaur yang merupakan Wave Rider pelari bebas cuan maksimal)
-        if (pos.avgEntryPriceUsd > 0 && priceUsd >= pos.avgEntryPriceUsd * 3.0 && scenario.id !== 'SCENARIO_13_ALPHA_1_WAVE_RIDER' && scenario.id !== 'SCENARIO_13_BETA_1_WAVE_RIDER' && scenario.id !== 'SCENARIO_13_CENTAUR_HYBRID_RIDER') {
+        // (Dikecualikan untuk S13-Alpha-1, S13-Beta-1, S13-Centaur & S14 yang merupakan Wave Rider pelari bebas cuan maksimal)
+        if (pos.avgEntryPriceUsd > 0 && priceUsd >= pos.avgEntryPriceUsd * 3.0 && scenario.id !== 'SCENARIO_13_ALPHA_1_WAVE_RIDER' && scenario.id !== 'SCENARIO_13_BETA_1_WAVE_RIDER' && scenario.id !== 'SCENARIO_13_CENTAUR_HYBRID_RIDER' && scenario.id !== 'SCENARIO_14_BUNDLER_RUNNER') {
           const now = Date.now();
           const timeWib = formatWibDate(now);
           const tokensToSell = pos.tokens;
@@ -4831,6 +5084,7 @@ export class MultiScenarioDryRunEngine {
 
   public getScenarioById(scenarioId: string): ScenarioState {
     const id = (scenarioId || '').toLowerCase();
+    if (id.includes('14') || id.includes('bundler')) return this.scenarios.s14;
     if (id.includes('centaur') || id.includes('13_centaur') || id.includes('13-centaur')) return this.scenarios.s13_centaur;
     if (id.includes('13_alpha_1') || id.includes('13-alpha-1') || id.includes('alpha_1') || id.includes('alpha-1')) return this.scenarios.s13_alpha_1;
     if (id.includes('13_beta_1') || id.includes('13-beta-1') || id.includes('beta_1') || id.includes('beta-1')) return this.scenarios.s13_beta_1;
@@ -5098,8 +5352,12 @@ export class MultiScenarioDryRunEngine {
     return this.scenarios.s13_centaur.openPositions.length;
   }
 
+  public getS14OpenPositionsCount(): number {
+    return this.scenarios.s14.openPositions.length;
+  }
+
   public isTargetEntered(mint: string): boolean {
-    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8, this.scenarios.s13, this.scenarios.s13_5, this.scenarios.s13_alpha, this.scenarios.s13_beta, this.scenarios.s13_alpha_1, this.scenarios.s13_beta_1, this.scenarios.s13_centaur]) {
+    for (const sc of [this.scenarios.s9, this.scenarios.s9_5, this.scenarios.s10, this.scenarios.s8, this.scenarios.s13, this.scenarios.s13_5, this.scenarios.s13_alpha, this.scenarios.s13_beta, this.scenarios.s13_alpha_1, this.scenarios.s13_beta_1, this.scenarios.s13_centaur, this.scenarios.s14]) {
       const pos = sc.openPositions.find(p => p.mint === mint);
       if (pos && pos.targetEnteredAt && pos.targetEnteredAt > 0) return true;
     }
