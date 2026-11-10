@@ -2,7 +2,7 @@ import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.t
 import fs from 'fs';
 import path from 'path';
 
-console.log('=== UNIT TEST SCENARIO 13-CENTAUR (HYBRID INITIAL PUMP RIDER & DECISION GATE) ===\n');
+console.log('=== UNIT TEST SCENARIO 13-CENTAUR (HYBRID MEV GATE & WAVE RIDER) ===\n');
 
 const testDir = path.resolve(process.cwd(), 'data/test-s13-centaur-' + Date.now());
 fs.mkdirSync(testDir, { recursive: true });
@@ -30,8 +30,8 @@ async function runTests() {
   assert(engine.scenarios.s13_centaur.totalTrades === 0, 'S13-Centaur 0 Trades');
   assert(engine.scenarios.s13_centaur.name.includes('Centaur'), 'Nama skenario valid mengandung Centaur');
 
-  // TEST 2: Koin Rugpull Cepat (Whale pasif, banting di detik 30)
-  console.log('\n2. Simulasi Koin Rugpull Cepat (Whale Pasif, Scalp Exit di Detik 22 Sebelum Bom Banting):');
+  // TEST 2: Koin Rugpull / MEV Dump Trap (Trademark, RING, CULPER)
+  console.log('\n2. Simulasi Koin Rugpull (Whale masuk 30 SOL, serbuan sell MEV di 1s pertama):');
   const rugMint = 'RugpullCentaur1111111111111111111111111111';
   const rugSignal = {
     action: 'buy',
@@ -52,25 +52,22 @@ async function runTests() {
   };
 
   engine.handleTargetBuy(rugSignal, true);
-  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'S13-Centaur langsung BUY di Detik 0');
-  assert(engine.scenarios.s13_centaur.availableCash <= 15.0, 'Kas berkurang modal $5.00');
+  assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur standby di Detik 0 (membuka 1s MEV observation)');
 
-  // Detik 0 s/d 20: Koin terdorong naik +60% oleh retail/fomo
-  engine.updatePriceTick(rugMint, 0.000062);
-  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'S13-Centaur tetap HOLD di detik 15 saat pompa (+63.2%)');
+  // Simulasikan serbuan bot MEV / sniper dump di 1s pertama (4x sell vs 2x buy):
+  engine.recordPoolTradeActivity(rugMint, 'buy', 0.000062, 0.5);
+  engine.recordPoolTradeActivity(rugMint, 'sell', 0.000060, 1.2);
+  engine.recordPoolTradeActivity(rugMint, 'sell', 0.000058, 1.5);
+  engine.recordPoolTradeActivity(rugMint, 'sell', 0.000055, 1.1);
+  engine.recordPoolTradeActivity(rugMint, 'sell', 0.000050, 2.0); // 4th sell -> triggers fast evaluation!
 
-  // Evaluasi Decision Gate di Detik 22 (Whale 0x buyback):
-  engine.evaluateS13CentaurDecisionGate(rugMint);
+  assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur 100% MEMBATALKAN BUY (Kebal Rugpull)!');
+  assert(engine.scenarios.s13_centaur.availableCash === 20.0, 'Kas S13-Centaur tetap utuh $20.00 ($0 fee)');
+  const lastEv = engine.scenarios.s13_centaur.recentEvents[0];
+  assert(lastEv && lastEv.reason.includes('BLOCKED_MEV_DUMP_GATE'), 'Alasan block adalah BLOCKED_MEV_DUMP_GATE');
 
-  assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur LANGSUNG SCALP EXIT di Detik 22!');
-  assert(engine.scenarios.s13_centaur.closedTrades.length === 1, 'Tercatat 1 Closed Trade');
-  const rugTrade = engine.scenarios.s13_centaur.closedTrades[0];
-  assert(rugTrade.isWin === true, 'Hasil trade adalah WIN (+cuan di koin rugpull!)');
-  assert(rugTrade.roiPct >= 60.0, `ROI tercatat tinggi (+${rugTrade.roiPct}%)`);
-  assert(rugTrade.exitReason.includes('S13_CENTAUR_PRE_RUG_SCALP'), 'Alasan exit adalah S13_CENTAUR_PRE_RUG_SCALP');
-
-  // TEST 3: Koin Runner Sejati (Whale aktif wash-trade)
-  console.log('\n3. Simulasi Koin Runner (Whale Aktif Ping-Pong, Switch ke Wave Rider):');
+  // TEST 3: Koin Runner Sejati (Akumulasi Bersih: 10x Buy, 1x Sell kecil)
+  console.log('\n3. Simulasi Koin Runner (Whale masuk 35 SOL, akumulasi bersih di 1s pertama):');
   const runnerMint = 'RunnerCentaur2222222222222222222222222222';
   const runnerSignal = {
     action: 'buy',
@@ -91,85 +88,47 @@ async function runTests() {
   };
 
   engine.handleTargetBuy(runnerSignal, true);
-  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'S13-Centaur masuk di RUNCOIN');
+  // Pembeli ritel masuk (banyak BUY, hanya 1 sell kecil sandwich bot):
+  engine.recordPoolTradeActivity(runnerMint, 'buy', 0.000062, 1.0);
+  engine.recordPoolTradeActivity(runnerMint, 'buy', 0.000065, 1.5);
+  engine.recordPoolTradeActivity(runnerMint, 'buy', 0.000068, 2.0);
+  engine.recordPoolTradeActivity(runnerMint, 'sell', 0.000066, 0.5); // hanya 1 sell
+  engine.recordPoolTradeActivity(runnerMint, 'buy', 0.000070, 1.2);
 
-  // Simulasikan waktu berlalu 15 detik:
-  const centaurTracker = engine.s13CentaurTrackers.get(runnerMint);
-  if (centaurTracker) {
-    centaurTracker.whaleFirstBuyAt = Date.now() - 15000;
-  }
+  // Evaluasi 1s Gate:
+  await engine.evaluateS13Centaur1sGate(runnerMint);
+  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'S13-Centaur LOLOS MEV GATE! Masuk BUY di Detik 1');
+  assert(engine.scenarios.s13_centaur.availableCash <= 15.0, 'Kas berkurang modal $5.00');
 
-  // Whale melakukan wash-trade (sell kecil 1.2 SOL):
-  engine.handleTargetSell({
-    action: 'sell',
-    mint: runnerMint,
-    symbol: 'RUNCOIN',
-    tokenName: 'Runner Coin',
-    tokenAmount: 2000000,
-    remainingHolding: 68000000,
-    solAmount: 1.2,
-    usdAmount: 100,
-    priceUsd: 0.000060,
-    txHash: 'sell1',
-    timestamp: Math.floor(Date.now() / 1000),
-    isOpenOrClose: false,
-    isFirstBuy: false,
-    ad: 'WhaleRunnerWallet2222222222222222222222222'
-  });
+  // Harga koin terbang didorong ritel (+100% s/d +200%):
+  engine.updatePriceTick(runnerMint, 0.000100);
+  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'Tahan posisi saat koin terbang');
 
-  // Buyback di detik 16:
-  engine.handleTargetBuy({
-    action: 'buy',
-    mint: runnerMint,
-    symbol: 'RUNCOIN',
-    tokenName: 'Runner Coin',
-    tokenAmount: 2100000,
-    remainingHolding: 70100000,
-    solAmount: 1.3,
-    usdAmount: 110,
-    priceUsd: 0.000065,
-    txHash: 'buyback1',
-    timestamp: Math.floor(Date.now() / 1000),
-    isOpenOrClose: false,
-    isFirstBuy: false,
-    ad: 'WhaleRunnerWallet2222222222222222222222222'
-  }, false);
+  engine.updatePriceTick(runnerMint, 0.000140); // Puncak +268%
+  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'Tetap riding di puncak $0.000140');
 
-  assert(centaurTracker.whaleBuybacks10_25s >= 1, 'Tercatat 1x buyback whale di jendela 10-25s');
-
-  // Evaluasi Decision Gate di Detik 22:
-  engine.evaluateS13CentaurDecisionGate(runnerMint);
-  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'S13-Centaur TIDAK exit di Detik 22! Terkonfirmasi Runner -> Lanjut Ride Mode!');
-  assert(centaurTracker.status === 'RUNNER_WAVE_RIDE', 'Status Centaur beralih ke RUNNER_WAVE_RIDE');
-
-  // Naik ke +200% ($0.000114):
-  engine.updatePriceTick(runnerMint, 0.000114);
-  assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'Tetap riding di puncak +200%');
-
-  // Retracement -20% dari puncak ($0.000114 -> $0.000091):
-  engine.updatePriceTick(runnerMint, 0.000091);
+  // Retracement -20% dari puncak ($0.000140 -> $0.000110):
+  engine.updatePriceTick(runnerMint, 0.000110);
   assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur Sukses Kunci Cuan Max via Trailing Stop -20%!');
   const runnerTrade = engine.scenarios.s13_centaur.closedTrades[0];
-  assert(runnerTrade.roiPct >= 130.0, `ROI runner terkunci masif (+${runnerTrade.roiPct}%)`);
+  assert(runnerTrade.roiPct >= 180.0, `ROI runner terkunci masif (+${runnerTrade.roiPct}%)`);
   assert(runnerTrade.exitReason.includes('S13_CENTAUR_TRAILING_STOP_20%_LOCK'), 'Reason adalah Trailing Stop Lock');
 
-  // TEST 4: Koin Runner dengan Exit Whale Exhaustion (3x Sell Beruntun)
-  console.log('\n4. Simulasi Koin Runner dengan Exit Whale Exhaustion:');
+  // TEST 4: Koin Runner dengan Exit Sebelum Whale Dump (Whale Exhaustion 3x Sell):
+  console.log('\n4. Simulasi Koin Runner dengan Exit Sebelum Whale Dump:');
   const streakMint = 'StreakCentaur3333333333333333333333333333';
   engine.handleTargetBuy({ ...runnerSignal, mint: streakMint, symbol: 'STREAK' }, true);
-  const streakTracker = engine.s13CentaurTrackers.get(streakMint);
-  streakTracker.whaleFirstBuyAt = Date.now() - 15000;
-  // Wash-trade buyback
-  engine.handleTargetBuy({ ...runnerSignal, mint: streakMint, isFirstBuy: false }, false);
-  engine.evaluateS13CentaurDecisionGate(streakMint);
+  // Bersih dari MEV dump:
+  engine.recordPoolTradeActivity(streakMint, 'buy', 0.000062, 1.0);
+  await engine.evaluateS13Centaur1sGate(streakMint);
   assert(engine.scenarios.s13_centaur.openPositions.length === 1, 'Masuk Wave Ride mode di STREAK');
 
-  // Whale sell 3x berturut-turut:
+  // Whale mulai sell berturut-turut tanpa buyback (tanda-tanda mau rugpull/exit):
   engine.handleTargetSell({ ...rugSignal, mint: streakMint, action: 'sell', solAmount: 1.0, usdAmount: 90, priceUsd: 0.000070 });
   engine.handleTargetSell({ ...rugSignal, mint: streakMint, action: 'sell', solAmount: 1.1, usdAmount: 95, priceUsd: 0.000068 });
   engine.handleTargetSell({ ...rugSignal, mint: streakMint, action: 'sell', solAmount: 1.2, usdAmount: 105, priceUsd: 0.000066 });
 
-  assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur langsung exit saat Whale sell 3x beruntun!');
+  assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur LANGSUNG EXIT SEBELUM WHALE DUMP (3x Sell Streak)!');
   const streakTrade = engine.scenarios.s13_centaur.closedTrades[0];
   assert(streakTrade.exitReason.includes('S13_CENTAUR_WHALE_3_CONSECUTIVE_SELLS'), 'Exit reason adalah WHALE_3_CONSECUTIVE_SELLS');
 
