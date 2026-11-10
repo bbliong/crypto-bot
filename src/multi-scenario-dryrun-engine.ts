@@ -806,7 +806,7 @@ export class MultiScenarioDryRunEngine {
       s14: {
         id: 'SCENARIO_14_BUNDLER_RUNNER',
         name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)',
-        description: 'Saldo Awal $20.00. Modal $5.00/entry. Tidak masuk di Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Tahan posisi selama koin dipompa (Stop Loss -20% dari harga masuk). Exit murni saat Whale Dump (Whale Giant Sell >= 15 SOL, Whale Exhaustion 3x sell beruntun, atau Timeout 30m).',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry. Standby saat Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Take Profit Bertahap: Jual 50% di +50% gain (amankan modal), sisa 50% moonbag ditahan hingga +100% atau Whale Dump. Stop Loss -20% dari entry (sebelum TP 1). Whale consecutive sells hanya hitung order signifikan >= 3 SOL atau holding < 50% (anti-shakeout). Giant Dump >= 15 SOL exit 100%.',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -2009,7 +2009,8 @@ export class MultiScenarioDryRunEngine {
 
     tracker.peakPriceUsd = entryPrice;
 
-    const buySignal = tracker.targetBuySignal || {
+    const buySignal: WalletTradeSignal = {
+      ...(tracker.targetBuySignal || {}),
       action: 'buy',
       mint: tracker.mint,
       symbol: tracker.symbol,
@@ -3887,11 +3888,19 @@ export class MultiScenarioDryRunEngine {
 
     // 14. Skenario 14: Bundler-Confirmed Runner Wave Rider
     const s14Tracker = this.s14Trackers.get(signal.mint);
-    if (s14Tracker && s14Tracker.status !== 'TERMINATED' && s14Tracker.status !== 'EXITED_TRAILING_STOP' && s14Tracker.status !== 'EXITED_WHALE_DUMP') {
+    if (s14Tracker && s14Tracker.status !== 'TERMINATED' && s14Tracker.status !== 'EXITED_TRAILING_STOP' && s14Tracker.status !== 'EXITED_WHALE_DUMP' && s14Tracker.status !== 'EXITED_PROFIT') {
       const ageSec = (now - s14Tracker.whaleFirstBuyAt) / 1000;
       s14Tracker.whaleSellsCount++;
-      s14Tracker.consecutiveWhaleSells++;
       s14Tracker.whaleRemainingHolding = signal.remainingHolding;
+
+      // Filter sell signifikan (Anti-Shakeout):
+      // Hanya hitung consecutive sell jika order sell berukuran signifikan (>= 3.0 SOL / >= $250)
+      // ATAU sisa holding Whale sudah di bawah 50% muatannya.
+      // Order receh (< 3 SOL) saat Whale masih pegang > 50% diabaikan sebagai wash-trading/ping-pong normal.
+      const isSignificantSell = (signal.solAmount && signal.solAmount >= 3.0) || targetUsd >= 250 || (signal.remainingHolding < s14Tracker.whalePeakHolding * 0.50);
+      if (isSignificantSell) {
+        s14Tracker.consecutiveWhaleSells++;
+      }
 
       if (s14Tracker.status === 'ACTIVE_RIDING') {
         const posIdx = this.scenarios.s14.openPositions.findIndex(p => p.mint === signal.mint);
@@ -3903,7 +3912,7 @@ export class MultiScenarioDryRunEngine {
           if (isWhale3ConsecutiveSells || isWhaleGiantSell || isPast30M) {
             s14Tracker.status = 'EXITED_WHALE_DUMP';
             let reason = '';
-            if (isWhale3ConsecutiveSells) reason = `S14_WHALE_3_CONSECUTIVE_SELLS (Whale sell 3x beruntun tanpa buyback | Wave Ride Complete)`;
+            if (isWhale3ConsecutiveSells) reason = `S14_WHALE_3_CONSECUTIVE_SELLS (Whale sell 3x beruntun signifikan >= 3 SOL | Wave Ride Complete)`;
             else if (isWhaleGiantSell) reason = `S14_WHALE_GIANT_SELL (Whale dump $${targetUsd.toFixed(0)} >= 15 SOL | Wave Ride Complete)`;
             else reason = `S14_MAX_AGE_30M_TIMEOUT`;
             this.executeScenarioExit(this.scenarios.s14, posIdx, pOut, now, timeWib, reason);
@@ -4073,8 +4082,24 @@ export class MultiScenarioDryRunEngine {
           }
 
           if (s14Tracker && s14Tracker.status === 'ACTIVE_RIDING') {
-            // Cut loss HANYA jika harga turun -20% dari harga kita masuk:
-            if (gainPct <= -20.0) {
+            // 1. Take Profit Bertahap Tahap 1: Jual 50% saat gain >= +50% (Kunci Cuan & Modal Aman)
+            if (gainPct >= 50.0 && !pos.stage1Exited) {
+              const exitReason = `S14_STAGE_1_TP_50% (Gain: +${gainPct.toFixed(1)}% >= +50% | Jual 50% amankan modal & cuan, sisa 50% moonbag ride wave)`;
+              this.executeScenarioPartial50Exit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+              // Lanjut memantau sisa 50%
+            }
+
+            // 2. Take Profit Bertahap Tahap 2: Jual sisa 50% saat gain >= +100%
+            if (gainPct >= 100.0 && pos.stage1Exited) {
+              const exitReason = `S14_STAGE_2_TP_100% (Gain: +${gainPct.toFixed(1)}% >= +100% | Moonbag Cuan Maksimal 100% Tercapai!)`;
+              this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
+              s14Tracker.status = 'EXITED_PROFIT';
+              s14Tracker.lastExitAt = now;
+              continue;
+            }
+
+            // Cut loss HANYA jika harga turun -20% dari harga kita masuk (hanya berlaku jika belum TP 1):
+            if (gainPct <= -20.0 && !pos.stage1Exited) {
               const exitReason = `STOP_LOSS_20%_ENTRY (Drop: ${gainPct.toFixed(1)}% <= -20% dari harga masuk $${pos.avgEntryPriceUsd.toFixed(8)} | Cut-loss pengaman)`;
               this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
               s14Tracker.status = 'TERMINATED';

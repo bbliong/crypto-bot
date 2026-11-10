@@ -150,45 +150,43 @@ assert(engine.scenarios.s14.openPositions.length === 1, 'S14 TERKONFIRMASI RUNNE
 assert(engine.scenarios.s14.availableCash <= 15.0, 'Kas S14 berkurang modal $5.00');
 
 // ==========================================================
-// TEST 4: Wave Riding & Keluar Murni Saat Whale Dump (Giant Sell >= 15 SOL)
+// TEST 4: Wave Riding & Take Profit Bertahap (+50% TP 50% -> +100% TP Moonbag)
 // ==========================================================
-console.log('\n4. Simulasi Gelombang Pompa Runner & Keluar Saat Whale Dump (Giant Sell >= 15 SOL):');
-// Harga koin terbang ke $0.000100 (+66%):
-engine.updatePriceTick(runnerMint, 0.000100);
-assert(engine.scenarios.s14.openPositions.length === 1, 'Tahan posisi saat koin terbang ke $0.000100');
+console.log('\n4. Simulasi Take Profit Bertahap & Anti-Shakeout:');
+// 4a. Harga koin terbang ke $0.000095 (+58.3% >= +50%):
+engine.updatePriceTick(runnerMint, 0.000095);
+assert(engine.scenarios.s14.openPositions.length === 1, 'Posisi tetap ada setelah TP 50% Tahap 1');
+const runnerPos = engine.scenarios.s14.openPositions[0];
+assert(runnerPos.stage1Exited === true, 'S14 SUKSES TAKE PROFIT 50% TAHAP 1 saat Gain >= +50%!');
+assert(engine.scenarios.s14.availableCash > 15.0, 'Modal & cuan sebagian sudah kembali aman di kas!');
 
-// Harga terbang ke puncak $0.000180 (+200%):
-engine.updatePriceTick(runnerMint, 0.000180);
-assert(engine.scenarios.s14.openPositions.length === 1, 'Tetap riding di puncak $0.000180 (+200% Gain)');
-
-// Terjadi koreksi -25% dari puncak (dari $0.000180 ke $0.000135, tapi masih +125% di atas entry):
-// S14 TIDAK CUT-LOSS karena BUKAN turun dari harga masuk!
-engine.updatePriceTick(runnerMint, 0.000135);
-assert(engine.scenarios.s14.openPositions.length === 1, 'S14 TETAP TAHAN saat koreksi -25% dari ATH (kebal shakeout selama di atas entry)!');
-
-// Whale melakukan Giant Dump 16 SOL di puncak:
+// 4b. Whale melakukan sell receh 1 SOL (wash trading) pasca TP 1:
 engine.handleTargetSell({
   action: 'sell',
   mint: runnerMint,
   symbol: 'RUNWINNER',
   tokenName: 'Runner Winner Coin',
-  tokenAmount: 20000000,
-  remainingHolding: 42000000,
-  solAmount: 16,
-  usdAmount: 1400,
-  priceUsd: 0.000135,
-  txHash: 'whale_giant_dump_tx',
+  tokenAmount: 1000000,
+  remainingHolding: 61000000,
+  solAmount: 1.0,
+  usdAmount: 85,
+  priceUsd: 0.000090,
+  txHash: 'whale_small_sell_tx',
   timestamp: Math.floor(Date.now() / 1000),
   isOpenOrClose: false,
   isFirstBuy: false
 });
+assert(engine.scenarios.s14.openPositions.length === 1, 'S14 KEBAL SHAKEOUT! Tidak cut-loss saat Whale sell receh 1 SOL (< 3 SOL)');
 
-assert(engine.scenarios.s14.openPositions.length === 0, 'S14 SUKSES KUNCI CUAN saat Whale Giant Sell >= 15 SOL!');
+// 4c. Koin terbang lanjut ke $0.000130 (+116.7% >= +100%):
+engine.updatePriceTick(runnerMint, 0.000130);
+assert(engine.scenarios.s14.openPositions.length === 0, 'S14 SUKSES KUNCI CUAN TAHAP 2 (Moonbag +100% Tercapai)!');
+
 const closedTrade = engine.scenarios.s14.closedTrades[0];
 console.log('Actual Closed Trade S14:', closedTrade?.exitReason, 'ROI:', closedTrade?.roiPct);
 assert(closedTrade !== undefined, 'Ada trade tertutup yang tercatat');
-assert(closedTrade.roiPct > 100.0, `ROI terkunci masif (${closedTrade.roiPct}% > 100%)`);
-assert(closedTrade.exitReason.includes('S14_WHALE_GIANT_SELL'), 'Exit reason adalah S14_WHALE_GIANT_SELL');
+assert(closedTrade.roiPct >= 50.0, `ROI gabungan terkunci (${closedTrade.roiPct}% >= 50%)`);
+assert(closedTrade.exitReason.includes('S14_STAGE_2_TP_100%'), 'Exit reason adalah S14_STAGE_2_TP_100%');
 
 // ==========================================================
 // TEST 5: Proteksi Stop Loss -20% Dari Harga Masuk
@@ -229,9 +227,9 @@ const slTrade = engine.scenarios.s14.closedTrades.find(t => t.mint === slMint);
 assert(slTrade && slTrade.exitReason.includes('STOP_LOSS_20%_ENTRY'), 'Exit reason adalah STOP_LOSS_20%_ENTRY');
 
 // ==========================================================
-// TEST 6: Proteksi Whale Dump Exit (3x Consecutive Sells)
+// TEST 6: Proteksi Whale Dump Exit (Signifikan >= 3 SOL atau Giant Dump >= 15 SOL)
 // ==========================================================
-console.log('\n6. Simulasi Proteksi Whale Dump (3x Sell Streak):');
+console.log('\n6. Simulasi Proteksi Whale Dump Signifikan:');
 const streakMint = 'StreakWinner3333333333333333333333333333';
 const streakSignal = {
   action: 'buy',
@@ -256,31 +254,48 @@ engine.handleTargetBuy(streakSignal, true);
 engine.evaluateS14BundlerEntry(streakMint, 8.00, 0.000050);
 assert(engine.scenarios.s14.openPositions.length === 1, 'S14 masuk di token STREAKCOIN');
 
-// Whale menjual 3x berturut-turut tanpa buyback:
+// Whale menjual receh 1 SOL 2x -> S14 TIDAK EXIT:
 engine.handleTargetSell({
   action: 'sell', mint: streakMint, symbol: 'STREAKCOIN', tokenName: 'Streak Coin',
-  tokenAmount: 5000000, remainingHolding: 65000000, solAmount: 2, usdAmount: 170,
-  priceUsd: 0.000060, txHash: 's_sell1', timestamp: Math.floor(Date.now() / 1000),
+  tokenAmount: 1000000, remainingHolding: 69000000, solAmount: 1, usdAmount: 85,
+  priceUsd: 0.000050, txHash: 's_receh1', timestamp: Math.floor(Date.now() / 1000),
   isOpenOrClose: false, isFirstBuy: false
 });
-assert(engine.scenarios.s14.openPositions.length === 1, 'Hold pasca Sell #1');
+assert(engine.scenarios.s14.openPositions.length === 1, 'Hold pasca Sell receh #1 (1 SOL < 3 SOL)');
 
 engine.handleTargetSell({
   action: 'sell', mint: streakMint, symbol: 'STREAKCOIN', tokenName: 'Streak Coin',
-  tokenAmount: 5000000, remainingHolding: 60000000, solAmount: 2, usdAmount: 170,
-  priceUsd: 0.000058, txHash: 's_sell2', timestamp: Math.floor(Date.now() / 1000),
+  tokenAmount: 1000000, remainingHolding: 68000000, solAmount: 1, usdAmount: 85,
+  priceUsd: 0.000050, txHash: 's_receh2', timestamp: Math.floor(Date.now() / 1000),
   isOpenOrClose: false, isFirstBuy: false
 });
-assert(engine.scenarios.s14.openPositions.length === 1, 'Hold pasca Sell #2');
+assert(engine.scenarios.s14.openPositions.length === 1, 'Hold pasca Sell receh #2 (1 SOL < 3 SOL)');
+
+// Whale sekarang menjual SIGNIFIKAN (>= 3 SOL) 3x berturut-turut:
+engine.handleTargetSell({
+  action: 'sell', mint: streakMint, symbol: 'STREAKCOIN', tokenName: 'Streak Coin',
+  tokenAmount: 4000000, remainingHolding: 64000000, solAmount: 4, usdAmount: 340,
+  priceUsd: 0.000049, txHash: 's_sig1', timestamp: Math.floor(Date.now() / 1000),
+  isOpenOrClose: false, isFirstBuy: false
+});
+assert(engine.scenarios.s14.openPositions.length === 1, 'Hold pasca Sell Signifikan #1');
 
 engine.handleTargetSell({
   action: 'sell', mint: streakMint, symbol: 'STREAKCOIN', tokenName: 'Streak Coin',
-  tokenAmount: 5000000, remainingHolding: 55000000, solAmount: 2, usdAmount: 170,
-  priceUsd: 0.000055, txHash: 's_sell3', timestamp: Math.floor(Date.now() / 1000),
+  tokenAmount: 4000000, remainingHolding: 60000000, solAmount: 4, usdAmount: 340,
+  priceUsd: 0.000048, txHash: 's_sig2', timestamp: Math.floor(Date.now() / 1000),
+  isOpenOrClose: false, isFirstBuy: false
+});
+assert(engine.scenarios.s14.openPositions.length === 1, 'Hold pasca Sell Signifikan #2');
+
+engine.handleTargetSell({
+  action: 'sell', mint: streakMint, symbol: 'STREAKCOIN', tokenName: 'Streak Coin',
+  tokenAmount: 4000000, remainingHolding: 56000000, solAmount: 4, usdAmount: 340,
+  priceUsd: 0.000047, txHash: 's_sig3', timestamp: Math.floor(Date.now() / 1000),
   isOpenOrClose: false, isFirstBuy: false
 });
 
-assert(engine.scenarios.s14.openPositions.length === 0, 'S14 LANGSUNG EXIT saat Whale Sell 3x beruntun!');
+assert(engine.scenarios.s14.openPositions.length === 0, 'S14 LANGSUNG EXIT saat Whale Sell Signifikan (>= 3 SOL) 3x beruntun!');
 const streakExit = engine.scenarios.s14.closedTrades.find(t => t.mint === streakMint);
 assert(streakExit && streakExit.exitReason.includes('S14_WHALE_3_CONSECUTIVE_SELLS'), 'Alasan exit adalah S14_WHALE_3_CONSECUTIVE_SELLS');
 
