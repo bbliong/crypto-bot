@@ -369,10 +369,10 @@ export class MultiScenarioDryRunEngine {
     };
 
     console.log(`\n=========================================================`);
-    console.log(`🔬 [BUNDLER 5S RESEARCH TRACKER STARTED]`);
+    console.log(`🔬 [BUNDLER 2S RESEARCH TRACKER STARTED]`);
     console.log(`   Token        : ${symbol} [${mint.slice(0, 8)}...]`);
-    console.log(`   Target       : Polling /api/v1/token_stat/sol/ setiap 5 detik (15 Menit)`);
-    console.log(`   Tujuan       : Memantau apakah Bundler bertambah, berkurang, atau tetap!`);
+    console.log(`   Target       : Polling /api/v1/token_stat/sol/ setiap 2 detik (10 Menit)`);
+    console.log(`   Tujuan       : Memantau detik demi detik kapan Bundler cluster muncul!`);
     console.log(`=========================================================\n`);
 
     const poll = async () => {
@@ -380,11 +380,11 @@ export class MultiScenarioDryRunEngine {
       const now = Date.now();
       const ageSec = Math.round((now - trackerState.firstSeenAt) / 1000);
 
-      // Stop otomatis jika sudah lewat 15 menit (180 sample)
-      if (trackerState.sampleCount > 180) {
+      // Stop otomatis jika sudah lewat 10 menit (300 sample x 2s)
+      if (trackerState.sampleCount > 300) {
         if (trackerState.timer) clearInterval(trackerState.timer);
         this.bundlerResearchTrackers.delete(mint);
-        console.log(`[BUNDLER RESEARCH COMPLETE] Token ${symbol} [${mint.slice(0, 8)}...] selesai dipantau (15 menit).`);
+        console.log(`[BUNDLER RESEARCH COMPLETE] Token ${symbol} [${mint.slice(0, 8)}...] selesai dipantau (10 menit).`);
         return;
       }
 
@@ -432,15 +432,15 @@ export class MultiScenarioDryRunEngine {
       } else if (status === 'DECREASED') {
         console.log(`📉 [BUNDLER TURUN! #${trackerState.sampleCount} | +${ageSec}s] ${symbol}: ${prev?.toFixed(2)}% -> ${bundlerPct.toFixed(2)}% (${delta.toFixed(2)}%) | Holders: ${holders}`);
       } else {
-        if (trackerState.sampleCount % 3 === 1) {
-          console.log(`📊 [BUNDLER RESEARCH #${trackerState.sampleCount} | +${ageSec}s] ${symbol.padEnd(8)} | Bundler: ${bundlerPct.toFixed(2)}% (STABIL) | Holders: ${holders} | Snipers: ${snipers.toFixed(1)}% | Dev: ${creator.toFixed(1)}%`);
+        if (trackerState.sampleCount % 5 === 1) {
+          console.log(`📊 [BUNDLER 2S RESEARCH #${trackerState.sampleCount} | +${ageSec}s] ${symbol.padEnd(8)} | Bundler: ${bundlerPct.toFixed(2)}% (STABIL) | Holders: ${holders} | Snipers: ${snipers.toFixed(1)}% | Dev: ${creator.toFixed(1)}%`);
         }
       }
     };
 
-    // Eksekusi segera detik ke-0, lalu pasang interval 5.000 ms
+    // Eksekusi segera detik ke-0, lalu pasang interval 2.000 ms
     poll().catch(() => {});
-    trackerState.timer = setInterval(poll, 5000);
+    trackerState.timer = setInterval(poll, 2000);
     if (typeof trackerState.timer?.unref === 'function') {
       trackerState.timer.unref();
     }
@@ -1488,8 +1488,8 @@ export class MultiScenarioDryRunEngine {
       tracker.bundlerRate = bundlerRate;
     }
 
-    // Evaluasi 1: Jebakan Koin Umpan Rugpull (Bundler Rate < 5.0% dari peluncuran Block 0)
-    const isLowBundler = (bundlerRate !== null && bundlerRate < 0.05);
+    // Evaluasi 1: Jebakan Koin Umpan Rugpull (HANYA valid jika umur token >= 20 detik, karena GMGN butuh 20s untuk clustering)
+    const isLowBundler = false;
 
     // Evaluasi 2: Serbuan MEV Sell / Dump
     const isSniperDump = (tracker.sniperSellsIn1s >= 3 && sellRatio >= 0.25) || tracker.sniperSellsIn1s >= 8;
@@ -1622,8 +1622,8 @@ export class MultiScenarioDryRunEngine {
       tracker.bundlerRate = bundlerRate;
     }
 
-    // Evaluasi 1: Jebakan Koin Umpan Rugpull (Bundler Rate < 5.0% dari peluncuran Block 0)
-    const isLowBundler = (bundlerRate !== null && bundlerRate < 0.05);
+    // Evaluasi 1: Jebakan Koin Umpan Rugpull (HANYA valid jika umur token >= 20 detik, karena GMGN butuh 20s untuk clustering)
+    const isLowBundler = false;
 
     // Evaluasi 2: Serbuan MEV Sell / Dump
     const isSniperDump = (tracker.sniperSellsIn1s >= 3 && sellRatio >= 0.25) || tracker.sniperSellsIn1s >= 8;
@@ -1737,8 +1737,8 @@ export class MultiScenarioDryRunEngine {
       tracker.bundlerRate = bundlerRate;
     }
 
-    // Evaluasi 1: Jebakan Koin Umpan Rugpull (Bundler Rate < 5.0% dari peluncuran Block 0)
-    const isLowBundler = (bundlerRate !== null && bundlerRate < 0.05);
+    // Evaluasi 1: Jebakan Koin Umpan Rugpull (HANYA valid jika umur token >= 20 detik, karena GMGN butuh 20s untuk clustering)
+    const isLowBundler = false;
 
     // Evaluasi 2: Serbuan MEV Sell / Dump
     const isMevDump = (tracker.sniperSellsIn1s >= 3 && sellRatio >= 0.25) || tracker.sniperSellsIn1s >= 8;
