@@ -72,6 +72,7 @@ export function render3ScenariosLiveHtml() {
   const s13_beta = data.s13_beta || { name: 'Skenario 13-Beta: Instant Buy + 1.5s Panic Cut (Post-Entry Rescue | Target TP +100% Full Exit)', description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Entry, Tanpa Ping-Pong). Detik 0: Langsung BUY bersama Whale. Selama 1.5 detik pertama (1500 ms), pasang radar deteksi sniper sell. Jika terdeteksi >= 2 sniper sell, LANGSUNG JUAL DI DETIK ITU JUGA (Instant Emergency Dump), mengamankan modal sebelum Dev RemoveLiquidity di detik 5. Jika aman, tahan posisi hingga Take Profit +100% (2x Lipat Modal) lalu LANGSUNG SELL SEMUA. Stop Loss -10% / Whale Dump.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s13_alpha_1 = data.s13_alpha_1 || { name: 'Skenario 13-Alpha-1: 1s Sniper Gate + Whale Wave Rider (Max Profit on Whale Sell Signals)', description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Ride). Detik 0: Whale masuk >= 20 SOL, Alpha-1 verifikasi 1s on-chain. Jika ada >= 3 sniper sell atau >= 12 txs -> ABORT (100% Kebal Rugpull). Jika aman, BUY di detik 1. TAHAN SELAMA WHALE PING-PONG! Exit HANYA jika: (1) Whale sell 3x beruntun tanpa buyback, (2) Whale sell tunggal >= 2.5 SOL, (3) Trailing stop -20% dari peak setelah gain >= +100%, atau (4) Stop loss -10% / Max age 10m.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s13_beta_1 = data.s13_beta_1 || { name: 'Skenario 13-Beta-1: Instant Buy + 1.5s Rescue + Whale Wave Rider (Max Profit on Whale Sell Signals)', description: 'Saldo Awal $20.00. Modal $5.00/entry (1x Ride). Detik 0: Langsung BUY bersama Whale. Jika dalam 1.5s terdeteksi >= 2 sniper sell atau >= 12 on-chain txs -> Instant Emergency Dump selamatkan modal. Jika aman, TAHAN SELAMA WHALE PING-PONG! Exit HANYA jika: (1) Whale sell 3x beruntun tanpa buyback, (2) Whale sell tunggal >= 2.5 SOL, (3) Trailing stop -20% dari peak setelah gain >= +100%, atau (4) Stop loss -10% / Max age 10m.', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s13_centaur = data.s13_centaur || { name: 'Skenario 13-Centaur: Hybrid Initial Pump Rider & 25s Whale Decision Gate', description: 'Saldo Awal $20.00. Modal $5.00/entry. Detik 0: Masuk bersama Whale (>= 20 SOL). Detik 0-20: Tahan posisi (Guaranteed Pump +60% - +100%). Detik 20-25 (Decision Gate): Evaluasi aksi Whale. JALUR A (Rugpull Trap): Jika Whale pasif (0 buyback) atau ada sell >= 8 SOL, LANGSUNG EXIT di detik 20-25 (kunci cuan +40% - +80% sebelum bom banting). JALUR B (Runner Sejati): Jika Whale aktif ping-pong (buyback >= 1x, sell < 8 SOL), SWITCH KE WAVE RIDER MODE (tahan hingga trailing stop -20% pasca +100%, whale exhaustion 3x sell, atau timeout 30m).', availableCash: 20.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
     const isPnlPositive = s.realizedPnl >= 0;
@@ -948,10 +949,11 @@ export function render3ScenariosLiveHtml() {
       ${renderScenarioCard(s13_beta, '#f59e0b', 'sce13_beta')}
       ${renderScenarioCard(s13_alpha_1, '#ec4899', 'sce13_alpha_1')}
       ${renderScenarioCard(s13_beta_1, '#10b981', 'sce13_beta_1')}
+      ${renderScenarioCard(s13_centaur, '#38bdf8', 'sce13_centaur')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 14-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S9.5 vs S10 vs S13 vs S13.5 vs S13-Alpha vs S13-Beta vs S13-Alpha-1 vs S13-Beta-1) &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 15-Way Parallel Dry-Run Engine (S4 vs S5 vs S6 vs S7 vs S8 vs S9 vs S9.5 vs S10 vs S13 vs S13.5 vs S13-Alpha vs S13-Beta vs S13-Alpha-1 vs S13-Beta-1 vs S13-Centaur) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 
