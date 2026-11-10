@@ -806,7 +806,7 @@ export class MultiScenarioDryRunEngine {
       s14: {
         id: 'SCENARIO_14_BUNDLER_RUNNER',
         name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)',
-        description: 'Saldo Awal $20.00. Modal $5.00/entry. Tidak masuk di Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00 dan aktifkan Wave Rider (Trailing Stop -20% pasca +100%, Whale Giant Sell >= 15 SOL, Whale Exhaustion 3x sell, atau Timeout 30m).',
+        description: 'Saldo Awal $20.00. Modal $5.00/entry. Tidak masuk di Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Tahan posisi selama koin dipompa (Stop Loss -20% dari harga masuk). Exit murni saat Whale Dump (Whale Giant Sell >= 15 SOL, Whale Exhaustion 3x sell beruntun, atau Timeout 30m).',
         initialCash: 20.0,
         availableCash: 20.0,
         investedCash: 0.0,
@@ -4032,7 +4032,7 @@ export class MultiScenarioDryRunEngine {
           }
         }
 
-        // Khusus Skenario 14: Bundler-Confirmed Runner Wave Rider
+        // Khusus Skenario 14: Bundler-Confirmed Runner (Ride with Whale | Stop Loss -20% dari Entry | Exit on Whale Dump)
         if (scenario.id === 'SCENARIO_14_BUNDLER_RUNNER' && pos.avgEntryPriceUsd > 0) {
           const gainPct = ((priceUsd - pos.avgEntryPriceUsd) / pos.avgEntryPriceUsd) * 100;
           const now = Date.now();
@@ -4044,19 +4044,9 @@ export class MultiScenarioDryRunEngine {
           }
 
           if (s14Tracker && s14Tracker.status === 'ACTIVE_RIDING') {
-            if (gainPct >= 100.0) {
-              const dropFromPeak = ((pos.peakPriceUsd - priceUsd) / pos.peakPriceUsd) * 100;
-              if (dropFromPeak >= 20.0) {
-                const exitReason = `S14_TRAILING_STOP_20%_LOCK (Gain: +${gainPct.toFixed(1)}% | Drop ${dropFromPeak.toFixed(1)}% dari Peak $${pos.peakPriceUsd.toFixed(8)} | Lock Cuan Max!)`;
-                this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
-                s14Tracker.status = 'EXITED_TRAILING_STOP';
-                s14Tracker.lastExitAt = now;
-                continue;
-              }
-            }
-
-            if (gainPct <= -10.0) {
-              const exitReason = `STOP_LOSS_10% (Drop: ${gainPct.toFixed(1)}% <= -10% | Cut-loss pengaman)`;
+            // Cut loss HANYA jika harga turun -20% dari harga kita masuk:
+            if (gainPct <= -20.0) {
+              const exitReason = `STOP_LOSS_20%_ENTRY (Drop: ${gainPct.toFixed(1)}% <= -20% dari harga masuk $${pos.avgEntryPriceUsd.toFixed(8)} | Cut-loss pengaman)`;
               this.executeScenarioExit(scenario, posIdx, priceUsd, now, timeWib, exitReason);
               s14Tracker.status = 'TERMINATED';
               s14Tracker.lastExitAt = now;
