@@ -8,6 +8,7 @@ const testDir = path.resolve(process.cwd(), 'data/test-s13-ab1-' + Date.now());
 fs.mkdirSync(testDir, { recursive: true });
 
 const engine = new MultiScenarioDryRunEngine(testDir);
+engine.bundlerResolver = async () => null;
 
 let testsPassed = 0;
 let totalTests = 0;

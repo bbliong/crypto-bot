@@ -262,6 +262,7 @@ export class WalletFollowerRunner {
       this.page = targetTab;
       this.liveAdapter.attachPageListeners(this.page);
       this.devWatcher.setBrowserPage(this.page);
+      this.multiDryRunEngine.setBrowserPage(this.page);
 
       // Trigger user info fetch to capture fresh Bearer Authorization header immediately
       this.page.evaluate(() => {

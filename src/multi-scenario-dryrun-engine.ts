@@ -141,13 +141,14 @@ export interface S13AlphaState {
   whalePeakHolding: number;
   consecutiveSells: number;
   cycleCount: number;
-  status: 'PENDING_1S_VERIFICATION' | 'ACTIVE' | 'BLOCKED_SNIPER_BATTLE' | 'TERMINATED';
+  status: 'PENDING_1S_VERIFICATION' | 'ACTIVE' | 'BLOCKED_SNIPER_BATTLE' | 'BLOCKED_LOW_BUNDLER' | 'TERMINATED';
   lastExitAt: number;
   sniperBuysIn1s: number;
   sniperSellsIn1s: number;
   verificationTimer?: any;
   verifiedAt?: number;
   targetBuySignal?: WalletTradeSignal;
+  bundlerRate?: number | null;
 }
 
 export interface S13BetaState {
@@ -182,12 +183,13 @@ export interface S13CentaurState {
   whaleBuybacks10_25s: number;
   hasLargeSell10_25s: boolean;
   consecutiveWhaleSells: number;
-  status: 'PENDING_1S_VERIFICATION' | 'ACTIVE_INITIAL_PUMP' | 'RUNNER_WAVE_RIDE' | 'BLOCKED_MEV_DUMP' | 'SCALPED_PRE_RUG' | 'EXHAUSTION_EXITED' | 'TERMINATED';
+  status: 'PENDING_1S_VERIFICATION' | 'ACTIVE_INITIAL_PUMP' | 'RUNNER_WAVE_RIDE' | 'BLOCKED_MEV_DUMP' | 'BLOCKED_LOW_BUNDLER' | 'SCALPED_PRE_RUG' | 'EXHAUSTION_EXITED' | 'TERMINATED';
   peakPriceUsd: number;
   lastExitAt: number;
   verificationTimer?: any;
   decisionGateTimer?: any;
   targetBuySignal?: WalletTradeSignal;
+  bundlerRate?: number | null;
 }
 
 export type ScenarioTradeActionCallback = (
@@ -245,6 +247,109 @@ export class MultiScenarioDryRunEngine {
   private lastObservedPrices: Map<string, number> = new Map();
   private abortedBuyKeys: Set<string> = new Set();
   public onTradeAction?: ScenarioTradeActionCallback;
+  public browserPage: any = null;
+  public bundlerResolver?: (mint: string) => Promise<number | null>;
+
+  public setBrowserPage(page: any): void {
+    this.browserPage = page;
+  }
+
+  /**
+   * Mengambil metrik Bundler Rate (% token supply diborong genesis bundle di Detik 0)
+   * Menggunakan browser GMGN page jika aktif, dengan fallback standalone CDP WebSocket (Port 9223).
+   */
+  public async fetchTokenBundlerRate(mint: string): Promise<number | null> {
+    if (this.bundlerResolver) {
+      try {
+        const val = await this.bundlerResolver(mint);
+        return val !== undefined ? val : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // 1. Coba via this.browserPage jika aktif
+    if (this.browserPage && typeof this.browserPage.isClosed === 'function' && !this.browserPage.isClosed()) {
+      try {
+        const bundlerVal = await Promise.race([
+          this.browserPage.evaluate(async (m: string) => {
+            try {
+              const r = await fetch('/api/v1/token_stat/sol/' + m);
+              const j = await r.json();
+              const rawRate = j?.data?.top_bundler_trader_percentage;
+              return rawRate !== undefined && rawRate !== null ? Number(rawRate) : null;
+            } catch {
+              return null;
+            }
+          }, mint),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
+        ]);
+        if (typeof bundlerVal === 'number' && !isNaN(bundlerVal)) {
+          return bundlerVal;
+        }
+      } catch {}
+    }
+
+    // 2. Standalone CDP WebSocket fallback (Port 9223)
+    try {
+      const tabsRes = await fetch('http://127.0.0.1:9223/json', { signal: AbortSignal.timeout(800) });
+      if (!tabsRes.ok) return null;
+      const tabs: any = await tabsRes.json();
+      const pageTab = tabs.find((t: any) => t.type === 'page' && t.url && t.url.includes('gmgn.ai'));
+      if (!pageTab || !pageTab.webSocketDebuggerUrl) return null;
+
+      const rate = await new Promise<number | null>((resolve) => {
+        const timer = setTimeout(() => {
+          try { ws.close(); } catch {}
+          resolve(null);
+        }, 1200);
+
+        const ws = new WebSocket(pageTab.webSocketDebuggerUrl);
+        ws.onopen = () => {
+          const expr = `(async () => {
+            try {
+              const r = await fetch('/api/v1/token_stat/sol/${mint}');
+              const j = await r.json();
+              return j?.data?.top_bundler_trader_percentage;
+            } catch { return null; }
+          })()`;
+          ws.send(JSON.stringify({
+            id: 888,
+            method: 'Runtime.evaluate',
+            params: { expression: expr, awaitPromise: true, returnByValue: true }
+          }));
+        };
+        ws.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data.toString());
+            if (data.id === 888) {
+              clearTimeout(timer);
+              ws.close();
+              const val = data.result?.result?.value;
+              if (val !== undefined && val !== null) {
+                const num = Number(val);
+                resolve(!isNaN(num) ? num : null);
+                return;
+              }
+              resolve(null);
+            }
+          } catch {
+            clearTimeout(timer);
+            try { ws.close(); } catch {}
+            resolve(null);
+          }
+        };
+        ws.onerror = () => {
+          clearTimeout(timer);
+          resolve(null);
+        };
+      });
+
+      return rate;
+    } catch {
+      return null;
+    }
+  }
 
   public scenarios: {
     s4: ScenarioState;
@@ -1277,17 +1382,33 @@ export class MultiScenarioDryRunEngine {
 
     const totTxs = tracker.sniperBuysIn1s + tracker.sniperSellsIn1s;
     const sellRatio = totTxs > 0 ? (tracker.sniperSellsIn1s / totTxs) : 0;
-    // Kriteria MEV Dump: Block jika ada >= 3 sniper sell dengan rasio sell >= 25%, ATAU sell >= 8 txs
+
+    // Ambil Bundler Rate dari GMGN Token Stat (Detik ke-1)
+    const bundlerRate = await this.fetchTokenBundlerRate(mint);
+    if (bundlerRate !== null) {
+      tracker.bundlerRate = bundlerRate;
+    }
+
+    // Evaluasi 1: Jebakan Koin Umpan Rugpull (Bundler Rate < 5.0% dari peluncuran Block 0)
+    const isLowBundler = (bundlerRate !== null && bundlerRate < 0.05);
+
+    // Evaluasi 2: Serbuan MEV Sell / Dump
     const isSniperDump = (tracker.sniperSellsIn1s >= 3 && sellRatio >= 0.25) || tracker.sniperSellsIn1s >= 8;
 
-    if (isSniperDump) {
-      tracker.status = 'BLOCKED_SNIPER_BATTLE';
-      const blockReason = `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sell / ${(sellRatio * 100).toFixed(0)}% sell ratio | Rugpull dicegah)`;
+    if (isLowBundler || isSniperDump) {
+      tracker.status = isLowBundler ? 'BLOCKED_LOW_BUNDLER' : 'BLOCKED_SNIPER_BATTLE';
+      const blockReason = isLowBundler
+        ? `BLOCKED_LOW_BUNDLER_GATE (Bundler ${(bundlerRate! * 100).toFixed(1)}% < 5% | Rugpull umpan dicegah)`
+        : `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sell / ${(sellRatio * 100).toFixed(0)}% sell ratio | Rugpull dicegah)`;
 
       console.log(`\n=========================================================`);
       console.log(`🛡️ [SCENARIO 13-ALPHA 1-SECOND SNIPER GATE: BLOCKED!]`);
       console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
-      console.log(`   Indikator    : Serbuan MEV Sell (${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy | Rasio Sell: ${(sellRatio * 100).toFixed(1)}%)!`);
+      if (isLowBundler) {
+        console.log(`   Indikator    : BUNDLER TERLALU RENDAH (${(bundlerRate! * 100).toFixed(2)}% < 5.0%) -> Koin umpan dev tanpa bundle!`);
+      } else {
+        console.log(`   Indikator    : Serbuan MEV Sell (${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy | Rasio Sell: ${(sellRatio * 100).toFixed(1)}%)!`);
+      }
       console.log(`   Keputusan    : BATALKAN ORDER BUY (100% Kebal Rugpull | Modal Aman $${this.scenarios.s13_alpha.availableCash.toFixed(2)} | $0 Gas Fee)!`);
       console.log(`=========================================================\n`);
 
@@ -1342,10 +1463,11 @@ export class MultiScenarioDryRunEngine {
       exchange: tracker.exchange
     };
 
+    const bundlerInfo = bundlerRate !== null ? `Bundler: ${(bundlerRate * 100).toFixed(1)}%` : 'Bundler: Organik';
     console.log(`\n=========================================================`);
     console.log(`🟢 [SCENARIO 13-ALPHA 1-SECOND SNIPER GATE: PASSED!]`);
     console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
-    console.log(`   Indikator    : Akumulasi Bersih! (Hanya ${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy dlm 1s).`);
+    console.log(`   Indikator    : Terkonfirmasi Runner! (${bundlerInfo} | Serbuan Sell MEV: ${tracker.sniperSellsIn1s}x vs ${tracker.sniperBuysIn1s}x buy).`);
     console.log(`   Keputusan    : TERKONFIRMASI WINNER (Main Pool)! Mengeksekusi BUY di detik ke-1...`);
     console.log(`   Modal Siklus : $${stakeUsd.toFixed(2)}`);
     console.log(`=========================================================\n`);
@@ -1394,11 +1516,24 @@ export class MultiScenarioDryRunEngine {
 
     const totTxs = tracker.sniperBuysIn1s + tracker.sniperSellsIn1s;
     const sellRatio = totTxs > 0 ? (tracker.sniperSellsIn1s / totTxs) : 0;
+
+    // Ambil Bundler Rate dari GMGN Token Stat (Detik ke-1)
+    const bundlerRate = await this.fetchTokenBundlerRate(mint);
+    if (bundlerRate !== null) {
+      tracker.bundlerRate = bundlerRate;
+    }
+
+    // Evaluasi 1: Jebakan Koin Umpan Rugpull (Bundler Rate < 5.0% dari peluncuran Block 0)
+    const isLowBundler = (bundlerRate !== null && bundlerRate < 0.05);
+
+    // Evaluasi 2: Serbuan MEV Sell / Dump
     const isSniperDump = (tracker.sniperSellsIn1s >= 3 && sellRatio >= 0.25) || tracker.sniperSellsIn1s >= 8;
 
-    if (isSniperDump) {
-      tracker.status = 'BLOCKED_SNIPER_BATTLE';
-      const blockReason = `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sell / ${(sellRatio * 100).toFixed(0)}% sell ratio | Rugpull dicegah)`;
+    if (isLowBundler || isSniperDump) {
+      tracker.status = isLowBundler ? 'BLOCKED_LOW_BUNDLER' : 'BLOCKED_SNIPER_BATTLE';
+      const blockReason = isLowBundler
+        ? `BLOCKED_LOW_BUNDLER_GATE (Bundler ${(bundlerRate! * 100).toFixed(1)}% < 5% | Rugpull umpan dicegah)`
+        : `BLOCKED_1S_SNIPER_GATE (${tracker.sniperSellsIn1s}x sell / ${(sellRatio * 100).toFixed(0)}% sell ratio | Rugpull dicegah)`;
 
       this.scenarios.s13_alpha_1.recentEvents.unshift({
         id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1450,10 +1585,11 @@ export class MultiScenarioDryRunEngine {
       exchange: tracker.exchange
     };
 
+    const bundlerInfo = bundlerRate !== null ? `Bundler: ${(bundlerRate * 100).toFixed(1)}%` : 'Bundler: Organik';
     console.log(`\n=========================================================`);
     console.log(`🟢 [SCENARIO 13-ALPHA-1 1S SNIPER GATE: PASSED!]`);
     console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
-    console.log(`   Indikator    : Akumulasi Bersih! (Hanya ${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy dlm 1s).`);
+    console.log(`   Indikator    : Terkonfirmasi Runner! (${bundlerInfo} | Serbuan Sell MEV: ${tracker.sniperSellsIn1s}x vs ${tracker.sniperBuysIn1s}x buy).`);
     console.log(`   Keputusan    : TERKONFIRMASI WINNER (Main Pool)! Masuk Mode Wave Rider di detik ke-1...`);
     console.log(`   Modal Siklus : $${stakeUsd.toFixed(2)}`);
     console.log(`=========================================================\n`);
@@ -1495,16 +1631,33 @@ export class MultiScenarioDryRunEngine {
 
     const totTxs = tracker.sniperBuysIn1s + tracker.sniperSellsIn1s;
     const sellRatio = totTxs > 0 ? (tracker.sniperSellsIn1s / totTxs) : 0;
+
+    // Ambil Bundler Rate dari GMGN Token Stat (Detik ke-1)
+    const bundlerRate = await this.fetchTokenBundlerRate(mint);
+    if (bundlerRate !== null) {
+      tracker.bundlerRate = bundlerRate;
+    }
+
+    // Evaluasi 1: Jebakan Koin Umpan Rugpull (Bundler Rate < 5.0% dari peluncuran Block 0)
+    const isLowBundler = (bundlerRate !== null && bundlerRate < 0.05);
+
+    // Evaluasi 2: Serbuan MEV Sell / Dump
     const isMevDump = (tracker.sniperSellsIn1s >= 3 && sellRatio >= 0.25) || tracker.sniperSellsIn1s >= 8;
 
-    if (isMevDump) {
-      tracker.status = 'BLOCKED_MEV_DUMP';
-      const blockReason = `BLOCKED_MEV_DUMP_GATE (${tracker.sniperSellsIn1s} sells / ${(sellRatio * 100).toFixed(0)}% sell ratio | Rugpull dicegah)`;
+    if (isLowBundler || isMevDump) {
+      tracker.status = isLowBundler ? 'BLOCKED_LOW_BUNDLER' : 'BLOCKED_MEV_DUMP';
+      const blockReason = isLowBundler
+        ? `BLOCKED_LOW_BUNDLER_GATE (Bundler ${(bundlerRate! * 100).toFixed(1)}% < 5% | Rugpull umpan dicegah)`
+        : `BLOCKED_MEV_DUMP_GATE (${tracker.sniperSellsIn1s} sells / ${(sellRatio * 100).toFixed(0)}% sell ratio | Rugpull dicegah)`;
 
       console.log(`\n=========================================================`);
       console.log(`🛡️ [SCENARIO 13-CENTAUR MEV GATE: BLOCKED!]`);
       console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
-      console.log(`   Indikator    : Terdeteksi serbuan sell MEV (${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy | Rasio Sell: ${(sellRatio * 100).toFixed(1)}%)!`);
+      if (isLowBundler) {
+        console.log(`   Indikator    : BUNDLER TERLALU RENDAH (${(bundlerRate! * 100).toFixed(2)}% < 5.0%) -> Koin umpan dev tanpa bundle!`);
+      } else {
+        console.log(`   Indikator    : Terdeteksi serbuan sell MEV (${tracker.sniperSellsIn1s}x sell vs ${tracker.sniperBuysIn1s}x buy | Rasio Sell: ${(sellRatio * 100).toFixed(1)}%)!`);
+      }
       console.log(`   Keputusan    : BATALKAN ORDER BUY (100% Kebal Rugpull | Modal Aman $${this.scenarios.s13_centaur.availableCash.toFixed(2)} | $0 Gas Fee)!`);
       console.log(`=========================================================\n`);
 
@@ -1556,10 +1709,11 @@ export class MultiScenarioDryRunEngine {
       exchange: tracker.exchange
     };
 
+    const bundlerInfo = bundlerRate !== null ? `Bundler: ${(bundlerRate * 100).toFixed(1)}%` : 'Bundler: Organik';
     console.log(`\n=========================================================`);
-    console.log(`🟢 [SCENARIO 13-CENTAUR MEV GATE: PASSED!]`);
+    console.log(`🟢 [SCENARIO 13-CENTAUR 1S GATE: PASSED!]`);
     console.log(`   Token        : ${tracker.symbol} [${mint.slice(0, 8)}...]`);
-    console.log(`   Indikator    : Akumulasi Bersih! (${tracker.sniperBuysIn1s}x buy vs ${tracker.sniperSellsIn1s}x sell | Rasio Sell: ${(sellRatio * 100).toFixed(1)}% < 30%).`);
+    console.log(`   Indikator    : Terkonfirmasi Runner! (${bundlerInfo} | Serbuan Sell MEV: ${tracker.sniperSellsIn1s}x vs ${tracker.sniperBuysIn1s}x buy).`);
     console.log(`   Keputusan    : TERKONFIRMASI RUNNER (Main Pool)! Masuk Mode Wave Rider di detik ke-1...`);
     console.log(`   Modal Siklus : $${stakeUsd.toFixed(2)}`);
     console.log(`=========================================================\n`);
@@ -3386,9 +3540,9 @@ export class MultiScenarioDryRunEngine {
         if ((signal.solAmount && signal.solAmount >= 8.0) || targetUsd >= 700) {
           centaurTracker.hasLargeSell10_25s = true;
         }
-        // Jika muncul dump raksasa >= 15 SOL seketika (detik 20-35), percepat Decision Gate untuk Scalp Exit!
+        // Jika muncul dump raksasa >= 15 SOL seketika (detik 20-35), percepat evaluasi untuk abort/exit!
         if ((signal.solAmount && signal.solAmount >= 15.0) || targetUsd >= 1300) {
-          this.evaluateS13CentaurDecisionGate(signal.mint);
+          this.evaluateS13Centaur1sGate(signal.mint);
           return;
         }
       } else if (centaurTracker.status === 'RUNNER_WAVE_RIDE') {

@@ -8,6 +8,7 @@ const testDir = path.resolve(process.cwd(), 'data/test-s13-centaur-' + Date.now(
 fs.mkdirSync(testDir, { recursive: true });
 
 const engine = new MultiScenarioDryRunEngine(testDir);
+engine.bundlerResolver = async () => null;
 
 let testsPassed = 0;
 let totalTests = 0;
@@ -60,6 +61,7 @@ async function runTests() {
   engine.recordPoolTradeActivity(rugMint, 'sell', 0.000058, 1.5);
   engine.recordPoolTradeActivity(rugMint, 'sell', 0.000055, 1.1);
   engine.recordPoolTradeActivity(rugMint, 'sell', 0.000050, 2.0); // 4th sell -> triggers fast evaluation!
+  await new Promise(r => setTimeout(r, 100));
 
   assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur 100% MEMBATALKAN BUY (Kebal Rugpull)!');
   assert(engine.scenarios.s13_centaur.availableCash === 20.0, 'Kas S13-Centaur tetap utuh $20.00 ($0 fee)');
