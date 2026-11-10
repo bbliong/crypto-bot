@@ -1527,22 +1527,51 @@ export class MultiScenarioDryRunEngine {
       }
     }
 
-    // Update S14 saat Whale Buyback / Buy More
-    const existingS14Tracker = this.s14Trackers.get(signal.mint);
-    if (existingS14Tracker && existingS14Tracker.status !== 'TERMINATED' && existingS14Tracker.status !== 'EXITED_TRAILING_STOP' && existingS14Tracker.status !== 'EXITED_WHALE_DUMP') {
-      existingS14Tracker.whaleBuysCount++;
-      existingS14Tracker.consecutiveWhaleSells = 0;
-      existingS14Tracker.whaleRemainingHolding = signal.remainingHolding;
-      if (signal.remainingHolding > existingS14Tracker.whalePeakHolding) {
-        existingS14Tracker.whalePeakHolding = signal.remainingHolding;
+    // Inisialisasi atau Update S14 Tracker saat Whale Buy
+    let s14Tracker = this.s14Trackers.get(signal.mint);
+    if (!s14Tracker && (isGroundZero || signal.isFirstBuy || signal.isOpenOrClose || targetUsd >= 500 || (signal.solAmount && signal.solAmount >= 5))) {
+      s14Tracker = {
+        mint: signal.mint,
+        symbol: signal.symbol,
+        pairAddress: signal.pairAddress,
+        exchange: signal.exchange,
+        whaleWallet: (signal as any).ad || (signal as any).devWallet || '',
+        whaleFirstBuyAt: now,
+        whaleFirstBuyUsd: targetUsd,
+        whaleFirstBuySol: signal.solAmount || (targetUsd / 90),
+        whalePeakHolding: signal.remainingHolding || signal.tokenAmount || 1,
+        whaleRemainingHolding: signal.remainingHolding || signal.tokenAmount || 1,
+        whaleBuysCount: 1,
+        whaleSellsCount: 0,
+        consecutiveWhaleSells: 0,
+        hasEntered: false,
+        status: 'OBSERVING_BUNDLER',
+        bundlerPct: 0,
+        peakPriceUsd: signal.priceUsd,
+        lastExitAt: 0,
+        targetBuySignal: signal,
+      };
+      this.s14Trackers.set(signal.mint, s14Tracker);
+      console.log(`\n=========================================================`);
+      console.log(`💎 [SCENARIO 14 RADAR ACTIVATED] Target Whale Masuk ${signal.solAmount || (targetUsd/90).toFixed(1)} SOL ($${targetUsd.toFixed(0)}) di '${signal.symbol}'!`);
+      console.log(`   Status      : Standby Cash (Menunggu Konfirmasi On-Chain Bundler >= 5.0%)...`);
+      console.log(`   Aturan Masuk: Masuk saat Bundler Rate >= 5% & Whale aktif buyback/ping-pong.`);
+      console.log(`   Aturan Jual : Stop Loss -20% dari Entry | Exit saat Whale Dump (>= 15 SOL / Streak 3x Sell).`);
+      console.log(`=========================================================\n`);
+    } else if (s14Tracker && s14Tracker.status !== 'TERMINATED' && s14Tracker.status !== 'EXITED_TRAILING_STOP' && s14Tracker.status !== 'EXITED_WHALE_DUMP') {
+      s14Tracker.whaleBuysCount++;
+      s14Tracker.consecutiveWhaleSells = 0;
+      s14Tracker.whaleRemainingHolding = signal.remainingHolding;
+      if (signal.remainingHolding > s14Tracker.whalePeakHolding) {
+        s14Tracker.whalePeakHolding = signal.remainingHolding;
       }
       const posIdx = this.scenarios.s14.openPositions.findIndex(p => p.mint === signal.mint);
       if (posIdx >= 0) {
         this.scenarios.s14.openPositions[posIdx].lastPriceUsd = signal.priceUsd;
       }
       // Jika belum masuk dan bundler sudah >= 5%: coba evaluasi entry!
-      if (!existingS14Tracker.hasEntered && existingS14Tracker.bundlerPct >= 5.0) {
-        this.evaluateS14BundlerEntry(signal.mint, existingS14Tracker.bundlerPct, signal.priceUsd);
+      if (!s14Tracker.hasEntered && s14Tracker.bundlerPct >= 5.0) {
+        this.evaluateS14BundlerEntry(signal.mint, s14Tracker.bundlerPct, signal.priceUsd);
       }
     }
 
@@ -2005,7 +2034,7 @@ export class MultiScenarioDryRunEngine {
     console.log(`   Whale Status : Aktif (${tracker.whaleBuysCount}x buy, sisa ${(remRatio * 100).toFixed(1)}% bag)`);
     console.log(`   Harga Masuk  : $${entryPrice.toFixed(8)}`);
     console.log(`   Modal Siklus : $${stakeUsd.toFixed(2)}`);
-    console.log(`   Aksi         : MASUK MODE WAVE RIDER (Trailing Stop -20% pasca +100%)!`);
+    console.log(`   Aksi         : MASUK MODE RUNNER (Stop Loss -20% dari Entry | Exit murni saat Whale Dump)!`);
     console.log(`=========================================================\n`);
 
     this.processScenarioBuy(this.scenarios.s14, buySignal, false, tracker.whaleFirstBuyUsd, now, timeWib, {
