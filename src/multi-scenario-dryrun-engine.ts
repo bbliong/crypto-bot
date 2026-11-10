@@ -2000,7 +2000,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = (liveCfg as any).stakeUsdS14 || (liveCfg as any).stakeUsdS13Centaur || (liveCfg as any).stakeUsdS13 || 5.0;
+      stakeUsd = (liveCfg as any).stakeUsdS14 || 5.0;
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)
