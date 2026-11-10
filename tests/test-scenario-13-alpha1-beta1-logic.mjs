@@ -27,8 +27,8 @@ function assert(condition, message) {
 async function runTests() {
   // TEST 1: Inisialisasi
   console.log('1. Memeriksa Inisialisasi S13-Alpha-1 & S13-Beta-1:');
-  assert(engine.scenarios.s13_alpha_1.availableCash === 20.0, 'S13-Alpha-1 Kas Awal $20.00');
-  assert(engine.scenarios.s13_beta_1.availableCash === 20.0, 'S13-Beta-1 Kas Awal $20.00');
+  assert(engine.scenarios.s13_alpha_1.availableCash === 5.0, 'S13-Alpha-1 Kas Awal $5.00');
+  assert(engine.scenarios.s13_beta_1.availableCash === 5.0, 'S13-Beta-1 Kas Awal $5.00');
   assert(engine.scenarios.s13_alpha_1.totalTrades === 0, 'S13-Alpha-1 0 Trades');
   assert(engine.scenarios.s13_beta_1.totalTrades === 0, 'S13-Beta-1 0 Trades');
 
@@ -64,7 +64,7 @@ async function runTests() {
 
   engine.recordPoolTradeActivity(rugMint, 'sell', 0.000035, 1.5);
   assert(engine.scenarios.s13_alpha_1.openPositions.length === 0, 'S13-Alpha-1: 1s Sniper Gate BLOCKED (Kebal rugpull)');
-  assert(engine.scenarios.s13_alpha_1.availableCash === 20.0, 'S13-Alpha-1 Kas tetap utuh $20.00 ($0 fee)');
+  assert(engine.scenarios.s13_alpha_1.availableCash === 5.0, 'S13-Alpha-1 Kas tetap utuh $5.00 ($0 fee)');
 
   // TEST 3: Koin Pemenang (Wave Rider - Ride the Pump!)
   console.log('\n3. Simulasi Koin Pemenang (Whale masuk 30 SOL, akumulasi bersih di 1s pertama):');

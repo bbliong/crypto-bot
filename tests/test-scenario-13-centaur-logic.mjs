@@ -27,7 +27,7 @@ function assert(condition, message) {
 async function runTests() {
   // TEST 1: Inisialisasi
   console.log('1. Memeriksa Inisialisasi S13-Centaur:');
-  assert(engine.scenarios.s13_centaur.availableCash === 20.0, 'S13-Centaur Kas Awal $20.00');
+  assert(engine.scenarios.s13_centaur.availableCash === 5.0, 'S13-Centaur Kas Awal $5.00');
   assert(engine.scenarios.s13_centaur.totalTrades === 0, 'S13-Centaur 0 Trades');
   assert(engine.scenarios.s13_centaur.name.includes('Centaur'), 'Nama skenario valid mengandung Centaur');
 
@@ -64,7 +64,7 @@ async function runTests() {
   await new Promise(r => setTimeout(r, 100));
 
   assert(engine.scenarios.s13_centaur.openPositions.length === 0, 'S13-Centaur 100% MEMBATALKAN BUY (Kebal Rugpull)!');
-  assert(engine.scenarios.s13_centaur.availableCash === 20.0, 'Kas S13-Centaur tetap utuh $20.00 ($0 fee)');
+  assert(engine.scenarios.s13_centaur.availableCash === 5.0, 'Kas S13-Centaur tetap utuh $5.00 ($0 fee)');
   const lastEv = engine.scenarios.s13_centaur.recentEvents[0];
   assert(lastEv && lastEv.reason.includes('BLOCKED_MEV_DUMP_GATE'), 'Alasan block adalah BLOCKED_MEV_DUMP_GATE');
 

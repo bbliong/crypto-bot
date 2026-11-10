@@ -8,6 +8,7 @@ const testDir = path.resolve(process.cwd(), 'data/test-s13-ab-' + Date.now());
 fs.mkdirSync(testDir, { recursive: true });
 
 const engine = new MultiScenarioDryRunEngine(testDir);
+engine.bundlerResolver = async () => null;
 
 let testsPassed = 0;
 let totalTests = 0;
@@ -26,8 +27,8 @@ function assert(condition, message) {
 async function runTests() {
   // TEST 1: Kondisi Awal
   console.log('1. Memeriksa Inisialisasi State S13-Alpha dan S13-Beta:');
-  assert(engine.scenarios.s13_alpha.availableCash === 20.0, 'S13-Alpha Kas Awal $20.00');
-  assert(engine.scenarios.s13_beta.availableCash === 20.0, 'S13-Beta Kas Awal $20.00');
+  assert(engine.scenarios.s13_alpha.availableCash === 5.0, 'S13-Alpha Kas Awal $5.00');
+  assert(engine.scenarios.s13_beta.availableCash === 5.0, 'S13-Beta Kas Awal $5.00');
   assert(engine.scenarios.s13_alpha.totalTrades === 0, 'S13-Alpha 0 Trades');
   assert(engine.scenarios.s13_beta.totalTrades === 0, 'S13-Beta 0 Trades');
 
@@ -70,7 +71,10 @@ async function runTests() {
   // Sell ke-3 tiba: S13-Alpha harus memblokir total entry buy!
   engine.recordPoolTradeActivity(rugMint, 'sell', 0.000035, 1.1);
   assert(engine.scenarios.s13_alpha.openPositions.length === 0, 'S13-Alpha 1-Second Sniper Gate: BLOCKED! Order Buy dibatalkan');
-  assert(engine.scenarios.s13_alpha.availableCash === 20.0, 'S13-Alpha Kas tetap utuh $20.00 (0 Gas Fee, 100% Kebal Rugpull)');
+  assert(engine.scenarios.s13_alpha.availableCash === 5.0, 'S13-Alpha Kas tetap utuh $5.00 (0 Gas Fee, 100% Kebal Rugpull)');
+
+  // Tunggu timer rugMint selesai:
+  await new Promise(r => setTimeout(r, 1100));
 
   // TEST 3: Koin Pemenang (Simulasi Kasus Trademark Gen 4 / STOKE / BTC)
   console.log('\n3. Simulasi Koin Pemenang (Whale masuk 30 SOL, akumulasi bersih di 1 detik pertama, lalu TP +10%):');

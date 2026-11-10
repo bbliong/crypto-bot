@@ -29,7 +29,7 @@ function assert(condition, message) {
 // ==========================================================
 console.log('1. Memeriksa Inisialisasi Skenario 14:');
 assert(engine.scenarios.s14 !== undefined, 'Skenario 14 terdaftar di engine');
-assert(engine.scenarios.s14.availableCash === 20.0, 'Kas Awal S14 $20.00');
+assert(engine.scenarios.s14.availableCash === 5.0, 'Kas Awal S14 $5.00');
 assert(engine.scenarios.s14.totalTrades === 0, 'Total Trades awal 0');
 assert(engine.scenarios.s14.name.includes('Skenario 14'), 'Nama skenario valid mengandung Skenario 14');
 
@@ -80,8 +80,8 @@ engine.handleTargetSell({
   isFirstBuy: false
 });
 
-assert(engine.scenarios.s14.openPositions.length === 0, 'S14 100% BEBAS DARI RUGPULL! (Kas tetap utuh $20.00, $0 kerugian)');
-assert(engine.scenarios.s14.availableCash === 20.0, 'Kas S14 tetap utuh $20.00');
+assert(engine.scenarios.s14.openPositions.length === 0, 'S14 100% BEBAS DARI RUGPULL! (Kas tetap utuh $5.00, $0 kerugian)');
+assert(engine.scenarios.s14.availableCash === 5.0, 'Kas S14 tetap utuh $5.00');
 
 // ==========================================================
 // TEST 3: Simulasi Koin Runner Pemenang (Bundler 7.5% - Seperti Token X / Bufo 2)
@@ -147,7 +147,7 @@ engine.handleTargetBuy({
 // Evaluasi entry S14 saat Bundler terdeteksi 7.5%:
 engine.evaluateS14BundlerEntry(runnerMint, 7.50, 0.000060);
 assert(engine.scenarios.s14.openPositions.length === 1, 'S14 TERKONFIRMASI RUNNER! Sukses BUY saat Bundler 7.5% >= 5%');
-assert(engine.scenarios.s14.availableCash <= 15.0, 'Kas S14 berkurang modal $5.00');
+assert(engine.scenarios.s14.availableCash <= 0.1, 'Kas S14 terpakai modal $5.00');
 
 // ==========================================================
 // TEST 4: Wave Riding & Take Profit Bertahap (+50% TP 50% -> +100% TP Moonbag)
@@ -158,7 +158,7 @@ engine.updatePriceTick(runnerMint, 0.000095);
 assert(engine.scenarios.s14.openPositions.length === 1, 'Posisi tetap ada setelah TP 50% Tahap 1');
 const runnerPos = engine.scenarios.s14.openPositions[0];
 assert(runnerPos.stage1Exited === true, 'S14 SUKSES TAKE PROFIT 50% TAHAP 1 saat Gain >= +50%!');
-assert(engine.scenarios.s14.availableCash > 15.0, 'Modal & cuan sebagian sudah kembali aman di kas!');
+assert(engine.scenarios.s14.availableCash >= 2.0, 'Modal & cuan sebagian sudah kembali aman di kas!');
 
 // 4b. Whale melakukan sell receh 1 SOL (wash trading) pasca TP 1:
 engine.handleTargetSell({
