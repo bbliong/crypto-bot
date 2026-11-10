@@ -249,44 +249,32 @@ export class MultiScenarioDryRunEngine {
   public onTradeAction?: ScenarioTradeActionCallback;
   public browserPage: any = null;
   public bundlerResolver?: (mint: string) => Promise<number | null>;
+  private bundlerResearchTrackers: Map<string, { timer: any; sampleCount: number; firstSeenAt: number; prevBundlerPct: number | null }> = new Map();
 
   public setBrowserPage(page: any): void {
     this.browserPage = page;
   }
 
   /**
-   * Mengambil metrik Bundler Rate (% token supply diborong genesis bundle di Detik 0)
-   * Menggunakan browser GMGN page jika aktif, dengan fallback standalone CDP WebSocket (Port 9223).
+   * Query raw response data dari /api/v1/token_stat/sol/${mint}
    */
-  public async fetchTokenBundlerRate(mint: string): Promise<number | null> {
-    if (this.bundlerResolver) {
-      try {
-        const val = await this.bundlerResolver(mint);
-        return val !== undefined ? val : null;
-      } catch {
-        return null;
-      }
-    }
-
+  public async queryGmgnTokenStatRaw(mint: string): Promise<any | null> {
     // 1. Coba via this.browserPage jika aktif
     if (this.browserPage && typeof this.browserPage.isClosed === 'function' && !this.browserPage.isClosed()) {
       try {
-        const bundlerVal = await Promise.race([
+        const raw = await Promise.race([
           this.browserPage.evaluate(async (m: string) => {
             try {
               const r = await fetch('/api/v1/token_stat/sol/' + m);
               const j = await r.json();
-              const rawRate = j?.data?.top_bundler_trader_percentage;
-              return rawRate !== undefined && rawRate !== null ? Number(rawRate) : null;
+              return j?.data || null;
             } catch {
               return null;
             }
           }, mint),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
         ]);
-        if (typeof bundlerVal === 'number' && !isNaN(bundlerVal)) {
-          return bundlerVal;
-        }
+        if (raw) return raw;
       } catch {}
     }
 
@@ -298,7 +286,7 @@ export class MultiScenarioDryRunEngine {
       const pageTab = tabs.find((t: any) => t.type === 'page' && t.url && t.url.includes('gmgn.ai'));
       if (!pageTab || !pageTab.webSocketDebuggerUrl) return null;
 
-      const rate = await new Promise<number | null>((resolve) => {
+      return await new Promise<any | null>((resolve) => {
         const timer = setTimeout(() => {
           try { ws.close(); } catch {}
           resolve(null);
@@ -310,7 +298,7 @@ export class MultiScenarioDryRunEngine {
             try {
               const r = await fetch('/api/v1/token_stat/sol/${mint}');
               const j = await r.json();
-              return j?.data?.top_bundler_trader_percentage;
+              return j?.data || null;
             } catch { return null; }
           })()`;
           ws.send(JSON.stringify({
@@ -325,13 +313,7 @@ export class MultiScenarioDryRunEngine {
             if (data.id === 888) {
               clearTimeout(timer);
               ws.close();
-              const val = data.result?.result?.value;
-              if (val !== undefined && val !== null) {
-                const num = Number(val);
-                resolve(!isNaN(num) ? num : null);
-                return;
-              }
-              resolve(null);
+              resolve(data.result?.result?.value || null);
             }
           } catch {
             clearTimeout(timer);
@@ -344,11 +326,125 @@ export class MultiScenarioDryRunEngine {
           resolve(null);
         };
       });
-
-      return rate;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Mengambil metrik Bundler Rate (% token supply diborong genesis bundle di Detik 0)
+   */
+  public async fetchTokenBundlerRate(mint: string): Promise<number | null> {
+    if (this.bundlerResolver) {
+      try {
+        const val = await this.bundlerResolver(mint);
+        return val !== undefined ? val : null;
+      } catch {
+        return null;
+      }
+    }
+
+    const data = await this.queryGmgnTokenStatRaw(mint);
+    const rawRate = data?.top_bundler_trader_percentage;
+    if (rawRate !== undefined && rawRate !== null) {
+      const num = Number(rawRate);
+      return !isNaN(num) ? num : null;
+    }
+    return null;
+  }
+
+  /**
+   * Worker Riset Bundler: Setiap token yang dibeli target Whale dipantau per 5 detik
+   * untuk mengamati apakah Bundler bertambah, berkurang, atau tetap.
+   */
+  public startBundlerResearchTracker(mint: string, symbol: string): void {
+    if (this.bundlerResearchTrackers.has(mint)) return;
+
+    const firstSeenAt = Date.now();
+    const trackerState = {
+      timer: null as any,
+      sampleCount: 0,
+      firstSeenAt,
+      prevBundlerPct: null as number | null
+    };
+
+    console.log(`\n=========================================================`);
+    console.log(`🔬 [BUNDLER 5S RESEARCH TRACKER STARTED]`);
+    console.log(`   Token        : ${symbol} [${mint.slice(0, 8)}...]`);
+    console.log(`   Target       : Polling /api/v1/token_stat/sol/ setiap 5 detik (15 Menit)`);
+    console.log(`   Tujuan       : Memantau apakah Bundler bertambah, berkurang, atau tetap!`);
+    console.log(`=========================================================\n`);
+
+    const poll = async () => {
+      trackerState.sampleCount++;
+      const now = Date.now();
+      const ageSec = Math.round((now - trackerState.firstSeenAt) / 1000);
+
+      // Stop otomatis jika sudah lewat 15 menit (180 sample)
+      if (trackerState.sampleCount > 180) {
+        if (trackerState.timer) clearInterval(trackerState.timer);
+        this.bundlerResearchTrackers.delete(mint);
+        console.log(`[BUNDLER RESEARCH COMPLETE] Token ${symbol} [${mint.slice(0, 8)}...] selesai dipantau (15 menit).`);
+        return;
+      }
+
+      const data = await this.queryGmgnTokenStatRaw(mint);
+      if (!data) return;
+
+      const bundlerRaw = data.top_bundler_trader_percentage;
+      const bundlerPct = bundlerRaw !== undefined && bundlerRaw !== null ? Number(bundlerRaw) * 100 : 0;
+      const holders = Number(data.holder_count || 0);
+      const snipers = Number(data.top70_sniper_hold_rate || 0) * 100;
+      const creator = Number(data.creator_hold_rate || 0) * 100;
+
+      const prev = trackerState.prevBundlerPct;
+      const delta = prev !== null ? (bundlerPct - prev) : 0;
+      let status: 'STABLE' | 'INCREASED' | 'DECREASED' = 'STABLE';
+      if (delta > 0.05) status = 'INCREASED';
+      else if (delta < -0.05) status = 'DECREASED';
+
+      trackerState.prevBundlerPct = bundlerPct;
+
+      // Append ke timeseries file
+      const timeseriesPath = path.join(this.dataDir, 'research-bundler-timeseries.jsonl');
+      const entry = {
+        mint,
+        symbol,
+        sampleIndex: trackerState.sampleCount,
+        timestamp: now,
+        timeWib: formatWibDate(now),
+        ageSeconds: ageSec,
+        bundlerPct: Number(bundlerPct.toFixed(2)),
+        prevBundlerPct: prev !== null ? Number(prev.toFixed(2)) : null,
+        deltaBundlerPct: Number(delta.toFixed(2)),
+        status,
+        holders,
+        snipers: Number(snipers.toFixed(2)),
+        creator: Number(creator.toFixed(2))
+      };
+      try {
+        fs.appendFileSync(timeseriesPath, JSON.stringify(entry) + '\n', 'utf8');
+      } catch {}
+
+      // Log ke console
+      if (status === 'INCREASED') {
+        console.log(`📈 [BUNDLER MENINGKAT! #${trackerState.sampleCount} | +${ageSec}s] ${symbol}: ${prev?.toFixed(2)}% -> ${bundlerPct.toFixed(2)}% (+${delta.toFixed(2)}%) | Holders: ${holders}`);
+      } else if (status === 'DECREASED') {
+        console.log(`📉 [BUNDLER TURUN! #${trackerState.sampleCount} | +${ageSec}s] ${symbol}: ${prev?.toFixed(2)}% -> ${bundlerPct.toFixed(2)}% (${delta.toFixed(2)}%) | Holders: ${holders}`);
+      } else {
+        if (trackerState.sampleCount % 3 === 1) {
+          console.log(`📊 [BUNDLER RESEARCH #${trackerState.sampleCount} | +${ageSec}s] ${symbol.padEnd(8)} | Bundler: ${bundlerPct.toFixed(2)}% (STABIL) | Holders: ${holders} | Snipers: ${snipers.toFixed(1)}% | Dev: ${creator.toFixed(1)}%`);
+        }
+      }
+    };
+
+    // Eksekusi segera detik ke-0, lalu pasang interval 5.000 ms
+    poll().catch(() => {});
+    trackerState.timer = setInterval(poll, 5000);
+    if (typeof trackerState.timer?.unref === 'function') {
+      trackerState.timer.unref();
+    }
+    this.bundlerResearchTrackers.set(mint, trackerState);
   }
 
   public scenarios: {
@@ -778,6 +874,9 @@ export class MultiScenarioDryRunEngine {
       if (cfg.stakeUsdS7Pool1) s7Pool1 = Number(cfg.stakeUsdS7Pool1);
       if (cfg.stakeUsdS7Pool2) s7Pool2 = Number(cfg.stakeUsdS7Pool2);
     } catch {}
+
+    // Mulai riset pemantauan Bundler tiap 5 detik untuk token yang dibeli target Whale
+    this.startBundlerResearchTracker(signal.mint, signal.symbol);
 
     // 1. Skenario 4 (2-Lapis Shakeout Trap: Hold 8s & Dump on Buyback)
     // Cek apakah S4 sedang menunggu buyback pada token ini (Lapis 2: Dump on Buyback)
