@@ -75,6 +75,7 @@ export function render3ScenariosLiveHtml() {
   const s13_centaur = data.s13_centaur || { name: 'Skenario 13-Centaur: Hybrid Initial Pump Rider & 25s Whale Decision Gate', description: 'Saldo Awal $5.00. Modal $5.00/entry. Detik 0: Masuk bersama Whale (>= 20 SOL). Detik 0-20: Tahan posisi (Guaranteed Pump +60% - +100%). Detik 20-25 (Decision Gate): Evaluasi aksi Whale. JALUR A (Rugpull Trap): Jika Whale pasif (0 buyback) atau ada sell >= 8 SOL, LANGSUNG EXIT di detik 20-25 (kunci cuan +40% - +80% sebelum bom banting). JALUR B (Runner Sejati): Jika Whale aktif ping-pong (buyback >= 1x, sell < 8 SOL), SWITCH KE WAVE RIDER MODE (tahan hingga trailing stop -20% pasca +100%, whale exhaustion 3x sell, atau timeout 30m).', availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s14 = data.s14 || { name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)', description: 'Saldo Awal $5.00. Modal $5.00/entry. Standby saat Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Take Profit Bertahap: Jual 50% di +50% gain (amankan modal), sisa 50% moonbag ditahan hingga +100% atau Whale Dump. Stop Loss -20% dari entry (sebelum TP 1). Whale consecutive sells hanya hitung order signifikan >= 3 SOL atau holding < 50% (anti-shakeout). Giant Dump >= 15 SOL exit 100%.', availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s14_alpha = data.s14_alpha || { name: 'Skenario 14-Alpha: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)', description: 'Saldo Awal $5.00. Modal $5.00/entry. Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Take Profit Bertahap: Jual 50% di +50% gain (amankan modal), sisa 50% moonbag ditahan hingga +100% atau Whale Dump. Stop Loss -20% dari entry (sebelum TP 1). Anti-shakeout sell >= 3 SOL. Giant Dump >= 15 SOL exit 100%.', availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
+  const s14_beta = data.s14_beta || { name: 'Skenario 14-Beta: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense', description: 'Saldo Awal $5.00. Modal $5.00/entry. Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Take Profit Bertahap: Jual 50% di +50% gain (amankan modal), sisa 50% moonbag ditahan hingga +100% atau Whale Dump. Whale Hoarding Trap Defense: Jika pasca-buy bag Whale membengkak >= +25% dari saldo awal entry atau > 8.0% supply (> 80M token) akibat menelan barang sendiri -> LANGSUNG FULL EXIT 100% SEKETIKA (amankan cuan sebelum Dev drain LP). Stop Loss -20% dari entry.', availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
     const isPnlPositive = s.realizedPnl >= 0;
@@ -954,10 +955,11 @@ export function render3ScenariosLiveHtml() {
       ${renderScenarioCard(s13_centaur, '#38bdf8', 'sce13_centaur')}
       ${renderScenarioCard(s14, '#e11d48', 'sce14')}
       ${renderScenarioCard(s14_alpha, '#6366f1', 'sce14_alpha')}
+      ${renderScenarioCard(s14_beta, '#0ea5e9', 'sce14_beta')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 17-Way Parallel Dry-Run Engine (S4 s/d S14 & S14-Alpha) &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 18-Way Parallel Dry-Run Engine (S4 s/d S14, S14-Alpha & S14-Beta) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 

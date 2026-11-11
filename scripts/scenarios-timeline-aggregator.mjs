@@ -199,7 +199,7 @@ export const SCENARIO_META = {
     color: '#e11d48',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return (s.includes('SCENARIO_14') || s.includes('S14')) && !s.includes('ALPHA');
+      return (s.includes('SCENARIO_14') || s.includes('S14')) && !s.includes('ALPHA') && !s.includes('BETA');
     }
   },
   sce14_alpha: {
@@ -214,6 +214,19 @@ export const SCENARIO_META = {
       const s = (id || '') + ' ' + (type || '');
       return s.includes('SCENARIO_14_ALPHA') || s.includes('14_ALPHA');
     }
+  },
+  sce14_beta: {
+    id: 'sce14_beta',
+    canonicalKey: 's14_beta',
+    name: 'Skenario 14-Beta: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
+    shortName: 'Skenario 14-Beta',
+    description: 'Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump. Whale Hoarding Trap Defense: Full exit 100% seketika jika bag Whale membengkak >= +25% pasca entry atau tembus > 8.0% supply (> 80M token) akibat menelan barang sendiri.',
+    ruleBadge: 'Bundler Runner + 60s Grace | Whale Hoarding Defense',
+    color: '#0ea5e9',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_14_BETA') || s.includes('14_BETA');
+    }
   }
 };
 
@@ -221,6 +234,7 @@ export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
   if (str.includes('14_alpha') || str.includes('14-alpha') || str.includes('14alpha')) return 'sce14_alpha';
+  if (str.includes('14_beta') || str.includes('14-beta') || str.includes('14beta')) return 'sce14_beta';
   if (str.includes('14') || str.includes('sce14')) return 'sce14';
   if (str.includes('alpha_1') || str.includes('alpha-1') || str.includes('alpha1')) return 'sce13_alpha_1';
   if (str.includes('beta_1') || str.includes('beta-1') || str.includes('beta1')) return 'sce13_beta_1';
