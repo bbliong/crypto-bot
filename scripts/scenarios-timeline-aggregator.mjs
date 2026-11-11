@@ -188,17 +188,45 @@ export const SCENARIO_META = {
       const s = (id || '') + ' ' + (type || '');
       return s.includes('BETA_1') || s.includes('BETA-1') || s.includes('BETA1');
     }
+  },
+  sce14: {
+    id: 'sce14',
+    canonicalKey: 's14',
+    name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)',
+    shortName: 'Skenario 14',
+    description: 'Standby saat Detik 0. Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump.',
+    ruleBadge: 'Bundler Runner | Wave Rider 2-Stage TP',
+    color: '#e11d48',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return (s.includes('SCENARIO_14') || s.includes('S14')) && !s.includes('ALPHA');
+    }
+  },
+  sce14_alpha: {
+    id: 'sce14_alpha',
+    canonicalKey: 's14_alpha',
+    name: 'Skenario 14-Alpha: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)',
+    shortName: 'Skenario 14-Alpha',
+    description: 'Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump.',
+    ruleBadge: 'Bundler Runner + 60s Grace | Anti-Rugpull 100%',
+    color: '#6366f1',
+    ledgerFilter: (id, type) => {
+      const s = (id || '') + ' ' + (type || '');
+      return s.includes('SCENARIO_14_ALPHA') || s.includes('14_ALPHA');
+    }
   }
 };
 
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('14_alpha') || str.includes('14-alpha') || str.includes('14alpha')) return 'sce14_alpha';
+  if (str.includes('14') || str.includes('sce14')) return 'sce14';
   if (str.includes('alpha_1') || str.includes('alpha-1') || str.includes('alpha1')) return 'sce13_alpha_1';
   if (str.includes('beta_1') || str.includes('beta-1') || str.includes('beta1')) return 'sce13_beta_1';
   if (str.includes('alpha')) return 'sce13_alpha';
   if (str.includes('beta')) return 'sce13_beta';
-  if (str.includes('13_5') || str.includes('13.5') || str.includes('dynamic_pingpong') || str.includes('14')) return 'sce13_5';
+  if (str.includes('13_5') || str.includes('13.5') || str.includes('dynamic_pingpong')) return 'sce13_5';
   if (str.includes('13') || str.includes('pingpong')) return 'sce13';
   if (str.includes('9_5') || str.includes('9.5') || str.includes('moonbag')) return 'sce9_5';
   if (str.includes('10') || str.includes('wave_runner')) return 'sce10';

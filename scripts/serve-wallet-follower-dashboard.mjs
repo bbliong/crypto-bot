@@ -560,8 +560,42 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Dedicated Scenario 13 Detail Timeline (/3scenarios/sce13, /add-fol/3scenarios/sce13)
-  if (pathname.includes('/3scenarios/sce13_5') || pathname.includes('/4scenarios/sce13_5') || pathname.includes('/scenarios/sce13_5') || pathname.includes('/3scenarios/sce14')) {
+  // Dedicated Scenario 14-Alpha Detail Timeline (/3scenarios/sce14_alpha, /add-fol/3scenarios/sce14_alpha)
+  if (pathname.includes('/3scenarios/sce14_alpha') || pathname.includes('/4scenarios/sce14_alpha') || pathname.includes('/scenarios/sce14_alpha') || pathname.includes('/3scenarios/alpha14')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce14_alpha', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S14-Alpha timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 14 Detail Timeline (/3scenarios/sce14, /add-fol/3scenarios/sce14)
+  if (pathname.includes('/3scenarios/sce14') || pathname.includes('/4scenarios/sce14') || pathname.includes('/scenarios/sce14')) {
+    (async () => {
+      try {
+        const token = url.searchParams.get('token') || '';
+        const { renderScenarioTimelineHtml } = await import('./render-scenario-timeline.mjs');
+        const html = await renderScenarioTimelineHtml({ scenarioId: 'sce14', tokenQuery: token });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Error rendering S14 timeline: ' + err.message);
+      }
+    })();
+    return;
+  }
+
+  // Dedicated Scenario 13.5 Detail Timeline (/3scenarios/sce13_5, /add-fol/3scenarios/sce13_5)
+  if (pathname.includes('/3scenarios/sce13_5') || pathname.includes('/4scenarios/sce13_5') || pathname.includes('/scenarios/sce13_5')) {
     (async () => {
       try {
         const token = url.searchParams.get('token') || '';
