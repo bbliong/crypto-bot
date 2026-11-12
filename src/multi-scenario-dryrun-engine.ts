@@ -853,7 +853,7 @@ export class MultiScenarioDryRunEngine {
       },
       s14_beta: {
         id: 'SCENARIO_14_BETA_HOARDING_DEFENSE',
-        name: 'Skenario 14-Beta: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
+        name: 'Skenario 14-Beta (S15): Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
         description: 'Saldo Awal $5.00. Modal $5.00/entry. Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump. Whale Hoarding Trap Defense: Jika pasca-buy bag Whale membengkak >= +25% dari saldo awal entry atau > 8.0% supply (> 80M token) akibat menelan barang sendiri -> LANGSUNG FULL EXIT 100% SEKETIKA (amankan cuan sebelum Dev drain LP). Stop Loss -20% dari entry.',
         initialCash: 5.0,
         availableCash: 5.0,
