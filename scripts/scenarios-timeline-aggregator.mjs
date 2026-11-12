@@ -233,8 +233,8 @@ export const SCENARIO_META = {
 export function normalizeScenarioId(raw) {
   if (!raw) return 'sce4';
   const str = String(raw).toLowerCase().trim();
+  if (str.includes('15') || str.includes('sce15') || str.includes('14_beta') || str.includes('14-beta') || str.includes('14beta')) return 'sce14_beta';
   if (str.includes('14_alpha') || str.includes('14-alpha') || str.includes('14alpha')) return 'sce14_alpha';
-  if (str.includes('14_beta') || str.includes('14-beta') || str.includes('14beta')) return 'sce14_beta';
   if (str.includes('14') || str.includes('sce14')) return 'sce14';
   if (str.includes('alpha_1') || str.includes('alpha-1') || str.includes('alpha1')) return 'sce13_alpha_1';
   if (str.includes('beta_1') || str.includes('beta-1') || str.includes('beta1')) return 'sce13_beta_1';

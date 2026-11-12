@@ -5623,8 +5623,8 @@ export class MultiScenarioDryRunEngine {
 
   public getScenarioById(scenarioId: string): ScenarioState {
     const id = (scenarioId || '').toLowerCase();
+    if (id.includes('15') || id.includes('sce15') || id.includes('14_beta') || id.includes('14-beta')) return this.scenarios.s14_beta;
     if (id.includes('14_alpha') || id.includes('14-alpha')) return this.scenarios.s14_alpha;
-    if (id.includes('14_beta') || id.includes('14-beta')) return this.scenarios.s14_beta;
     if (id.includes('14') || id.includes('bundler')) return this.scenarios.s14;
     if (id.includes('centaur') || id.includes('13_centaur') || id.includes('13-centaur')) return this.scenarios.s13_centaur;
     if (id.includes('13_alpha_1') || id.includes('13-alpha-1') || id.includes('alpha_1') || id.includes('alpha-1')) return this.scenarios.s13_alpha_1;

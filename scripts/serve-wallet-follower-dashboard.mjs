@@ -577,8 +577,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Dedicated Scenario 14-Beta Detail Timeline (/3scenarios/sce14_beta, /add-fol/3scenarios/sce14_beta)
-  if (pathname.includes('/3scenarios/sce14_beta') || pathname.includes('/4scenarios/sce14_beta') || pathname.includes('/scenarios/sce14_beta') || pathname.includes('/3scenarios/beta14')) {
+  // Dedicated Scenario 14-Beta / S15 Detail Timeline (/3scenarios/sce14_beta, /3scenarios/sce15)
+  if (pathname.includes('/3scenarios/sce15') || pathname.includes('/4scenarios/sce15') || pathname.includes('/scenarios/sce15') || pathname.includes('/3scenarios/sce14_beta') || pathname.includes('/4scenarios/sce14_beta') || pathname.includes('/scenarios/sce14_beta') || pathname.includes('/3scenarios/beta14')) {
     (async () => {
       try {
         const token = url.searchParams.get('token') || '';
@@ -588,7 +588,7 @@ const server = createServer((req, res) => {
         return res.end(html);
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('Error rendering S14-Beta timeline: ' + err.message);
+        return res.end('Error rendering S14-Beta / S15 timeline: ' + err.message);
       }
     })();
     return;
