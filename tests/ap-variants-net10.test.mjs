@@ -7,7 +7,8 @@ import {ApExitMonitor} from '../src/ap-exit-monitor.ts';
 const families=[['s14','evaluateS14BundlerEntry','s14Trackers','AP1-10%'],
  ['s14_alpha','evaluateS14AlphaBundlerEntry','s14AlphaTrackers','AP2-10%'],
  ['s14_beta','evaluateS14BetaBundlerEntry','s14BetaTrackers','AP3-10%']];
-function setup(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ap-net10-variants-'));
+function setup(config={}){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ap-net10-variants-'));
+ if(Object.keys(config).length)fs.writeFileSync(path.join(dir,'follower-autobuy-settings.json'),JSON.stringify({enabled:false,autobuyScenario:'DRY_RUN',...config}));
  const e=new MultiScenarioDryRunEngine(dir); e.startBundlerResearchTracker=()=>{};e.queryGmgnTokenStatRaw=async()=>null;e.bundlerResolver=async()=>null;
  const sig={action:'buy',mint:'Offline',symbol:'FX',tokenName:'FX',tokenAmount:70e6,remainingHolding:70e6,
  solAmount:30,usdAmount:2700,priceUsd:.00001,pairAddress:'',timestamp:Math.floor((Date.now()-65000)/1000),isFirstBuy:true,isOpenOrClose:true};
@@ -21,7 +22,7 @@ function settle(e,call){const [,id,sig,d]=call;const units=497500000000;
  e.syncRealBuyExecution(id,sig.mint,.00001,units/1e6,d.stakeUsd,{...d.quoteTicket,baseUnits:String(units),decimals:6});}
 for(const [key,method,map,name] of families){
  test(`${name}: additive identity PAPER denied even ALL and aliases`,()=>{
-  const {e}=setup(),s=e.scenarios[key+'_net10'];assert.ok(s,'independent additive state exists');assert.equal(s.name,name);assert.equal(s.availableCash,5);
+  const {e}=setup(),s=e.scenarios[key+'_net10'];assert.ok(s,'independent additive state exists');assert.equal(s.name,name);assert.equal(s.initialCash,20);assert.equal(s.availableCash,20);
   for(const alias of [name,key+'_net10','sce'+key.slice(1)+'_net10',s.id]){
    assert.equal(e.getScenarioById(alias),s);
    for(const target of ['BOTH','ALL',name,'AP1+ALL'])assert.equal(isScenarioAllowedForRealOrder(alias,{enabled:true,autobuyScenario:target}),false);
@@ -33,13 +34,35 @@ for(const [key,method,map,name] of families){
   assert.equal(calls.length,0);
   e[method](sig.mint,5,.00001);
   assert.equal(calls.length,1);assert.equal(calls[0][1],e.scenarios[key+'_net10'].id);
-  assert.equal(calls[0][3].stakeUsd,4.975);
+  assert.equal(calls[0][3].stakeUsd,5);
  });
  test(`${key} control rejects NaN bundler rather than bypass >=5 gate`,()=>{
   const {e,sig,calls}=setup();e[method](sig.mint,NaN,.00001);
   assert.equal(calls.length,0);
  });
 }
+
+test('each net10 lane uses its own configured stake and keeps live AP stake independent',()=>{
+ const cfg={stakeUsdS14:9,stakeUsdS14Alpha:9,stakeUsdS15:9,stakeUsdAP1Net10:5,stakeUsdAP2Net10:6,stakeUsdAP3Net10:7};
+ for(const [key,method,,name] of families){
+  const {e,sig,calls}=setup(cfg);const index=families.findIndex(x=>x[0]===key);
+  e[method](sig.mint,5,.00001,true);
+  const call=calls.find(c=>c[1]===e.scenarios[key+'_net10'].id);
+  assert.ok(call,`${name} should create its paper entry`);
+  assert.equal(call[3].stakeUsd,[5,6,7][index],`${name} uses its own configured paper stake; base live stake remains independent`);
+  assert.equal(e.scenarios[key+'_net10'].initialCash,20);
+  assert.equal(e.scenarios[key+'_net10'].availableCash,20-call[3].stakeUsd-0.025);
+ }
+});
+
+test('legacy net10 paper balance is topped up once to $20 without discarding open positions',()=>{
+ const {dir,e}=setup();const s=e.scenarios.s14_net10;s.initialCash=5;s.availableCash=2;s.totalPortfolioValue=5;delete s.apCapitalVersion;
+ s.openPositions.push({mint:'legacy-open',symbol:'OLD',costBasisUsd:3,tokens:10,unrealizedPnlUsd:0,entryCount:1});e.saveState();
+ const migrated=new MultiScenarioDryRunEngine(dir);const m=migrated.scenarios.s14_net10;
+ assert.equal(m.initialCash,20);assert.equal(m.availableCash,17);assert.equal(m.totalPortfolioValue,20);assert.equal(m.apCapitalVersion,2);assert.equal(m.openPositions.length,1);
+ migrated.saveState();const reread=new MultiScenarioDryRunEngine(dir);
+ assert.equal(reread.scenarios.s14_net10.availableCash,17,'capital increase must not repeat on restart');
+});
 
 test('net10 only full-exits exact fresh whole-position net >=10%, never spot +50 partial; controls retain partial TP',async()=>{
  const {e,sig,calls}=setup();e.evaluateS14BundlerEntry(sig.mint,5,.00001);
@@ -48,13 +71,13 @@ test('net10 only full-exits exact fresh whole-position net >=10%, never spot +50
  e.updatePriceTick(sig.mint,.000016);
  assert.equal(variant.openPositions[0].stage1Exited,undefined);
  assert.equal(control.openPositions[0].ap.exitReason,'S14_STAGE_1_TP_50%');
- let gross=5.5249999;
+ let gross=5.55249;
  const deps={sell:async req=>({ok:true,routeData:{quote:{inAmount:req.baseUnits,outAmount:String(Math.round(gross/100*1e9)),inDecimals:6,outDecimals:9}}}),audit:()=>{},buy:async()=>{},sleep:async()=>{}};
  const monitor=new ApExitMonitor(e,deps,{cooldownMs:0,maxConcurrency:6});
  await monitor.tick(100);assert.equal(variant.closedTrades.length,0,'slightly below net10 stays open');
- gross=5.525;await monitor.tick(100);
+ gross=5.553;await monitor.tick(100);
  assert.equal(variant.openPositions.length,0);assert.equal(variant.closedTrades.length,1);
- assert.ok(Math.abs(variant.closedTrades[0].roiPct-10)<1e-10);
+ assert.ok(variant.closedTrades[0].roiPct>=10&&variant.closedTrades[0].roiPct<10.02);
  assert.equal(variant.closedTrades[0].exitReason,'NET_TP_10%_FULL');
 });
 

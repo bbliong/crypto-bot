@@ -19,6 +19,11 @@ test('six cards render exact names PAPER only, accounting provenance and unmatch
  assert.equal((html.match(/class="scenario-panel"/g)||[]).length,6);
  for(const lane of AP_LANES){assert.match(html,new RegExp(lane.label.replace('%','%')));assert.ok(html.includes('/3scenarios/sce'+lane.key.slice(1)));}
  assert.match(html,/PAPER ONLY/);assert.match(html,/unmatched legacy capital cohort/i);assert.match(html,/BUY_PENDING/);assert.match(html,/legacy-unreconciled/i);
+ for(const [field,card] of [['stakeUsdAP1Net10','sce14_net10'],['stakeUsdAP2Net10','sce14_alpha_net10'],['stakeUsdAP3Net10','sce14_beta_net10']]){
+  assert.ok(html.includes(`saveApNet10Stake('${field}','${card}StakeInput')`));
+  assert.ok(html.includes(`id="${card}StakeInput" value="5.00"`));
+ }
+ assert.equal(e.scenarios.s14_net10.initialCash,20);assert.equal(e.scenarios.s14_net10.availableCash,20);
  assert.doesNotMatch(html,/<input[^>]+value="AP[123]-10%"/);
  for(const [,script]of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g))new vm.Script(script);
 });
@@ -50,6 +55,23 @@ test('actual dashboard request handler resolves net10 BEFORE base substring rout
    assert.equal(result.code,200);assert.ok(result.body.includes(lane.label));assert.match(result.body,/PAPER ONLY/);
   }
  }}finally{if(old===undefined)delete process.env.FOLLOWER_DASHBOARD_DATA_DIR;else process.env.FOLLOWER_DASHBOARD_DATA_DIR=old}
+});
+
+test('AP net10 modal settings persist independently and do not arm live Auto-Buy',async()=>{
+ const {dir}=setup();const old=process.env.FOLLOWER_DASHBOARD_DATA_DIR;process.env.FOLLOWER_DASHBOARD_DATA_DIR=dir;
+ try{
+  for(const [field,value] of [['stakeUsdAP1Net10',5],['stakeUsdAP2Net10',6.25],['stakeUsdAP3Net10',7.5]]){
+   const result=await new Promise(resolve=>{
+    const req=new EventEmitter();Object.assign(req,{url:'/api/autobuy/config',method:'POST',headers:{host:'offline'}});
+    const res={writeHead(code){this.code=code},end(body){resolve({code:this.code,body})}};
+    handleFollowerDashboardRequest(req,res);req.emit('data',JSON.stringify({[field]:value}));req.emit('end');
+   });
+   assert.equal(result.code,200);
+  }
+  const saved=JSON.parse(fs.readFileSync(path.join(dir,'follower-autobuy-settings.json'),'utf8'));
+  assert.equal(saved.enabled,false);assert.equal(saved.stakeUsdAP1Net10,5);assert.equal(saved.stakeUsdAP2Net10,6.25);assert.equal(saved.stakeUsdAP3Net10,7.5);
+  assert.equal(saved.stakeUsdS14 ?? 5,5,'net10 modal changes must not alter live AP1 stake');
+ }finally{if(old===undefined)delete process.env.FOLLOWER_DASHBOARD_DATA_DIR;else process.env.FOLLOWER_DASHBOARD_DATA_DIR=old}
 });
 
 test('API refuses variant arming before any settings mutation and serves exact variant timeline JSON',async()=>{

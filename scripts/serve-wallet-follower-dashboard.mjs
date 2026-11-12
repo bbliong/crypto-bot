@@ -190,7 +190,7 @@ export const handleFollowerDashboardRequest = (req, res) => {
           quotaResetAt: 0,
         });
 
-        for (const key of ['stakeUsdS14', 'stakeUsdS14Alpha', 'stakeUsdS14Beta', 'stakeUsdS15']) {
+        for (const key of ['stakeUsdS14', 'stakeUsdS14Alpha', 'stakeUsdS14Beta', 'stakeUsdS15', 'stakeUsdAP1Net10', 'stakeUsdAP2Net10', 'stakeUsdAP3Net10']) {
           if (patch[key] !== undefined) {
             const n = Number(patch[key]);
             if (!Number.isFinite(n) || n < 0.05 || n > 1000) throw new Error(`Invalid ${key}`);
@@ -309,6 +309,10 @@ export const handleFollowerDashboardRequest = (req, res) => {
             updated.stakeUsdS14Beta = val;
             updated.stakeUsdAP3 = val;
           }
+        }
+
+        for (const key of ['stakeUsdAP1Net10', 'stakeUsdAP2Net10', 'stakeUsdAP3Net10']) {
+          updated[key] = Number(patch[key] ?? current[key] ?? 5);
         }
 
         if (patch.resetQuota) {

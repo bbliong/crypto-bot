@@ -235,6 +235,7 @@ export interface ScenarioState {
   apReservedCashUsd?: number;
   apTrackers?: Record<string,S14BundlerRunnerState>;
   apBoughtMints?: string[];
+  apCapitalVersion?: number;
   id: string;
   name: string;
   description: string;
@@ -527,6 +528,19 @@ export class MultiScenarioDryRunEngine {
       const saved=JSON.parse(fs.readFileSync(this.filePath,'utf8'));
       for(const l of AP_LANES.filter(l=>l.net10)) if(saved[l.key]) this.scenarios[l.key]=saved[l.key];
     } catch {} }
+    // One-time paper capital top-up: raise each existing net10 lane's initial balance to $20
+    // without deleting settled history or disturbing open positions.
+    for(const l of AP_LANES.filter(l=>l.net10)) {
+      const s=this.scenarios[l.key];
+      if((s.apCapitalVersion||1)<2) {
+        const oldInitial=Number.isFinite(Number(s.initialCash))?Number(s.initialCash):5;
+        const targetInitial=Math.max(20,oldInitial);
+        const delta=targetInitial-oldInitial;
+        s.availableCash=(Number.isFinite(Number(s.availableCash))?Number(s.availableCash):oldInitial)+delta;
+        s.totalPortfolioValue=(Number.isFinite(Number(s.totalPortfolioValue))?Number(s.totalPortfolioValue):oldInitial)+delta;
+        s.initialCash=targetInitial;s.apCapitalVersion=2;
+      }
+    }
     for(const l of AP_LANES) {
       const map=new Map<string,S14BundlerRunnerState>(Object.entries(this.scenarios[l.key].apTrackers||{}));
       if(l.net10) this.net10Trackers[l.key]=map;
@@ -2285,7 +2299,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = (liveCfg as any).stakeUsdS14 || 5.0;
+      stakeUsd = net10 ? (liveCfg as any).stakeUsdAP1Net10 || 5.0 : (liveCfg as any).stakeUsdS14 || 5.0;
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)
@@ -2439,7 +2453,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = getScenarioStakeUsd('SCENARIO_14_ALPHA_60S_GRACE', liveCfg);
+      stakeUsd = net10 ? (liveCfg as any).stakeUsdAP2Net10 || 5.0 : getScenarioStakeUsd('SCENARIO_14_ALPHA_60S_GRACE', liveCfg);
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)
@@ -2624,7 +2638,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = getScenarioStakeUsd('SCENARIO_14_BETA_HOARDING_DEFENSE', liveCfg);
+      stakeUsd = net10 ? (liveCfg as any).stakeUsdAP3Net10 || 5.0 : getScenarioStakeUsd('SCENARIO_14_BETA_HOARDING_DEFENSE', liveCfg);
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)

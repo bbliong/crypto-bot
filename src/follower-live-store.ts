@@ -38,6 +38,9 @@ export interface FollowerLiveConfig {
   stakeUsdAP1?: number;
   stakeUsdAP2?: number;
   stakeUsdAP3?: number;
+  stakeUsdAP1Net10?: number;
+  stakeUsdAP2Net10?: number;
+  stakeUsdAP3Net10?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -79,6 +82,9 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   stakeUsdAP1: 5.0,
   stakeUsdAP2: 5.0,
   stakeUsdAP3: 5.0,
+  stakeUsdAP1Net10: 5.0,
+  stakeUsdAP2Net10: 5.0,
+  stakeUsdAP3Net10: 5.0,
   maxBuysQuota: 3,
   maxActiveRealPositions: 1,
   buySlippagePercent: 15,
@@ -304,6 +310,10 @@ export function saveFollowerLiveConfig(
     const stake = Number.isFinite(n) ? Math.max(0.05, Math.min(1000, n)) : 5;
     updated.stakeUsdS15 = stake;
     updated.stakeUsdS14Beta = stake;
+  }
+  for (const key of ['stakeUsdAP1Net10','stakeUsdAP2Net10','stakeUsdAP3Net10'] as const) {
+    const n=Number(patch[key] ?? updated[key]);
+    updated[key]=Number.isFinite(n)&&n>=0.05&&n<=1000?n:5;
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;

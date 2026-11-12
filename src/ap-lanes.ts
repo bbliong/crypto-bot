@@ -14,7 +14,7 @@ export function resolveApLane(raw:string){const id=String(raw||'').toLowerCase()
 export const isNet10=(raw:string)=>resolveApLane(raw)?.net10===true;
 export function freshApNet10(key:ApLaneKey):ScenarioState {
  const lane=AP_LANES.find(l=>l.key===key&&l.net10);if(!lane)throw Error('INVALID_NET10_LANE');
- return {id:lane.id,name:lane.label,description:`PAPER ONLY · Entry/safety ${lane.parentKey} unchanged; full liquidation net TP +10%. Unmatched legacy capital cohort — not fair performance A/B.`,
-  initialCash:5,availableCash:5,investedCash:0,totalFeesPaid:0,realizedPnl:0,unrealizedPnl:0,totalPortfolioValue:5,
+ return {id:lane.id,name:lane.label,description:`PAPER ONLY · Saldo awal $20; modal entry default $5; entry/safety ${lane.parentKey} unchanged; full liquidation net TP +10%. Unmatched legacy capital cohort — not fair performance A/B.`,
+ initialCash:20,availableCash:20,investedCash:0,totalFeesPaid:0,realizedPnl:0,unrealizedPnl:0,totalPortfolioValue:20,apCapitalVersion:2,
   wins:0,losses:0,totalTrades:0,winRate:0,openPositions:[],closedTrades:[],recentEvents:[],apBoughtMints:[],apTrackers:{}};
 }

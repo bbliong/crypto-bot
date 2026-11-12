@@ -2,7 +2,7 @@
 
 ## Accounting boundary
 
-New AP positions use accounting version 2, provenance `PAPER_AMM_QUOTE`, and the explicit **paper estimate** $0.025 per swap leg. BUY reserves principal + buy fee without inventing tokens. Only the selected second BUY quote fills the position. Both probes are audited in `ap-paper-quotes.jsonl`; probe-2 throw, malformed or no-route refunds once. The runner preserves engine affordable stake (initial $5 cash → $4.975 principal).
+New AP positions use accounting version 2, provenance `PAPER_AMM_QUOTE`, and the explicit **paper estimate** $0.025 per swap leg. BUY reserves configured principal + buy fee without inventing tokens. A $5 modal therefore reserves $5.025 from the $20 paper balance. Only the selected second BUY quote fills the position. Both probes are audited in `ap-paper-quotes.jsonl`; probe-2 throw, malformed or no-route refunds once.
 
 SELL first records an intent. No cash, token reduction, realized profit, or closed record is booked until a matching SELL quote arrives. Lane/mint/position UUID/revision/request UUID/quantity/pair must match. Partial sale allocates remaining principal and buy fee proportionally; SELL subtracts only its own sell fee. Whole-cycle net PnL is summed sell net proceeds minus initial cash outlay. No-route and administrative stagnant timeout preserve unresolved exposure instead of reporting a fictitious -100% liquidation. Duplicate/stale/pre-restart callbacks cannot settle twice.
 
@@ -18,7 +18,7 @@ No service restart, live-state/config write, browser, RPC, remote market request
 
 ## Capital / cohort warning
 
-Original AP1/AP2/AP3 controls and their historical capital remain untouched. Additive net10 lanes begin with fresh $5 paper cash. The existing controls may have exhausted capital and traded a different cohort: **unmatched legacy capital cohort — not a fair performance A/B comparison**. Historical alternate-trigger executable SELL quotes are unavailable; historical alternative return remains UNKNOWN. Fixture results are not strategy profitability evidence.
+Original AP1/AP2/AP3 controls and their historical capital remain untouched. Additive net10 lanes now start with $20 paper cash and have separate per-lane paper-entry modal defaults of $5. Existing legacy net10 balances are topped up to $20 once, preserving open positions and prior history. The existing controls may have exhausted capital and traded a different cohort: **unmatched legacy capital cohort — not a fair performance A/B comparison**. Historical alternate-trigger executable SELL quotes are unavailable; historical alternative return remains UNKNOWN. Fixture results are not strategy profitability evidence.
 
 ## Stage C: Net TP10 variants implementation
 
@@ -26,7 +26,8 @@ Original AP1/AP2/AP3 controls and their historical capital remain untouched. Add
 - Strict PAPER-ONLY guard: `isScenarioAllowedForRealOrder` and `canonicalizeAutobuyScenario` reject net10 IDs before any `enabled=true` or `ALL`/`BOTH` checks.
 - Inherited entry gates and safety: Bundler rate >= 5.0%, 60s grace period (AP2/AP3), whale hoarding trap defense (AP3), and whale dump exits are evaluated independently with isolated trackers.
 - Single experimental exit delta: Replaces spot +50%/+100% partial take-profits with full position exit (`NET_TP_10%_FULL`) exclusively when a fresh whole-position liquidation quote yields net PnL >= +10% after deducting both buy fee and sell fee (`gross >= cashOutlay * 1.1 + sellFee`).
-- Additive state persistence: Controls and net10 states persist independently; cash or closed trades from old runs are never copied or reset.
+- Additive state persistence: Controls and net10 states persist independently; cash or closed trades from old runs are never copied or reset. Existing net10 starting capital migrates once to $20; current available cash increases by the top-up amount while positions and history remain intact.
+- Three independent paper-entry modal settings (`stakeUsdAP1Net10`, `stakeUsdAP2Net10`, `stakeUsdAP3Net10`) default to $5, accept $0.05–$1,000, and do not change legacy AP live-order stakes or arm Auto-Buy.
 
 ## Stage D: UI, Dashboard and Timeline integration
 

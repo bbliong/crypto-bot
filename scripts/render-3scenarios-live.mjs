@@ -88,6 +88,9 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
 
   function renderScenarioCard(s, color, scId = 'sce4') {
     const paperOnly=scId.endsWith('_net10');
+    const net10StakeFields={sce14_net10:'stakeUsdAP1Net10',sce14_alpha_net10:'stakeUsdAP2Net10',sce14_beta_net10:'stakeUsdAP3Net10'};
+    const net10StakeField=net10StakeFields[scId];
+    const net10Stake=Number(net10StakeField?autobuyConfig[net10StakeField]:0)||5.0;
     const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isPnlPositive = s.realizedPnl >= 0;
     const pnlSign = isPnlPositive ? '+' : '';
@@ -259,6 +262,19 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
             </div>
             <button onclick="saveS10Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S10</button>
           </div>
+        ` : (paperOnly ? `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Modal Paper ${scId.startsWith('sce14_alpha')?'AP2':scId.startsWith('sce14_beta')?'AP3':'AP1'} · Net TP 10%</span>
+              <span class="stake-current-val">Stake: $${net10Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-1" style="margin-top: 6px;">
+              <div><label class="stake-sublabel">Modal Entry Paper:</label><div class="stake-input-wrap"><span class="currency-prefix">$</span>
+                <input type="number" id="${scId}StakeInput" value="${net10Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="5.00">
+              </div></div>
+            </div>
+            <button onclick="saveApNet10Stake('${net10StakeField}','${scId}StakeInput')" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal ${scId.startsWith('sce14_alpha')?'AP2':scId.startsWith('sce14_beta')?'AP3':'AP1'}-10%</button>
+          </div>
         ` : (scId === 'sce14' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
@@ -310,7 +326,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
             </div>
             <button onclick="saveS15Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal AP3 (S15 / S14-Beta)</button>
           </div>
-        ` : ``)))))))))}
+        ` : ``))))))))))}
 
         <!-- Open Positions -->
         <div class="sub-section">
@@ -977,7 +993,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
       ${renderScenarioCard(s14_beta, '#0ea5e9', 'sce14_beta')}
       ${['s14','s14_alpha','s14_beta'].map((key,i)=>{
         const s=data[key+'_net10']||{name:`AP${i+1}-10%`,description:'PAPER ONLY · NOT INITIALIZED — menunggu engine additive state',
-          initialCash:5,availableCash:0,investedCash:0,realizedPnl:0,wins:0,losses:0,totalTrades:0,openPositions:[],closedTrades:[],recentEvents:[]};
+          initialCash:20,availableCash:20,investedCash:0,realizedPnl:0,wins:0,losses:0,totalTrades:0,openPositions:[],closedTrades:[],recentEvents:[]};
         return renderScenarioCard({...s,name:`AP${i+1}-10%`},['#fb7185','#a5b4fc','#38bdf8'][i],'sce'+key.slice(1)+'_net10');
       }).join('')}
     </div>
@@ -1116,6 +1132,17 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
       sendStakeUpdate({
         stakeUsdS10: val
       }, 'Modal S10 berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveApNet10Stake(field, inputId) {
+      const input = document.getElementById(inputId);
+      if (!input || !['stakeUsdAP1Net10','stakeUsdAP2Net10','stakeUsdAP3Net10'].includes(field)) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05 || val > 1000) {
+        alert('Modal paper AP net 10% harus $0.05–$1,000!');
+        return;
+      }
+      sendStakeUpdate({ [field]: val }, 'Modal paper net TP 10% berhasil disimpan: $' + val.toFixed(2));
     }
 
     function saveS14Stake() {
