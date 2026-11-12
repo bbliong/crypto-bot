@@ -19,3 +19,19 @@ No service restart, live-state/config write, browser, RPC, remote market request
 ## Capital / cohort warning
 
 Original AP1/AP2/AP3 controls and their historical capital remain untouched. Additive net10 lanes begin with fresh $5 paper cash. The existing controls may have exhausted capital and traded a different cohort: **unmatched legacy capital cohort — not a fair performance A/B comparison**. Historical alternate-trigger executable SELL quotes are unavailable; historical alternative return remains UNKNOWN. Fixture results are not strategy profitability evidence.
+
+## Stage C: Net TP10 variants implementation
+
+- Three additive paper-only lanes: `AP1-10%` (`s14_net10`), `AP2-10%` (`s14_alpha_net10`), `AP3-10%` (`s14_beta_net10`).
+- Strict PAPER-ONLY guard: `isScenarioAllowedForRealOrder` and `canonicalizeAutobuyScenario` reject net10 IDs before any `enabled=true` or `ALL`/`BOTH` checks.
+- Inherited entry gates and safety: Bundler rate >= 5.0%, 60s grace period (AP2/AP3), whale hoarding trap defense (AP3), and whale dump exits are evaluated independently with isolated trackers.
+- Single experimental exit delta: Replaces spot +50%/+100% partial take-profits with full position exit (`NET_TP_10%_FULL`) exclusively when a fresh whole-position liquidation quote yields net PnL >= +10% after deducting both buy fee and sell fee (`gross >= cashOutlay * 1.1 + sellFee`).
+- Additive state persistence: Controls and net10 states persist independently; cash or closed trades from old runs are never copied or reset.
+
+## Stage D: UI, Dashboard and Timeline integration
+
+- Multi-scenario live card view: Displays all 6 lanes with clear badges (`PAPER ONLY` for net10 variants), dynamic available cash, fees, and accounting v2 provenance notices.
+- Substring routing protection: Dedicated route matchers ensure `AP1-10%`, `AP2-10%`, `AP3-10%` routes (`/3scenarios/sce14_net10`, etc.) are resolved prior to legacy substring checks.
+- API guardrails: POST `/api/autobuy/config` returns HTTP 400 (`NET10_PAPER_ONLY`) when any net10 variant is targeted for live arming.
+- Comprehensive test coverage: 46 automated offline unit and regression tests covering accounting lifecycles, exit monitoring bounds, variant logic, and dashboard endpoints.
+

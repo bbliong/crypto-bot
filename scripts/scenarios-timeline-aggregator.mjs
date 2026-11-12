@@ -230,7 +230,85 @@ export const SCENARIO_META = {
   }
 };
 
+// Exact AP registry takes precedence over ALL legacy substring/digit routing.
+const AP_IDENTITIES=[
+  ['s14','SCENARIO_14_BUNDLER_RUNNER','AP1',['ap1','s14','sce14','scenario_14']],
+  ['s14_alpha','SCENARIO_14_ALPHA_60S_GRACE','AP2',['ap2','s14_alpha','sce14_alpha','scenario_14_alpha']],
+  ['s14_beta','SCENARIO_14_BETA_HOARDING_DEFENSE','AP3',['ap3','s15','sce15','s14_beta','sce14_beta','scenario_14_beta']],
+  ['s14_net10','SCENARIO_14_BUNDLER_RUNNER_NET10','AP1-10%',['ap1-10%','ap1-net10','s14_net10','sce14_net10']],
+  ['s14_alpha_net10','SCENARIO_14_ALPHA_60S_GRACE_NET10','AP2-10%',['ap2-10%','ap2-net10','s14_alpha_net10','sce14_alpha_net10']],
+  ['s14_beta_net10','SCENARIO_14_BETA_HOARDING_DEFENSE_NET10','AP3-10%',['ap3-10%','ap3-net10','s14_beta_net10','sce14_beta_net10']],
+];
+export function exactApScenarioId(raw){
+  const value=String(raw||'').toLowerCase().trim();
+  const row=AP_IDENTITIES.find(([key,id,label,aliases])=>[key,id.toLowerCase(),label.toLowerCase(),...aliases].includes(value));
+  return row?'sce'+row[0].slice(1):null;
+}
+for(const [key,id,label] of AP_IDENTITIES){
+  const route='sce'+key.slice(1),net10=key.endsWith('_net10'),baseRoute=route.replace('_net10','');
+  if(net10) SCENARIO_META[route]={...SCENARIO_META[baseRoute],id:route,canonicalKey:key,name:label,shortName:label,
+    description:'PAPER ONLY · Entry/safety inherited unchanged. Net TP +10% full liquidation. Unmatched legacy capital cohort — not fair performance A/B.',
+    ruleBadge:'PAPER ONLY | NET TP10 FULL | accounting v2',ledgerFilter:(candidate)=>candidate===id};
+  else {
+    const filter=SCENARIO_META[route].ledgerFilter;
+    SCENARIO_META[route].ledgerFilter=(candidate,type)=>!/(?:NET10|AP[123]-10%)/i.test(String(candidate)+' '+String(type))&&filter(candidate,type);
+  }
+}
+
+function apStored(meta,dir){
+  const file=join(dir,'dryrun-3scenarios-live.json');
+  try{return JSON.parse(readFileSync(file,'utf8'))[meta.canonicalKey]||{}}catch{return {}}
+}
+function apTokenList(meta,dir){
+  const s=apStored(meta,dir),byMint=new Map();
+  for(const p of s.openPositions||[])byMint.set(p.mint,{symbol:p.symbol,mint:p.mint,tokenName:p.tokenName||p.symbol,
+    firstSeenAt:p.openedAt,lastSeenAt:p.updatedAt||p.openedAt,status:p.ap?.status||'LEGACY_UNRECONCILED',
+    realizedPnlUsd:p.realizedPnlUsd||0,unrealizedPnlUsd:p.unrealizedPnlUsd||0,roiPct:0,tradesCount:1});
+  for(const t of s.closedTrades||[])if(!byMint.has(t.mint))byMint.set(t.mint,{symbol:t.symbol,mint:t.mint,tokenName:t.tokenName||t.symbol,
+    firstSeenAt:t.openedAt,lastSeenAt:t.closedAt,status:'CLOSED',realizedPnlUsd:t.realizedPnlUsd,roiPct:t.roiPct,tradesCount:1});
+  return [...byMint.values()].sort((a,b)=>b.lastSeenAt-a.lastSeenAt).map(t=>({...t,firstSeenWib:formatWib(t.firstSeenAt),lastSeenWib:formatWib(t.lastSeenAt)}));
+}
+async function apTimeline(meta,query,dir){
+  const tokensList=apTokenList(meta,dir),s=apStored(meta,dir);
+  const token=tokensList.find(t=>t.mint===query)||tokensList.find(t=>t.symbol===query)||tokensList[0];
+  if(!token)return {scenarioId:meta.id,scenarioMeta:meta,token:{symbol:'NONE',mint:'',status:'NOT_FOUND'},tokensList,summary:null,steps:[]};
+  const p=(s.openPositions||[]).find(p=>p.mint===token.mint),t=(s.closedTrades||[]).find(t=>t.mint===token.mint);
+  const steps=(s.recentEvents||[]).filter(e=>e.mint===token.mint).map(e=>({id:e.id,type:e.action,category:'PAPER',title:e.action,
+    timestampMs:e.timestamp,timeWib:formatWib(e.timestamp),timeShort:formatWibTimeOnly(e.timestamp),description:e.reason,
+    metrics:[],request:null,response:e}));
+  const quotes=join(dir,'ap-paper-quotes.jsonl');
+  if(existsSync(quotes)){
+    const rl=readline.createInterface({input:createReadStream(quotes),crlfDelay:Infinity});
+    const retained=[];
+    for await(const line of rl){try{const q=JSON.parse(line);if(q.ticket?.lane===AP_IDENTITIES.find(row=>row[0]===meta.canonicalKey)?.[1]&&q.ticket?.mint===token.mint){retained.push(q);if(retained.length>100)retained.shift()}}catch{}}
+    for(const q of retained)steps.push({id:q.ticket.requestId+'-'+(q.probe||q.type),type:q.type,category:'PAPER',title:q.type,
+      timestampMs:q.ticket.requestedAt,timeWib:formatWib(q.ticket.requestedAt),timeShort:formatWibTimeOnly(q.ticket.requestedAt),
+      description:q.error||`Probe ${q.probe||'-'} · selected=${!!q.selected}`,metrics:[],request:q.request,response:q});
+  }
+  steps.sort((a,b)=>a.timestampMs-b.timestampMs);steps.forEach((s,i)=>s.stepNumber=i+1);
+  const provenance=p?.ap?.provenance||t?.provenance||'legacy-unreconciled';
+  return {scenarioId:meta.id,scenarioMeta:meta,token,tokensList,steps,summary:{symbol:token.symbol,mint:token.mint,
+    scenarioName:meta.name,status:p?(p.ap?.status||'LEGACY_UNRECONCILED'):'CLOSED',
+    accountingVersion:p?.ap?.version||t?.accountingVersion||null,provenance,feeModel:'PAPER_ESTIMATE_0.025_PER_LEG',
+    investedUsd:p?.costBasisUsd??t?.totalInvestedUsd??0,cashOutlayUsd:p?.ap?.cashOutlayUsd??t?.cashOutlayUsd??null,
+    returnedUsd:p?.ap?.netReturnedUsd??t?.totalReturnedUsd??0,realizedPnlUsd:p?.realizedPnlUsd??t?.realizedPnlUsd??0,
+    roiPct:t?.roiPct??0,exitReason:p?.ap?.exitReason||t?.exitReason||'',lastError:p?.ap?.lastError||null,
+    lastFreshAt:p?.ap?.lastFreshAt||null,attempts:p?.ap?.attempts||0,historicalAlternativePnl:'UNKNOWN',
+    cohort:'unmatched legacy capital cohort — not fair performance A/B'}};
+}
+const apEscape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export async function renderApPaperTimelineHtml(raw,options={}){
+  const data=await getScenarioTokenTimeline(raw,options.tokenQuery||'',options),meta=data.scenarioMeta;
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><title>${apEscape(meta.shortName)} timeline</title></head><body style="background:#0f172a;color:#e2e8f0;font:16px system-ui;padding:24px">
+    <a href="/add-fol/3scenarios">Enam AP lanes</a><h1>${apEscape(meta.shortName)}</h1><p>${apEscape(meta.description)}</p>
+    <p>Accounting v2 quote-settled; legacy-unreconciled history unchanged. Unmatched legacy capital cohort — not fair performance A/B.</p>
+    <nav>${data.tokensList.map(t=>`<a style="color:#38bdf8;margin-right:12px" href="?token=${encodeURIComponent(t.mint)}">${apEscape(t.symbol)} · ${apEscape(t.mint)}</a>`).join('')}</nav>
+    <pre>${apEscape(JSON.stringify(data.summary,null,2))}</pre>${data.steps.map(s=>`<article><h3>${apEscape(s.timeWib)} · ${apEscape(s.title)}</h3><p>${apEscape(s.description)}</p><details><summary>Quote / intent evidence</summary><pre>${apEscape(JSON.stringify({request:s.request,response:s.response},null,2))}</pre></details></article>`).join('')}
+    </body></html>`;
+}
+
 export function normalizeScenarioId(raw) {
+  const exact=exactApScenarioId(raw);if(exact)return exact;
   if (!raw) return 'sce14';
   const str = String(raw).toLowerCase().trim();
   if (str === 'ap3' || str.includes('ap3') || str.includes('15') || str.includes('sce15') || str.includes('14_beta') || str.includes('14-beta') || str.includes('14beta')) return 'sce14_beta';
@@ -280,9 +358,10 @@ export function formatWibTimeOnly(timestamp) {
 /**
  * Membaca dan mengumpulkan daftar token unik yang pernah ditransaksikan pada suatu skenario.
  */
-export async function getScenarioTokensList(rawScenarioId = 'sce4') {
+export async function getScenarioTokensList(rawScenarioId = 'sce4', options = {}) {
   const scId = normalizeScenarioId(rawScenarioId);
   const meta = SCENARIO_META[scId];
+  if(exactApScenarioId(rawScenarioId))return apTokenList(meta,options.dataDir||dataDir);
   const ledgerPath = join(dataDir, 'follower-real-ledger.jsonl');
   const dryRunPath = join(dataDir, 'dryrun-3scenarios-live.json');
 
@@ -398,9 +477,10 @@ export async function getScenarioTokensList(rawScenarioId = 'sce4') {
 /**
  * Menyusun urutan timeline transaksi terstruktur untuk sebuah token pada skenario tertentu.
  */
-export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuery = '') {
+export async function getScenarioTokenTimeline(rawScenarioId = 'sce4', tokenQuery = '', options = {}) {
   const scId = normalizeScenarioId(rawScenarioId);
   const meta = SCENARIO_META[scId];
+  if(exactApScenarioId(rawScenarioId))return apTimeline(meta,tokenQuery,options.dataDir||dataDir);
   const ledgerPath = join(dataDir, 'follower-real-ledger.jsonl');
   const dryRunPath = join(dataDir, 'dryrun-3scenarios-live.json');
   const eventsPath = join(dataDir, 'wallet-follower-events.json');

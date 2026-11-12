@@ -5,6 +5,7 @@ import { renderBacktestDynamicHtml } from './render-backtest-dynamic.mjs';
 import { renderBacktestDynamic2Html } from './render-backtest-dynamic2.mjs';
 import { render3ScenariosLiveHtml } from './render-3scenarios-live.mjs';
 import { renderLiquidityAuditHtml } from './render-liquidity-audit.mjs';
+import { exactApScenarioId, renderApPaperTimelineHtml } from './scenarios-timeline-aggregator.mjs';
 
 const PORT = Number(process.env.FOLLOWER_DASHBOARD_PORT ?? 4192);
 const ROOT = process.cwd();
@@ -144,7 +145,9 @@ function loadDashboardState() {
   };
 }
 
-const server = createServer((req, res) => {
+export const handleFollowerDashboardRequest = (req, res) => {
+  // Explicit offline fixture directory; production retains its existing default path.
+  const FOLLOWER_SETTINGS_FILE=join(process.env.FOLLOWER_DASHBOARD_DATA_DIR||join(ROOT,'data'),'follower-autobuy-settings.json');
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
@@ -165,6 +168,10 @@ const server = createServer((req, res) => {
     req.on('end', () => {
       try {
         const patch = JSON.parse(body || '{}');
+        if(String(patch.autobuyScenario||'').split(/[+,\s]+/).some(part=>exactApScenarioId(part)?.endsWith('_net10'))) {
+          res.writeHead(400,{'Content-Type':'application/json'});
+          return res.end(JSON.stringify({ok:false,error:'NET10_PAPER_ONLY — real arming forbidden'}));
+        }
         const current = safeReadJson(FOLLOWER_SETTINGS_FILE, {
           enabled: false,
           activeLane: 'LANE_2',
@@ -415,7 +422,7 @@ const server = createServer((req, res) => {
         const scenario = url.searchParams.get('scenario') || 'sce4';
         const token = url.searchParams.get('token') || '';
         const { getScenarioTokenTimeline } = await import('./scenarios-timeline-aggregator.mjs');
-        const data = await getScenarioTokenTimeline(scenario, token);
+        const data = await getScenarioTokenTimeline(scenario, token, {dataDir:process.env.FOLLOWER_DASHBOARD_DATA_DIR||join(ROOT,'data')});
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
@@ -433,6 +440,16 @@ const server = createServer((req, res) => {
   }
 
   // Dedicated Scenario 4 Detail Timeline (/3scenarios/sce4, /add-fol/3scenarios/sce4)
+  const apPath=pathname.match(/\/(?:3scenarios|4scenarios|scenarios)\/([^/]+)\/?$/);
+  let apRoute=null;
+  try { apRoute=apPath?exactApScenarioId(decodeURIComponent(apPath[1])):null; } catch {}
+  if(apRoute && req.method==='GET') {
+    renderApPaperTimelineHtml(apRoute,{tokenQuery:url.searchParams.get('token')||'',
+      dataDir:process.env.FOLLOWER_DASHBOARD_DATA_DIR||join(ROOT,'data')}).then(html=>{
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(html);
+      }).catch(error=>{res.writeHead(500,{'Content-Type':'text/plain'});res.end(String(error))});
+    return;
+  }
   if (pathname.includes('/3scenarios/sce4') || pathname.includes('/4scenarios/sce4') || pathname.includes('/scenarios/sce4')) {
     (async () => {
       try {
@@ -706,7 +723,7 @@ const server = createServer((req, res) => {
 
   // Dedicated Live Multi-Scenario Dry-Run Dashboard (/3scenarios, /4scenarios, /scenarios)
   if (pathname.includes('/3scenarios') || pathname.includes('/4scenarios') || pathname.includes('/scenarios')) {
-    const html = render3ScenariosLiveHtml();
+    const html = render3ScenariosLiveHtml({dataDir:process.env.FOLLOWER_DASHBOARD_DATA_DIR||join(ROOT,'data')});
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(html);
   }
@@ -737,7 +754,8 @@ const server = createServer((req, res) => {
   const html = renderHtmlDashboard(state);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
-});
+};
+const server=createServer(handleFollowerDashboardRequest);
 
 function renderHtmlDashboard(initialState = {}) {
   const abCfg = initialState.autobuy?.config || {};
@@ -2722,7 +2740,7 @@ function renderHtmlDashboard(initialState = {}) {
 </html>`;
 }
 
-server.listen(PORT, '0.0.0.0', () => {
+if(import.meta.url===new URL(process.argv[1]||'', 'file://'+process.cwd()+'/').href) server.listen(PORT, '0.0.0.0', () => {
   const address = server.address();
   console.log(`[DASHBOARD-FOLLOWER] Berjalan di port ${address.port} (http://127.0.0.1:${address.port})`);
 });

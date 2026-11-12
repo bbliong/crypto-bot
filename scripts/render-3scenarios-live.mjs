@@ -87,6 +87,8 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
   const s14_beta = data.s14_beta || { name: 'Skenario 14-Beta (S15): Bundler Runner + 60s Grace + Whale Hoarding Trap Defense', description: 'Saldo Awal $5.00. Modal $5.00/entry. Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Take Profit Bertahap: Jual 50% di +50% gain (amankan modal), sisa 50% moonbag ditahan hingga +100% atau Whale Dump. Whale Hoarding Trap Defense: Jika pasca-buy bag Whale membengkak >= +25% dari saldo awal entry atau > 8.0% supply (> 80M token) akibat menelan barang sendiri -> LANGSUNG FULL EXIT 100% SEKETIKA (amankan cuan sebelum Dev drain LP). Stop Loss -20% dari entry.', availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
 
   function renderScenarioCard(s, color, scId = 'sce4') {
+    const paperOnly=scId.endsWith('_net10');
+    const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isPnlPositive = s.realizedPnl >= 0;
     const pnlSign = isPnlPositive ? '+' : '';
     const pnlClass = isPnlPositive ? 'val-emerald' : 'val-rose';
@@ -103,10 +105,11 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
             <div class="panel-title">${s.name}</div>
             <span style="font-size:0.68rem; padding: 2px 8px; border-radius: 4px; font-weight:800; white-space:nowrap; ${isRealActive ? 'background:rgba(16,185,129,0.2); color:#10b981; border:1px solid rgba(16,185,129,0.4);' : (isDryRun ? 'background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid rgba(56,189,248,0.5);' : 'background:rgba(148,163,184,0.15); color:#94a3b8; border:1px solid #334155;')}">
-              ${isRealActive ? '⚡ REAL AUTO-BUY' : (isDryRun ? '⚪ DRY RUN REALISTIS' : '⚪ SIMULASI SWAP')}
+              ${paperOnly ? 'PAPER ONLY' : isRealActive ? '⚡ REAL AUTO-BUY' : (isDryRun ? '⚪ DRY RUN REALISTIS' : '⚪ SIMULASI SWAP')}
             </span>
           </div>
           <div class="panel-desc">${s.description || ''}</div>
+          <div class="panel-desc">Accounting v2: PAPER_AMM_QUOTE · fee estimate $0.025/leg. Legacy-unreconciled history unchanged; observed mark ≠ executable cash.</div>
         </div>
 
         <div class="stat-mini-grid">
@@ -114,6 +117,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
             <div class="mini-label">Kas Tersedia (Dinamis)</div>
             <div class="mini-val" style="color:${color};">$${s.availableCash.toFixed(2)}</div>
             <div class="mini-sub">Fee Dipotong: -$${(s.totalFeesPaid || 0).toFixed(2)}</div>
+            <div class="mini-sub">BUY reservation (bukan fill): $${(s.apReservedCashUsd||0).toFixed(3)}</div>
           </div>
           <div class="mini-stat">
             <div class="mini-label">Realized PnL</div>
@@ -123,7 +127,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
           <div class="mini-stat">
             <div class="mini-label">Total Portfolio</div>
             <div class="mini-val">$${s.totalPortfolioValue ? s.totalPortfolioValue.toFixed(2) : (s.availableCash + s.investedCash).toFixed(2)}</div>
-            <div class="mini-sub">Modal Awal $20.00</div>
+            <div class="mini-sub">Modal Awal $${(s.initialCash||5).toFixed(2)}</div>
           </div>
         </div>
 
@@ -320,7 +324,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
                   const cClass = p.unrealizedPnlUsd >= 0 ? 'val-emerald' : 'val-rose';
                   return `
                     <tr>
-                      <td><strong>${p.symbol}</strong></td>
+                      <td><strong>${esc(p.symbol)}</strong><br><small>${esc(p.ap?.status||'LEGACY_UNRECONCILED')} · accounting ${p.ap?.version||'legacy-unreconciled'}<br>Fresh: ${p.ap?.lastFreshAt?new Date(p.ap.lastFreshAt).toISOString():'NEVER'} · attempts ${p.ap?.attempts||0}<br>${esc(p.ap?.lastError||'')}</small></td>
                       <td>${p.entryCount}x Buy</td>
                       <td class="mono">$${p.costBasisUsd.toFixed(2)}</td>
                       <td class="mono">${p.tokens.toLocaleString()}</td>
@@ -367,7 +371,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Dry-Run 2 Skenario (S4 vs S6) | cr.bbliong.io</title>
+  <title>AP1/AP2/AP3 + PAPER net TP10 | cr.bbliong.io</title>
   <style>
     :root {
       --bg-dark: #090d16;
@@ -821,10 +825,10 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
         <div>
           <h1>
             <span class="live-dot"></span>
-            Live 3-Way Dry-Run Radar (AP1 vs AP2 vs AP3)
+            Enam Lane AP · Kontrol + PAPER Net TP10
           </h1>
           <div class="header-subtitle">
-            Head-to-Head 3 Skenario Aktif &bull; Modal Pool <strong>$5.00</strong> Masing-Masing &bull; AP1: <strong>Bundler Runner</strong> &bull; AP2: <strong>60s Grace Period</strong> &bull; AP3: <strong>Whale Hoarding Defense</strong>
+            Unmatched legacy capital cohort — not fair performance A/B. Kontrol tidak di-topup/reset; varian PAPER mulai $5 baru. Bundler wajib finite >=5%; entry/safety asli tetap.
           </div>
         </div>
       </div>
@@ -971,6 +975,11 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
       ${renderScenarioCard(s14, '#e11d48', 'sce14')}
       ${renderScenarioCard(s14_alpha, '#6366f1', 'sce14_alpha')}
       ${renderScenarioCard(s14_beta, '#0ea5e9', 'sce14_beta')}
+      ${['s14','s14_alpha','s14_beta'].map((key,i)=>{
+        const s=data[key+'_net10']||{name:`AP${i+1}-10%`,description:'PAPER ONLY · NOT INITIALIZED — menunggu engine additive state',
+          initialCash:5,availableCash:0,investedCash:0,realizedPnl:0,wins:0,losses:0,totalTrades:0,openPositions:[],closedTrades:[],recentEvents:[]};
+        return renderScenarioCard({...s,name:`AP${i+1}-10%`},['#fb7185','#a5b4fc','#38bdf8'][i],'sce'+key.slice(1)+'_net10');
+      }).join('')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
