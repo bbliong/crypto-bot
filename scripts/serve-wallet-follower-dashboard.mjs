@@ -6,7 +6,7 @@ import { renderBacktestDynamic2Html } from './render-backtest-dynamic2.mjs';
 import { render3ScenariosLiveHtml } from './render-3scenarios-live.mjs';
 import { renderLiquidityAuditHtml } from './render-liquidity-audit.mjs';
 
-const PORT = 4192;
+const PORT = Number(process.env.FOLLOWER_DASHBOARD_PORT ?? 4192);
 const ROOT = process.cwd();
 const POS_FILE = join(ROOT, 'data', 'wallet-follower-positions.json');
 const TRADES_FILE = join(ROOT, 'data', 'wallet-follower-trades.json');
@@ -183,6 +183,12 @@ const server = createServer((req, res) => {
           quotaResetAt: 0,
         });
 
+        for (const key of ['stakeUsdS14', 'stakeUsdS14Alpha', 'stakeUsdS14Beta', 'stakeUsdS15']) {
+          if (patch[key] !== undefined) {
+            const n = Number(patch[key]);
+            if (!Number.isFinite(n) || n < 0.05 || n > 1000) throw new Error(`Invalid ${key}`);
+          }
+        }
         const updated = {
           ...current,
           ...patch,
@@ -190,10 +196,20 @@ const server = createServer((req, res) => {
         };
 
         if (patch.autobuyScenario !== undefined) {
-          const sc = String(patch.autobuyScenario).toUpperCase();
-          if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S13', 'S13_BETA', 'S13_ALPHA', 'S13_BETA_1', 'S13_ALPHA_1', 'BOTH'].includes(sc) || sc.includes('BETA') || sc.includes('ALPHA')) {
+          const sc = String(patch.autobuyScenario).toUpperCase().trim();
+          // Canonical exact allowlist — no generic substring matching to prevent cross-scenario collision.
+          // S14 group listed before S4/S5 so numeric substring checks are impossible.
+          const KNOWN = new Set([
+            'OFF', 'DRY_RUN', 'BOTH', 'ALL',
+            'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10',
+            'S13', 'S13_ALPHA', 'S13_BETA', 'S13_ALPHA_1', 'S13_BETA_1', 'S13_CENTAUR',
+            'S14', 'S14_ALPHA', 'S14_BETA', 'S15',
+          ]);
+          const isComposite = /[+,\s]/.test(sc) && sc.split(/[+,\s]+/).every(p => KNOWN.has(p.trim()));
+          if (!(KNOWN.has(sc) || isComposite) || (isComposite && sc.split(/[+,\s]+/).some(p => ['OFF', 'DRY_RUN'].includes(p)))) throw new Error('Invalid autobuyScenario');
+          if (KNOWN.has(sc) || isComposite) {
             updated.autobuyScenario = sc;
-            updated.enabled = (sc !== 'OFF' && sc !== 'DRY_RUN');
+            updated.enabled = patch.enabled === true && sc !== 'OFF' && sc !== 'DRY_RUN';
           }
         } else if (patch.enabled !== undefined) {
           updated.enabled = Boolean(patch.enabled);
@@ -260,6 +276,34 @@ const server = createServer((req, res) => {
         if (patch.stakeUsdS10 !== undefined) {
           const val = parseFloat(patch.stakeUsdS10);
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS10 = val;
+        }
+
+        if (patch.stakeUsdS14 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS14);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS14 = val;
+        }
+
+        if (patch.stakeUsdS14Alpha !== undefined) {
+          const val = parseFloat(patch.stakeUsdS14Alpha);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS14Alpha = val;
+        }
+
+        if (patch.stakeUsdS14Beta !== undefined) {
+          const val = parseFloat(patch.stakeUsdS14Beta);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS14Beta = val;
+        }
+
+        if (patch.stakeUsdS15 !== undefined) {
+          const val = parseFloat(patch.stakeUsdS15);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS15 = val;
+        }
+
+        if (patch.stakeUsdS15 !== undefined || patch.stakeUsdS14Beta !== undefined) {
+          const val = Number(patch.stakeUsdS15 ?? patch.stakeUsdS14Beta);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) {
+            updated.stakeUsdS15 = val;
+            updated.stakeUsdS14Beta = val;
+          }
         }
 
         if (patch.resetQuota) {
@@ -2681,5 +2725,6 @@ function renderHtmlDashboard(initialState = {}) {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[DASHBOARD-FOLLOWER] Berjalan di port ${PORT} (http://127.0.0.1:${PORT})`);
+  const address = server.address();
+  console.log(`[DASHBOARD-FOLLOWER] Berjalan di port ${address.port} (http://127.0.0.1:${address.port})`);
 });

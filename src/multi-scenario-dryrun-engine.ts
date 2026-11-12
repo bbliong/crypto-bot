@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { WalletTradeSignal } from './wallet-follower-lane.js';
 import { readFollowerLiveConfig } from './follower-live-store.js';
+import { getScenarioStakeUsd } from './autobuy-scenario-guard.js';
 import { getSolanaRpcUrl } from '../scripts/solana-rpc-config.mjs';
 
 // Rata-rata fee riil per swap: on-chain gas ($0.0105) + priority/tip ($0.0100) + DEX swap fee ($0.0045) = $0.025 USD
@@ -2232,7 +2233,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = (liveCfg as any).stakeUsdS14Alpha || (liveCfg as any).stakeUsdS14 || 5.0;
+      stakeUsd = getScenarioStakeUsd('SCENARIO_14_ALPHA_60S_GRACE', liveCfg);
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)
@@ -2345,7 +2346,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = (liveCfg as any).stakeUsdS14Beta || (liveCfg as any).stakeUsdS14Alpha || (liveCfg as any).stakeUsdS14 || 5.0;
+      stakeUsd = getScenarioStakeUsd('SCENARIO_14_BETA_HOARDING_DEFENSE', liveCfg);
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)

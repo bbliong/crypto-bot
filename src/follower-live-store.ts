@@ -14,7 +14,7 @@ export type FollowerLiveLane = 'LANE_1' | 'LANE_2' | 'BOTH';
 export interface FollowerLiveConfig {
   enabled: boolean;
   activeLane: FollowerLiveLane;
-  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'S9' | 'S10' | 'S13' | 'S13_ALPHA' | 'S13_BETA' | 'S13_ALPHA_1' | 'S13_BETA_1' | 'BOTH' | string;
+  autobuyScenario?: 'OFF' | 'DRY_RUN' | 'S4' | 'S5' | 'S6' | 'S7' | 'S8' | 'S9' | 'S10' | 'S13' | 'S13_ALPHA' | 'S13_BETA' | 'S13_ALPHA_1' | 'S13_BETA_1' | 'S14' | 'S14_ALPHA' | 'S14_BETA' | 'S15' | 'BOTH' | string;
   stakeUsdLane1: number;
   stakeUsdLane2: number;
   stakeUsdS4?: number;
@@ -31,6 +31,10 @@ export interface FollowerLiveConfig {
   stakeUsdS13Alpha?: number;
   stakeUsdS13Beta1?: number;
   stakeUsdS13Alpha1?: number;
+  stakeUsdS14?: number;
+  stakeUsdS14Alpha?: number;
+  stakeUsdS14Beta?: number;
+  stakeUsdS15?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -65,6 +69,10 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   stakeUsdS13Alpha: 5.0,
   stakeUsdS13Beta1: 0.25,
   stakeUsdS13Alpha1: 5.0,
+  stakeUsdS14: 5.0,
+  stakeUsdS14Alpha: 5.0,
+  stakeUsdS14Beta: 5.0,
+  stakeUsdS15: 5.0,
   maxBuysQuota: 3,
   maxActiveRealPositions: 1,
   buySlippagePercent: 15,
@@ -194,10 +202,23 @@ export function saveFollowerLiveConfig(
   }
 
   if (patch.autobuyScenario !== undefined) {
-    const sc = String(patch.autobuyScenario).toUpperCase();
-    if (['OFF', 'DRY_RUN', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S13', 'S13_ALPHA', 'S13_BETA', 'S13_ALPHA_1', 'S13_BETA_1', 'BOTH'].includes(sc) || sc.includes('BETA') || sc.includes('ALPHA')) {
+    const sc = String(patch.autobuyScenario).toUpperCase().trim();
+    // Canonical allowlist — exact matches only; no generic substring includes()
+    // S14 group must come before S4/S5 to prevent '4'/'5' substring collisions.
+    // S13 group ALPHA/BETA checked with explicit prefix, not generic includes.
+    const KNOWN_SCENARIOS = new Set([
+      'OFF', 'DRY_RUN', 'BOTH', 'ALL',
+      'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10',
+      'S13', 'S13_ALPHA', 'S13_BETA', 'S13_ALPHA_1', 'S13_BETA_1', 'S13_CENTAUR',
+      'S14', 'S14_ALPHA', 'S14_BETA', 'S15',
+    ]);
+    // Also allow composite multi-scenario strings (e.g. 'S14+S14_ALPHA', 'S5,S9')
+    const isComposite = /[+,\s]/.test(sc) && sc.split(/[+,\s]+/).every(p => KNOWN_SCENARIOS.has(p.trim()));
+    if (!(KNOWN_SCENARIOS.has(sc) || isComposite) || (isComposite && sc.split(/[+,\s]+/).some(p => ['OFF', 'DRY_RUN'].includes(p)))) throw new Error('Invalid autobuyScenario');
+    if (KNOWN_SCENARIOS.has(sc) || isComposite) {
       updated.autobuyScenario = sc as any;
-      updated.enabled = sc !== 'OFF' && sc !== 'DRY_RUN';
+      // Selecting a target alone does not arm it; explicit boolean opt-in is required.
+      updated.enabled = patch.enabled === true && sc !== 'OFF' && sc !== 'DRY_RUN';
     }
   } else if (patch.enabled !== undefined) {
     updated.enabled = Boolean(patch.enabled);
@@ -252,6 +273,26 @@ export function saveFollowerLiveConfig(
   }
   if (patch.stakeUsdS13Alpha1 !== undefined || updated.stakeUsdS13Alpha1 === undefined) {
     updated.stakeUsdS13Alpha1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13Alpha1 !== undefined ? patch.stakeUsdS13Alpha1 : updated.stakeUsdS13Alpha1) || 5.0));
+  }
+  // S14 / S14_ALPHA / S14_BETA (alias) / S15 stake bounds
+  if (patch.stakeUsdS14 !== undefined || updated.stakeUsdS14 === undefined) {
+    updated.stakeUsdS14 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS14 !== undefined ? patch.stakeUsdS14 : updated.stakeUsdS14) || 5.0));
+  }
+  if (patch.stakeUsdS14Alpha !== undefined || updated.stakeUsdS14Alpha === undefined) {
+    updated.stakeUsdS14Alpha = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS14Alpha !== undefined ? patch.stakeUsdS14Alpha : updated.stakeUsdS14Alpha) || 5.0));
+  }
+  if (patch.stakeUsdS14Beta !== undefined || updated.stakeUsdS14Beta === undefined) {
+    updated.stakeUsdS14Beta = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS14Beta !== undefined ? patch.stakeUsdS14Beta : updated.stakeUsdS14Beta) || 5.0));
+  }
+  if (patch.stakeUsdS15 !== undefined || updated.stakeUsdS15 === undefined) {
+    updated.stakeUsdS15 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS15 !== undefined ? patch.stakeUsdS15 : updated.stakeUsdS15) || 5.0));
+  }
+  // S15 and S14-Beta name the same strategy. Explicit S15 wins if both supplied.
+  if (patch.stakeUsdS15 !== undefined || patch.stakeUsdS14Beta !== undefined) {
+    const n = Number(patch.stakeUsdS15 ?? patch.stakeUsdS14Beta);
+    const stake = Number.isFinite(n) ? Math.max(0.05, Math.min(1000, n)) : 5;
+    updated.stakeUsdS15 = stake;
+    updated.stakeUsdS14Beta = stake;
   }
   const rawQuota = Number(updated.maxBuysQuota);
   updated.maxBuysQuota = Number.isFinite(rawQuota) && rawQuota >= 0 ? Math.min(99999, rawQuota) : 0;

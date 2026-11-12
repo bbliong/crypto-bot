@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const dataDir = join(__dirname, '../data');
+const defaultDataDir = join(__dirname, '../data');
 
-export function render3ScenariosLiveHtml() {
+export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
   const liveFile = join(dataDir, 'dryrun-3scenarios-live.json');
   let data = { s4: null, s6: null };
   if (existsSync(liveFile)) {
@@ -42,7 +42,10 @@ export function render3ScenariosLiveHtml() {
   const isS95Real = activeScenario === 'S95' || activeScenario === 'S9_5' || activeScenario === 'BOTH';
   const isS10Real = activeScenario === 'S10' || activeScenario === 'BOTH';
   const isS13Real = activeScenario === 'S13' || activeScenario === 'BOTH';
-  const isS135Real = activeScenario === 'S13_5' || activeScenario === 'S135' || activeScenario === 'S14' || activeScenario === 'BOTH';
+  const isS135Real = activeScenario === 'S13_5' || activeScenario === 'S135' || activeScenario === 'BOTH';
+  const isS14Real = activeScenario === 'S14' || activeScenario === 'BOTH';
+  const isS14AlphaReal = activeScenario === 'S14_ALPHA' || activeScenario === 'BOTH';
+  const isS15Real = activeScenario === 'S15' || activeScenario === 'S14_BETA' || activeScenario === 'BOTH';
   const isDryRun = activeScenario === 'DRY_RUN';
 
   const s4Stake = Number(autobuyConfig.stakeUsdS4) || 1.0;
@@ -57,6 +60,9 @@ export function render3ScenariosLiveHtml() {
   const s10Stake = Number(autobuyConfig.stakeUsdS10) || 0.25;
   const s13Stake = Number(autobuyConfig.stakeUsdS13) || 5.0;
   const s135Stake = Number(autobuyConfig.stakeUsdS13_5) || Number(autobuyConfig.stakeUsdS13) || 5.0;
+  const s14Stake = Number(autobuyConfig.stakeUsdS14) || 5.0;
+  const s14AlphaStake = Number(autobuyConfig.stakeUsdS14Alpha) || 5.0;
+  const s15Stake = Number(autobuyConfig.stakeUsdS15) || Number(autobuyConfig.stakeUsdS14Beta) || 5.0;
 
   const s4 = data.s4 || { name: `Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)`, description: `Saldo Awal $5.00. Modal $${s4Stake.toFixed(2)}. Jika target sell <= 3s (shakeout): tahan hingga 8 detik. Begitu target buyback: LANGSUNG SELL 100% dump ke likuiditas target. Jika tidak buyback dlm 8s -> Safety Exit.`, availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
   const s5 = data.s5 || { name: `Skenario 5: Anti-Shakeout Runner (TP +25% | Hold >= 12s | Time-Stop 35s)`, description: 'Saldo Awal $5.00. Modal $1.00. Abaikan goyangan dump target di 12 detik pertama (Anti-Shakeout). Auto Take-Profit +25%, Time-Stop 35s, atau ikuti sell target jika dump pasca detik 12.', availableCash: 5.0, investedCash: 0, realizedPnl: 0, wins: 0, losses: 0, totalTrades: 0, openPositions: [], closedTrades: [], recentEvents: [] };
@@ -82,7 +88,11 @@ export function render3ScenariosLiveHtml() {
     const pnlSign = isPnlPositive ? '+' : '';
     const pnlClass = isPnlPositive ? 'val-emerald' : 'val-rose';
     const winRate = s.totalTrades > 0 ? ((s.wins / s.totalTrades) * 100).toFixed(1) : '0';
-    const isRealActive = scId === 'sce4' ? isS4Real : (scId === 'sce5' ? isS5Real : (scId === 'sce6' ? isS6Real : (scId === 'sce7' ? isS7Real : (scId === 'sce8' ? isS8Real : (scId === 'sce9' ? isS9Real : (scId === 'sce9_5' ? isS95Real : (scId === 'sce10' ? isS10Real : (scId === 'sce13' ? isS13Real : isS135Real))))))));
+    const realByCard = { sce4: isS4Real, sce5: isS5Real, sce6: isS6Real, sce7: isS7Real,
+      sce8: isS8Real, sce9: isS9Real, sce9_5: isS95Real, sce10: isS10Real,
+      sce13: isS13Real, sce13_5: isS135Real, sce14: isS14Real,
+      sce14_alpha: isS14AlphaReal, sce14_beta: isS15Real };
+    const isRealActive = realByCard[scId] || false;
 
     return `
       <div class="scenario-panel" style="border-top: 4px solid ${color};">
@@ -225,7 +235,7 @@ export function render3ScenariosLiveHtml() {
             </div>
             <button onclick="saveS9Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S9</button>
           </div>
-        ` : `
+        ` : (scId === 'sce10' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
               <span class="stake-section-title">⚙️ Konfigurasi Modal S10 (Dynamic Wave Runner)</span>
@@ -242,7 +252,58 @@ export function render3ScenariosLiveHtml() {
             </div>
             <button onclick="saveS10Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S10</button>
           </div>
-        `)))))}
+        ` : (scId === 'sce14' ? `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal S14 (Bundler Runner)</span>
+              <span class="stake-current-val">Stake: $${s14Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-1" style="margin-top: 6px;">
+              <div>
+                <label class="stake-sublabel">Modal Entry (Bundler ≥ 5%):</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s14StakeInput" value="${s14Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="5.00">
+                </div>
+              </div>
+            </div>
+            <button onclick="saveS14Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S14</button>
+          </div>
+        ` : (scId === 'sce14_alpha' ? `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal S14-Alpha (Bundler + 60s Grace)</span>
+              <span class="stake-current-val">Stake: $${s14AlphaStake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-1" style="margin-top: 6px;">
+              <div>
+                <label class="stake-sublabel">Modal Entry (Bundler ≥ 5% + ≥60s Grace):</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s14AlphaStakeInput" value="${s14AlphaStake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="5.00">
+                </div>
+              </div>
+            </div>
+            <button onclick="saveS14AlphaStake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S14-Alpha</button>
+          </div>
+        ` : (scId === 'sce14_beta' ? `
+          <div class="stake-card-section">
+            <div class="stake-section-header">
+              <span class="stake-section-title">⚙️ Konfigurasi Modal S15 / S14-Beta (Whale Hoarding Defense)</span>
+              <span class="stake-current-val">Stake: $${s15Stake.toFixed(2)}</span>
+            </div>
+            <div class="stake-form-grid-1" style="margin-top: 6px;">
+              <div>
+                <label class="stake-sublabel">Modal Entry (Bundler + 60s + Hoarding Defense):</label>
+                <div class="stake-input-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input type="number" id="s15StakeInput" value="${s15Stake.toFixed(2)}" step="0.05" min="0.05" max="1000" placeholder="5.00">
+                </div>
+              </div>
+            </div>
+            <button onclick="saveS15Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S15 / S14-Beta</button>
+          </div>
+        ` : ``)))))))))}
 
         <!-- Open Positions -->
         <div class="sub-section">
@@ -703,6 +764,27 @@ export function render3ScenariosLiveHtml() {
       background: #f59e0b;
     }
 
+    .scenario-radio-card.active-s14 {
+      border-color: rgba(225,29,72,0.5);
+      background: rgba(225,29,72,0.07);
+    }
+    .scenario-radio-card.active-s14 input[type="radio"]:checked {
+      background-color: #e11d48;
+    }
+    .scenario-radio-card.active-s14-alpha {
+      border-color: rgba(99,102,241,0.5);
+      background: rgba(99,102,241,0.07);
+    }
+    .scenario-radio-card.active-s14-alpha input[type="radio"]:checked {
+      background-color: #6366f1;
+    }
+    .scenario-radio-card.active-s15 {
+      border-color: rgba(14,165,233,0.5);
+      background: rgba(14,165,233,0.07);
+    }
+    .scenario-radio-card.active-s15 input[type="radio"]:checked {
+      background-color: #0ea5e9;
+    }
     .scenario-radio-card.active-both {
       border-color: #10b981;
       background: rgba(16, 185, 129, 0.12);
@@ -767,7 +849,7 @@ export function render3ScenariosLiveHtml() {
         <div class="autobuy-title">
           <span>⚡ REAL AUTO-BUY & DRY-RUN CONTROLLER</span>
           <span class="status-pill status-${activeScenario.toLowerCase()}">
-            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : (activeScenario === 'DRY_RUN' ? '⚪ SEMUANYA DRY RUN REALISTIS' : (activeScenario === 'S4' ? '🟡 S4 REAL AUTO-BUY AKTIF' : (activeScenario === 'S5' ? '🟠 S5 REAL AUTO-BUY AKTIF' : (activeScenario === 'S6' ? '🟣 S6 REAL AUTO-BUY AKTIF' : (activeScenario === 'S7' ? '🔵 S7 REAL AUTO-BUY AKTIF' : (activeScenario === 'S8' ? '🟣 S8 REAL AUTO-BUY AKTIF' : (activeScenario === 'S9' ? '🔷 S9 REAL AUTO-BUY AKTIF' : (activeScenario === 'S13_BETA' ? '⚡ S13-BETA REAL AUTO-BUY AKTIF' : '🟢 SEMUA REAL AUTO-BUY AKTIF'))))))))}
+            ${activeScenario === 'OFF' ? '⚪ NONAKTIF (OFF)' : activeScenario === 'DRY_RUN' ? '⚪ SEMUANYA DRY RUN REALISTIS' : ['ALL', 'BOTH'].includes(activeScenario) ? '🟢 SEMUA REAL AUTO-BUY AKTIF' : '🟢 ' + activeScenario.replace(/_/g, '-') + ' REAL AUTO-BUY AKTIF'}
           </span>
         </div>
         <div style="font-size: 0.78rem; color: #94a3b8;">
@@ -877,6 +959,30 @@ export function render3ScenariosLiveHtml() {
           </div>
         </label>
 
+        <label class="scenario-radio-card ${activeScenario === 'S14' ? 'active-s14' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S14" ${activeScenario === 'S14' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #e11d48;">🔴 Skenario 14 Saja (S14)</span>
+            <span class="radio-hint">Bundler Runner: Buy saat Bundler ≥ 5% (Hanya S14)</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${activeScenario === 'S14_ALPHA' ? 'active-s14-alpha' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S14_ALPHA" ${activeScenario === 'S14_ALPHA' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #6366f1;">🟣 Skenario 14-Alpha (S14_ALPHA)</span>
+            <span class="radio-hint">Bundler Runner + 60s Grace Period (Hanya S14-Alpha)</span>
+          </div>
+        </label>
+
+        <label class="scenario-radio-card ${(activeScenario === 'S15' || activeScenario === 'S14_BETA') ? 'active-s15' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S15" ${(activeScenario === 'S15' || activeScenario === 'S14_BETA') ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+          <div class="radio-text">
+            <span class="radio-main" style="color: #0ea5e9;">🔷 Skenario 15 / S14-Beta (S15)</span>
+            <span class="radio-hint">Bundler Runner + 60s Grace + Whale Hoarding Defense (Hanya S15)</span>
+          </div>
+        </label>
+
         <label class="scenario-radio-card ${activeScenario === 'BOTH' ? 'active-both' : ''}">
           <input type="radio" name="autobuyScenarioRadio" value="BOTH" ${activeScenario === 'BOTH' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
@@ -970,7 +1076,12 @@ export function render3ScenariosLiveHtml() {
       isToggling = true;
       const curPath = window.location.pathname;
       const ep = curPath.includes('/add-fol') ? '/add-fol/api/autobuy/config' : '/api/autobuy/config';
-      const enabled = scenario !== 'OFF';
+      const enabled = scenario !== 'OFF' && scenario !== 'DRY_RUN';
+      if (enabled && !confirm('Aktifkan transaksi NYATA untuk ' + scenario + '? Ini akan memakai saldo wallet.')) {
+        isToggling = false;
+        location.reload();
+        return;
+      }
       fetch(ep, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1087,6 +1198,39 @@ export function render3ScenariosLiveHtml() {
       sendStakeUpdate({
         stakeUsdS10: val
       }, 'Modal S10 berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveS14Stake() {
+      const input = document.getElementById('s14StakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S14 minimal $0.05!');
+        return;
+      }
+      sendStakeUpdate({ stakeUsdS14: val }, 'Modal S14 berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveS14AlphaStake() {
+      const input = document.getElementById('s14AlphaStakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S14-Alpha minimal $0.05!');
+        return;
+      }
+      sendStakeUpdate({ stakeUsdS14Alpha: val }, 'Modal S14-Alpha berhasil disimpan: $' + val.toFixed(2));
+    }
+
+    function saveS15Stake() {
+      const input = document.getElementById('s15StakeInput');
+      if (!input) return;
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val) || val < 0.05) {
+        alert('Modal S15 minimal $0.05!');
+        return;
+      }
+      sendStakeUpdate({ stakeUsdS15: val, stakeUsdS14Beta: val }, 'Modal S15 berhasil disimpan: $' + val.toFixed(2));
     }
 
     function sendStakeUpdate(payload, successMsg) {

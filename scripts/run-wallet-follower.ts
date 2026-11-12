@@ -22,6 +22,7 @@ import {
   type FollowerLiveConfig,
 } from '../src/follower-live-store.js';
 import { FollowerLiveAdapter } from '../src/follower-live-adapter.js';
+import { isScenarioAllowedForRealOrder as _guardIsScenarioAllowed, getScenarioStakeUsd, scenarioSellBaseUnits, settleScenarioRealSell } from '../src/autobuy-scenario-guard.js';
 
 const TARGET_WALLET = '3azG8rmtPnNUz77a6UqBKt1ykpk3JQpLLNTaoXW31b34';
 const CDP_ENDPOINT = process.env.CDP_ENDPOINT || 'http://127.0.0.1:9223';
@@ -1552,57 +1553,12 @@ export class WalletFollowerRunner {
 
   /**
    * Helper: Periksa apakah skenario diizinkan untuk eksekusi Real Auto-Buy
+   * Delegates to pure autobuy-scenario-guard module for exact canonical matching.
+   * S14 group uses SCENARIO_14_* prefix matching, NOT substring digit check,
+   * so S4→S14 and S5→S15 collisions are impossible.
    */
   private isScenarioAllowedForRealOrder(scenarioId: string, config: any): boolean {
-    if (!config.enabled) return false;
-    const targetSc = String(config.autobuyScenario || 'OFF').toUpperCase();
-    if (targetSc === 'OFF' || targetSc === 'DRY_RUN') return false;
-    if (targetSc === 'BOTH' || targetSc === 'ALL') return true;
-
-    const scUpper = scenarioId.toUpperCase();
-
-    // Support multi-scenario: "S5+S9", "S5,S9", "S9+S5", etc.
-    const parts = targetSc.split(/[+,\s]+/).map(s => s.trim()).filter(Boolean);
-
-    for (const part of parts) {
-      if (part === 'S4' || part === 'SCE4' || part === 'SCENARIO_4') {
-        if (scUpper.includes('4') || scUpper.includes('SINGLE')) return true;
-      }
-      if (part === 'S5' || part === 'SCE5' || part === 'SCENARIO_5') {
-        if (scUpper.includes('5') || scUpper.includes('ANTI_SHAKEOUT')) return true;
-      }
-      if (part === 'S6' || part === 'SCE6' || part === 'SCENARIO_6') {
-        if (scUpper.includes('6') || scUpper.includes('REDEPLOY')) return true;
-      }
-      if (part === 'S7' || part === 'SCE7' || part === 'SCENARIO_7') {
-        if (scUpper.includes('7') || scUpper.includes('TIME_STOP')) return true;
-      }
-      if (part === 'S8' || part === 'SCE8' || part === 'SCENARIO_8') {
-        if (scUpper.includes('8') || scUpper.includes('FRONTRUN_DEV')) return true;
-      }
-      if (part === 'S9' || part === 'SCE9' || part === 'SCENARIO_9') {
-        if (scUpper.includes('9') || scUpper.includes('DEV_FRONTRUN')) return true;
-      }
-      if (part === 'S10' || part === 'SCE10' || part === 'SCENARIO_10') {
-        if (scUpper.includes('10') || scUpper.includes('DYNAMIC_WAVE')) return true;
-      }
-      if (part === 'S13_BETA_1' || part === 'BETA_1' || part === 'BETA1') {
-        if (scUpper.includes('BETA_1') || scUpper.includes('BETA-1')) return true;
-      }
-      if (part === 'S13_BETA' || part === 'BETA') {
-        if ((scUpper.includes('BETA') || scUpper.includes('13_BETA')) && !scUpper.includes('BETA_1') && !scUpper.includes('BETA-1')) return true;
-      }
-      if (part === 'S13_ALPHA_1' || part === 'ALPHA_1' || part === 'ALPHA1') {
-        if (scUpper.includes('ALPHA_1') || scUpper.includes('ALPHA-1')) return true;
-      }
-      if (part === 'S13_ALPHA' || part === 'ALPHA') {
-        if ((scUpper.includes('ALPHA') || scUpper.includes('13_ALPHA')) && !scUpper.includes('ALPHA_1') && !scUpper.includes('ALPHA-1')) return true;
-      }
-      if (part === 'S13' || part === 'SCE13' || part === 'SCENARIO_13') {
-        if (scUpper.includes('13') && !scUpper.includes('ALPHA') && !scUpper.includes('BETA')) return true;
-      }
-    }
-    return false;
+    return _guardIsScenarioAllowed(scenarioId, config);
   }
 
   /**
@@ -1627,6 +1583,17 @@ export class WalletFollowerRunner {
       const state = readFollowerRealState(this.dataDir);
       const wallet = state.readiness.wallet || 'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6';
       const config = readFollowerLiveConfig(this.dataDir);
+      const familyStake = getScenarioStakeUsd(scenarioId, config);
+      const isS14Family = Number.isFinite(familyStake);
+      const realTarget = this.isScenarioAllowedForRealOrder(scenarioId, config);
+      if (side === 'BUY' && isS14Family) stakeUsd = familyStake;
+      // New scenario exits may only touch a real position owned by that exact engine.
+      const ownedPosition = state.positions.find(p => p.mint === signal.mint && p.lane === scenarioId &&
+        (p.status === 'HOLDING' || String(p.status) === 'ACTIVE'));
+      if (side === 'SELL' && isS14Family && realTarget && !ownedPosition) {
+        console.warn(`[AUTO-BUY SELL ABORTED] No owned real position for ${scenarioId}`);
+        return;
+      }
 
       console.log(`\n=========================================================`);
       console.log(`[GMGN SWAP ROUTE] 🎯 Cek rute ${side} [${scenarioId}] (${reason}) untuk ${signal.symbol} ($${stakeUsd.toFixed(2)})...`);
@@ -1664,9 +1631,15 @@ export class WalletFollowerRunner {
         // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil
         let units = tokens && tokens > 0 ? Math.floor(tokens * 1e6).toString() : '1000000';
         try {
+          if (isS14Family && !realTarget) throw new Error('PAPER_QUOTE_USES_PAPER_TOKENS');
           const { getOnChainTokenBalance } = await import('./solana-rent-reclaimer.mjs');
           const onChain = await getOnChainTokenBalance(signal.mint, wallet);
-          if (onChain && onChain.amount && onChain.amount !== '0') {
+          if (isS14Family && realTarget) {
+            if (!onChain?.amount || onChain.amount === '0') throw new Error('NO_VERIFIED_REAL_TOKEN_BALANCE');
+            units = scenarioSellBaseUnits(onChain.amount, reason);
+            ownedPosition!.remainingBaseUnits = onChain.amount;
+            ownedPosition!.remainingTokens = onChain.uiAmount;
+          } else if (onChain && onChain.amount && onChain.amount !== '0') {
             const isStage1Partial = reason && reason.includes('STAGE_1_TP_50%');
             if (isStage1Partial) {
               units = (BigInt(onChain.amount) / 2n).toString();
@@ -1676,7 +1649,9 @@ export class WalletFollowerRunner {
               console.log(`[REAL SELL BALANCE PRE-CHECK] Menggunakan 100% saldo on-chain riil: ${onChain.uiAmount} tokens (${units} base units)`);
             }
           }
-        } catch {}
+        } catch (err) {
+          if (isS14Family && realTarget) throw err;
+        }
 
         route = await getBrowserSellSwapRoute(
           this.page,
@@ -1697,11 +1672,17 @@ export class WalletFollowerRunner {
             const onChain = await getOnChainTokenBalance(signal.mint, wallet);
             if (onChain && onChain.amount && onChain.amount !== '0') {
               console.log(`[DOUBLE-CATCH] ✅ Saldo on-chain terverifikasi ulang: ${onChain.amount} base units. Menembak ulang sell route dengan pairAddress...`);
+              const retryUnits = isS14Family ? scenarioSellBaseUnits(onChain.amount, reason) : onChain.amount;
+              if (isS14Family && ownedPosition) {
+                ownedPosition.remainingBaseUnits = onChain.amount;
+                ownedPosition.remainingTokens = onChain.uiAmount;
+              }
+              units = retryUnits;
               route = await getBrowserSellSwapRoute(
                 this.page,
                 signal.mint,
                 wallet,
-                onChain.amount,
+                retryUnits,
                 6,
                 config.sellSlippagePercent || 20,
                 5,
@@ -1726,7 +1707,7 @@ export class WalletFollowerRunner {
           // Koreksi trade di dry-run engine agar dicatat sebagai loss / gagal jual jika AMM pool mati!
           this.multiDryRunEngine.recordFailedSellExecution(scenarioId, signal.mint, route.error || 'NO_AMM_ROUTE');
 
-          if (this.isScenarioAllowedForRealOrder(scenarioId, config)) {
+          if (!isS14Family && this.isScenarioAllowedForRealOrder(scenarioId, config)) {
             try {
               const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
               console.log(`[SAFETY-AUTO-RECLAIM] Rute sell tidak ada (${route.error}). Membakar sisa token & me-reclaim sewa rent SOL untuk ${signal.symbol || signal.mint}...`);
@@ -1901,6 +1882,8 @@ export class WalletFollowerRunner {
         priorityFeeSol: config.priorityFeeSol
       };
 
+      // OFF during quote latency must win over the earlier routing decision.
+      if (!this.isScenarioAllowedForRealOrder(scenarioId, readFollowerLiveConfig(this.dataDir))) return;
       const submitRes = await this.liveAdapter.submitSwapOrder(this.page, {
         side,
         mint: signal.mint,
@@ -1924,18 +1907,25 @@ export class WalletFollowerRunner {
 
         // Update status posisi riil menjadi CLOSED
         const curRealState = readFollowerRealState(this.dataDir);
-        const targetPos = curRealState.positions.find(p => p.mint === signal.mint && (p.status === 'HOLDING' || p.status === 'ACTIVE'));
+        const targetPos = curRealState.positions.find(p => p.mint === signal.mint &&
+          (!isS14Family || p.lane === scenarioId) && (p.status === 'HOLDING' || String(p.status) === 'ACTIVE'));
         if (targetPos) {
-          targetPos.status = 'CLOSED';
-          targetPos.updatedAt = Date.now();
-          targetPos.exitPriceUsd = realExitPrice;
-          targetPos.realizedPnlUsd = usdReceived - targetPos.costBasisUsd;
-          targetPos.sells.push(submitRes);
+          if (isS14Family) {
+            targetPos.remainingBaseUnits = ownedPosition!.remainingBaseUnits;
+            targetPos.remainingTokens = ownedPosition!.remainingTokens;
+            settleScenarioRealSell(targetPos, unitsToSubmit, usdReceived, realExitPrice, submitRes);
+          } else {
+            targetPos.status = 'CLOSED';
+            targetPos.updatedAt = Date.now();
+            targetPos.exitPriceUsd = realExitPrice;
+            targetPos.realizedPnlUsd = usdReceived - targetPos.costBasisUsd;
+            targetPos.sells.push(submitRes);
+          }
           writeFollowerRealState(this.dataDir, curRealState);
         }
 
-        // Reclaim rent SOL seketika pasca-sell
-        try {
+        // Never burn a new-family moonbag. Non-destructive reclaim below is full-exit only.
+        if (!isS14Family) try {
           const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
           burnAndCloseTokenAccount(signal.mint).catch(() => {});
         } catch {}
@@ -1994,7 +1984,18 @@ export class WalletFollowerRunner {
                 const realPriceUsd = (stakeUsd / onChain.uiAmount);
                 this.multiDryRunEngine.syncRealBuyExecution(scenarioId, signal.mint, realPriceUsd, onChain.uiAmount, stakeUsd);
 
-                auditFollowerReal(this.dataDir, state, null, `POST_BUY_VERIFIED_${scenarioId}`, {
+                if (isS14Family) {
+                  const verifiedState = readFollowerRealState(this.dataDir);
+                  const verifiedPos = verifiedState.positions.find(p => p.id === newRealPos.id);
+                  if (verifiedPos) {
+                    verifiedPos.remainingBaseUnits = onChain.amount;
+                    verifiedPos.remainingTokens = onChain.uiAmount;
+                    verifiedPos.acquiredTokens = onChain.uiAmount;
+                    verifiedPos.entryPriceUsd = realPriceUsd;
+                    writeFollowerRealState(this.dataDir, verifiedState);
+                  }
+                }
+                auditFollowerReal(this.dataDir, readFollowerRealState(this.dataDir), null, `POST_BUY_VERIFIED_${scenarioId}`, {
                   scenarioId,
                   mint: signal.mint,
                   symbol: signal.symbol,
@@ -2028,7 +2029,7 @@ export class WalletFollowerRunner {
       }
 
       // Audit log ke follower-real-ledger.jsonl
-      auditFollowerReal(this.dataDir, state, null, `API_PROBE_${side}_${scenarioId}`, {
+      auditFollowerReal(this.dataDir, readFollowerRealState(this.dataDir), null, `API_PROBE_${side}_${scenarioId}`, {
         scenarioId,
         reason,
         signal,
