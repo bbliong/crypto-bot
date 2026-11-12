@@ -156,15 +156,15 @@ function partMatchesEngine(part: string, scenarioId: string): boolean {
   // ── OFF / DRY_RUN are handled before calling this ────────────────────────
   if (p === 'BOTH' || p === 'ALL') return true;
 
-  // ── S14 group (checked BEFORE S4/S5 to avoid '4'/'5' substring collisions)
-  // S14_BETA_1 / S14_BETA alias for S15 → must precede S14_ALPHA and S14 checks
-  if (p === 'S15' || p === 'S14_BETA' || p === 'SCE15' || p === 'SCENARIO_15' || p === 'SCENARIO_14_BETA') {
+  // ── S14 / AP group (checked BEFORE S4/S5 to avoid '4'/'5' substring collisions)
+  // S14_BETA_1 / S14_BETA alias for S15 / AP3 → must precede S14_ALPHA / AP2 and S14 / AP1 checks
+  if (p === 'AP3' || p === 'S15' || p === 'S14_BETA' || p === 'SCE15' || p === 'SCENARIO_15' || p === 'SCENARIO_14_BETA') {
     return isS15Engine(scenarioId);
   }
-  if (p === 'S14_ALPHA' || p === 'SCE14_ALPHA' || p === 'SCENARIO_14_ALPHA') {
+  if (p === 'AP2' || p === 'S14_ALPHA' || p === 'SCE14_ALPHA' || p === 'SCENARIO_14_ALPHA') {
     return isS14AlphaEngine(scenarioId);
   }
-  if (p === 'S14' || p === 'SCE14' || p === 'SCENARIO_14') {
+  if (p === 'AP1' || p === 'S14' || p === 'SCE14' || p === 'SCENARIO_14') {
     return isS14Engine(scenarioId);
   }
 
@@ -255,9 +255,12 @@ export function canonicalizeAutobuyScenario(raw: string): string | null {
   if (['S13_ALPHA_1', 'ALPHA_1', 'ALPHA1'].includes(sc)) return 'S13_ALPHA_1';
   if (['S13_BETA_1', 'BETA_1', 'BETA1'].includes(sc)) return 'S13_BETA_1';
   if (['S13_CENTAUR', 'CENTAUR'].includes(sc)) return 'S13_CENTAUR';
-  // S14 group
+  // S14 / AP group
+  if (sc === 'AP1') return 'AP1';
   if (['S14', 'SCE14', 'SCENARIO_14'].includes(sc)) return 'S14';
+  if (sc === 'AP2') return 'AP2';
   if (['S14_ALPHA', 'SCE14_ALPHA', 'SCENARIO_14_ALPHA'].includes(sc)) return 'S14_ALPHA';
+  if (sc === 'AP3') return 'AP3';
   // S15 canonical; S14_BETA is preserved as alias
   if (['S15', 'SCE15', 'SCENARIO_15'].includes(sc)) return 'S15';
   if (['S14_BETA', 'SCENARIO_14_BETA'].includes(sc)) return 'S14_BETA'; // alias preserved
@@ -286,9 +289,9 @@ export function getScenarioStakeUsd(
     for (const value of values) { const n = Number(value); if (Number.isFinite(n) && n >= 0.05 && n <= 1000) return n; }
     return 5;
   };
-  if (isS14Engine(u)) return positive(config.stakeUsdS14);
-  if (isS14AlphaEngine(u)) return positive(config.stakeUsdS14Alpha);
-  if (isS15Engine(u)) return positive(config.stakeUsdS15, config.stakeUsdS14Beta);
+  if (isS14Engine(u)) return positive(config.stakeUsdAP1, config.stakeUsdS14);
+  if (isS14AlphaEngine(u)) return positive(config.stakeUsdAP2, config.stakeUsdS14Alpha);
+  if (isS15Engine(u)) return positive(config.stakeUsdAP3, config.stakeUsdS15, config.stakeUsdS14Beta);
   // For other scenarios, return NaN to signal caller should use its own lookup
   return NaN;
 }

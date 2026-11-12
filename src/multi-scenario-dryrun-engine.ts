@@ -816,7 +816,7 @@ export class MultiScenarioDryRunEngine {
       },
       s14: {
         id: 'SCENARIO_14_BUNDLER_RUNNER',
-        name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)',
+        name: 'AP1: Bundler-Confirmed Runner (Wave Rider)',
         description: 'Saldo Awal $5.00. Modal $5.00/entry. Standby saat Detik 0 (menghindari rugpull kilat & shakeout trap). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif buyback/ping-pong. Begitu terkonfirmasi runner: BUY $5.00. Take Profit Bertahap: Jual 50% di +50% gain (amankan modal), sisa 50% moonbag ditahan hingga +100% atau Whale Dump. Stop Loss -20% dari entry (sebelum TP 1). Whale consecutive sells hanya hitung order signifikan >= 3 SOL atau holding < 50% (anti-shakeout). Giant Dump >= 15 SOL exit 100%.',
         initialCash: 5.0,
         availableCash: 5.0,
@@ -835,7 +835,7 @@ export class MultiScenarioDryRunEngine {
       },
       s14_alpha: {
         id: 'SCENARIO_14_ALPHA_60S_GRACE',
-        name: 'Skenario 14-Alpha: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)',
+        name: 'AP2: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)',
         description: 'Saldo Awal $5.00. Modal $5.00/entry. Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump. Stop Loss -20% dari entry (sebelum TP 1). Anti-shakeout sell >= 3 SOL. Giant Dump >= 15 SOL exit 100%.',
         initialCash: 5.0,
         availableCash: 5.0,
@@ -854,7 +854,7 @@ export class MultiScenarioDryRunEngine {
       },
       s14_beta: {
         id: 'SCENARIO_14_BETA_HOARDING_DEFENSE',
-        name: 'Skenario 14-Beta (S15): Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
+        name: 'AP3: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
         description: 'Saldo Awal $5.00. Modal $5.00/entry. Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale terbukti aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump. Whale Hoarding Trap Defense: Jika pasca-buy bag Whale membengkak >= +25% dari saldo awal entry atau > 8.0% supply (> 80M token) akibat menelan barang sendiri -> LANGSUNG FULL EXIT 100% SEKETIKA (amankan cuan sebelum Dev drain LP). Stop Loss -20% dari entry.',
         initialCash: 5.0,
         availableCash: 5.0,
@@ -2822,6 +2822,14 @@ export class MultiScenarioDryRunEngine {
   ): void {
     const pIn = signal.priceUsd;
     if (pIn <= 0) return;
+
+    // Hanya AP1 (S14), AP2 (S14-Alpha), AP3 (S14-Beta / S15) yang aktif eksekusi buy
+    const ACTIVE_SCENARIOS = new Set([
+      'SCENARIO_14_BUNDLER_RUNNER',
+      'SCENARIO_14_ALPHA_60S_GRACE',
+      'SCENARIO_14_BETA_HOARDING_DEFENSE',
+    ]);
+    if (!ACTIVE_SCENARIOS.has(scenario.id)) return;
 
     let pos = scenario.openPositions.find(p => p.mint === signal.mint);
 
@@ -4987,6 +4995,16 @@ export class MultiScenarioDryRunEngine {
     return mints;
   }
 
+  public getAllOpenMints(): string[] {
+    const mints = new Set<string>();
+    for (const scenario of Object.values(this.scenarios)) {
+      for (const pos of scenario.openPositions || []) {
+        if (pos.mint) mints.add(pos.mint);
+      }
+    }
+    return Array.from(mints);
+  }
+
   /**
    * Auto-likuidasi posisi stagnan / terbengkalai (> 25 menit tanpa aktivitas target)
    */
@@ -4995,7 +5013,7 @@ export class MultiScenarioDryRunEngine {
     const maxAgeMs = maxAgeMinutes * 60 * 1000;
     let changed = false;
 
-    for (const scenario of [this.scenarios.s4, this.scenarios.s5, this.scenarios.s6, this.scenarios.s7, this.scenarios.s8, this.scenarios.s9]) {
+    for (const scenario of Object.values(this.scenarios)) {
       for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
         const pos = scenario.openPositions[i];
         if (now - pos.openedAt >= maxAgeMs) {

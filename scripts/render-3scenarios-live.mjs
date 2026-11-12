@@ -11,6 +11,9 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
   if (existsSync(liveFile)) {
     try {
       data = JSON.parse(readFileSync(liveFile, 'utf8'));
+      if (data.s14) data.s14.name = 'AP1: Bundler-Confirmed Runner (Wave Rider)';
+      if (data.s14_alpha) data.s14_alpha.name = 'AP2: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)';
+      if (data.s14_beta) data.s14_beta.name = 'AP3: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense';
     } catch {}
   }
 
@@ -255,7 +258,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
         ` : (scId === 'sce14' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
-              <span class="stake-section-title">⚙️ Konfigurasi Modal S14 (Bundler Runner)</span>
+              <span class="stake-section-title">⚙️ Konfigurasi Modal AP1 (Bundler Runner)</span>
               <span class="stake-current-val">Stake: $${s14Stake.toFixed(2)}</span>
             </div>
             <div class="stake-form-grid-1" style="margin-top: 6px;">
@@ -267,12 +270,12 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
                 </div>
               </div>
             </div>
-            <button onclick="saveS14Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S14</button>
+            <button onclick="saveS14Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal AP1 (S14)</button>
           </div>
         ` : (scId === 'sce14_alpha' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
-              <span class="stake-section-title">⚙️ Konfigurasi Modal S14-Alpha (Bundler + 60s Grace)</span>
+              <span class="stake-section-title">⚙️ Konfigurasi Modal AP2 (Bundler + 60s Grace)</span>
               <span class="stake-current-val">Stake: $${s14AlphaStake.toFixed(2)}</span>
             </div>
             <div class="stake-form-grid-1" style="margin-top: 6px;">
@@ -284,12 +287,12 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
                 </div>
               </div>
             </div>
-            <button onclick="saveS14AlphaStake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S14-Alpha</button>
+            <button onclick="saveS14AlphaStake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal AP2 (S14-Alpha)</button>
           </div>
         ` : (scId === 'sce14_beta' ? `
           <div class="stake-card-section">
             <div class="stake-section-header">
-              <span class="stake-section-title">⚙️ Konfigurasi Modal S15 / S14-Beta (Whale Hoarding Defense)</span>
+              <span class="stake-section-title">⚙️ Konfigurasi Modal AP3 (Whale Hoarding Defense)</span>
               <span class="stake-current-val">Stake: $${s15Stake.toFixed(2)}</span>
             </div>
             <div class="stake-form-grid-1" style="margin-top: 6px;">
@@ -301,7 +304,7 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
                 </div>
               </div>
             </div>
-            <button onclick="saveS15Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal S15 / S14-Beta</button>
+            <button onclick="saveS15Stake()" class="btn-stake-save" style="margin-top: 6px; width: 100%;">💾 Simpan Modal AP3 (S15 / S14-Beta)</button>
           </div>
         ` : ``)))))))))}
 
@@ -818,28 +821,19 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
         <div>
           <h1>
             <span class="live-dot"></span>
-            Live 3-Way Dry-Run Radar (S4 vs S6 vs S7)
+            Live 3-Way Dry-Run Radar (AP1 vs AP2 vs AP3)
           </h1>
           <div class="header-subtitle">
-            Head-to-Head 3 Skenario Terbaik &bull; Modal Pool <strong>$20.00</strong> Masing-Masing &bull; Wajib <strong>First Buy Ground Zero</strong> &bull; S4: <strong>Single Buy $5</strong> &bull; S6: <strong>Re-Deploy Sniper V2</strong> &bull; S7: <strong>Time-Stop Sniper (Force Sell @ 28s)</strong>
+            Head-to-Head 3 Skenario Aktif &bull; Modal Pool <strong>$5.00</strong> Masing-Masing &bull; AP1: <strong>Bundler Runner</strong> &bull; AP2: <strong>60s Grace Period</strong> &bull; AP3: <strong>Whale Hoarding Defense</strong>
           </div>
         </div>
       </div>
       <div class="nav-group">
         <a href="/add-fol" class="nav-btn">⚡ Live Dashboard</a>
-        <a href="/add-fol/backtest-dynamic" class="nav-btn">📊 Backtest V1 ($5 Cap)</a>
-        <a href="/add-fol/backtest-dynamic2" class="nav-btn">🚀 Backtest V2 ($20 Pool)</a>
-        <a href="/add-fol/3scenarios" class="nav-btn active">📡 Live Radar Multi-Skenario</a>
-        <a href="/add-fol/3scenarios/sce4" class="nav-btn" style="color:#f59e0b; border-color:rgba(245,158,11,0.4);">🔍 Detail S4</a>
-        <a href="/add-fol/3scenarios/sce5" class="nav-btn" style="color:#f97316; border-color:rgba(249,115,22,0.4);">🌊 Detail S5</a>
-        <a href="/add-fol/3scenarios/sce6" class="nav-btn" style="color:#ec4899; border-color:rgba(236,72,153,0.4);">🚀 Detail S6</a>
-        <a href="/add-fol/3scenarios/sce7" class="nav-btn" style="color:#06b6d4; border-color:rgba(6,182,212,0.4);">⏱️ Detail S7</a>
-        <a href="/add-fol/3scenarios/sce8" class="nav-btn" style="color:#a855f7; border-color:rgba(168,85,247,0.4);">⚡ Detail S8</a>
-        <a href="/add-fol/3scenarios/sce9" class="nav-btn" style="color:#3b82f6; border-color:rgba(59,130,246,0.4);">🔄 Detail S9</a>
-        <a href="/add-fol/3scenarios/sce9_5" class="nav-btn" style="color:#8b5cf6; border-color:rgba(139,92,246,0.4);">🌙 Detail S9.5</a>
-        <a href="/add-fol/3scenarios/sce10" class="nav-btn" style="color:#f59e0b; border-color:rgba(245,158,11,0.4);">🌊 Detail S10</a>
-        <a href="/add-fol/3scenarios/sce13" class="nav-btn" style="color:#10b981; border-color:rgba(16,185,129,0.4);">🏓 Detail S13</a>
-        <a href="/add-fol/3scenarios/sce13_5" class="nav-btn" style="color:#06b6d4; border-color:rgba(6,182,212,0.4);">⚡ Detail S13.5</a>
+        <a href="/add-fol/3scenarios" class="nav-btn active">📡 Live Radar AP1/AP2/AP3</a>
+        <a href="/add-fol/3scenarios/sce14" class="nav-btn" style="color:#e11d48; border-color:rgba(225,29,72,0.4);">🔴 Detail AP1 (S14)</a>
+        <a href="/add-fol/3scenarios/sce14_alpha" class="nav-btn" style="color:#6366f1; border-color:rgba(99,102,241,0.4);">🟣 Detail AP2 (Alpha)</a>
+        <a href="/add-fol/3scenarios/sce14_beta" class="nav-btn" style="color:#0ea5e9; border-color:rgba(14,165,233,0.4);">🔷 Detail AP3 (Beta/S15)</a>
       </div>
     </header>
 
@@ -858,23 +852,17 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
       </div>
 
       <div class="autobuy-sub">
-        ${activeScenario === 'OFF' 
-          ? '⚪ <strong>Keduanya Nonaktif:</strong> Bot idle, tidak ada pemantauan swap.' 
+        ${activeScenario === 'OFF'
+          ? '⚪ <strong>Nonaktif:</strong> Bot idle, tidak ada pemantauan swap.'
           : (activeScenario === 'DRY_RUN'
               ? '⚪ <strong>Semuanya Dry Run (Simulasi Swap Ganda):</strong> Mekanisme persis seperti buy asli! Hit batch_order diganti hit swap ke-2 untuk simulasi slippage riil. PnL dihitung murni dari harga swap DEX nyata tanpa memotong saldo SOL.'
-              : (activeScenario === 'S4' 
-                  ? '🟡 <strong>Skenario 4 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S4 terpenuhi (2-Lapis Shakeout Trap: Hold 8s & Dump on Buyback). Skenario lain berjalan sebagai simulasi.' 
-                  : (activeScenario === 'S5' 
-                      ? '🟠 <strong>Skenario 5 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S5 terpenuhi (Anti-Shakeout Runner: Hold >= 12s, TP +25%, Time-Stop 35s). Skenario lain berjalan sebagai simulasi.' 
-                      : (activeScenario === 'S6' 
-                          ? '🟣 <strong>Skenario 6 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S6 terpenuhi (Re-Deploy Sniper: TP1 50% @ 5% & TP2 @ 15%). Skenario lain berjalan sebagai simulasi.' 
-                          : (activeScenario === 'S7'
-                              ? '🔵 <strong>Skenario 7 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S7 terpenuhi (Time-Stop Sniper: TP1 50% @ 5% & Force Sell 100% @ 28s). Skenario lain berjalan sebagai simulasi.'
-                              : (activeScenario === 'S8'
-                                  ? '🟣 <strong>Skenario 8 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S8 terpenuhi (Front-Run Dev Re-Deploy & Dump on Target Entry). Skenario lain berjalan sebagai simulasi.'
-                                  : (activeScenario === 'S9'
-                                      ? '🔷 <strong>Skenario 9 Saja:</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger S9 terpenuhi (Dev Front-Run & 2-Way Target Sync: Detik 0 Genesis, Timeout 60s). Skenario lain berjalan sebagai simulasi.'
-                                      : '🟢 <strong>Semua Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain saat trigger masing-masing terpenuhi.')))))))}
+              : (activeScenario === 'AP1' || activeScenario === 'S14'
+                  ? '🔴 <strong>AP1 Saja (S14):</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger AP1 terpenuhi (Bundler Runner: Buy saat Bundler ≥ 5%).'
+                  : (activeScenario === 'AP2' || activeScenario === 'S14_ALPHA'
+                      ? '🟣 <strong>AP2 Saja (S14-Alpha):</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger AP2 terpenuhi (Bundler Runner + 60s Grace Period).'
+                      : (activeScenario === 'AP3' || activeScenario === 'S15' || activeScenario === 'S14_BETA'
+                          ? '🔷 <strong>AP3 Saja (S15 / S14-Beta):</strong> Order NYATA disubmit ke GMGN & blockchain HANYA saat trigger AP3 terpenuhi (Bundler Runner + 60s Grace + Whale Hoarding Defense).'
+                          : '🟢 <strong>Semua AP1, AP2, AP3 Aktif:</strong> Order NYATA disubmit ke GMGN & blockchain saat trigger masing-masing terpenuhi.'))))}
       </div>
 
       <!-- Radio Buttons Selection -->
@@ -895,91 +883,27 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
           </div>
         </label>
 
-        <label class="scenario-radio-card ${activeScenario === 'S4' ? 'active-s4' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S4" ${activeScenario === 'S4' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+        <label class="scenario-radio-card ${(activeScenario === 'AP1' || activeScenario === 'S14') ? 'active-s14' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S14" ${(activeScenario === 'AP1' || activeScenario === 'S14') ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
-            <span class="radio-main" style="color: #f59e0b;">🟡 Skenario 4 Saja</span>
-            <span class="radio-hint">Single Buy (Exit ≥ 15%) Real</span>
+            <span class="radio-main" style="color: #e11d48;">🔴 AP1 (S14)</span>
+            <span class="radio-hint">Bundler Runner: Buy saat Bundler ≥ 5%</span>
           </div>
         </label>
 
-        <label class="scenario-radio-card ${activeScenario === 'S5' ? 'active-s5' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S5" ${activeScenario === 'S5' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+        <label class="scenario-radio-card ${(activeScenario === 'AP2' || activeScenario === 'S14_ALPHA') ? 'active-s14-alpha' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S14_ALPHA" ${(activeScenario === 'AP2' || activeScenario === 'S14_ALPHA') ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
-            <span class="radio-main" style="color: #f97316;">🟠 Skenario 5 Saja</span>
-            <span class="radio-hint">Anti-Shakeout (TP +25%) Real</span>
+            <span class="radio-main" style="color: #6366f1;">🟣 AP2 (S14-Alpha)</span>
+            <span class="radio-hint">Bundler Runner + 60s Grace Period</span>
           </div>
         </label>
 
-        <label class="scenario-radio-card ${activeScenario === 'S6' ? 'active-s6' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S6" ${activeScenario === 'S6' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
+        <label class="scenario-radio-card ${(activeScenario === 'AP3' || activeScenario === 'S15' || activeScenario === 'S14_BETA') ? 'active-s15' : ''}">
+          <input type="radio" name="autobuyScenarioRadio" value="S15" ${(activeScenario === 'AP3' || activeScenario === 'S15' || activeScenario === 'S14_BETA') ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
           <div class="radio-text">
-            <span class="radio-main" style="color: #ec4899;">🟣 Skenario 6 Saja</span>
-            <span class="radio-hint">Sniper V2 (TP 5% & 15%) Real</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S7' ? 'active-s7' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S7" ${activeScenario === 'S7' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #06b6d4;">🔵 Skenario 7 Saja</span>
-            <span class="radio-hint">Time-Stop (TP 5% & Force 28s) Real</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S8' ? 'active-s8' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S8" ${activeScenario === 'S8' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #a855f7;">🟣 Skenario 8 Saja</span>
-            <span class="radio-hint">Front-Run Dev & Dump on Target</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S9' ? 'active-s9' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S9" ${activeScenario === 'S9' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #3b82f6;">🔷 Skenario 9 Saja</span>
-            <span class="radio-hint">Dev Front-Run & 2-Way Sync Real</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S10' ? 'active-s10' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S10" ${activeScenario === 'S10' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #f59e0b;">⚡ Skenario 10 Saja</span>
-            <span class="radio-hint">Dynamic Wave Runner (Whale Sync)</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S13_BETA' ? 'active-s13-beta' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S13_BETA" ${activeScenario === 'S13_BETA' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #ec4899;">⚡ Skenario 13-Beta</span>
-            <span class="radio-hint">Instant Buy + 1.5s Panic Rescue ($0.25)</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S14' ? 'active-s14' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S14" ${activeScenario === 'S14' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #e11d48;">🔴 Skenario 14 Saja (S14)</span>
-            <span class="radio-hint">Bundler Runner: Buy saat Bundler ≥ 5% (Hanya S14)</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${activeScenario === 'S14_ALPHA' ? 'active-s14-alpha' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S14_ALPHA" ${activeScenario === 'S14_ALPHA' ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #6366f1;">🟣 Skenario 14-Alpha (S14_ALPHA)</span>
-            <span class="radio-hint">Bundler Runner + 60s Grace Period (Hanya S14-Alpha)</span>
-          </div>
-        </label>
-
-        <label class="scenario-radio-card ${(activeScenario === 'S15' || activeScenario === 'S14_BETA') ? 'active-s15' : ''}">
-          <input type="radio" name="autobuyScenarioRadio" value="S15" ${(activeScenario === 'S15' || activeScenario === 'S14_BETA') ? 'checked' : ''} onchange="setAutobuyScenario(this.value)">
-          <div class="radio-text">
-            <span class="radio-main" style="color: #0ea5e9;">🔷 Skenario 15 / S14-Beta (S15)</span>
-            <span class="radio-hint">Bundler Runner + 60s Grace + Whale Hoarding Defense (Hanya S15)</span>
+            <span class="radio-main" style="color: #0ea5e9;">🔷 AP3 (S15 / S14-Beta)</span>
+            <span class="radio-hint">Bundler + 60s Grace + Hoarding Defense</span>
           </div>
         </label>
 
@@ -1044,28 +968,13 @@ export function render3ScenariosLiveHtml({ dataDir = defaultDataDir } = {}) {
     </div>
 
     <div class="scenarios-grid">
-      ${renderScenarioCard(s4, 'var(--amber)', 'sce4')}
-      ${renderScenarioCard(s5, '#10b981', 'sce5')}
-      ${renderScenarioCard(s6, '#ec4899', 'sce6')}
-      ${renderScenarioCard(s7, '#06b6d4', 'sce7')}
-      ${renderScenarioCard(s8, '#a855f7', 'sce8')}
-      ${renderScenarioCard(s9, '#3b82f6', 'sce9')}
-      ${renderScenarioCard(s9_5, '#8b5cf6', 'sce9_5')}
-      ${renderScenarioCard(s10, '#f59e0b', 'sce10')}
-      ${renderScenarioCard(s13, '#10b981', 'sce13')}
-      ${renderScenarioCard(s13_5, '#06b6d4', 'sce13_5')}
-      ${renderScenarioCard(s13_alpha, '#8b5cf6', 'sce13_alpha')}
-      ${renderScenarioCard(s13_beta, '#f59e0b', 'sce13_beta')}
-      ${renderScenarioCard(s13_alpha_1, '#ec4899', 'sce13_alpha_1')}
-      ${renderScenarioCard(s13_beta_1, '#10b981', 'sce13_beta_1')}
-      ${renderScenarioCard(s13_centaur, '#38bdf8', 'sce13_centaur')}
       ${renderScenarioCard(s14, '#e11d48', 'sce14')}
       ${renderScenarioCard(s14_alpha, '#6366f1', 'sce14_alpha')}
       ${renderScenarioCard(s14_beta, '#0ea5e9', 'sce14_beta')}
     </div>
 
     <footer style="text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 24px;">
-      cr.bbliong.io/add-fol/3scenarios &bull; Real-time 18-Way Parallel Dry-Run Engine (S4 s/d S14, S14-Alpha & S14-Beta) &bull; Auto-Refresh setiap 5s
+      cr.bbliong.io/add-fol/3scenarios &bull; Live 3-Way Parallel Engine (AP1, AP2, AP3) &bull; Auto-Refresh setiap 5s
     </footer>
   </div>
 

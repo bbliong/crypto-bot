@@ -1331,10 +1331,12 @@ export class WalletFollowerRunner {
       // 1. Sinkronisasi subscribe token aktif dan batch price heartbeat
       const smartOpen = this.smartDipLane.getOpenPositions();
       const gen2CooldownMints = this.multiDryRunEngine.getGen2CooldownMints();
+      const multiOpenMints = typeof this.multiDryRunEngine.getAllOpenMints === 'function' ? this.multiDryRunEngine.getAllOpenMints() : [];
       const allOpenMints = Array.from(new Set([
         ...openPositions.map(p => p.mint),
         ...smartOpen.map(p => p.mint),
         ...gen2CooldownMints,
+        ...multiOpenMints,
       ]));
 
       for (const mint of allOpenMints) {
@@ -1383,6 +1385,7 @@ export class WalletFollowerRunner {
             for (const [mint, price] of bestPrices.entries()) {
               this.lane.updateTokenTick(mint, price);
               await this.handleSmartDipPriceTick(mint, price);
+              this.multiDryRunEngine.updatePriceTick(mint, price);
             }
           }
         } catch {}

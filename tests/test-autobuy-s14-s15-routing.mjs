@@ -204,6 +204,20 @@ function runRoutingTests() {
   check('S14+S15 → S14_ALPHA: deny',
     isScenarioAllowedForRealOrder('SCENARIO_14_ALPHA_60S_GRACE', makeConfig('S14+S15')), false);
 
+  // ── AP1, AP2, AP3 aliases ───────────────────────────────────────────────
+  check('AP1 → SCENARIO_14_BUNDLER_RUNNER: allow',
+    isScenarioAllowedForRealOrder('SCENARIO_14_BUNDLER_RUNNER', makeConfig('AP1')), true);
+  check('AP1 → SCENARIO_14_ALPHA_60S_GRACE: deny',
+    isScenarioAllowedForRealOrder('SCENARIO_14_ALPHA_60S_GRACE', makeConfig('AP1')), false);
+  check('AP2 → SCENARIO_14_ALPHA_60S_GRACE: allow',
+    isScenarioAllowedForRealOrder('SCENARIO_14_ALPHA_60S_GRACE', makeConfig('AP2')), true);
+  check('AP2 → SCENARIO_14_BUNDLER_RUNNER: deny',
+    isScenarioAllowedForRealOrder('SCENARIO_14_BUNDLER_RUNNER', makeConfig('AP2')), false);
+  check('AP3 → SCENARIO_14_BETA_HOARDING_DEFENSE: allow',
+    isScenarioAllowedForRealOrder('SCENARIO_14_BETA_HOARDING_DEFENSE', makeConfig('AP3')), true);
+  check('AP3 → SCENARIO_14_BUNDLER_RUNNER: deny',
+    isScenarioAllowedForRealOrder('SCENARIO_14_BUNDLER_RUNNER', makeConfig('AP3')), false);
+
   // ── BOTH / ALL activates all including S14 group ─────────────────────────
   check('BOTH → S14: allow',
     isScenarioAllowedForRealOrder('SCENARIO_14_BUNDLER_RUNNER', makeConfig('BOTH')), true);

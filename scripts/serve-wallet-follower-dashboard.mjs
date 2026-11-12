@@ -201,6 +201,7 @@ const server = createServer((req, res) => {
           // S14 group listed before S4/S5 so numeric substring checks are impossible.
           const KNOWN = new Set([
             'OFF', 'DRY_RUN', 'BOTH', 'ALL',
+            'AP1', 'AP2', 'AP3',
             'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10',
             'S13', 'S13_ALPHA', 'S13_BETA', 'S13_ALPHA_1', 'S13_BETA_1', 'S13_CENTAUR',
             'S14', 'S14_ALPHA', 'S14_BETA', 'S15',
@@ -278,31 +279,28 @@ const server = createServer((req, res) => {
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS10 = val;
         }
 
-        if (patch.stakeUsdS14 !== undefined) {
-          const val = parseFloat(patch.stakeUsdS14);
-          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS14 = val;
+        if (patch.stakeUsdAP1 !== undefined || patch.stakeUsdS14 !== undefined) {
+          const val = parseFloat(patch.stakeUsdAP1 ?? patch.stakeUsdS14);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) {
+            updated.stakeUsdS14 = val;
+            updated.stakeUsdAP1 = val;
+          }
         }
 
-        if (patch.stakeUsdS14Alpha !== undefined) {
-          const val = parseFloat(patch.stakeUsdS14Alpha);
-          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS14Alpha = val;
+        if (patch.stakeUsdAP2 !== undefined || patch.stakeUsdS14Alpha !== undefined) {
+          const val = parseFloat(patch.stakeUsdAP2 ?? patch.stakeUsdS14Alpha);
+          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) {
+            updated.stakeUsdS14Alpha = val;
+            updated.stakeUsdAP2 = val;
+          }
         }
 
-        if (patch.stakeUsdS14Beta !== undefined) {
-          const val = parseFloat(patch.stakeUsdS14Beta);
-          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS14Beta = val;
-        }
-
-        if (patch.stakeUsdS15 !== undefined) {
-          const val = parseFloat(patch.stakeUsdS15);
-          if (Number.isFinite(val) && val >= 0.05 && val <= 1000) updated.stakeUsdS15 = val;
-        }
-
-        if (patch.stakeUsdS15 !== undefined || patch.stakeUsdS14Beta !== undefined) {
-          const val = Number(patch.stakeUsdS15 ?? patch.stakeUsdS14Beta);
+        if (patch.stakeUsdAP3 !== undefined || patch.stakeUsdS15 !== undefined || patch.stakeUsdS14Beta !== undefined) {
+          const val = Number(patch.stakeUsdAP3 ?? (patch.stakeUsdS15 ?? patch.stakeUsdS14Beta));
           if (Number.isFinite(val) && val >= 0.05 && val <= 1000) {
             updated.stakeUsdS15 = val;
             updated.stakeUsdS14Beta = val;
+            updated.stakeUsdAP3 = val;
           }
         }
 
@@ -604,8 +602,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Dedicated Scenario 14-Alpha Detail Timeline (/3scenarios/sce14_alpha, /add-fol/3scenarios/sce14_alpha)
-  if (pathname.includes('/3scenarios/sce14_alpha') || pathname.includes('/4scenarios/sce14_alpha') || pathname.includes('/scenarios/sce14_alpha') || pathname.includes('/3scenarios/alpha14')) {
+  // Dedicated Scenario 14-Alpha Detail Timeline (/3scenarios/sce14_alpha, /add-fol/3scenarios/sce14_alpha, /3scenarios/ap2)
+  if (pathname.includes('/3scenarios/sce14_alpha') || pathname.includes('/4scenarios/sce14_alpha') || pathname.includes('/scenarios/sce14_alpha') || pathname.includes('/3scenarios/alpha14') || pathname.includes('/3scenarios/ap2')) {
     (async () => {
       try {
         const token = url.searchParams.get('token') || '';
@@ -621,8 +619,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Dedicated Scenario 14-Beta / S15 Detail Timeline (/3scenarios/sce14_beta, /3scenarios/sce15)
-  if (pathname.includes('/3scenarios/sce15') || pathname.includes('/4scenarios/sce15') || pathname.includes('/scenarios/sce15') || pathname.includes('/3scenarios/sce14_beta') || pathname.includes('/4scenarios/sce14_beta') || pathname.includes('/scenarios/sce14_beta') || pathname.includes('/3scenarios/beta14')) {
+  // Dedicated Scenario 14-Beta / S15 Detail Timeline (/3scenarios/sce14_beta, /3scenarios/sce15, /3scenarios/ap3)
+  if (pathname.includes('/3scenarios/sce15') || pathname.includes('/4scenarios/sce15') || pathname.includes('/scenarios/sce15') || pathname.includes('/3scenarios/sce14_beta') || pathname.includes('/4scenarios/sce14_beta') || pathname.includes('/scenarios/sce14_beta') || pathname.includes('/3scenarios/beta14') || pathname.includes('/3scenarios/ap3')) {
     (async () => {
       try {
         const token = url.searchParams.get('token') || '';
@@ -638,8 +636,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Dedicated Scenario 14 Detail Timeline (/3scenarios/sce14, /add-fol/3scenarios/sce14)
-  if (pathname.includes('/3scenarios/sce14') || pathname.includes('/4scenarios/sce14') || pathname.includes('/scenarios/sce14')) {
+  // Dedicated Scenario 14 Detail Timeline (/3scenarios/sce14, /add-fol/3scenarios/sce14, /3scenarios/ap1)
+  if (pathname.includes('/3scenarios/sce14') || pathname.includes('/4scenarios/sce14') || pathname.includes('/scenarios/sce14') || pathname.includes('/3scenarios/ap1')) {
     (async () => {
       try {
         const token = url.searchParams.get('token') || '';

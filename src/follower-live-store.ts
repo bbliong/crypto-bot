@@ -35,6 +35,9 @@ export interface FollowerLiveConfig {
   stakeUsdS14Alpha?: number;
   stakeUsdS14Beta?: number;
   stakeUsdS15?: number;
+  stakeUsdAP1?: number;
+  stakeUsdAP2?: number;
+  stakeUsdAP3?: number;
   maxBuysQuota: number;
   maxActiveRealPositions: number;
   buySlippagePercent: number;
@@ -73,6 +76,9 @@ export const FOLLOWER_LIVE_DEFAULTS: FollowerLiveConfig = {
   stakeUsdS14Alpha: 5.0,
   stakeUsdS14Beta: 5.0,
   stakeUsdS15: 5.0,
+  stakeUsdAP1: 5.0,
+  stakeUsdAP2: 5.0,
+  stakeUsdAP3: 5.0,
   maxBuysQuota: 3,
   maxActiveRealPositions: 1,
   buySlippagePercent: 15,
@@ -208,6 +214,7 @@ export function saveFollowerLiveConfig(
     // S13 group ALPHA/BETA checked with explicit prefix, not generic includes.
     const KNOWN_SCENARIOS = new Set([
       'OFF', 'DRY_RUN', 'BOTH', 'ALL',
+      'AP1', 'AP2', 'AP3',
       'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10',
       'S13', 'S13_ALPHA', 'S13_BETA', 'S13_ALPHA_1', 'S13_BETA_1', 'S13_CENTAUR',
       'S14', 'S14_ALPHA', 'S14_BETA', 'S15',
@@ -274,18 +281,22 @@ export function saveFollowerLiveConfig(
   if (patch.stakeUsdS13Alpha1 !== undefined || updated.stakeUsdS13Alpha1 === undefined) {
     updated.stakeUsdS13Alpha1 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS13Alpha1 !== undefined ? patch.stakeUsdS13Alpha1 : updated.stakeUsdS13Alpha1) || 5.0));
   }
-  // S14 / S14_ALPHA / S14_BETA (alias) / S15 stake bounds
-  if (patch.stakeUsdS14 !== undefined || updated.stakeUsdS14 === undefined) {
-    updated.stakeUsdS14 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS14 !== undefined ? patch.stakeUsdS14 : updated.stakeUsdS14) || 5.0));
+  // S14 / S14_ALPHA / S14_BETA (alias) / S15 / AP1 / AP2 / AP3 stake bounds
+  if (patch.stakeUsdAP1 !== undefined || patch.stakeUsdS14 !== undefined || updated.stakeUsdS14 === undefined) {
+    const v = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdAP1 !== undefined ? patch.stakeUsdAP1 : (patch.stakeUsdS14 !== undefined ? patch.stakeUsdS14 : updated.stakeUsdS14)) || 5.0));
+    updated.stakeUsdS14 = v;
+    updated.stakeUsdAP1 = v;
   }
-  if (patch.stakeUsdS14Alpha !== undefined || updated.stakeUsdS14Alpha === undefined) {
-    updated.stakeUsdS14Alpha = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS14Alpha !== undefined ? patch.stakeUsdS14Alpha : updated.stakeUsdS14Alpha) || 5.0));
+  if (patch.stakeUsdAP2 !== undefined || patch.stakeUsdS14Alpha !== undefined || updated.stakeUsdS14Alpha === undefined) {
+    const v = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdAP2 !== undefined ? patch.stakeUsdAP2 : (patch.stakeUsdS14Alpha !== undefined ? patch.stakeUsdS14Alpha : updated.stakeUsdS14Alpha)) || 5.0));
+    updated.stakeUsdS14Alpha = v;
+    updated.stakeUsdAP2 = v;
   }
-  if (patch.stakeUsdS14Beta !== undefined || updated.stakeUsdS14Beta === undefined) {
-    updated.stakeUsdS14Beta = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS14Beta !== undefined ? patch.stakeUsdS14Beta : updated.stakeUsdS14Beta) || 5.0));
-  }
-  if (patch.stakeUsdS15 !== undefined || updated.stakeUsdS15 === undefined) {
-    updated.stakeUsdS15 = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdS15 !== undefined ? patch.stakeUsdS15 : updated.stakeUsdS15) || 5.0));
+  if (patch.stakeUsdAP3 !== undefined || patch.stakeUsdS15 !== undefined || patch.stakeUsdS14Beta !== undefined || updated.stakeUsdS15 === undefined) {
+    const v = Math.max(0.05, Math.min(1000, Number(patch.stakeUsdAP3 !== undefined ? patch.stakeUsdAP3 : (patch.stakeUsdS15 !== undefined ? patch.stakeUsdS15 : (patch.stakeUsdS14Beta !== undefined ? patch.stakeUsdS14Beta : updated.stakeUsdS15))) || 5.0));
+    updated.stakeUsdS15 = v;
+    updated.stakeUsdS14Beta = v;
+    updated.stakeUsdAP3 = v;
   }
   // S15 and S14-Beta name the same strategy. Explicit S15 wins if both supplied.
   if (patch.stakeUsdS15 !== undefined || patch.stakeUsdS14Beta !== undefined) {

@@ -192,50 +192,50 @@ export const SCENARIO_META = {
   sce14: {
     id: 'sce14',
     canonicalKey: 's14',
-    name: 'Skenario 14: Bundler-Confirmed Runner (Wave Rider)',
-    shortName: 'Skenario 14',
+    name: 'AP1: Bundler-Confirmed Runner (Wave Rider)',
+    shortName: 'AP1',
     description: 'Standby saat Detik 0. Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump.',
     ruleBadge: 'Bundler Runner | Wave Rider 2-Stage TP',
     color: '#e11d48',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return (s.includes('SCENARIO_14') || s.includes('S14')) && !s.includes('ALPHA') && !s.includes('BETA');
+      return (s.includes('SCENARIO_14') || s.includes('S14') || s.includes('AP1')) && !s.includes('ALPHA') && !s.includes('BETA');
     }
   },
   sce14_alpha: {
     id: 'sce14_alpha',
     canonicalKey: 's14_alpha',
-    name: 'Skenario 14-Alpha: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)',
-    shortName: 'Skenario 14-Alpha',
+    name: 'AP2: Bundler Runner + 60s Grace Period (Anti-Rugpull 100%)',
+    shortName: 'AP2',
     description: 'Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump.',
     ruleBadge: 'Bundler Runner + 60s Grace | Anti-Rugpull 100%',
     color: '#6366f1',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('SCENARIO_14_ALPHA') || s.includes('14_ALPHA');
+      return s.includes('SCENARIO_14_ALPHA') || s.includes('14_ALPHA') || s.includes('AP2');
     }
   },
   sce14_beta: {
     id: 'sce14_beta',
     canonicalKey: 's14_beta',
-    name: 'Skenario 14-Beta: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
-    shortName: 'Skenario 14-Beta',
+    name: 'AP3: Bundler Runner + 60s Grace + Whale Hoarding Trap Defense',
+    shortName: 'AP3',
     description: 'Grace Period Umur Token >= 60 detik (kebal total rugpull kilat Dev). Menunggu konfirmasi on-chain Bundler Rate >= 5.0% dan Whale aktif. Take Profit Bertahap: Jual 50% di +50% gain, sisa 50% moonbag ke +100% atau Whale Dump. Whale Hoarding Trap Defense: Full exit 100% seketika jika bag Whale membengkak >= +25% pasca entry atau tembus > 8.0% supply (> 80M token) akibat menelan barang sendiri.',
     ruleBadge: 'Bundler Runner + 60s Grace | Whale Hoarding Defense',
     color: '#0ea5e9',
     ledgerFilter: (id, type) => {
       const s = (id || '') + ' ' + (type || '');
-      return s.includes('SCENARIO_14_BETA') || s.includes('14_BETA');
+      return s.includes('SCENARIO_14_BETA') || s.includes('14_BETA') || s.includes('AP3') || s.includes('S15');
     }
   }
 };
 
 export function normalizeScenarioId(raw) {
-  if (!raw) return 'sce4';
+  if (!raw) return 'sce14';
   const str = String(raw).toLowerCase().trim();
-  if (str.includes('15') || str.includes('sce15') || str.includes('14_beta') || str.includes('14-beta') || str.includes('14beta')) return 'sce14_beta';
-  if (str.includes('14_alpha') || str.includes('14-alpha') || str.includes('14alpha')) return 'sce14_alpha';
-  if (str.includes('14') || str.includes('sce14')) return 'sce14';
+  if (str === 'ap3' || str.includes('ap3') || str.includes('15') || str.includes('sce15') || str.includes('14_beta') || str.includes('14-beta') || str.includes('14beta')) return 'sce14_beta';
+  if (str === 'ap2' || str.includes('ap2') || str.includes('14_alpha') || str.includes('14-alpha') || str.includes('14alpha')) return 'sce14_alpha';
+  if (str === 'ap1' || str.includes('ap1') || str.includes('14') || str.includes('sce14')) return 'sce14';
   if (str.includes('alpha_1') || str.includes('alpha-1') || str.includes('alpha1')) return 'sce13_alpha_1';
   if (str.includes('beta_1') || str.includes('beta-1') || str.includes('beta1')) return 'sce13_beta_1';
   if (str.includes('alpha')) return 'sce13_alpha';

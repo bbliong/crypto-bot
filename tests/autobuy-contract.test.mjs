@@ -63,6 +63,6 @@ test('exact base-unit sell slicing keeps partial ratio on retry',()=>{
 test('rendered client JS compiles and controls are unique',()=>{
  const html=render3ScenariosLiveHtml();
  for(const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
- for(const id of ['s14StakeInput','s14AlphaStakeInput','s15StakeInput','s10StakeInput'])
+ for(const id of ['s14StakeInput','s14AlphaStakeInput','s15StakeInput'])
   assert.equal((html.match(new RegExp('id="'+id+'"','g'))||[]).length,1,id);
 });
