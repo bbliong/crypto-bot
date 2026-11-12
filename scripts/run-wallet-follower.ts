@@ -6,7 +6,8 @@ import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follow
 import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
 import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.js';
 import { isAp, type ApQuoteTicket } from '../src/ap-paper-accounting.js';
-import { executeApPaperQuote, type ApPaperDependencies } from '../src/ap-paper-execution.js';
+import { executeApPaperQuote, apBrowserSellQuote, type ApPaperDependencies } from '../src/ap-paper-execution.js';
+import { ApExitMonitor, AP_MONITOR_DEFAULTS } from '../src/ap-exit-monitor.js';
 import { SingleDevWalletWatcher } from '../src/dev-wallet-watcher.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
@@ -60,6 +61,8 @@ function formatAmount(n: number): string {
 
 export class WalletFollowerRunner {
   public apPaperDependencies?: ApPaperDependencies;
+  private apExitMonitor?: ApExitMonitor;
+  private apMonitorInterval?: NodeJS.Timeout;
   private cdpEndpoint: string;
   private targetWallet: string;
   private dryRun: boolean;
@@ -211,6 +214,10 @@ export class WalletFollowerRunner {
     setInterval(() => this.refreshSolPrice(), 60000);
     await this.connectAndSetup();
 
+    this.apMonitorInterval=setInterval(()=>{
+      void this.pollApExitQuotes().catch(error=>console.warn('[AP-MONITOR]',String(error)));
+    },AP_MONITOR_DEFAULTS.intervalMs);
+
     // Loop retry cepat (1.5 detik) khusus eksekusi Real Sell jika rute AMM sempat gagal/delay
     this.fastSellRetryInterval = setInterval(() => this.fastRetryPendingRealSells(), 1500);
 
@@ -237,6 +244,7 @@ export class WalletFollowerRunner {
   public async stop(): Promise<void> {
     console.log(`[FOLLOWER] Menghentikan Wallet Follower...`);
     this.isRunning = false;
+    if(this.apMonitorInterval) clearInterval(this.apMonitorInterval);
     if (this.fastSellRetryInterval) {
       clearInterval(this.fastSellRetryInterval);
       this.fastSellRetryInterval = null;
@@ -1512,8 +1520,7 @@ export class WalletFollowerRunner {
     return this.apPaperDependencies || {
       buy:request=>getBrowserBuySwapRoute(this.page!,request.mint,DEFAULT_SWAP_WALLET,request.stakeUsd,
         request.solUsd,15,1,request.pairAddress,0),
-      sell:request=>getBrowserSellSwapRoute(this.page!,request.mint,DEFAULT_SWAP_WALLET,request.baseUnits!,
-        request.decimals!,20,1,request.pairAddress),
+      sell:request=>apBrowserSellQuote(this.page,request),
       sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms)),
       audit:event=>appendFileSync(path.join(this.dataDir,'ap-paper-quotes.jsonl'),JSON.stringify(event)+'\n','utf8'),
     };
@@ -1524,6 +1531,11 @@ export class WalletFollowerRunner {
     if(!isAp(scenarioId) || !details.quoteTicket) return;
     await executeApPaperQuote(this.multiDryRunEngine,details.quoteTicket,details.stakeUsd||0,
       details.reason,this.solPriceUsd,this.apDependencies());
+  }
+
+  public async pollApExitQuotes():Promise<void> {
+    this.apExitMonitor ||= new ApExitMonitor(this.multiDryRunEngine,this.apDependencies());
+    await this.apExitMonitor.tick(this.solPriceUsd);
   }
 
   private enqueueGmgnApiProbe(item: {

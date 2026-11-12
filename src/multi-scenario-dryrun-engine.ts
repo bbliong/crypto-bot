@@ -4679,6 +4679,25 @@ export class MultiScenarioDryRunEngine {
   /**
    * Update unrealized PnL saat harga berubah
    */
+  public evaluateApQuote(s:ScenarioState,p:ScenarioPosition,price:number,_gross:number,_ticket:ApQuoteTicket):void {
+    this.evaluateApPrice(s,p,price);
+  }
+
+  private evaluateApPrice(s:ScenarioState,p:ScenarioPosition,price:number):void {
+    if(!p.ap || p.ap.status.startsWith('BUY') || p.ap.exitReason || p.tokens<=0) return;
+    const idx=s.openPositions.indexOf(p); if(idx<0) return;
+    const gain=(price-p.avgEntryPriceUsd)/p.avgEntryPriceUsd*100, now=Date.now();
+    const beta=s.id==='SCENARIO_14_BETA_HOARDING_DEFENSE';
+    const alpha=s.id==='SCENARIO_14_ALPHA_60S_GRACE';
+    const tracker=(beta?this.s14BetaTrackers:alpha?this.s14AlphaTrackers:this.s14Trackers).get(p.mint);
+    const prefix=beta?'S14_BETA_':alpha?'S14_ALPHA_':'S14_';
+    p.lastPriceUsd=price; p.peakPriceUsd=Math.max(p.peakPriceUsd||0,price);
+    if(beta && tracker && this.checkS14BetaWhaleHoardingTrap(p.mint,tracker.whaleRemainingHolding,price,now,formatWibDate(now))) return;
+    if(gain>=50&&!p.stage1Exited) this.executeScenarioPartial50Exit(s,idx,price,now,formatWibDate(now),`${prefix}STAGE_1_TP_50%`);
+    if(gain>=100&&p.stage1Exited) this.executeScenarioExit(s,idx,price,now,formatWibDate(now),`${prefix}STAGE_2_TP_100%`);
+    if(gain<=-20&&!p.stage1Exited) this.executeScenarioExit(s,idx,price,now,formatWibDate(now),'STOP_LOSS_20%_ENTRY');
+  }
+
   public updatePriceTick(mint: string, priceUsd: number): void {
     if (priceUsd <= 0) return;
     this.lastObservedPrices.set(mint, priceUsd);
@@ -4693,6 +4712,8 @@ export class MultiScenarioDryRunEngine {
         const curVal = pos.tokens * priceUsd;
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
         changed = true;
+
+        if(isAp(scenario.id)) { this.evaluateApPrice(scenario,pos,priceUsd); continue; }
 
         // Khusus Skenario 13 & Skenario 13.5: Multi-Cycle Ping-Pong Scalper (TP +10% & Stop Loss -10%)
         if ((scenario.id === 'SCENARIO_13_PINGPONG_SCALPER' || scenario.id === 'SCENARIO_13_5_DYNAMIC_PINGPONG') && pos.avgEntryPriceUsd > 0) {

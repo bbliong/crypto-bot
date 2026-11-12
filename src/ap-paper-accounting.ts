@@ -15,7 +15,7 @@ export interface ApAccounting {
   status: 'BUY_PENDING' | 'BUY_UNAVAILABLE' | 'OPEN_UNPRICED' | 'OPEN_QUOTED' | 'EXIT_PENDING' | 'EXIT_UNAVAILABLE';
   cashOutlayUsd: number; buyFeeUsd: number; remainingBuyFeeUsd: number;
   grossReturnedUsd: number; netReturnedUsd: number; baseUnits?: string; decimals?: number;
-  pending?: ApQuoteTicket; exitReason?: string; lastError?: string;
+  pending?: ApQuoteTicket; exitReason?: string; exitBaseUnits?: string; lastError?: string;
   attempts: number; lastAttemptAt?: number; lastFreshAt?: number;
 }
 export const isAp = (id: string) => ['SCENARIO_14_BUNDLER_RUNNER', 'SCENARIO_14_ALPHA_60S_GRACE',
@@ -77,7 +77,7 @@ export function beginApExit(s: ScenarioState, p: ScenarioPosition, reason: strin
   if (units<=0n) return;
   const tokens=Number(units)/10**a.decimals!;
   a.pending=apTicket(s,p,'SELL',tokens,units.toString());
-  a.status='EXIT_PENDING'; a.exitReason=reason;
+  a.status='EXIT_PENDING'; a.exitReason=reason; a.exitBaseUnits=units.toString();
   apEvent(s,p,'SELL_INTENT',reason,{tokens,feeUsd:0});
   return a.pending;
 }
@@ -108,6 +108,7 @@ export function settleApSell(s: ScenarioState, p: ScenarioPosition, price: numbe
   p.feesPaidUsd+=AP_PAPER_FEE; p.realizedPnlUsd+=pnl;
   a.baseUnits=(before-sold).toString(); p.tokens=Number(before-sold)/10**a.decimals!;
   a.pending=undefined; a.revision++; a.status='OPEN_UNPRICED'; a.lastFreshAt=Date.now(); a.lastError=undefined;
+  a.exitReason=undefined; a.exitBaseUnits=undefined;
   p.updatedAt=Date.now(); p.lastPriceUsd=price;
   apEvent(s,p,'SELL',`${reason} — SELL_QUOTE_SETTLED`,{tokens:ticket!.tokens,usdReceived:net,feeUsd:AP_PAPER_FEE,pnlUsd:pnl,priceUsd:price});
   if (sold<before) {

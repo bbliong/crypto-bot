@@ -10,6 +10,8 @@ Existing historical records are not recomputed or claimed reconciled. Records wi
 
 ## Offline verification
 
+The independent AP monitor runs on a 1-second runner timer: fair round-robin, at most 2 concurrent tasks, 5-second per-position cooldown and quote TTL, 4-second outer timeout, 3.5-second abortable in-page SELL fetch, one route attempt per cycle. It scans only active AP positions, uses paper base units/decimals/pair, never wallet balances or spot proceeds. No-route/timeout retain exposure and failure metadata; retries use a new request identity. Whole-position observation quotes may trigger original TP/SL rules; actual partial exits still require exact partial quotes. Legacy open records without exact quote provenance remain unreconciled/unpriced rather than guessed into liquidation. No new whale, trailing or SL policy is added.
+
 Strict RED/GREEN logs live in `$TMPDIR/ap-net10-A-*`. Focused accounting and actual runner prototype tests exercise isolated scratch directories and injected quote dependencies, not market quotes or real orders. The no-rebuy regression fixture now explicitly settles paper quotes; it no longer depends on spot phantom fills.
 
 No service restart, live-state/config write, browser, RPC, remote market request, signing, broadcast, or deployment is part of implementation verification. Existing full-project typecheck diagnostics are compared against a pre-change snapshot, not declared clean.

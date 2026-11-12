@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {MultiScenarioDryRunEngine} from '../src/multi-scenario-dryrun-engine.ts';
 import {WalletFollowerRunner} from '../scripts/run-wallet-follower.ts';
+import * as paper from '../src/ap-paper-execution.ts';
 
 function setup(second) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ap-net10-runner-'));
@@ -38,3 +39,14 @@ for(const [name,second] of [['throw',()=>{throw Error('offline throw')}],['malfo
     assert.equal(f.audit.length,2); assert.equal(f.audit[1].selected,false);
   });
 }
+
+test('bounded AP browser SELL uses exact pair/units and AbortSignal, never wallet lookup',async()=>{
+ const old=globalThis.fetch, requests=[];
+ globalThis.fetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({code:0,data:{quote:{inAmount:'123',outAmount:'55'}}})}};
+ try{
+  const page={isClosed:()=>false,evaluate:(fn,args)=>fn(args)};
+  const result=await paper.apBrowserSellQuote(page,{mint:'offline',lane:'AP1',stakeUsd:0,baseUnits:'123',decimals:9,pairAddress:'exact-pair',solUsd:100});
+  assert.equal(result.ok,true);assert.equal(requests.length,1);assert.ok(requests[0].options.signal instanceof AbortSignal);
+  assert.match(requests[0].url,/in_amount=123/);assert.match(requests[0].url,/pair_address=exact-pair/);
+ }finally{globalThis.fetch=old}
+});

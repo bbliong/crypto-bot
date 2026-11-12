@@ -6,6 +6,23 @@ export interface ApPaperDependencies {
   buy:(request:ApPaperRequest)=>Promise<any>; sell:(request:ApPaperRequest)=>Promise<any>;
   audit:(event:any)=>void; sleep:(ms:number)=>Promise<void>;
 }
+/** Bounded in-page route fetch; no token-stat/pair discovery or real token balance. */
+export async function apBrowserSellQuote(page:any, request:ApPaperRequest):Promise<any> {
+  if(!page || page.isClosed()) return {ok:false,error:'PAGE_UNAVAILABLE'};
+  if(!request.pairAddress) return {ok:false,error:'PAIR_UNAVAILABLE'};
+  return page.evaluate(async (r:ApPaperRequest)=>{
+    const params=new URLSearchParams({web_from_source:'token_poll',token_in_chain:'sol',token_out_chain:'sol',
+      from_address:'F2yWctiAKCa3EDCsXUgTQfHd1r3u5VpaWsDymkDGxqt6',token_in_address:r.mint,
+      token_out_address:'So11111111111111111111111111111111111111112',in_amount:r.baseUnits!,
+      pair_address:r.pairAddress!,slippage:'20',is_anti_mev:'false',fee:'0.0002',tip_fee:'0.0001',priority_fee:'0.0001',legacy:'true'});
+    try {
+      const response=await fetch(`/txproxy/v1/get_swap_route?${params}`,{credentials:'include',signal:AbortSignal.timeout(3500)});
+      const body=await response.json();
+      return response.ok&&body?.code===0&&body?.data?.quote ? {ok:true,routeData:body.data}:
+        {ok:false,error:body?.msg||body?.message||'NO_ROUTE'};
+    }catch(e){return {ok:false,error:String(e)}}
+  },request);
+}
 export async function boundedApQuote<T>(work:()=>Promise<T>, timeoutMs=4000):Promise<T> {
   let timer:ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([Promise.resolve().then(work),new Promise<never>((_,reject)=>{
