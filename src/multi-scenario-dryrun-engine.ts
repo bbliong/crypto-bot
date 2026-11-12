@@ -543,6 +543,7 @@ export class MultiScenarioDryRunEngine {
         p.ap.lastError='RESTART_UNRESOLVED — old callbacks invalidated';
       }
     }
+    this.saveState();
   }
 
   private initFreshScenarios(): {
