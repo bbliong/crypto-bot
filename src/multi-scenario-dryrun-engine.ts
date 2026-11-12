@@ -2110,7 +2110,60 @@ export class MultiScenarioDryRunEngine {
    */
   public evaluateS14BundlerEntry(mint: string, bundlerPct: number, currentPrice?: number): void {
     const tracker = this.s14Trackers.get(mint);
+
+    // Pre-check: mint sudah pernah ditradingkan (closedTrades) → emit REJECT_ALREADY_TRADED tanpa perlu tracker aktif
+    if (this.scenarios.s14.closedTrades.some(t => t.mint === mint)) {
+      const now = Date.now();
+      const timeWib = formatWibDate(now);
+      const sym = tracker?.symbol || mint.slice(0, 8);
+      console.log(`[SCENARIO 14 / AP1 SKIP] Token ${sym} (${mint.slice(0, 8)}...) sudah ada di closedTrades. REJECT_ALREADY_TRADED.`);
+      this.scenarios.s14.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s14.id,
+        action: 'SKIP',
+        symbol: sym,
+        mint,
+        priceUsd: currentPrice || 0,
+        availableCashAfter: this.scenarios.s14.availableCash,
+        investedCashAfter: this.scenarios.s14.investedCash,
+        reason: 'REJECT_ALREADY_TRADED (AP1: 1 Mint 1 Buy — dilarang buy ulang mint yang sudah pernah ditradingkan)',
+      });
+      if (this.scenarios.s14.recentEvents.length > 50) this.scenarios.s14.recentEvents.pop();
+      if (tracker) tracker.status = 'TERMINATED';
+      this.saveState();
+      return;
+    }
+
     if (!tracker || tracker.hasEntered || tracker.status !== 'OBSERVING_BUNDLER') return;
+
+    // 0. Strict 1-Mint-1-Buy per AP: Dilarang buy ulang token yang sudah pernah ditradingkan / ada di closedTrades.
+    // Guard ini bersifat AUTHORITATIVE untuk AP1 dan tidak dapat dibypass oleh allowReEntryCycle.
+    // Provenance: Hermes dirty patch (AP1-only) di /home/bbliong/.hermes/cache/scratch/ap-no-rebuy-before.patch;
+    // konsolidasi + diperluas ke AP2/AP3 dalam fix ap-single-buy-no-rebuy.
+    if (this.scenarios.s14.closedTrades.some(t => t.mint === mint) || this.scenarios.s14.openPositions.some(p => p.mint === mint)) {
+      const now = Date.now();
+      const timeWib = formatWibDate(now);
+      console.log(`[SCENARIO 14 / AP1 SKIP] Token ${tracker.symbol} (${mint.slice(0, 8)}...) sudah pernah ditradingkan. 1 Mint 1 Buy berlaku. REJECT_ALREADY_TRADED.`);
+      this.scenarios.s14.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s14.id,
+        action: 'SKIP',
+        symbol: tracker.symbol,
+        mint,
+        priceUsd: currentPrice || 0,
+        availableCashAfter: this.scenarios.s14.availableCash,
+        investedCashAfter: this.scenarios.s14.investedCash,
+        reason: 'REJECT_ALREADY_TRADED (AP1: 1 Mint 1 Buy — dilarang buy ulang mint yang sudah pernah ditradingkan)',
+      });
+      if (this.scenarios.s14.recentEvents.length > 50) this.scenarios.s14.recentEvents.pop();
+      tracker.status = 'TERMINATED';
+      this.saveState();
+      return;
+    }
 
     tracker.bundlerPct = bundlerPct;
 
@@ -2205,7 +2258,59 @@ export class MultiScenarioDryRunEngine {
    */
   public evaluateS14AlphaBundlerEntry(mint: string, bundlerPct: number, currentPrice?: number): void {
     const tracker = this.s14AlphaTrackers.get(mint);
+
+    // Pre-check: mint sudah pernah ditradingkan (closedTrades) → emit REJECT_ALREADY_TRADED tanpa perlu tracker aktif.
+    // Authoritative guard AP2; tidak dapat dibypass oleh allowReEntryCycle.
+    // Provenance: konsolidasi fix ap-single-buy-no-rebuy (AP2 sebelumnya tidak punya guard ini).
+    if (this.scenarios.s14_alpha.closedTrades.some(t => t.mint === mint)) {
+      const now = Date.now();
+      const timeWib = formatWibDate(now);
+      const sym = tracker?.symbol || mint.slice(0, 8);
+      console.log(`[SCENARIO 14-ALPHA / AP2 SKIP] Token ${sym} (${mint.slice(0, 8)}...) sudah ada di closedTrades. REJECT_ALREADY_TRADED.`);
+      this.scenarios.s14_alpha.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s14_alpha.id,
+        action: 'SKIP',
+        symbol: sym,
+        mint,
+        priceUsd: currentPrice || 0,
+        availableCashAfter: this.scenarios.s14_alpha.availableCash,
+        investedCashAfter: this.scenarios.s14_alpha.investedCash,
+        reason: 'REJECT_ALREADY_TRADED (AP2: 1 Mint 1 Buy — dilarang buy ulang mint yang sudah pernah ditradingkan)',
+      });
+      if (this.scenarios.s14_alpha.recentEvents.length > 50) this.scenarios.s14_alpha.recentEvents.pop();
+      if (tracker) tracker.status = 'TERMINATED';
+      this.saveState();
+      return;
+    }
+
     if (!tracker || tracker.hasEntered || tracker.status !== 'OBSERVING_BUNDLER') return;
+
+    // Inner guard: covers openPositions (position still open — no duplicate)
+    if (this.scenarios.s14_alpha.openPositions.some(p => p.mint === mint)) {
+      const now = Date.now();
+      const timeWib = formatWibDate(now);
+      console.log(`[SCENARIO 14-ALPHA / AP2 SKIP] Token ${tracker.symbol} (${mint.slice(0, 8)}...) masih ada di openPositions. REJECT_ALREADY_TRADED.`);
+      this.scenarios.s14_alpha.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s14_alpha.id,
+        action: 'SKIP',
+        symbol: tracker.symbol,
+        mint,
+        priceUsd: currentPrice || 0,
+        availableCashAfter: this.scenarios.s14_alpha.availableCash,
+        investedCashAfter: this.scenarios.s14_alpha.investedCash,
+        reason: 'REJECT_ALREADY_TRADED (AP2: 1 Mint 1 Buy — dilarang buy ulang mint yang sudah pernah ditradingkan)',
+      });
+      if (this.scenarios.s14_alpha.recentEvents.length > 50) this.scenarios.s14_alpha.recentEvents.pop();
+      tracker.status = 'TERMINATED';
+      this.saveState();
+      return;
+    }
 
     tracker.bundlerPct = bundlerPct;
 
@@ -2307,7 +2412,61 @@ export class MultiScenarioDryRunEngine {
    */
   public evaluateS14BetaBundlerEntry(mint: string, bundlerPct: number, currentPrice?: number): void {
     const tracker = this.s14BetaTrackers.get(mint);
+
+    // Pre-check: mint sudah pernah ditradingkan (closedTrades) → emit REJECT_ALREADY_TRADED tanpa perlu tracker aktif.
+    // Authoritative guard AP3; tidak dapat dibypass oleh allowReEntryCycle.
+    // Provenance: konsolidasi fix ap-single-buy-no-rebuy (AP3 sebelumnya tidak punya guard ini).
+    if (this.scenarios.s14_beta.closedTrades.some(t => t.mint === mint)) {
+      const now = Date.now();
+      const timeWib = formatWibDate(now);
+      const sym = tracker?.symbol || mint.slice(0, 8);
+      console.log(`[SCENARIO 14-BETA / AP3 SKIP] Token ${sym} (${mint.slice(0, 8)}...) sudah ada di closedTrades. REJECT_ALREADY_TRADED.`);
+      this.scenarios.s14_beta.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s14_beta.id,
+        action: 'SKIP',
+        symbol: sym,
+        mint,
+        priceUsd: currentPrice || 0,
+        availableCashAfter: this.scenarios.s14_beta.availableCash,
+        investedCashAfter: this.scenarios.s14_beta.investedCash,
+        reason: 'REJECT_ALREADY_TRADED (AP3: 1 Mint 1 Buy — dilarang buy ulang mint yang sudah pernah ditradingkan)',
+      });
+      if (this.scenarios.s14_beta.recentEvents.length > 50) this.scenarios.s14_beta.recentEvents.pop();
+      if (tracker) tracker.status = 'TERMINATED';
+      this.saveState();
+      return;
+    }
+
     if (!tracker || tracker.hasEntered || tracker.status !== 'OBSERVING_BUNDLER') return;
+
+    // 0. Strict 1-Mint-1-Buy per AP3: inner guard for openPositions (position still open — no duplicate).
+    // Guard ini bersifat AUTHORITATIVE untuk AP3 dan tidak dapat dibypass oleh allowReEntryCycle.
+    // Provenance: konsolidasi fix ap-single-buy-no-rebuy (AP3 sebelumnya tidak punya guard ini).
+    if (this.scenarios.s14_beta.openPositions.some(p => p.mint === mint)) {
+      const now = Date.now();
+      const timeWib = formatWibDate(now);
+      console.log(`[SCENARIO 14-BETA / AP3 SKIP] Token ${tracker.symbol} (${mint.slice(0, 8)}...) sudah pernah ditradingkan. 1 Mint 1 Buy berlaku. REJECT_ALREADY_TRADED.`);
+      this.scenarios.s14_beta.recentEvents.unshift({
+        id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: now,
+        timeWib,
+        scenarioId: this.scenarios.s14_beta.id,
+        action: 'SKIP',
+        symbol: tracker.symbol,
+        mint,
+        priceUsd: currentPrice || 0,
+        availableCashAfter: this.scenarios.s14_beta.availableCash,
+        investedCashAfter: this.scenarios.s14_beta.investedCash,
+        reason: 'REJECT_ALREADY_TRADED (AP3: 1 Mint 1 Buy — dilarang buy ulang mint yang sudah pernah ditradingkan)',
+      });
+      if (this.scenarios.s14_beta.recentEvents.length > 50) this.scenarios.s14_beta.recentEvents.pop();
+      tracker.status = 'TERMINATED';
+      this.saveState();
+      return;
+    }
 
     tracker.bundlerPct = bundlerPct;
 
@@ -2858,7 +3017,7 @@ export class MultiScenarioDryRunEngine {
 
     // Jika posisi belum ada:
     if (!pos) {
-      // 0. Strict 1-Cycle-Per-Token Rule: Dilarang keras buy ulang token yang sudah pernah ditradingkan / ada di closedTrades
+      // 0a. Strict 1-Cycle-Per-Token Rule: Dilarang keras buy ulang token yang sudah pernah ditradingkan / ada di closedTrades
       // Kecuali jika diizinkan oleh Multi-Cycle Gen-2 Re-Entry (allowReEntryCycle = true)
       const alreadyTraded = scenario.closedTrades.some(t => t.mint === signal.mint);
       if (alreadyTraded && !rules.allowReEntryCycle) {
@@ -2874,6 +3033,28 @@ export class MultiScenarioDryRunEngine {
           availableCashAfter: scenario.availableCash,
           investedCashAfter: scenario.investedCash,
           reason: 'REJECT_ALREADY_TRADED (Limitasi 1 token hanya boleh buy 1 kali, dilarang buy ulang)',
+        });
+        if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+        return;
+      }
+
+      // 0b. Secondary safety net for AP family (S14 / S14-Alpha / S14-Beta):
+      // Jika allowReEntryCycle=true tapi scenario ini termasuk AP family, closedTrades tetap memblokir.
+      // allowReEntryCycle dipakai untuk bypass ground-zero price cap (bukan untuk rebuy di AP family).
+      // Guard ini memastikan evaluator guard tidak dapat dibypass melalui jalur processScenarioBuy langsung.
+      if (alreadyTraded && rules.allowReEntryCycle && ACTIVE_SCENARIOS.has(scenario.id)) {
+        scenario.recentEvents.unshift({
+          id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: now,
+          timeWib,
+          scenarioId: scenario.id,
+          action: 'SKIP',
+          symbol: signal.symbol,
+          mint: signal.mint,
+          priceUsd: pIn,
+          availableCashAfter: scenario.availableCash,
+          investedCashAfter: scenario.investedCash,
+          reason: 'REJECT_ALREADY_TRADED (AP family: 1 Mint 1 Buy — allowReEntryCycle tidak berlaku untuk rebuy di AP1/AP2/AP3)',
         });
         if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
         return;
@@ -3003,8 +3184,8 @@ export class MultiScenarioDryRunEngine {
       return;
     }
 
-    // Jika posisi sudah ada: periksa apakah aturan melarang akumulasi (Skenario 4: Single Buy 1x Only)
-    if (rules.disallowAccumulation) {
+    // AP1/AP2/AP3 are single-entry lanes even if a caller enables accumulation.
+    if (rules.disallowAccumulation || ACTIVE_SCENARIOS.has(scenario.id)) {
       scenario.recentEvents.unshift({
         id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
         timestamp: now,
@@ -3016,7 +3197,9 @@ export class MultiScenarioDryRunEngine {
         priceUsd: pIn,
         availableCashAfter: scenario.availableCash,
         investedCashAfter: scenario.investedCash,
-        reason: 'REJECT_ACCUMULATION (Skenario 4: Strict 1x Buy Only)',
+        reason: ACTIVE_SCENARIOS.has(scenario.id)
+          ? 'REJECT_ALREADY_TRADED (AP family: posisi mint masih terbuka, dilarang BUY kedua)'
+          : 'REJECT_ACCUMULATION (Strict 1x Buy Only)',
       });
       if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
       return;
