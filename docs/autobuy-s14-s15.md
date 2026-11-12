@@ -40,6 +40,18 @@ Agy berhenti karena kuota provider setelah menghasilkan perubahan parsial. Herme
 - Suite lama `test-autobuy-scenario-selection.mjs` TIDAK dijalankan: ia menulis ke config produksi dan mengaktifkan real mode. Digantikan test HTTP terisolasi di task ini.
 - Real AMM order, signing, broadcast, burn, rent reclaim dan transaksi berbayar: NOT_EXECUTED, sesuai permintaan tetap OFF.
 
+## Batas aktivasi nyata — belum dinyatakan aman untuk ON
+Review read-only yang selesai terlambat mengambil snapshot sebelum patch Hermes terakhir. Readback commit `86a73e9` memastikan partial settlement, ownership berdasarkan scenario+mint, sizing retry, stake S15, final OFF recheck dan larangan burn S14-family sudah terpasang. Temuan itu bukan daftar bug yang semuanya masih aktif.
+
+Namun masih ada gate terpisah sebelum real mode boleh dinyatakan siap:
+- Belum ada reservasi/lock atomik per wallet dan per posisi untuk probe paralel, termasuk Stage 1 dan Stage 2 yang dapat terpanggil berdekatan.
+- Belum ada durable/idempotent pending-exit recovery khusus S14-family bila route/order gagal.
+- Ownership telah diperketat berdasarkan scenario+mint, tetapi belum dibuktikan isolasi wallet/cycle dan bounded allocation pada holding wallet yang bercampur.
+- Jalur bersama masih memakai asumsi token 6 decimals serta fallback readiness wallet; perlu fail-closed wallet/decimal verification sebelum aktivasi nyata.
+- Semantik autoSell pada shared executor belum diselaraskan dengan legacy lane dan belum diberi defense-in-depth pada adapter submission.
+
+Karena itu acceptance task ini adalah pilihan/config/routing terpasang, paper-only berfungsi, UI publik terverifikasi, dan real mode tetap OFF. Ini bukan sertifikasi live trading. Jangan aktifkan ON sebelum gate tersebut diselesaikan dan diverifikasi secara terpisah; jangan menjalankan transaksi nyata untuk sekadar membuktikan UI.
+
 ## Deployment terverifikasi
 - Kedua service existing direstart pada 12 November 2026 09:35:49 WIB; wallet follower dan dashboard active/running, NRestarts=0 saat pemeriksaan.
 - Journal worker menunjukkan CDP dan WebSocket GMGN terhubung; heartbeat muncul setelah restart.
