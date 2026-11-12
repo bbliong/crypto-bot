@@ -210,6 +210,7 @@ export interface S14BundlerRunnerState {
   whaleSellsCount: number;
   consecutiveWhaleSells: number;
   hasEntered: boolean;
+  hasEverDumpedAll?: boolean;
   status: 'OBSERVING_BUNDLER' | 'ACTIVE_RIDING' | 'EXITED_TRAILING_STOP' | 'EXITED_WHALE_DUMP' | 'EXITED_PROFIT' | 'EXITED_WHALE_HOARDING' | 'TERMINATED';
   bundlerPct: number;
   peakPriceUsd: number;
@@ -272,6 +273,7 @@ export class MultiScenarioDryRunEngine {
   private s14Trackers: Map<string, S14BundlerRunnerState> = new Map();
   private s14AlphaTrackers: Map<string, S14BundlerRunnerState> = new Map();
   private s14BetaTrackers: Map<string, S14BundlerRunnerState> = new Map();
+  private whaleDumpedAllMints: Set<string> = new Set();
   private lastObservedPrices: Map<string, number> = new Map();
   private abortedBuyKeys: Set<string> = new Set();
   public onTradeAction?: ScenarioTradeActionCallback;
@@ -1488,8 +1490,10 @@ export class MultiScenarioDryRunEngine {
         };
         this.s14AlphaTrackers.set(signal.mint, s14AlphaTracker);
 
+        const prevBetaTracker = this.s14BetaTrackers.get(signal.mint);
         const s14BetaTracker: S14BundlerRunnerState = {
           ...s14Tracker,
+          hasEverDumpedAll: prevBetaTracker?.hasEverDumpedAll || this.whaleDumpedAllMints.has(signal.mint),
           whaleInitialHolding: signal.remainingHolding || signal.tokenAmount,
         };
         this.s14BetaTrackers.set(signal.mint, s14BetaTracker);
@@ -1692,6 +1696,9 @@ export class MultiScenarioDryRunEngine {
         s14BetaTracker.whaleBuysCount++;
         s14BetaTracker.consecutiveWhaleSells = 0;
         s14BetaTracker.whaleRemainingHolding = signal.remainingHolding;
+        if (this.whaleDumpedAllMints.has(signal.mint)) {
+          s14BetaTracker.hasEverDumpedAll = true;
+        }
         if (signal.remainingHolding > s14BetaTracker.whalePeakHolding) {
           s14BetaTracker.whalePeakHolding = signal.remainingHolding;
         }
@@ -2313,7 +2320,23 @@ export class MultiScenarioDryRunEngine {
     // 2. Syarat Bundler Rate >= 5.0%
     if (bundlerPct < 5.0) return;
 
-    // 3. Syarat Plafon Awal Whale (Whale Hoarding Pre-Check <= 80M / 8.0% supply):
+    // 3a. Syarat Zero Tolerance: Whale TIDAK PERNAH Dump Semua (100% exit / saldo sisa 0) sebelumnya:
+    if (tracker.hasEverDumpedAll || this.whaleDumpedAllMints.has(mint)) {
+      console.log(`[SCENARIO 14-BETA / AP3 SKIP ENTRY] Token ${tracker.symbol}: Whale tercatat pernah dump 100% saldo sebelumnya. Dilarang re-entry. Lewati.`);
+      tracker.status = 'TERMINATED';
+      return;
+    }
+
+    // 3b. Syarat Batas Bawah Minimum Bag Whale (>= 15M tokens / 1.5% supply):
+    // Whale wajib memiliki posisi signifikan agar tidak masuk pada remah-remah sisa dump.
+    const MIN_WHALE_HOLDING = 15_000_000;
+    if (tracker.whaleRemainingHolding < MIN_WHALE_HOLDING) {
+      console.log(`[SCENARIO 14-BETA / AP3 SKIP ENTRY] Token ${tracker.symbol}: Bag Whale (${(tracker.whaleRemainingHolding / 1e6).toFixed(2)}M) di bawah batas minimum ${(MIN_WHALE_HOLDING / 1e6).toFixed(0)}M (1.5% supply). Whale terlalu kecil, lewati.`);
+      tracker.status = 'TERMINATED';
+      return;
+    }
+
+    // 3c. Syarat Plafon Awal Whale (Whale Hoarding Pre-Check <= 80M / 8.0% supply):
     if (tracker.whaleRemainingHolding > 80_000_000) {
       console.log(`[SCENARIO 14-BETA SKIP ENTRY] Token ${tracker.symbol}: Umur ${ageSec}s, Bag Whale (${(tracker.whaleRemainingHolding / 1e6).toFixed(1)}M) melebihi batas plafon 80M (8.0% supply). Trap terdeteksi. Lewati.`);
       tracker.status = 'TERMINATED';
@@ -3461,6 +3484,10 @@ export class MultiScenarioDryRunEngine {
       sellRatio >= 0.85 ||
       targetRemaining < 100;
 
+    if (isFullExit || targetRemaining <= 0 || sellRatio >= 0.95) {
+      this.whaleDumpedAllMints.add(signal.mint);
+    }
+
     if (isFullExit) sellRatio = 1.0;
     const currentSellRatioPct = Number((sellRatio * 100).toFixed(1));
     const targetUsd = signal.usdAmount || (targetSold * pOut);
@@ -4382,6 +4409,10 @@ export class MultiScenarioDryRunEngine {
       const ageSec = (now - s14BetaTracker.whaleFirstBuyAt) / 1000;
       s14BetaTracker.whaleSellsCount++;
       s14BetaTracker.whaleRemainingHolding = signal.remainingHolding;
+      if (isFullExit || signal.remainingHolding <= 0 || (s14BetaTracker.whalePeakHolding > 0 && signal.remainingHolding < s14BetaTracker.whalePeakHolding * 0.05)) {
+        s14BetaTracker.hasEverDumpedAll = true;
+        this.whaleDumpedAllMints.add(signal.mint);
+      }
 
       const isSignificantSell = (signal.solAmount && signal.solAmount >= 3.0) || targetUsd >= 250 || (signal.remainingHolding < s14BetaTracker.whalePeakHolding * 0.50);
       if (isSignificantSell) {

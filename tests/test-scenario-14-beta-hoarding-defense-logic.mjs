@@ -31,7 +31,7 @@ console.log('1. Memeriksa Inisialisasi Skenario 14-Beta:');
 assert(engine.scenarios.s14_beta !== undefined, 'Skenario 14-Beta terdaftar di engine');
 assert(engine.scenarios.s14_beta.availableCash === 5.0, 'Kas Awal S14-Beta $5.00');
 assert(engine.scenarios.s14_beta.totalTrades === 0, 'Total Trades awal 0');
-assert(engine.scenarios.s14_beta.name.includes('Skenario 14-Beta'), 'Nama skenario valid mengandung Skenario 14-Beta');
+assert(engine.scenarios.s14_beta.name.includes('Skenario 14-Beta') || engine.scenarios.s14_beta.name.includes('AP3'), 'Nama skenario valid mengandung Skenario 14-Beta / AP3');
 assert(engine.scenarios.s14_beta.description.includes('Hoarding'), 'Deskripsi mengandung Whale Hoarding Trap Defense');
 assert(engine.scenarios.s14_beta.description.includes('60 detik'), 'Deskripsi mengandung Grace Period 60 detik');
 
@@ -315,6 +315,109 @@ engine.updatePriceTick(slMint, 0.000039);
 assert(engine.scenarios.s14_beta.openPositions.length === 0, 'S14-Beta langsung CUT LOSS saat harga drop <= -20%!');
 const slTrade = engine.scenarios.s14_beta.closedTrades.find(t => t.mint === slMint);
 assert(slTrade && slTrade.exitReason.includes('STOP_LOSS_20%_ENTRY'), 'Alasan exit adalah Stop Loss -20% Entry');
+
+// ==========================================================
+// TEST 7: Batas Bawah Bag Whale (Reject jika Whale Bag < 15M / 1.5% Supply)
+// ==========================================================
+console.log('\n7. Simulasi Batas Bawah Bag Whale (< 15M tokens / 1.5% Supply):');
+const lowWhaleMint = 'LowWhaleBagMint11111111111111111111111111';
+const lowWhaleStart = Date.now() - 70000;
+
+engine.handleTargetBuy({
+  action: 'buy',
+  mint: lowWhaleMint,
+  symbol: 'LOWWHALE',
+  tokenName: 'Low Whale Bag',
+  tokenAmount: 2000000,
+  remainingHolding: 2000000, // Cuma 2M tokens (0.2% supply)
+  solAmount: 1.5,
+  usdAmount: 130,
+  priceUsd: 0.000050,
+  txHash: 'low_whale_genesis_tx',
+  timestamp: Math.floor(lowWhaleStart / 1000),
+  isOpenOrClose: true,
+  isFirstBuy: true,
+  pairAddress: 'LowWhalePoolAddress1111111111111111111111111',
+  ad: 'WhaleWallet3azG8rmt1111111111111111111111111'
+}, true);
+
+const lowTracker = engine['s14BetaTrackers'].get(lowWhaleMint);
+lowTracker.whaleFirstBuyAt = lowWhaleStart;
+
+engine.evaluateS14BetaBundlerEntry(lowWhaleMint, 6.00, 0.000050);
+assert(engine.scenarios.s14_beta.openPositions.length === 0, 'S14-Beta / AP3 MENOLAK MASUK karena Bag Whale (2M) < 15M minimum (1.5% supply)!');
+assert(lowTracker.status === 'TERMINATED', 'Status tracker low-whale adalah TERMINATED');
+
+// ==========================================================
+// TEST 8: Zero Tolerance Dump 100% (Tolak Re-Entry jika Whale Pernah Dump Habis)
+// ==========================================================
+console.log('\n8. Simulasi Zero Tolerance Dump 100% (Kasus Koin X Siklus 2):');
+const dumpAllMint = 'DumpAllWhaleMint11111111111111111111111111';
+const dumpStartTime = Date.now() - 80000;
+
+// Whale masuk awal 50M tokens
+engine.handleTargetBuy({
+  action: 'buy',
+  mint: dumpAllMint,
+  symbol: 'DUMPALL',
+  tokenName: 'Dump All Coin',
+  tokenAmount: 50000000,
+  remainingHolding: 50000000,
+  solAmount: 25,
+  usdAmount: 2200,
+  priceUsd: 0.000040,
+  txHash: 'dump_genesis_tx',
+  timestamp: Math.floor(dumpStartTime / 1000),
+  isOpenOrClose: true,
+  isFirstBuy: true,
+  pairAddress: 'DumpAllPoolAddress11111111111111111111111111',
+  ad: 'WhaleWallet3azG8rmt1111111111111111111111111'
+}, true);
+
+// Whale dump 100% (menjual habis sampai sisa 0)
+engine.handleTargetSell({
+  action: 'sell',
+  mint: dumpAllMint,
+  symbol: 'DUMPALL',
+  tokenName: 'Dump All Coin',
+  tokenAmount: 50000000,
+  remainingHolding: 0, // Dump 100% habis
+  solAmount: 26,
+  usdAmount: 2300,
+  priceUsd: 0.000042,
+  txHash: 'dump_all_tx',
+  timestamp: Math.floor((dumpStartTime + 30000) / 1000),
+  isOpenOrClose: true,
+  isFirstBuy: false,
+  pairAddress: 'DumpAllPoolAddress11111111111111111111111111',
+  ad: 'WhaleWallet3azG8rmt1111111111111111111111111'
+});
+
+// Whale iseng beli lagi 20M tokens
+engine.handleTargetBuy({
+  action: 'buy',
+  mint: dumpAllMint,
+  symbol: 'DUMPALL',
+  tokenName: 'Dump All Coin',
+  tokenAmount: 20000000,
+  remainingHolding: 20000000,
+  solAmount: 10,
+  usdAmount: 900,
+  priceUsd: 0.000045,
+  txHash: 'dump_reentry_tx',
+  timestamp: Math.floor((dumpStartTime + 65000) / 1000),
+  isOpenOrClose: false,
+  isFirstBuy: false,
+  pairAddress: 'DumpAllPoolAddress11111111111111111111111111',
+  ad: 'WhaleWallet3azG8rmt1111111111111111111111111'
+}, false);
+
+const dumpTracker = engine['s14BetaTrackers'].get(dumpAllMint);
+dumpTracker.whaleFirstBuyAt = dumpStartTime;
+
+engine.evaluateS14BetaBundlerEntry(dumpAllMint, 7.00, 0.000045);
+assert(engine.scenarios.s14_beta.openPositions.length === 0, 'S14-Beta / AP3 MENOLAK RE-ENTRY karena Whale pernah dump 100% sebelumnya!');
+assert(dumpTracker.status === 'TERMINATED', 'Status tracker dump-all adalah TERMINATED');
 
 console.log(`\n=========================================================`);
 console.log(`HASIL AKHIR UNIT TEST S14-BETA: ${testsPassed}/${totalTests} TESTS PASSED!`);
