@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ScenarioPosition, ScenarioState, ScenarioLogEvent } from './multi-scenario-dryrun-engine.js';
 import type { WalletTradeSignal } from './wallet-follower-lane.js';
+import {resolveApLane} from './ap-lanes.js';
 
 // PAPER estimate only: not an assertion about exchange/on-chain fee parity.
 export const AP_PAPER_FEE = 0.025;
@@ -15,11 +16,10 @@ export interface ApAccounting {
   status: 'BUY_PENDING' | 'BUY_UNAVAILABLE' | 'OPEN_UNPRICED' | 'OPEN_QUOTED' | 'EXIT_PENDING' | 'EXIT_UNAVAILABLE';
   cashOutlayUsd: number; buyFeeUsd: number; remainingBuyFeeUsd: number;
   grossReturnedUsd: number; netReturnedUsd: number; baseUnits?: string; decimals?: number;
-  pending?: ApQuoteTicket; exitReason?: string; exitBaseUnits?: string; lastError?: string;
+  pending?: ApQuoteTicket; exitReason?: string; exitBaseUnits?: string; deferredSafetyExitReason?: string; lastError?: string;
   attempts: number; lastAttemptAt?: number; lastFreshAt?: number;
 }
-export const isAp = (id: string) => ['SCENARIO_14_BUNDLER_RUNNER', 'SCENARIO_14_ALPHA_60S_GRACE',
-  'SCENARIO_14_BETA_HOARDING_DEFENSE'].includes(id);
+export const isAp = (id: string) => !!resolveApLane(id);
 export function apEvent(s: ScenarioState, p: ScenarioPosition, action: ScenarioLogEvent['action'], reason: string,
   extra: Partial<ScenarioLogEvent> = {}, now = Date.now()): void {
   s.recentEvents.unshift({id:randomUUID(), timestamp:now, timeWib:new Date(now).toISOString(), scenarioId:s.id,
@@ -64,6 +64,10 @@ export function settleApBuy(s: ScenarioState, p: ScenarioPosition, price: number
   p.feesPaidUsd=AP_PAPER_FEE; s.totalFeesPaid+=AP_PAPER_FEE;
   p.ap!.baseUnits=ticket.baseUnits; p.ap!.decimals=ticket.decimals;
   p.ap!.pending=undefined; p.ap!.revision++; p.ap!.status='OPEN_UNPRICED';
+  if(p.ap!.deferredSafetyExitReason) {
+    p.ap!.status='EXIT_UNAVAILABLE';p.ap!.exitReason=p.ap!.deferredSafetyExitReason;p.ap!.exitBaseUnits=ticket.baseUnits;
+    p.ap!.deferredSafetyExitReason=undefined;
+  }
   s.apBoughtMints ||= []; if (!s.apBoughtMints.includes(p.mint)) s.apBoughtMints.push(p.mint);
   apEvent(s,p,'BUY','BUY_QUOTE_SETTLED (probe 2)',{stakeUsd:stake,tokens,feeUsd:AP_PAPER_FEE,priceUsd:p.avgEntryPriceUsd});
   return true;

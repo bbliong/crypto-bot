@@ -31,7 +31,8 @@ export async function boundedApQuote<T>(work:()=>Promise<T>, timeoutMs=4000):Pro
 }
 export function validApRoute(route:any, req:ApPaperRequest, side:'BUY'|'SELL'):boolean {
   const q=route?.routeData?.quote;
-  if (!route?.ok || !q || !/^\d+$/.test(q.outAmount) || BigInt(q.outAmount)<=0n ||
+  if (!route?.ok || !q || typeof q.outAmount!=='string' || typeof q.inAmount!=='string' ||
+    !Number.isFinite(Number(q.outAmount)) || !Number.isFinite(Number(q.inAmount)) || !/^\d+$/.test(q.outAmount) || BigInt(q.outAmount)<=0n ||
     !/^\d+$/.test(q.inAmount) || BigInt(q.inAmount)<=0n || !Number.isFinite(req.solUsd) || req.solUsd<=0) return false;
   if(side==='SELL') return q.inAmount===req.baseUnits && (q.inDecimals==null || q.inDecimals===req.decimals) &&
     (q.outDecimals==null || q.outDecimals===9);

@@ -23,6 +23,8 @@
 // Canonical engine ID families
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { isNet10 } from './ap-lanes.js';
+
 const S14_ENGINES = new Set([
   'SCENARIO_14_BUNDLER_RUNNER',
 ]);
@@ -218,6 +220,8 @@ export function isScenarioAllowedForRealOrder(
   scenarioId: string,
   config: { enabled?: boolean; autobuyScenario?: string }
 ): boolean {
+  // Immutable paper deny BEFORE enabled/ALL/BOTH and every permissive matcher.
+  if (isNet10(scenarioId)) return false;
   if (config.enabled !== true) return false;
 
   const targetSc = String(config.autobuyScenario || 'OFF').toUpperCase().trim();
@@ -239,6 +243,7 @@ export function isScenarioAllowedForRealOrder(
  * Used for config validation and normalization.
  */
 export function canonicalizeAutobuyScenario(raw: string): string | null {
+  if (isNet10(raw)) return null;
   const sc = String(raw).toUpperCase().trim();
 
   if (['OFF', 'DRY_RUN', 'BOTH', 'ALL'].includes(sc)) return sc;

@@ -32,6 +32,7 @@ test('actual runner paper path quotes reserved 4.975 twice, selects and audits p
   assert.equal(f.audit[1].quote.outAmount,'248750000000');
 });
 for(const [name,second] of [['throw',()=>{throw Error('offline throw')}],['malformed',()=>({ok:true,routeData:{}})],
+  ['numeric amount loses raw precision',()=>({ok:true,routeData:{quote:{inAmount:'49750000',outAmount:248750000000,outDecimals:6}}})],
   ['no route',()=>({ok:false,error:'NO_ROUTE'})]]) {
   test(`probe 2 ${name} fails closed and refunds reservation`,async()=>{
     const f=setup(second); await f.r.executeApPaperAction(...f.action);

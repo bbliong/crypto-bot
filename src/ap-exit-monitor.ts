@@ -22,7 +22,6 @@ export class ApExitMonitor {
       const key=`${s.id}:${p.ap!.positionId}`;
       const a=p.ap!,now=this.options.now();
       if(this.active.has(key) || (a.lastAttemptAt!==undefined&&now-a.lastAttemptAt<this.options.cooldownMs)) continue;
-      if(a.status==='EXIT_PENDING'&&a.pending&&now-a.pending.requestedAt<this.options.ttlMs) continue;
       this.active.add(key);
       work.push(this.quote(s,p,solUsd).finally(()=>this.active.delete(key)));
     }

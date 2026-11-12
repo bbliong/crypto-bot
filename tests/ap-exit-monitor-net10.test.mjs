@@ -63,3 +63,17 @@ test('actual runner polling uses injected monitor without constructor live data 
  await r.pollApExitQuotes();
  assert.equal(seen.length,2);assert.equal(e.scenarios.s14.openPositions[0].ap.status,'OPEN_QUOTED');
 });
+
+test('runner simultaneous whale exit callbacks share monitor concurrency bound, not one unbounded probe per lane',async()=>{
+ const e=setup(),r=Object.create(WalletFollowerRunner.prototype),waiters=[];let active=0,peak=0;
+ r.multiDryRunEngine=e;r.solPriceUsd=100;
+ r.apPaperDependencies=dependencies(req=>new Promise(resolve=>{
+  active++;peak=Math.max(peak,active);waiters.push(()=>{active--;resolve(route(req))});
+ }));
+ r.apExitMonitor=new monitoring.ApExitMonitor(e,r.apPaperDependencies,{maxConcurrency:2,cooldownMs:0});
+ const pending=[];e.onTradeAction=(...args)=>{pending.push(r.executeApPaperAction(...args))};
+ for(const s of [e.scenarios.s14,e.scenarios.s14_alpha,e.scenarios.s14_beta])e.executeScenarioExit(s,0,.00001,Date.now(),'fixture','WHALE_GIANT_SELL');
+ await new Promise(resolve=>setImmediate(resolve));
+ const observed=peak;for(const resolve of waiters)resolve();await Promise.all(pending);
+ assert.ok(observed<=2,`concurrent SELL probes ${observed} exceeds 2`);
+});

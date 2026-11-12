@@ -1529,6 +1529,7 @@ export class WalletFollowerRunner {
   public async executeApPaperAction(action:'BUY'|'SELL',scenarioId:string,signal:WalletTradeSignal,
     details:{stakeUsd?:number;reason:string;quoteTicket?:ApQuoteTicket}):Promise<void> {
     if(!isAp(scenarioId) || !details.quoteTicket) return;
+    if(action==='SELL') { await this.pollApExitQuotes();return; }
     await executeApPaperQuote(this.multiDryRunEngine,details.quoteTicket,details.stakeUsd||0,
       details.reason,this.solPriceUsd,this.apDependencies());
   }

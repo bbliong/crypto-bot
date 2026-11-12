@@ -30,6 +30,7 @@ test('AP BUY reserves affordable principal, but has no spot fill or SELL before 
   assert.equal(p.ap.status, 'BUY_PENDING');
   assert.equal(s.availableCash, 0);
   assert.equal(s.totalFeesPaid, 0, 'fee is reserved, not yet paid');
+  assert.equal(s.totalPortfolioValue,5,'pending reservation is not a paid fee or liquidatable spot holding');
   assert.equal(calls[0][3].stakeUsd, 4.975);
   assert.equal(s.recentEvents[0].action, 'BUY_INTENT');
   engine.updatePriceTick(signal.mint, 0.01);
