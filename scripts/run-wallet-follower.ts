@@ -1,10 +1,12 @@
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright';
 import path from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
 import { SmartDipFollowerLane } from '../src/smart-dip-follower-lane.js';
 import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.js';
+import { isAp, type ApQuoteTicket } from '../src/ap-paper-accounting.js';
+import { executeApPaperQuote, type ApPaperDependencies } from '../src/ap-paper-execution.js';
 import { SingleDevWalletWatcher } from '../src/dev-wallet-watcher.js';
 import { getBrowserBuySwapRoute, getBrowserSellSwapRoute, DEFAULT_SWAP_WALLET } from '../src/browser-swap-route.js';
 import { getSolanaRpcUrl, getSolanaRpcWsUrl } from './solana-rpc-config.mjs';
@@ -57,6 +59,7 @@ function formatAmount(n: number): string {
 }
 
 export class WalletFollowerRunner {
+  public apPaperDependencies?: ApPaperDependencies;
   private cdpEndpoint: string;
   private targetWallet: string;
   private dryRun: boolean;
@@ -168,6 +171,15 @@ export class WalletFollowerRunner {
     // Enqueue swap route probe untuk masing-masing skenario (S4 & S6):
     // Rute swap DEX/AMM selalu dicek. Order nyata batch_order & rent reclaim dikontrol oleh config autobuyScenario.
     this.multiDryRunEngine.onTradeAction = (action, scenarioId, signal, details) => {
+      if (isAp(scenarioId) && details.quoteTicket) {
+        // Paper quantities never consult the real wallet; real control execution stays separate.
+        const paper=this.executeApPaperAction(action,scenarioId,signal,details);
+        if (this.isScenarioAllowedForRealOrder(scenarioId,readFollowerLiveConfig(this.dataDir))) {
+          void paper.then(()=>this.enqueueGmgnApiProbe({side:action,scenarioId,signal,
+            stakeUsd:details.stakeUsd||5,tokens:details.tokens,priceUsd:details.priceUsd,reason:details.reason}));
+        }
+        return paper;
+      }
       this.enqueueGmgnApiProbe({
         side: action,
         scenarioId,
@@ -1496,6 +1508,24 @@ export class WalletFollowerRunner {
    * Antrekan hit API GMGN (Swap Route & Submit Order Probe) per skenario.
    * Diproses secara sekuensial (FIFO queue) agar tidak membanjiri browser page.
    */
+  private apDependencies(): ApPaperDependencies {
+    return this.apPaperDependencies || {
+      buy:request=>getBrowserBuySwapRoute(this.page!,request.mint,DEFAULT_SWAP_WALLET,request.stakeUsd,
+        request.solUsd,15,1,request.pairAddress,0),
+      sell:request=>getBrowserSellSwapRoute(this.page!,request.mint,DEFAULT_SWAP_WALLET,request.baseUnits!,
+        request.decimals!,20,1,request.pairAddress),
+      sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+      audit:event=>appendFileSync(path.join(this.dataDir,'ap-paper-quotes.jsonl'),JSON.stringify(event)+'\n','utf8'),
+    };
+  }
+
+  public async executeApPaperAction(action:'BUY'|'SELL',scenarioId:string,signal:WalletTradeSignal,
+    details:{stakeUsd?:number;reason:string;quoteTicket?:ApQuoteTicket}):Promise<void> {
+    if(!isAp(scenarioId) || !details.quoteTicket) return;
+    await executeApPaperQuote(this.multiDryRunEngine,details.quoteTicket,details.stakeUsd||0,
+      details.reason,this.solPriceUsd,this.apDependencies());
+  }
+
   private enqueueGmgnApiProbe(item: {
     side: 'BUY' | 'SELL';
     scenarioId: string;

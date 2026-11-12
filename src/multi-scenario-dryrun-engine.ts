@@ -5,11 +5,13 @@ import { WalletTradeSignal } from './wallet-follower-lane.js';
 import { readFollowerLiveConfig } from './follower-live-store.js';
 import { getScenarioStakeUsd } from './autobuy-scenario-guard.js';
 import { getSolanaRpcUrl } from '../scripts/solana-rpc-config.mjs';
+import { isAp, reserveApBuy, settleApBuy, beginApExit, settleApSell, failApExit, abortApBuy, type ApAccounting, type ApQuoteTicket } from './ap-paper-accounting.js';
 
 // Rata-rata fee riil per swap: on-chain gas ($0.0105) + priority/tip ($0.0100) + DEX swap fee ($0.0045) = $0.025 USD
 export const REAL_SWAP_FEE_USD = 0.025;
 
 export interface ScenarioPosition {
+  ap?: ApAccounting;
   mint: string;
   symbol: string;
   tokenName: string;
@@ -41,6 +43,9 @@ export interface ScenarioPosition {
 }
 
 export interface ScenarioTradeRecord {
+  accountingVersion?: number;
+  provenance?: string;
+  cashOutlayUsd?: number;
   mint: string;
   symbol: string;
   tokenName: string;
@@ -62,7 +67,7 @@ export interface ScenarioLogEvent {
   timestamp: number;
   timeWib: string;
   scenarioId: string;
-  action: 'BUY' | 'SELL' | 'SKIP';
+  action: 'BUY' | 'SELL' | 'SKIP' | 'BUY_INTENT' | 'SELL_INTENT';
   symbol: string;
   mint: string;
   stakeUsd?: number;
@@ -222,10 +227,11 @@ export type ScenarioTradeActionCallback = (
   action: 'BUY' | 'SELL',
   scenarioId: string,
   signal: WalletTradeSignal,
-  details: { stakeUsd?: number; tokens?: number; priceUsd: number; reason: string; isReEntryCycle?: boolean; cycleIndex?: number }
+  details: { stakeUsd?: number; tokens?: number; priceUsd: number; reason: string; isReEntryCycle?: boolean; cycleIndex?: number; quoteTicket?: ApQuoteTicket }
 ) => void | Promise<void>;
 
 export interface ScenarioState {
+  apBoughtMints?: string[];
   id: string;
   name: string;
   description: string;
@@ -508,6 +514,15 @@ export class MultiScenarioDryRunEngine {
     this.filePath = path.join(this.dataDir, 'dryrun-3scenarios-live.json');
 
     this.scenarios = this.loadState();
+    for (const s of Object.values(this.scenarios).filter(s=>isAp(s.id))) {
+      s.apBoughtMints = [...new Set([...(s.apBoughtMints||[]),...s.closedTrades.map(t=>t.mint),
+        ...s.openPositions.filter(p=>!p.ap || !p.ap.status.startsWith('BUY')).map(p=>p.mint)])];
+      for (const p of s.openPositions) if (p.ap?.pending) {
+        p.ap.revision++; p.ap.pending=undefined;
+        p.ap.status=p.ap.status.startsWith('BUY')?'BUY_UNAVAILABLE':'EXIT_UNAVAILABLE';
+        p.ap.lastError='RESTART_UNRESOLVED — old callbacks invalidated';
+      }
+    }
   }
 
   private initFreshScenarios(): {
@@ -945,7 +960,7 @@ export class MultiScenarioDryRunEngine {
   public saveState(): void {
     try {
       for (const s of Object.values(this.scenarios)) {
-        s.investedCash = Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
+        s.investedCash = isAp(s.id) ? s.openPositions.reduce((acc,p)=>acc+p.costBasisUsd,0) : Number(s.openPositions.reduce((acc, p) => acc + p.costBasisUsd, 0).toFixed(2));
         s.unrealizedPnl = Number(s.openPositions.reduce((acc, p) => acc + p.unrealizedPnlUsd, 0).toFixed(2));
         s.totalPortfolioValue = Number((s.availableCash + s.investedCash + s.unrealizedPnl).toFixed(2));
         s.winRate = s.totalTrades > 0 ? Number(((s.wins / s.totalTrades) * 100).toFixed(1)) : 0.0;
@@ -3019,7 +3034,7 @@ export class MultiScenarioDryRunEngine {
     if (!pos) {
       // 0a. Strict 1-Cycle-Per-Token Rule: Dilarang keras buy ulang token yang sudah pernah ditradingkan / ada di closedTrades
       // Kecuali jika diizinkan oleh Multi-Cycle Gen-2 Re-Entry (allowReEntryCycle = true)
-      const alreadyTraded = scenario.closedTrades.some(t => t.mint === signal.mint);
+      const alreadyTraded = scenario.closedTrades.some(t => t.mint === signal.mint) || !!scenario.apBoughtMints?.includes(signal.mint);
       if (alreadyTraded && !rules.allowReEntryCycle) {
         scenario.recentEvents.unshift({
           id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -3122,6 +3137,17 @@ export class MultiScenarioDryRunEngine {
       const maxAffordableStake = Math.max(0, scenario.availableCash - REAL_SWAP_FEE_USD);
       const actualStake = Math.min(maxAffordableStake, Math.min(rules.maxTokenExposure, desiredStake));
       if (actualStake < 0.05) return;
+
+      if (isAp(scenario.id)) {
+        const pending = reserveApBuy(scenario, signal, actualStake, now);
+        this.saveState();
+        try {
+          Promise.resolve(this.onTradeAction?.('BUY', scenario.id, signal, {
+            stakeUsd:actualStake,tokens:0,priceUsd:pIn,reason:'AP_BUY_QUOTE',quoteTicket:pending.ap!.pending,
+          })).catch(() => {});
+        } catch {}
+        return;
+      }
 
       const tokensBought = actualStake / pIn;
       const totalCashDeducted = Number((actualStake + REAL_SWAP_FEE_USD).toFixed(2));
@@ -3278,6 +3304,19 @@ export class MultiScenarioDryRunEngine {
    * Eksekusi Full Exit Bersih untuk suatu posisi di skenario:
    * Menghitung PnL, mencatat closed trade, recent event, dan memanggil callback onTradeAction SELL.
    */
+  private requestApExit(s: ScenarioState, p: ScenarioPosition, reason: string, partial: boolean): void {
+    const ticket=beginApExit(s,p,reason,partial);
+    if (!ticket) return;
+    this.saveState();
+    const signal: WalletTradeSignal={action:'sell',mint:p.mint,symbol:p.symbol,tokenName:p.tokenName,
+      tokenAmount:ticket.tokens,remainingHolding:0,solAmount:0,usdAmount:0,priceUsd:p.lastPriceUsd,
+      txHash:'',timestamp:Math.floor(Date.now()/1000),isOpenOrClose:!partial,isFirstBuy:false,
+      pairAddress:p.pairAddress,exchange:p.exchange};
+    try { Promise.resolve(this.onTradeAction?.('SELL',s.id,signal,{tokens:ticket.tokens,priceUsd:p.lastPriceUsd,
+      reason,quoteTicket:ticket})).catch(error=>this.recordFailedSellExecution(s.id,p.mint,String(error),ticket));
+    } catch(error) { this.recordFailedSellExecution(s.id,p.mint,String(error),ticket); }
+  }
+
   public executeScenarioExit(
     scenario: ScenarioState,
     posIdx: number,
@@ -3289,6 +3328,7 @@ export class MultiScenarioDryRunEngine {
     const pos = scenario.openPositions[posIdx];
     if (!pos) return;
 
+    if (isAp(scenario.id)) { this.requestApExit(scenario,pos,reason,false); return; }
     const pOut = exitPriceUsd > 0 ? exitPriceUsd : pos.avgEntryPriceUsd;
     const tokensToSell = pos.tokens;
     const grossReceived = tokensToSell * pOut;
@@ -3435,6 +3475,8 @@ export class MultiScenarioDryRunEngine {
   ): void {
     const pos = scenario.openPositions[posIdx];
     if (!pos || pos.tokens <= 0 || pos.stage1Exited) return;
+
+    if (isAp(scenario.id)) { this.requestApExit(scenario,pos,reason,true); return; }
 
     const pOut = exitPriceUsd > 0 ? exitPriceUsd : pos.avgEntryPriceUsd;
     const tokensToSell = Number((pos.tokens * 0.5).toFixed(6));
@@ -4646,6 +4688,7 @@ export class MultiScenarioDryRunEngine {
       const posIdx = scenario.openPositions.findIndex(p => p.mint === mint);
       if (posIdx !== -1) {
         const pos = scenario.openPositions[posIdx];
+        if (isAp(scenario.id) && (!pos.ap || pos.ap.status.startsWith('BUY'))) continue;
         pos.lastPriceUsd = priceUsd;
         const curVal = pos.tokens * priceUsd;
         pos.unrealizedPnlUsd = Number((curVal - pos.costBasisUsd).toFixed(2));
@@ -5231,6 +5274,10 @@ export class MultiScenarioDryRunEngine {
       for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
         const pos = scenario.openPositions[i];
         if (now - pos.openedAt >= maxAgeMs) {
+          if (isAp(scenario.id)) {
+            this.executeScenarioExit(scenario,i,pos.lastPriceUsd,now,formatWibDate(now),'STAGNANT_TIMEOUT_EXIT');
+            continue;
+          }
           const timeWib = formatWibDate(now);
           scenario.openPositions.splice(i, 1);
           scenario.losses += 1;
@@ -5885,13 +5932,18 @@ export class MultiScenarioDryRunEngine {
     mint: string,
     realPriceUsd: number,
     tokensBought: number,
-    stakeUsd: number
+    stakeUsd: number,
+    quoteTicket?: ApQuoteTicket
   ): void {
     if (realPriceUsd <= 0 || tokensBought <= 0) return;
     const targetSc = this.getScenarioById(scenarioId);
     const pos = targetSc.openPositions.find(p => p.mint === mint);
     if (!pos) return;
 
+    if (isAp(targetSc.id)) {
+      if (settleApBuy(targetSc, pos, realPriceUsd, tokensBought, stakeUsd, quoteTicket)) this.saveState();
+      return;
+    }
     const oldPrice = pos.avgEntryPriceUsd;
     pos.avgEntryPriceUsd = realPriceUsd;
     pos.lastPriceUsd = realPriceUsd;
@@ -5923,9 +5975,16 @@ export class MultiScenarioDryRunEngine {
     mint: string,
     realExitPriceUsd: number,
     realUsdReturned: number,
-    reason: string
+    reason: string,
+    quoteTicket?: ApQuoteTicket
   ): void {
     if (realUsdReturned < 0) return;
+    const apScenario=this.getScenarioById(scenarioId);
+    if (isAp(apScenario.id)) {
+      const p=apScenario.openPositions.find(p=>p.mint===mint);
+      if (p && settleApSell(apScenario,p,realExitPriceUsd,realUsdReturned,reason,quoteTicket)) this.saveState();
+      return;
+    }
     if (this.abortedBuyKeys.has(`${scenarioId}_${mint}`)) {
       console.warn(`[DRYRUN-ENGINE SYNC] ⛔ Mengabaikan sync rute jual untuk ${mint} [${scenarioId}] karena pembelian sebelumnya telah dibatalkan (ABORTED)!`);
       return;
@@ -5987,7 +6046,13 @@ export class MultiScenarioDryRunEngine {
    * Batalkan Buy di Scenario jika rute swap AMM gagal (little pool hit / no route):
    * Mencegah posisi hantu di dry-run yang menghasilkan profit palsu!
    */
-  public abortScenarioBuy(scenarioId: string, mint: string, reason: string): void {
+  public abortScenarioBuy(scenarioId: string, mint: string, reason: string, quoteTicket?: ApQuoteTicket): void {
+    const apScenario=this.getScenarioById(scenarioId);
+    if (isAp(apScenario.id)) {
+      const p=apScenario.openPositions.find(p=>p.mint===mint);
+      if (p && abortApBuy(apScenario,p,reason,quoteTicket)) this.saveState();
+      return;
+    }
     this.abortedBuyKeys.add(`${scenarioId}_${mint}`);
     const targetSc = this.getScenarioById(scenarioId);
     const idx = targetSc.openPositions.findIndex(p => p.mint === mint);
@@ -6059,8 +6124,13 @@ export class MultiScenarioDryRunEngine {
    * Catat Kegagalan Jual Riil di Scenario (little pool hit / unsellable):
    * Mengoreksi trade agar tercatat sebagai rugi / proceeds = 0 jika token tidak bisa dijual!
    */
-  public recordFailedSellExecution(scenarioId: string, mint: string, reason: string): void {
+  public recordFailedSellExecution(scenarioId: string, mint: string, reason: string, quoteTicket?: ApQuoteTicket): void {
     const targetSc = this.getScenarioById(scenarioId);
+    if (isAp(targetSc.id)) {
+      const p=targetSc.openPositions.find(p=>p.mint===mint);
+      if (p && failApExit(targetSc,p,reason,quoteTicket)) this.saveState();
+      return;
+    }
     const trade = targetSc.closedTrades.find(t => t.mint === mint);
     if (trade) {
       const oldPnl = trade.realizedPnlUsd;

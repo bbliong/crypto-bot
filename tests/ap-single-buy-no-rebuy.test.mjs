@@ -40,6 +40,25 @@ function makeEngine(dir) {
   engine.bundlerResolver = async () => null;
   engine.startBundlerResearchTracker = () => {};
   engine.queryGmgnTokenStatRaw = async () => null;
+  // Offline executable quote fixture: intent alone must never close or fill AP.
+  // Retain observers used by callback-count assertions without bypassing settlement.
+  let observer;
+  Object.defineProperty(engine, 'onTradeAction', {
+    get: () => (action, id, signal, details) => {
+      observer?.(action, id, signal, details);
+      const ticket=details.quoteTicket;
+      if (!ticket) return;
+      if (action==='BUY') {
+        const units=Math.floor(details.stakeUsd / signal.priceUsd * 1e6).toString();
+        const tokens=Number(units)/1e6;
+        engine.syncRealBuyExecution(id,signal.mint,details.stakeUsd/tokens,tokens,details.stakeUsd,
+          {...ticket,baseUnits:units,decimals:6});
+      } else engine.syncRealSellExecution(id,signal.mint,details.priceUsd,
+        ticket.tokens*details.priceUsd,details.reason,ticket);
+    },
+    set: value => { observer=value; },
+    configurable:true,
+  });
   return engine;
 }
 
