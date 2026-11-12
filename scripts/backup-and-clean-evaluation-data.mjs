@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, statSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { MultiScenarioDryRunEngine } from '../src/multi-scenario-dryrun-engine.ts';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const dataDir = join(__dirname, '../data');
@@ -56,144 +58,12 @@ async function main() {
   // 2. Bersihkan file untuk evaluasi baru
   console.log('\n🧹 [CLEAN] Mengosongkan data aktif untuk evaluasi fresh...');
 
-  // Reset dryrun-3scenarios-live.json
-  let s4Stake = 1.0;
-  let s5Stake = 1.0;
-  let s6Pool1 = 1.0;
-  let s6Pool2 = 1.0;
-  let s7Pool1 = 1.0;
-  let s7Pool2 = 1.0;
-  let s8Stake = 1.0;
-  let s9Stake = 1.0;
-  try {
-    const s = JSON.parse(readFileSync(join(dataDir, 'follower-autobuy-settings.json'), 'utf8'));
-    if (s.stakeUsdS4) s4Stake = Number(s.stakeUsdS4);
-    if (s.stakeUsdS5) s5Stake = Number(s.stakeUsdS5);
-    if (s.stakeUsdS6Pool1) s6Pool1 = Number(s.stakeUsdS6Pool1);
-    if (s.stakeUsdS6Pool2) s6Pool2 = Number(s.stakeUsdS6Pool2);
-    if (s.stakeUsdS7Pool1) s7Pool1 = Number(s.stakeUsdS7Pool1);
-    if (s.stakeUsdS7Pool2) s7Pool2 = Number(s.stakeUsdS7Pool2);
-    if (s.stakeUsdS8) s8Stake = Number(s.stakeUsdS8);
-    if (s.stakeUsdS9) s9Stake = Number(s.stakeUsdS9);
-  } catch {}
-
-  const freshScenarios = {
-    s4: {
-      id: 'SCENARIO_4_SINGLE_BUY_5USD',
-      name: `Skenario 4: 2-Lapis Shakeout Trap (Hold 8s & Dump on Buyback)`,
-      description: `Saldo Awal $20.00. Modal $${s4Stake.toFixed(2)}. Jika target sell <= 3s (shakeout): tahan hingga 8 detik. Begitu target buyback: LANGSUNG SELL 100% dump ke likuiditas target. Jika tidak buyback dlm 8s -> Safety Exit.`,
-      initialCash: 20.0,
-      availableCash: 20.0,
-      investedCash: 0.0,
-      totalFeesPaid: 0.0,
-      realizedPnl: 0.0,
-      unrealizedPnl: 0.0,
-      totalPortfolioValue: 20.0,
-      wins: 0,
-      losses: 0,
-      totalTrades: 0,
-      winRate: 0.0,
-      openPositions: [],
-      closedTrades: [],
-      recentEvents: [],
-    },
-    s5: {
-      id: 'SCENARIO_5_ANTI_SHAKEOUT_RUNNER',
-      name: `Skenario 5: Anti-Shakeout Runner (TP +25% | Hold >= 12s | Time-Stop 35s)`,
-      description: `Saldo Awal $20.00. Modal $${s5Stake.toFixed(2)}. Abaikan goyangan dump target di 12 detik pertama (Anti-Shakeout). Auto Take-Profit +25%, Time-Stop 35s, atau ikuti sell target jika dump pasca detik 12.`,
-      initialCash: 20.0,
-      availableCash: 20.0,
-      investedCash: 0.0,
-      totalFeesPaid: 0.0,
-      realizedPnl: 0.0,
-      unrealizedPnl: 0.0,
-      totalPortfolioValue: 20.0,
-      wins: 0,
-      losses: 0,
-      totalTrades: 0,
-      winRate: 0.0,
-      openPositions: [],
-      closedTrades: [],
-      recentEvents: [],
-    },
-    s6: {
-      id: 'SCENARIO_6_REDEPLOY_SNIPER',
-      name: `Skenario 6: Re-Deploy Sniper V2 (Split TP 50/50: 5% & 15%)`,
-      description: `Saldo Awal $20.00. Pool 1: $${s6Pool1.toFixed(2)} flat, Pool 2+: $${s6Pool2.toFixed(2)} flat (Strict 1x Buy). Stage 1: TP 50% di >= 5% (Kunci Modal & Anti-Rug). Stage 2: 50% Tahan >= 15% (Mega Runner).`,
-      initialCash: 20.0,
-      availableCash: 20.0,
-      investedCash: 0.0,
-      totalFeesPaid: 0.0,
-      realizedPnl: 0.0,
-      unrealizedPnl: 0.0,
-      totalPortfolioValue: 20.0,
-      wins: 0,
-      losses: 0,
-      totalTrades: 0,
-      winRate: 0.0,
-      openPositions: [],
-      closedTrades: [],
-      recentEvents: [],
-    },
-    s7: {
-      id: 'SCENARIO_7_TIME_STOP_SNIPER',
-      name: 'Skenario 7: Time-Stop Sniper (Stage 1 @ 5% + Force Sell @ 28s)',
-      description: `Saldo Awal $20.00. Pool 1: $${s7Pool1.toFixed(2)}, Pool 2+: $${s7Pool2.toFixed(2)}. Stage 1: TP 50% di >= 5% Anti-Rug. Stage 2: Kejar >= 15% ATAU Force Sell 100% tepat di Detik 28 (Puncak Pump) sebelum dev rugpull.`,
-      initialCash: 20.0,
-      availableCash: 20.0,
-      investedCash: 0.0,
-      totalFeesPaid: 0.0,
-      realizedPnl: 0.0,
-      unrealizedPnl: 0.0,
-      totalPortfolioValue: 20.0,
-      wins: 0,
-      losses: 0,
-      totalTrades: 0,
-      winRate: 0.0,
-      openPositions: [],
-      closedTrades: [],
-      recentEvents: [],
-    },
-    s8: {
-      id: 'SCENARIO_8_FRONTRUN_DEV',
-      name: `Skenario 8: Front-Run Dev Floor & Hold 20s Post-Target ($${s8Stake.toFixed(2)})`,
-      description: `Saldo Awal $20.00. Stake $${s8Stake.toFixed(2)} di Detik 0 lantai Dev Meteora DAMM v2. Tahan 20 detik pasca target whale masuk (TIME_STOP_20S_POST_TARGET_ENTRY) atau safety exit jika target dump >= 15%.`,
-      initialCash: 20.0,
-      availableCash: 20.0,
-      investedCash: 0.0,
-      totalFeesPaid: 0.0,
-      realizedPnl: 0.0,
-      unrealizedPnl: 0.0,
-      totalPortfolioValue: 20.0,
-      wins: 0,
-      losses: 0,
-      totalTrades: 0,
-      winRate: 0.0,
-      openPositions: [],
-      closedTrades: [],
-      recentEvents: [],
-    },
-    s9: {
-      id: 'SCENARIO_9_DEV_FRONTRUN_SYNC',
-      name: `Skenario 9: Dev Front-Run & 2-Way Target Sync ($${s9Stake.toFixed(2)})`,
-      description: `Saldo Awal $20.00. Modal $${s9Stake.toFixed(2)}. Proaktif Buy di Detik 0 saat Dev rilis pool baru sebelum target whale masuk. Jika target tidak masuk dalam 60s -> Force Sell. Komparasi 2-arah jika target beralih dev.`,
-      initialCash: 20.0,
-      availableCash: 20.0,
-      investedCash: 0.0,
-      totalFeesPaid: 0.0,
-      realizedPnl: 0.0,
-      unrealizedPnl: 0.0,
-      totalPortfolioValue: 20.0,
-      wins: 0,
-      losses: 0,
-      totalTrades: 0,
-      winRate: 0.0,
-      openPositions: [],
-      closedTrades: [],
-      recentEvents: [],
-    }
-  };
+  // Reset dryrun-3scenarios-live.json using complete fresh scenarios from MultiScenarioDryRunEngine
+  const tmpScratch = mkdtempSync(join(tmpdir(), 'fresh-dryrun-'));
+  const engine = new MultiScenarioDryRunEngine(tmpScratch);
+  const freshScenarios = engine.scenarios;
   writeFileSync(join(dataDir, 'dryrun-3scenarios-live.json'), JSON.stringify(freshScenarios, null, 2), 'utf8');
+  rmSync(tmpScratch, { recursive: true, force: true });
 
   // Reset follower-real-ledger.jsonl (0 bytes)
   writeFileSync(join(dataDir, 'follower-real-ledger.jsonl'), '', 'utf8');
