@@ -2,16 +2,19 @@
 /**
  * scripts/generate-report-infographic.mjs
  *
- * Engine pembuat Infografis Scorecard Telegram untuk Crypto Bot Follower.
- * Membaca data state live, mengekstrak data on-chain whale/bundler dari log,
- * dan menghasilkan file gambar PNG resolusi tinggi via Playwright.
+ * Engine pembuat Infografis Scorecard Telegram per Skenario (Opsi A) & Ringkasan.
+ * Menghasilkan kartu visual individual untuk tiap skenario secara ringan, cepat, & tajam.
+ *
+ * Penggunaan:
+ *   node scripts/generate-report-infographic.mjs --scenario s14_net10
+ *   node scripts/generate-report-infographic.mjs --net10  (menghasilkan AP1-10%, AP2-10%, AP3-10%)
+ *   node scripts/generate-report-infographic.mjs --all    (semua 6 varian AP)
  */
 
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,208 +22,97 @@ const ROOT = join(__dirname, '..');
 
 const STATE_FILE = join(ROOT, 'data', 'dryrun-3scenarios-live.json');
 const CONFIG_FILE = join(ROOT, 'data', 'follower-autobuy-settings.json');
-const DEFAULT_OUT_PATH = join(ROOT, 'data', 'telegram-report-scorecard.png');
+
+const LANES_METADATA = {
+  s14_net10: {
+    label: 'AP1-10%',
+    fullName: 'AP1-10%: Bundler Runner Net 10%',
+    rules: 'Bundler Rate ≥ 5.0% · Saldo Awal $20.00 · Modal $5.00/entry · Full Exit Net TP +10%',
+    type: 'NET10',
+    color: '#34d399'
+  },
+  s14_alpha_net10: {
+    label: 'AP2-10%',
+    fullName: 'AP2-10%: Bundler + 60s Grace Net 10%',
+    rules: 'Grace Period ≥ 60s · Bundler ≥ 5.0% · Saldo Awal $20.00 · Modal $5.00/entry · Exit Net TP +10%',
+    type: 'NET10',
+    color: '#34d399'
+  },
+  s14_beta_net10: {
+    label: 'AP3-10%',
+    fullName: 'AP3-10%: Bundler + Grace + Hoarding Net 10%',
+    rules: 'Grace ≥ 60s · Bundler ≥ 5.0% · Whale Hoarding Defense (+25% bag) · Exit Net TP +10%',
+    type: 'NET10',
+    color: '#34d399'
+  },
+  s14: {
+    label: 'AP1',
+    fullName: 'AP1: Bundler-Confirmed Runner (Wave Rider)',
+    rules: 'Bundler Rate ≥ 5.0% · Saldo Awal $5.00 · Modal $5.00/entry · Multi-Stage TP (+50% / +100%)',
+    type: 'STANDARD',
+    color: '#38bdf8'
+  },
+  s14_alpha: {
+    label: 'AP2',
+    fullName: 'AP2: Bundler Runner + 60s Grace Period',
+    rules: 'Grace Period ≥ 60s · Bundler ≥ 5.0% · Saldo Awal $5.00 · Modal $5.00/entry · TP 50% / 100%',
+    type: 'STANDARD',
+    color: '#38bdf8'
+  },
+  s14_beta: {
+    label: 'AP3',
+    fullName: 'AP3: Bundler Runner + 60s Grace + Hoarding Defense',
+    rules: 'Grace ≥ 60s · Bundler ≥ 5% · Whale Hoarding Trap Defense · Saldo $5.00 · Modal $5.00',
+    type: 'STANDARD',
+    color: '#38bdf8'
+  }
+};
 
 function formatWib(ms) {
   if (!ms) return '-';
   const d = new Date(ms + 7 * 3600 * 1000);
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  const ss = String(d.getUTCSeconds()).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
 }
 
 function formatWibDateTime(ms) {
   if (!ms) return '-';
   const d = new Date(ms + 7 * 3600 * 1000);
-  const yyyy = d.getUTCFullYear();
-  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = d.getUTCFullYear();
   const hh = String(d.getUTCHours()).padStart(2, '0');
   const mm = String(d.getUTCMinutes()).padStart(2, '0');
   return `${dd}/${mo}/${yyyy} · ${hh}:${mm} WIB`;
 }
 
-async function main() {
-  const outPath = process.argv[2] || DEFAULT_OUT_PATH;
+function normalizeLaneKey(raw) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (['ap1-10%', 'ap1_net10', 's14_net10'].includes(s)) return 's14_net10';
+  if (['ap2-10%', 'ap2_net10', 's14_alpha_net10'].includes(s)) return 's14_alpha_net10';
+  if (['ap3-10%', 'ap3_net10', 's14_beta_net10'].includes(s)) return 's14_beta_net10';
+  if (['ap1', 's14'].includes(s)) return 's14';
+  if (['ap2', 's14_alpha'].includes(s)) return 's14_alpha';
+  if (['ap3', 's14_beta', 's15'].includes(s)) return 's14_beta';
+  return LANES_METADATA[s] ? s : null;
+}
 
-  if (!existsSync(STATE_FILE)) {
-    console.error(`State file not found: ${STATE_FILE}`);
-    process.exit(1);
-  }
+async function renderSingleScenarioCard(browser, state, laneKey) {
+  const meta = LANES_METADATA[laneKey];
+  const s = state[laneKey];
+  if (!meta || !s) return null;
 
-  const state = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-  const config = existsSync(CONFIG_FILE) ? JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) : {};
+  const trades = s.closedTrades || [];
+  const wins = trades.filter(t => (t.realizedPnlUsd || 0) > 0).length;
+  const losses = trades.filter(t => (t.realizedPnlUsd || 0) < 0).length;
+  const pnl = trades.reduce((acc, t) => acc + (t.realizedPnlUsd || 0), 0);
+  const winRate = trades.length ? ((wins / trades.length) * 100).toFixed(1) : '0.0';
+  const opens = s.openPositions || [];
 
-  // 1. Ekstrak data jurnal log untuk mencocokkan Whale In, Bundler, & Whale Dump
-  const whaleFirstBuys = new Map();
-  const bundlerRates = new Map();
-  const whaleFirstSells = new Map();
-  const whaleSellAlls = new Map();
+  const holds = trades.map(t => (t.closedAt - t.openedAt) / 1000).filter(h => h > 0);
+  const avgHold = holds.length ? Math.round(holds.reduce((a, b) => a + b, 0) / holds.length) : 0;
 
-  try {
-    const rawLogs = execSync(
-      `journalctl --user -u crypto-bot-wallet-follower.service --since "12 hours ago" --no-pager -o short-iso`,
-      { encoding: 'utf8', maxBuffer: 30 * 1024 * 1024 }
-    );
-    const lines = rawLogs.split('\n');
-
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i];
-
-      // Whale first buy
-      if (l.includes('[TARGET ACTIVITY] BUY') && l.includes('FIRST_BUY')) {
-        const m = l.match(/BUY\s+(.+?)\s+\(([A-Za-z0-9]+)\.\.\.\)/);
-        const mTime = l.match(/T([0-9]{2}:[0-9]{2}:[0-9]{2})/);
-        if (m && mTime) {
-          const pref = m[2];
-          let price = null;
-          let usd = null;
-          for (let j = i + 1; j < Math.min(lines.length, i + 5); j++) {
-            const mp = lines[j].match(/Price:\s*\$([0-9.]+)/);
-            if (mp) price = mp[1];
-            const mu = lines[j].match(/Target USD:\s*\$([0-9.]+)/);
-            if (mu) usd = mu[1];
-          }
-          if (!whaleFirstBuys.has(pref)) {
-            whaleFirstBuys.set(pref, { time: mTime[1], price, usd });
-          }
-        }
-      }
-
-      // Bundler rate terkonfirmasi
-      if (l.includes('Bundler Rate :') || l.includes('BUNDLER 2S RESEARCH') || l.includes('BUNDLER MENINGKAT!')) {
-        const mb = l.match(/Bundler(?:\s*Rate)?\s*:\s*([0-9.]+%)|->\s*([0-9.]+%)|\(([0-9.]+%\))/);
-        const mPref = l.match(/\[([A-Za-z0-9]{8})\.\.\.\]/);
-        if (mb && mPref) {
-          const val = mb[1] || mb[2] || mb[3];
-          if (val) bundlerRates.set(mPref[1], val);
-        }
-      }
-
-      // Whale sell activity
-      if (l.includes('[TARGET ACTIVITY] SELL')) {
-        const m = l.match(/SELL\s+(.+?)\s+\(([A-Za-z0-9]+)\.\.\.\)/);
-        const mTime = l.match(/T([0-9]{2}:[0-9]{2}:[0-9]{2})/);
-        if (m && mTime) {
-          const pref = m[2];
-          if (!whaleFirstSells.has(pref)) whaleFirstSells.set(pref, mTime[1]);
-          if (l.includes('SELL_ALL')) whaleSellAlls.set(pref, mTime[1]);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[SCORECARD] Warning: tidak dapat membaca journalctl secara penuh:', err.message);
-  }
-
-  // 2. Kalkulasi statistik skenario
-  const apLanes = [
-    { key: 's14_net10', label: 'AP1-10%', parent: 'AP1', type: 'NET10' },
-    { key: 's14_alpha_net10', label: 'AP2-10%', parent: 'AP2', type: 'NET10' },
-    { key: 's14_beta_net10', label: 'AP3-10%', parent: 'AP3', type: 'NET10' },
-    { key: 's14', label: 'AP1', parent: 'AP1', type: 'STANDARD' },
-    { key: 's14_alpha', label: 'AP2', parent: 'AP2', type: 'STANDARD' },
-    { key: 's14_beta', label: 'AP3', parent: 'AP3', type: 'STANDARD' }
-  ];
-
-  const laneStats = {};
-  let net10Trades = 0, net10Wins = 0, net10Losses = 0, net10Pnl = 0;
-  let stdTrades = 0, stdWins = 0, stdLosses = 0, stdPnl = 0;
-  let allOpenPositions = [];
-
-  for (const l of apLanes) {
-    const s = state[l.key] || {};
-    const trades = s.closedTrades || [];
-    const wins = trades.filter(t => (t.realizedPnlUsd || 0) > 0).length;
-    const losses = trades.filter(t => (t.realizedPnlUsd || 0) < 0).length;
-    const pnl = trades.reduce((acc, t) => acc + (t.realizedPnlUsd || 0), 0);
-    const opens = s.openPositions || [];
-
-    laneStats[l.key] = {
-      label: l.label,
-      type: l.type,
-      initialCash: s.initialCash || (l.type === 'NET10' ? 20 : 5),
-      availableCash: s.availableCash || 0,
-      portfolio: s.totalPortfolioValue || 0,
-      tradesCount: trades.length,
-      wins,
-      losses,
-      winRate: trades.length ? ((wins / trades.length) * 100).toFixed(1) : '0.0',
-      pnl,
-      openCount: opens.length
-    };
-
-    if (l.type === 'NET10') {
-      net10Trades += trades.length;
-      net10Wins += wins;
-      net10Losses += losses;
-      net10Pnl += pnl;
-    } else {
-      stdTrades += trades.length;
-      stdWins += wins;
-      stdLosses += losses;
-      stdPnl += pnl;
-    }
-
-    for (const pos of opens) {
-      allOpenPositions.push({
-        laneLabel: l.label,
-        symbol: pos.symbol,
-        mint: pos.mint,
-        mintPrefix: pos.mint ? pos.mint.slice(0, 8) : '',
-        openedAt: pos.openedAt,
-        costBasisUsd: pos.costBasisUsd || 5,
-        unrealizedPnlUsd: pos.unrealizedPnlUsd || 0,
-        status: pos.ap?.status || 'OPEN'
-      });
-    }
-  }
-
-  // 3. Gabungkan dan urutkan transaksi tertutup terbaru
-  const recentClosed = [];
-  for (const l of apLanes) {
-    const s = state[l.key] || {};
-    for (const t of s.closedTrades || []) {
-      const pref = t.mint ? t.mint.slice(0, 8) : '';
-      const wBuy = whaleFirstBuys.get(pref);
-      const wSell = whaleFirstSells.get(pref);
-      const wSellAll = whaleSellAlls.get(pref);
-      const bRate = bundlerRates.get(pref);
-
-      let holdSeconds = '-';
-      if (t.openedAt && t.closedAt) {
-        holdSeconds = `${Math.round((t.closedAt - t.openedAt) / 1000)}s`;
-      }
-
-      recentClosed.push({
-        laneLabel: l.label,
-        type: l.type,
-        symbol: t.symbol,
-        mintPrefix: pref,
-        openedAt: t.openedAt,
-        closedAt: t.closedAt,
-        holdSeconds,
-        investedUsd: t.totalInvestedUsd || 5,
-        pnl: t.realizedPnlUsd || 0,
-        roi: t.roiPct || 0,
-        exitReason: t.exitReason || '',
-        whaleInTime: wBuy?.time || '-',
-        whalePrice: wBuy?.price ? `$${parseFloat(wBuy.price).toFixed(7)}` : '-',
-        bundlerRate: bRate || '-',
-        whaleSellTime: wSell || '-',
-        whaleSellAllTime: wSellAll || '-'
-      });
-    }
-  }
-
-  // Ambil 8 trade terbaru berdasarkan waktu closedAt
-  recentClosed.sort((a, b) => (b.closedAt || 0) - (a.closedAt || 0));
-  const topTrades = recentClosed.slice(0, 8);
-
-  // 4. Bangun Desain HTML Infografis (Clean Dark Mode)
   const nowWib = formatWibDateTime(Date.now());
-  const net10WinRate = net10Trades ? ((net10Wins / net10Trades) * 100).toFixed(1) : '0.0';
-  const stdWinRate = stdTrades ? ((stdWins / stdTrades) * 100).toFixed(1) : '0.0';
+  const availableCash = s.availableCash || 0;
 
   const html = `
   <!DOCTYPE html>
@@ -228,263 +120,138 @@ async function main() {
   <head>
     <meta charset="utf-8">
     <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-      body { background: #0b1120; color: #f8fafc; padding: 24px; width: 960px; margin: 0 auto; }
-      .card { background: #131d31; border-radius: 18px; border: 1px solid #22324e; padding: 24px; box-shadow: 0 16px 36px rgba(0,0,0,0.6); }
+      * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+      body { background: #0b1120; color: #f8fafc; padding: 18px; width: 880px; margin: 0 auto; }
+      .card { background: #131d31; border-radius: 16px; border: 1px solid #22324e; padding: 22px; box-shadow: 0 16px 36px rgba(0,0,0,0.6); }
       
-      .top-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #22324e; padding-bottom: 16px; margin-bottom: 20px; }
-      .brand { display: flex; align-items: center; gap: 10px; }
-      .brand-icon { font-size: 24px; }
-      .brand-title { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; color: #38bdf8; }
-      .meta-pills { display: flex; align-items: center; gap: 8px; }
-      .pill { padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-      .pill-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
-      .pill-gray { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #22324e; padding-bottom: 16px; margin-bottom: 18px; }
+      .title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .lane-title { font-size: 22px; font-weight: 800; color: #38bdf8; letter-spacing: -0.3px; }
+      .badge-type { background: ${meta.type === 'NET10' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; color: ${meta.type === 'NET10' ? '#34d399' : '#38bdf8'}; border: 1px solid ${meta.type === 'NET10' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(56, 189, 248, 0.4)'}; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
+      .lane-desc { font-size: 11px; color: #94a3b8; line-height: 1.4; }
+      .meta-right { text-align: right; }
+      .time-pill { background: #1e293b; color: #94a3b8; font-size: 11px; padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; font-weight: 600; }
+
+      .grid-kpi { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px; }
+      .kpi-box { background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 12px 10px; text-align: center; }
+      .kpi-lbl { font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+      .kpi-val { font-size: 18px; font-weight: 800; }
+      .val-green { color: #34d399; }
+      .val-red { color: #f87171; }
+      .val-cyan { color: #38bdf8; }
+      .val-amber { color: #fbbf24; }
+
+      .section-hdr { font-size: 12px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
       
-      .section-label { font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-      
-      .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-      .group-card { background: #182338; border: 1px solid #263857; border-radius: 14px; padding: 16px; }
-      .group-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px dashed #263857; padding-bottom: 8px; }
-      .group-name { font-size: 14px; font-weight: 700; color: #f1f5f9; }
-      .group-tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
-      .tag-net10 { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-      .tag-std { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
-      
-      .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-      .kpi-box { background: #0f172a; border-radius: 8px; padding: 10px 8px; text-align: center; border: 1px solid #1e293b; }
-      .kpi-title { font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; font-weight: 600; }
-      .kpi-num { font-size: 16px; font-weight: 800; }
-      
-      .lane-subtable { width: 100%; border-collapse: collapse; font-size: 11px; }
-      .lane-subtable th { text-align: left; color: #64748b; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #263857; }
-      .lane-subtable td { padding: 6px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
-      
-      .val-green { color: #34d399; font-weight: 700; }
-      .val-red { color: #f87171; font-weight: 700; }
-      .val-cyan { color: #38bdf8; font-weight: 700; }
-      .val-amber { color: #fbbf24; font-weight: 700; }
-      
-      .main-table-wrap { background: #182338; border: 1px solid #263857; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
+      .open-box { background: rgba(56, 189, 248, 0.08); border: 1px dashed rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+      .open-title { font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 6px; }
+      .open-tag { display: inline-flex; align-items: center; gap: 8px; background: #0f172a; border: 1px solid #22324e; padding: 4px 10px; border-radius: 6px; font-size: 11px; margin-right: 8px; }
+
+      .table-wrap { background: #182338; border: 1px solid #263857; border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
       .trade-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-      .trade-table th { background: #0f172a; color: #94a3b8; text-align: left; padding: 9px 8px; font-weight: 600; border-top: 1px solid #263857; border-bottom: 1px solid #263857; }
-      .trade-table td { padding: 8px; border-bottom: 1px solid #1e293b; }
-      
+      .trade-table th { background: #0f172a; color: #94a3b8; text-align: left; padding: 9px 10px; font-weight: 600; border-bottom: 1px solid #263857; }
+      .trade-table td { padding: 8px 10px; border-bottom: 1px solid #1e293b; }
+      .trade-table tr:last-child td { border-bottom: none; }
+
       .coin-badge { font-family: monospace; font-size: 9px; padding: 2px 4px; border-radius: 4px; background: #0f172a; border: 1px solid #263857; color: #94a3b8; }
-      .lane-badge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
-      .badge-ap10 { background: rgba(16, 185, 129, 0.15); color: #34d399; }
-      .badge-ap { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
-      
       .tag-win { background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 10px; }
       .tag-loss { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 10px; }
-      
-      .open-box { background: rgba(56, 189, 248, 0.08); border: 1px dashed rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 12px; margin-bottom: 16px; }
-      .open-title { font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 8px; display: flex; justify-content: space-between; }
-      .open-item { display: inline-flex; align-items: center; gap: 8px; background: #131d31; border: 1px solid #22324e; padding: 4px 10px; border-radius: 6px; font-size: 11px; margin-right: 8px; margin-bottom: 4px; }
-      
-      .footer { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #64748b; padding-top: 10px; border-top: 1px solid #22324e; }
+
+      .footer { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; padding-top: 8px; border-top: 1px solid #22324e; }
     </style>
   </head>
   <body>
     <div class="card">
-      <div class="top-header">
-        <div class="brand">
-          <span class="brand-icon">⚡</span>
-          <div>
-            <div class="brand-title">CRYPTO BOT FOLLOWER SCORECARD</div>
-            <div style="font-size: 11px; color: #94a3b8;">Target Wallet: 3azG8rmt... · Headless AMM Router Proxy</div>
-          </div>
-        </div>
-        <div class="meta-pills">
-          <div class="pill pill-blue">PAPER SWAP QUOTE</div>
-          <div class="pill pill-gray">${nowWib}</div>
-        </div>
-      </div>
-      
-      <div class="summary-grid">
-        <!-- GROUP 1: AP NET 10% -->
-        <div class="group-card">
-          <div class="group-title-row">
-            <span class="group-name">AP NET 10% (Target Likuidasi Pasti +10%)</span>
-            <span class="group-tag tag-net10">PAPER ONLY</span>
-          </div>
-          <div class="kpi-row">
-            <div class="kpi-box">
-              <div class="kpi-title">Realized PnL</div>
-              <div class="kpi-num val-green">+$${net10Pnl.toFixed(4)}</div>
-            </div>
-            <div class="kpi-box">
-              <div class="kpi-title">Win Rate</div>
-              <div class="kpi-num val-cyan">${net10WinRate}%</div>
-            </div>
-            <div class="kpi-box">
-              <div class="kpi-title">Win / Loss</div>
-              <div class="kpi-num">${net10Wins}W / ${net10Losses}L</div>
-            </div>
-            <div class="kpi-box">
-              <div class="kpi-title">Stake</div>
-              <div class="kpi-num val-amber">$5.00</div>
-            </div>
-          </div>
-          <table class="lane-subtable">
-            <thead>
-              <tr><th>Lane</th><th>Saldo</th><th>Trades</th><th>W/L</th><th>PnL</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>AP1-10%</strong> (Bundler)</td>
-                <td>$${laneStats['s14_net10'].availableCash.toFixed(2)}</td>
-                <td>${laneStats['s14_net10'].tradesCount}</td>
-                <td>${laneStats['s14_net10'].wins}/${laneStats['s14_net10'].losses}</td>
-                <td class="val-green">+$${laneStats['s14_net10'].pnl.toFixed(4)}</td>
-              </tr>
-              <tr>
-                <td><strong>AP2-10%</strong> (+60s Grace)</td>
-                <td>$${laneStats['s14_alpha_net10'].availableCash.toFixed(2)}</td>
-                <td>${laneStats['s14_alpha_net10'].tradesCount}</td>
-                <td>${laneStats['s14_alpha_net10'].wins}/${laneStats['s14_alpha_net10'].losses}</td>
-                <td class="val-green">+$${laneStats['s14_alpha_net10'].pnl.toFixed(4)}</td>
-              </tr>
-              <tr>
-                <td><strong>AP3-10%</strong> (Hoarding Def)</td>
-                <td>$${laneStats['s14_beta_net10'].availableCash.toFixed(2)}</td>
-                <td>${laneStats['s14_beta_net10'].tradesCount}</td>
-                <td>${laneStats['s14_beta_net10'].wins}/${laneStats['s14_beta_net10'].losses}</td>
-                <td class="val-green">+$${laneStats['s14_beta_net10'].pnl.toFixed(4)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- GROUP 2: AP STANDAR -->
-        <div class="group-card">
-          <div class="group-title-row">
-            <span class="group-name">AP STANDAR (TP Bertahap 50%/100% & Wave Ride)</span>
-            <span class="group-tag tag-std">MODAL $5</span>
-          </div>
-          <div class="kpi-row">
-            <div class="kpi-box">
-              <div class="kpi-title">Realized PnL</div>
-              <div class="kpi-num val-green">+$${stdPnl.toFixed(4)}</div>
-            </div>
-            <div class="kpi-box">
-              <div class="kpi-title">Win Rate</div>
-              <div class="kpi-num val-cyan">${stdWinRate}%</div>
-            </div>
-            <div class="kpi-box">
-              <div class="kpi-title">Win / Loss</div>
-              <div class="kpi-num">${stdWins}W / ${stdLosses}L</div>
-            </div>
-            <div class="kpi-box">
-              <div class="kpi-title">Open Pos</div>
-              <div class="kpi-num val-amber">${allOpenPositions.length}</div>
-            </div>
-          </div>
-          <table class="lane-subtable">
-            <thead>
-              <tr><th>Lane</th><th>Saldo</th><th>Trades</th><th>W/L</th><th>PnL</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>AP1</strong> (Wave Rider)</td>
-                <td>$${laneStats['s14'].availableCash.toFixed(2)}</td>
-                <td>${laneStats['s14'].tradesCount}</td>
-                <td>${laneStats['s14'].wins}/${laneStats['s14'].losses}</td>
-                <td class="val-green">+$${laneStats['s14'].pnl.toFixed(4)}</td>
-              </tr>
-              <tr>
-                <td><strong>AP2</strong> (+60s Grace)</td>
-                <td>$${laneStats['s14_alpha'].availableCash.toFixed(2)}</td>
-                <td>${laneStats['s14_alpha'].tradesCount}</td>
-                <td>${laneStats['s14_alpha'].wins}/${laneStats['s14_alpha'].losses}</td>
-                <td class="val-green">+$${laneStats['s14_alpha'].pnl.toFixed(4)}</td>
-              </tr>
-              <tr>
-                <td><strong>AP3</strong> (Hoarding Def)</td>
-                <td>$${laneStats['s14_beta'].availableCash.toFixed(2)}</td>
-                <td>${laneStats['s14_beta'].tradesCount}</td>
-                <td>${laneStats['s14_beta'].wins}/${laneStats['s14_beta'].losses}</td>
-                <td class="val-green">+$${laneStats['s14_beta'].pnl.toFixed(4)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      ${allOpenPositions.length ? `
-      <!-- POSISI TERBUKA (FLOATING) -->
-      <div class="open-box">
-        <div class="open-title">
-          <span>🚨 POSISI TERBUKA AKTIF (SEDANG FLOATING)</span>
-          <span>${allOpenPositions.length} Posisi</span>
-        </div>
+      <div class="header">
         <div>
-          ${allOpenPositions.map(p => `
-            <div class="open-item">
-              <span class="lane-badge badge-ap">${p.laneLabel}</span>
+          <div class="title-row">
+            <span class="lane-title">${meta.fullName}</span>
+            <span class="badge-type">${meta.type === 'NET10' ? 'TARGET NET TP +10%' : 'MULTI-STAGE TP'}</span>
+          </div>
+          <div class="lane-desc">${meta.rules}</div>
+        </div>
+        <div class="meta-right">
+          <div class="time-pill">${nowWib}</div>
+        </div>
+      </div>
+
+      <div class="grid-kpi">
+        <div class="kpi-box">
+          <div class="kpi-lbl">Realized PnL</div>
+          <div class="kpi-val ${pnl >= 0 ? 'val-green' : 'val-red'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(4)}</div>
+        </div>
+        <div class="kpi-box">
+          <div class="kpi-lbl">Win Rate</div>
+          <div class="kpi-val val-cyan">${winRate}%</div>
+        </div>
+        <div class="kpi-box">
+          <div class="kpi-lbl">Win / Loss</div>
+          <div class="kpi-val">${wins}W / ${losses}L</div>
+        </div>
+        <div class="kpi-box">
+          <div class="kpi-lbl">Saldo Kas</div>
+          <div class="kpi-val">$${availableCash.toFixed(2)}</div>
+        </div>
+        <div class="kpi-box">
+          <div class="kpi-lbl">Avg Hold</div>
+          <div class="kpi-val val-amber">${avgHold}s</div>
+        </div>
+      </div>
+
+      ${opens.length ? `
+      <div class="open-box">
+        <div class="open-title">🚨 POSISI TERBUKA AKTIF (${opens.length})</div>
+        <div>
+          ${opens.map(p => `
+            <div class="open-tag">
               <strong>${p.symbol}</strong>
-              <span class="coin-badge">${p.mintPrefix}</span>
-              <span>Modal: $${p.costBasisUsd}</span>
-              <span class="${p.unrealizedPnlUsd >= 0 ? 'val-green' : 'val-red'}">
-                Float: ${p.unrealizedPnlUsd >= 0 ? '+' : ''}$${p.unrealizedPnlUsd.toFixed(2)}
+              <span class="coin-badge">${p.mint ? p.mint.slice(0, 8) : ''}</span>
+              <span>Modal: $${p.costBasisUsd || 5}</span>
+              <span class="${(p.unrealizedPnlUsd || 0) >= 0 ? 'val-green' : 'val-red'}">
+                Float: ${(p.unrealizedPnlUsd || 0) >= 0 ? '+' : ''}$${(p.unrealizedPnlUsd || 0).toFixed(2)}
               </span>
-              <span style="color: #64748b;">${formatWib(p.openedAt)}</span>
+              <span style="color:#64748b;">${formatWib(p.openedAt)}</span>
             </div>
           `).join('')}
         </div>
       </div>
       ` : ''}
 
-      <!-- DETAIL KRONOLOGI TRANSAKSI TERAKHIR -->
-      <div class="main-table-wrap">
-        <div class="section-label">
-          <span>📋 DETAIL KRONOLOGI TRANSAKSI TERAKHIR (VS AKSI WHALE)</span>
-        </div>
+      <div class="section-hdr">
+        <span>RIWAYAT TRANSAKSI TERAKHIR (${trades.length} CLOSED)</span>
+        <span style="color:#94a3b8; font-weight:400; font-size:10px;">Modal: $5.00/Entry · Fee $0.050/roundtrip</span>
+      </div>
+
+      <div class="table-wrap">
         <table class="trade-table">
           <thead>
             <tr>
-              <th>Token & Mint</th>
-              <th>Lane</th>
-              <th>Whale In</th>
-              <th>Bundler</th>
-              <th>Kita In</th>
-              <th>Kita Out (Hold)</th>
-              <th>Whale Dump</th>
+              <th style="width: 30px;">#</th>
+              <th>Token</th>
+              <th>Jam Masuk</th>
+              <th>Jam Keluar</th>
+              <th>Durasi</th>
               <th>Hasil Realized</th>
+              <th>Alasan Exit</th>
             </tr>
           </thead>
           <tbody>
-            ${topTrades.map(t => `
+            ${trades.slice(0, 10).map((t, idx) => `
               <tr>
+                <td style="color:#64748b;">${idx + 1}</td>
                 <td>
                   <strong>${t.symbol}</strong>
-                  <span class="coin-badge">${t.mintPrefix}</span>
+                  <span class="coin-badge">${t.mint ? t.mint.slice(0, 8) : ''}</span>
                 </td>
+                <td>${formatWib(t.openedAt)}</td>
+                <td>${formatWib(t.closedAt)}</td>
+                <td style="color:#94a3b8;">${t.closedAt && t.openedAt ? Math.round((t.closedAt - t.openedAt) / 1000) + 's' : '-'}</td>
                 <td>
-                  <span class="lane-badge ${t.type === 'NET10' ? 'badge-ap10' : 'badge-ap'}">${t.laneLabel}</span>
-                </td>
-                <td>
-                  ${t.whaleInTime}<br>
-                  <span style="color:#64748b; font-size:9px;">${t.whalePrice}</span>
-                </td>
-                <td>
-                  <span class="val-amber">${t.bundlerRate}</span>
-                </td>
-                <td>
-                  ${formatWib(t.openedAt)}
-                </td>
-                <td>
-                  ${formatWib(t.closedAt)}<br>
-                  <span style="color:#94a3b8; font-size:9px;">hold ${t.holdSeconds}</span>
-                </td>
-                <td>
-                  ${t.whaleSellAllTime !== '-' ? `<span style="color:#f87171; font-weight:700;">${t.whaleSellAllTime} (ALL)</span>` : (t.whaleSellTime !== '-' ? `${t.whaleSellTime} (part)` : '-')}
-                </td>
-                <td>
-                  <span class="${t.pnl >= 0 ? 'tag-win' : 'tag-loss'}">
-                    ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(4)} (${t.roi >= 0 ? '+' : ''}${t.roi.toFixed(1)}%)
+                  <span class="${(t.realizedPnlUsd || 0) >= 0 ? 'tag-win' : 'tag-loss'}">
+                    ${(t.realizedPnlUsd || 0) >= 0 ? '+' : ''}$${(t.realizedPnlUsd || 0).toFixed(4)} (${(t.roiPct || 0) >= 0 ? '+' : ''}${(t.roiPct || 0).toFixed(1)}%)
                   </span>
                 </td>
+                <td style="color:#cbd5e1; font-size:10px;">${t.exitReason}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -492,31 +259,67 @@ async function main() {
       </div>
 
       <div class="footer">
-        <span>* Kuotasi AMM riil on-chain via GMGN Route Proxy · Flat DEX gas fee $0.025/leg ($0.050 roundtrip)</span>
-        <span>Auto-Buy Live: ⚪ DRY_RUN (OFF)</span>
+        <span>* Kuotasi swap AMM on-chain via GMGN Route Proxy · Flat DEX fee $0.025/leg</span>
+        <span>Auto-Buy Live: ⚪ DRY_RUN</span>
       </div>
     </div>
   </body>
   </html>
   `;
 
+  const page = await browser.newPage({ viewport: { width: 900, height: 750, deviceScaleFactor: 2 } });
+  await page.setContent(html);
+  const outPath = join(ROOT, 'data', `scorecard-${laneKey}.png`);
+  await page.screenshot({ path: outPath, fullPage: true });
+  await page.close();
+
+  return { laneKey, label: meta.label, outPath, pnl, wins, losses, tradesCount: trades.length, winRate };
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  let targetScenarios = [];
+
+  const scArgIdx = args.indexOf('--scenario');
+  if (scArgIdx !== -1 && args[scArgIdx + 1]) {
+    const norm = normalizeLaneKey(args[scArgIdx + 1]);
+    if (norm) targetScenarios.push(norm);
+  } else if (args.includes('--net10') || args.includes('--ap-net10')) {
+    targetScenarios = ['s14_net10', 's14_alpha_net10', 's14_beta_net10'];
+  } else if (args.includes('--all')) {
+    targetScenarios = ['s14_net10', 's14_alpha_net10', 's14_beta_net10', 's14', 's14_alpha', 's14_beta'];
+  } else {
+    // Default fallback: 3 varian net10
+    targetScenarios = ['s14_net10', 's14_alpha_net10', 's14_beta_net10'];
+  }
+
+  if (!existsSync(STATE_FILE)) {
+    console.error(`State file not found: ${STATE_FILE}`);
+    process.exit(1);
+  }
+
+  const state = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-  const page = await browser.newPage({
-    viewport: { width: 980, height: 1200, deviceScaleFactor: 2 }
-  });
 
-  await page.setContent(html, { waitUntil: 'load' });
-  await page.screenshot({ path: outPath, fullPage: true });
+  const results = [];
+  for (const laneKey of targetScenarios) {
+    const res = await renderSingleScenarioCard(browser, state, laneKey);
+    if (res) results.push(res);
+  }
+
   await browser.close();
 
-  console.log(`[SCORECARD_GENERATED_SUCCESS] Image saved to: ${outPath}`);
-  console.log(`SUMMARY: Net10 PnL: +$${net10Pnl.toFixed(4)} (${net10Wins}W/${net10Losses}L) | Std PnL: +$${stdPnl.toFixed(4)} (${stdWins}W/${stdLosses}L)`);
+  console.log(`[GENERATED_${results.length}_SCORECARDS]`);
+  for (const r of results) {
+    console.log(`MEDIA_PATH: ${r.outPath} | ${r.label} | PnL: +$${r.pnl.toFixed(4)} (${r.wins}W/${r.losses}L)`);
+  }
 }
 
 main().catch(err => {
-  console.error('[SCORECARD_ERROR]', err);
+  console.error('[ERROR]', err);
   process.exit(1);
 });
