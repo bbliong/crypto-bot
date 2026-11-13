@@ -2299,7 +2299,7 @@ export class MultiScenarioDryRunEngine {
     let stakeUsd = 5.0;
     try {
       const liveCfg = readFollowerLiveConfig(this.dataDir);
-      stakeUsd = net10 ? (liveCfg as any).stakeUsdAP1Net10 || 5.0 : (liveCfg as any).stakeUsdS14 || 5.0;
+      stakeUsd = net10 ? (liveCfg as any).stakeUsdAP1Net10 || 5.0 : getScenarioStakeUsd('SCENARIO_14_BUNDLER_RUNNER', liveCfg);
     } catch {}
 
     const entryPrice = (currentPrice && currentPrice > 0)
