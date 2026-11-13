@@ -1,5 +1,9 @@
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { FollowerTickRecorder } from '../src/follower-tick-recorder.js';
+import { attachFollowerShutdown } from '../src/follower-capture-shutdown.js';
+import { extractFollowerTicksFromMessage } from '../src/follower-tick-capture.js';
 import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { WalletFollowerLane, type WalletTradeSignal } from '../src/wallet-follower-lane.js';
@@ -97,6 +101,59 @@ export class WalletFollowerRunner {
   }> = [];
   private isProcessingProbeQueue = false;
   private startTimeSec: number = Math.floor(Date.now() / 1000);
+  private tickRecorder: FollowerTickRecorder | null = null;
+  private captureSessionId = `${new Date().toISOString().replace(/[:.]/g, '-')}_${randomUUID()}`;
+  private captureConnectionId = 'unknown';
+  private captureReceiveSequence = 0;
+  private captureFirstTicks = new Set<string>();
+  private gmgnSocketIds = new Set<string>();
+  private otherSocketIds = new Set<string>();
+  private unknownCaptureSocketIds = new Set<string>();
+
+  private captureLifecycle(event: string, detail: Record<string, unknown> = {}): void {
+    try { this.tickRecorder?.lifecycle({event,at:Date.now(),...detail}); } catch {}
+  }
+
+  private markSubscriptionCoverageGap(reason: string): void {
+    if (!this.subscribedTokens?.size) return;
+    try { this.tickRecorder?.coverageGap(reason,{activeSubscriptionCount:this.subscribedTokens.size}); } catch {}
+  }
+
+  private attachCapturedSocketFrames(cdp: CDPSession): void {
+    this.gmgnSocketIds.clear();
+    this.otherSocketIds.clear();
+    this.unknownCaptureSocketIds ??= new Set<string>();
+    this.unknownCaptureSocketIds.clear();
+    this.captureConnectionId='unknown';
+    cdp.on('Network.webSocketCreated', ({requestId,url}) => {
+      this.unknownCaptureSocketIds.delete(requestId);
+      try {
+        if (new URL(url).hostname === 'ws.gmgn.ai') {
+          this.markSubscriptionCoverageGap('socket_replaced');
+          this.gmgnSocketIds.add(requestId);
+          this.captureConnectionId=requestId;
+          this.captureLifecycle('socket_created',{connectionId:requestId});
+        } else this.otherSocketIds.add(requestId);
+      } catch { this.otherSocketIds.add(requestId); }
+    });
+    cdp.on('Network.webSocketClosed', ({requestId}) => {
+      if (this.gmgnSocketIds.has(requestId)) {
+        this.captureLifecycle('socket_closed',{connectionId:requestId});
+        this.markSubscriptionCoverageGap('socket_closed');
+      }
+      this.gmgnSocketIds.delete(requestId);
+      this.otherSocketIds.delete(requestId);
+      this.unknownCaptureSocketIds.delete(requestId);
+    });
+    cdp.on('Network.webSocketFrameReceived', ({requestId,response}) => {
+      const identified=this.gmgnSocketIds.has(requestId);
+      if (!identified && !this.otherSocketIds.has(requestId) && !this.unknownCaptureSocketIds.has(requestId) && this.tickRecorder) {
+        this.unknownCaptureSocketIds.add(requestId);
+        try { this.tickRecorder.coverageGap('socket_origin_unverified',{requestId}); } catch {}
+      }
+      void this.handleIncomingWsFrame(response.payloadData,requestId,identified);
+    });
+  }
 
   private async refreshSolPrice(): Promise<void> {
     try {
@@ -198,6 +255,11 @@ export class WalletFollowerRunner {
   }
 
   public async start(durationSeconds: number = 0): Promise<void> {
+    if (process.env.FOLLOWER_TICK_CAPTURE_ENABLED === '1') {
+      this.tickRecorder = new FollowerTickRecorder({outputDir:path.join(this.dataDir,'follower-ticks'),sessionId:this.captureSessionId});
+      this.captureLifecycle('capture_started');
+      await this.tickRecorder.flush();
+    }
     const curCfg = readFollowerLiveConfig(this.dataDir);
     const curStakeL1 = curCfg.stakeUsdLane1 !== undefined ? curCfg.stakeUsdLane1 : 0.25;
     const curStakeL2 = curCfg.stakeUsdLane2 !== undefined ? curCfg.stakeUsdLane2 : 0.25;
@@ -260,6 +322,8 @@ export class WalletFollowerRunner {
       await this.browser.close().catch(() => {});
       this.browser = null;
     }
+    this.captureLifecycle('capture_stopped');
+    await this.tickRecorder?.close();
     console.log(`[FOLLOWER] Stopped.`);
   }
 
@@ -309,9 +373,7 @@ export class WalletFollowerRunner {
       this.cdp = await ctx.newCDPSession(this.page);
       await this.cdp.send('Network.enable');
 
-      this.cdp.on('Network.webSocketFrameReceived', ({ response }) => {
-        this.handleIncomingWsFrame(response.payloadData);
-      });
+      this.attachCapturedSocketFrames(this.cdp);
 
       // Cek apakah socket __gmgnWs sudah tersambung
       const wsReady = await this.page.evaluate(() => {
@@ -336,11 +398,27 @@ export class WalletFollowerRunner {
     }
   }
 
-  private async handleIncomingWsFrame(payload: string): Promise<void> {
+  private async handleIncomingWsFrame(payload: string, requestId: string | null = null, captureEligible = true): Promise<void> {
     if (!payload || !payload.startsWith('{')) return;
-
     try {
       const msg = JSON.parse(payload);
+      if (this.tickRecorder && captureEligible) {
+        try {
+          const sequence=++this.captureReceiveSequence;
+          const ticks=extractFollowerTicksFromMessage(msg,{
+            sessionId:this.captureSessionId,connectionId:requestId ?? this.captureConnectionId,
+            requestId,receiveSequence:sequence,receivedAt:Date.now(),targetWallet:this.targetWallet,
+          });
+          for (const tick of ticks) {
+            this.tickRecorder.record(tick);
+            const key=`${tick.channel}:${tick.mint}`;
+            if (!this.captureFirstTicks.has(key)) {
+              this.captureFirstTicks.add(key);
+              this.captureLifecycle('first_tick_received',{channel:tick.channel,mint:tick.mint,receiveSequence:sequence});
+            }
+          }
+        } catch (err) { console.warn('[FOLLOWER-TICK-RECORDER] capture failed:',String(err)); }
+      }
 
       // 1. Tangkap aktivitas Buy / Sell dari target wallet
       if (msg.channel === 'wallet_activity_info' && Array.isArray(msg.data)) {
@@ -1156,12 +1234,13 @@ export class WalletFollowerRunner {
     if (!mint || this.subscribedTokens.has(mint) || !this.page) return;
 
     try {
+      this.captureLifecycle('subscribe_requested',{mint});
       this.subscribedTokens.add(mint);
 
-      await this.page.evaluate(
+      const sent = await this.page.evaluate(
         (targetMint) => {
           const ws = (window as any).__gmgnWs;
-          if (!ws || ws.readyState !== 1) return;
+          if (!ws || ws.readyState !== 1) return false;
 
           ws.send(JSON.stringify({
             action: 'subscribe',
@@ -1177,13 +1256,17 @@ export class WalletFollowerRunner {
             id: `sub_stat_${targetMint.slice(0, 8)}`,
             data: [{ chain: 'sol', addresses: targetMint }],
           }));
+          return true;
         },
         mint
       );
 
+      this.captureLifecycle(sent ? 'subscribe_sent' : 'socket_not_ready',{mint,channels:['token_activity','token_stat']});
+      if (!sent) { try { this.tickRecorder?.coverageGap('socket_not_ready',{mint}); } catch {} }
       console.log(`[DYNAMIC TOKEN WS] Berhasil subscribe sub-second feed untuk token: ${mint} (Total aktif: ${this.subscribedTokens.size})`);
     } catch (err: any) {
       this.subscribedTokens.delete(mint);
+      this.captureLifecycle('subscribe_error',{mint});
       console.warn(`[DYNAMIC-SUB-WARN] Gagal subscribe token: ${err?.message}`);
     }
   }
@@ -1193,10 +1276,10 @@ export class WalletFollowerRunner {
 
     try {
       this.subscribedTokens.delete(mint);
-      await this.page.evaluate(
+      const sent = await this.page.evaluate(
         (targetMint) => {
           const ws = (window as any).__gmgnWs;
-          if (!ws || ws.readyState !== 1) return;
+          if (!ws || ws.readyState !== 1) return false;
 
           ws.send(JSON.stringify({
             action: 'unsubscribe',
@@ -1212,11 +1295,13 @@ export class WalletFollowerRunner {
             id: `unsub_stat_${targetMint.slice(0, 8)}`,
             data: [{ chain: 'sol', addresses: targetMint }],
           }));
+          return true;
         },
         mint
       );
       console.log(`[DYNAMIC TOKEN WS] Unsubscribed token: ${mint} (Sisa: ${this.subscribedTokens.size})`);
-    } catch {}
+      this.captureLifecycle(sent ? 'unsubscribe_sent' : 'unsubscribe_not_ready',{mint,channels:['token_activity','token_stat']});
+    } catch { this.captureLifecycle('unsubscribe_error',{mint,error:'page_evaluate_failed'}); }
   }
 
   /**
@@ -1321,9 +1406,9 @@ export class WalletFollowerRunner {
           await this.page.goto(WALLET_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
           this.cdp = await this.page.context().newCDPSession(this.page);
           await this.cdp.send('Network.enable');
-          this.cdp.on('Network.webSocketFrameReceived', ({ response }) => {
-            this.handleIncomingWsFrame(response.payloadData);
-          });
+          this.attachCapturedSocketFrames(this.cdp);
+          this.captureLifecycle('cdp_reconnected');
+          this.markSubscriptionCoverageGap('cdp_reconnected');
           this.devWatcher.setBrowserPage(this.page);
           console.log(`[WATCHDOG] ✅ Berhasil merecover tab target wallet!`);
         }
@@ -2621,8 +2706,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const onceSeconds = onceArg ? parseInt(onceArg.split('=')[1], 10) : (args.includes('--once') ? 30 : 0);
 
   const runner = new WalletFollowerRunner({ dryRun });
-  runner.start(onceSeconds).catch(err => {
+  attachFollowerShutdown(process,() => runner.stop(),code => process.exit(code));
+  runner.start(onceSeconds).catch(async err => {
     console.error('[FATAL] Runner error:', err);
+    await runner.stop().catch(() => {});
     process.exit(1);
   });
 }
