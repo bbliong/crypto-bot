@@ -315,7 +315,7 @@ async function main() {
 
   console.log(`[GENERATED_${results.length}_SCORECARDS]`);
   for (const r of results) {
-    console.log(`MEDIA_PATH: ${r.outPath} | ${r.label} | PnL: +$${r.pnl.toFixed(4)} (${r.wins}W/${r.losses}L)`);
+    console.log(`MEDIA_PATH: ${r.outPath} | ${r.label} | PnL: ${r.pnl >= 0 ? '+' : ''}$${r.pnl.toFixed(4)} (${r.wins}W/${r.losses}L)`);
   }
 }
 
