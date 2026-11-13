@@ -1054,10 +1054,10 @@ export class MultiScenarioDryRunEngine {
       if(signal.solAmount>=3||usd>=250||signal.remainingHolding<t.whalePeakHolding*.5)t.consecutiveWhaleSells++;
       const giant=signal.solAmount>=15||usd>=1300;
       if(lane.parentKey!=='s14'&&t.status==='OBSERVING_BUNDLER'&&giant)t.status='TERMINATED';
-      if(t.status==='ACTIVE_RIDING'&&(t.consecutiveWhaleSells>=3||giant||(now-t.whaleFirstBuyAt)>=1800000)) {
+      if(t.status==='ACTIVE_RIDING'&&(t.consecutiveWhaleSells>=3||giant||(now-t.whaleFirstBuyAt)>=240000)) {
         const s=this.scenarios[lane.key],idx=s.openPositions.findIndex(p=>p.mint===signal.mint);
         if(idx>=0)this.executeScenarioExit(s,idx,signal.priceUsd,now,formatWibDate(now),
-          t.consecutiveWhaleSells>=3?'WHALE_3_CONSECUTIVE_SELLS':giant?'WHALE_GIANT_SELL':'MAX_AGE_30M_TIMEOUT');
+          t.consecutiveWhaleSells>=3?'WHALE_3_CONSECUTIVE_SELLS':giant?'WHALE_GIANT_SELL':'MAX_AGE_4M_TIMEOUT');
         t.status='EXITED_WHALE_DUMP';t.lastExitAt=now;
       }
     }
@@ -4799,6 +4799,10 @@ export class MultiScenarioDryRunEngine {
     const prefix=beta?'S14_BETA_':alpha?'S14_ALPHA_':'S14_';
     p.lastPriceUsd=price; p.peakPriceUsd=Math.max(p.peakPriceUsd||0,price);
     if(beta && tracker && this.checkS14BetaWhaleHoardingTrap(p.mint,tracker.whaleRemainingHolding,price,now,formatWibDate(now),lane.net10)) return;
+    if(now - p.openedAt >= 240000) {
+      this.executeScenarioExit(s,idx,price,now,formatWibDate(now),'MAX_AGE_4M_TIMEOUT');
+      return;
+    }
     if(!lane.net10&&gain>=50&&!p.stage1Exited) this.executeScenarioPartial50Exit(s,idx,price,now,formatWibDate(now),`${prefix}STAGE_1_TP_50%`);
     if(!lane.net10&&gain>=100&&p.stage1Exited) this.executeScenarioExit(s,idx,price,now,formatWibDate(now),`${prefix}STAGE_2_TP_100%`);
     if(gain<=-20&&!p.stage1Exited) this.executeScenarioExit(s,idx,price,now,formatWibDate(now),'STOP_LOSS_20%_ENTRY');
@@ -5342,9 +5346,9 @@ export class MultiScenarioDryRunEngine {
   }
 
   /**
-   * Auto-likuidasi posisi stagnan / terbengkalai (> 25 menit tanpa aktivitas target)
+   * Auto-likuidasi posisi stagnan / terbengkalai (> 4 menit / batas maksimal hold time)
    */
-  public checkStagnantPositions(maxAgeMinutes: number = 25): void {
+  public checkStagnantPositions(maxAgeMinutes: number = 4): void {
     const now = Date.now();
     const maxAgeMs = maxAgeMinutes * 60 * 1000;
     let changed = false;
@@ -5353,52 +5357,71 @@ export class MultiScenarioDryRunEngine {
       for (let i = scenario.openPositions.length - 1; i >= 0; i--) {
         const pos = scenario.openPositions[i];
         if (now - pos.openedAt >= maxAgeMs) {
-          if (isAp(scenario.id)) {
-            this.executeScenarioExit(scenario,i,pos.lastPriceUsd,now,formatWibDate(now),'STAGNANT_TIMEOUT_EXIT');
+          // Jika AP dan belum ada exitReason yang dipicu, request exit AMM terlebih dahulu
+          if (isAp(scenario.id) && !pos.ap?.exitReason && pos.ap?.status !== 'EXIT_UNAVAILABLE') {
+            this.executeScenarioExit(scenario, i, pos.lastPriceUsd, now, formatWibDate(now), 'MAX_AGE_4M_TIMEOUT');
+            changed = true;
             continue;
           }
-          const timeWib = formatWibDate(now);
-          scenario.openPositions.splice(i, 1);
-          scenario.losses += 1;
-          scenario.totalTrades += 1;
-          scenario.realizedPnl = Number((scenario.realizedPnl - pos.costBasisUsd).toFixed(2));
 
-          scenario.recentEvents.unshift({
-            id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
-            timestamp: now,
-            timeWib,
-            scenarioId: scenario.id,
-            action: 'SELL',
-            symbol: pos.symbol,
-            mint: pos.mint,
-            usdReceived: 0,
-            feeUsd: 0,
-            tokens: pos.tokens,
-            priceUsd: pos.lastPriceUsd,
-            pnlUsd: -pos.costBasisUsd,
-            availableCashAfter: scenario.availableCash,
-            investedCashAfter: Math.max(0, scenario.investedCash - pos.costBasisUsd),
-            reason: `STAGNANT_TIMEOUT_AUTO_EXIT (No target exit in ${maxAgeMinutes}m)`,
-          });
-          if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+          // Jika AP tapi likuiditas kolam kering (EXIT_UNAVAILABLE / little pool) atau sudah lewat 4.5m (> 270s) mencoba exit:
+          // Langsung bersihkan (write-off / administrative exit) agar tidak menggantung selamanya!
+          const isDeadPool = isAp(scenario.id) && (pos.ap?.status === 'EXIT_UNAVAILABLE' || (pos.ap?.lastError && pos.ap.lastError.includes('little pool')) || (now - pos.openedAt >= maxAgeMs + 30000));
 
-          scenario.closedTrades.unshift({
-            mint: pos.mint,
-            symbol: pos.symbol,
-            tokenName: pos.tokenName,
-            openedAt: pos.openedAt,
-            closedAt: now,
-            entryCount: pos.entryCount,
-            totalInvestedUsd: pos.costBasisUsd,
-            totalReturnedUsd: 0,
-            totalFeesPaidUsd: pos.feesPaidUsd,
-            realizedPnlUsd: -pos.costBasisUsd,
-            roiPct: -100,
-            exitReason: `STAGNANT_TIMEOUT_EXIT (> ${maxAgeMinutes}m Abandoned)`,
-            isWin: false,
-          });
-          if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
-          changed = true;
+          if (!isAp(scenario.id) || isDeadPool) {
+            const timeWib = formatWibDate(now);
+            scenario.openPositions.splice(i, 1);
+            const returned = Number((pos.stage1RealUsdReturned || pos.ap?.netReturnedUsd || 0).toFixed(2));
+            const pnlUsd = Number((returned - pos.costBasisUsd).toFixed(2));
+            const isWin = pnlUsd >= 0;
+            if (isWin) scenario.wins += 1;
+            else scenario.losses += 1;
+            scenario.totalTrades += 1;
+            scenario.realizedPnl = Number((scenario.realizedPnl + pnlUsd).toFixed(2));
+            if (returned > 0) scenario.availableCash = Number((scenario.availableCash + returned).toFixed(2));
+            scenario.investedCash = Math.max(0, Number((scenario.investedCash - pos.costBasisUsd).toFixed(2)));
+
+            const reason = (pos.ap?.lastError && pos.ap.lastError.includes('little pool'))
+              ? `MAX_AGE_4M_TIMEOUT (Kolam Kering / Rugpull)`
+              : `MAX_AGE_4M_TIMEOUT (> ${maxAgeMinutes}m Auto Exit)`;
+
+            scenario.recentEvents.unshift({
+              id: `ev_${now}_${Math.random().toString(36).slice(2, 6)}`,
+              timestamp: now,
+              timeWib,
+              scenarioId: scenario.id,
+              action: 'SELL',
+              symbol: pos.symbol,
+              mint: pos.mint,
+              usdReceived: returned,
+              feeUsd: 0,
+              tokens: pos.tokens,
+              priceUsd: pos.lastPriceUsd,
+              pnlUsd,
+              availableCashAfter: scenario.availableCash,
+              investedCashAfter: scenario.investedCash,
+              reason,
+            });
+            if (scenario.recentEvents.length > 50) scenario.recentEvents.pop();
+
+            scenario.closedTrades.unshift({
+              mint: pos.mint,
+              symbol: pos.symbol,
+              tokenName: pos.tokenName,
+              openedAt: pos.openedAt,
+              closedAt: now,
+              entryCount: pos.entryCount,
+              totalInvestedUsd: pos.costBasisUsd,
+              totalReturnedUsd: returned,
+              totalFeesPaidUsd: pos.feesPaidUsd,
+              realizedPnlUsd: pnlUsd,
+              roiPct: Number(((pnlUsd / pos.costBasisUsd) * 100).toFixed(1)),
+              exitReason: reason,
+              isWin,
+            });
+            if (scenario.closedTrades.length > 100) scenario.closedTrades.pop();
+            changed = true;
+          }
         }
       }
     }

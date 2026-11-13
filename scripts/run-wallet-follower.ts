@@ -1450,9 +1450,9 @@ export class WalletFollowerRunner {
         }
       } catch {}
 
-      // Auto-likuidasi posisi dry-run multi-skenario jika terbengkalai > 25 menit & fallback safety TP 45s
+      // Auto-likuidasi posisi dry-run multi-skenario jika melebihi batas waktu maksimal 4 menit
       try {
-        this.multiDryRunEngine.checkStagnantPositions(25);
+        this.multiDryRunEngine.checkStagnantPositions(4);
         this.multiDryRunEngine.checkSafetyExits(45000, 60000);
       } catch {}
 
