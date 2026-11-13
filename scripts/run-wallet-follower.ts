@@ -98,10 +98,12 @@ export class WalletFollowerRunner {
     tokens?: number;
     priceUsd: number;
     reason: string;
+    actionId?: string | null;
   }> = [];
   private isProcessingProbeQueue = false;
   private startTimeSec: number = Math.floor(Date.now() / 1000);
   private tickRecorder: FollowerTickRecorder | null = null;
+  private pendingRentCallbacks=0;
   private captureSessionId = `${new Date().toISOString().replace(/[:.]/g, '-')}_${randomUUID()}`;
   private captureConnectionId = 'unknown';
   private captureReceiveSequence = 0;
@@ -228,15 +230,31 @@ export class WalletFollowerRunner {
       this.multiDryRunEngine.handleEarlyRedeployBuy(evt);
     });
 
-    // Enqueue swap route probe untuk masing-masing skenario (S4 & S6):
-    // Rute swap DEX/AMM selalu dicek. Order nyata batch_order & rent reclaim dikontrol oleh config autobuyScenario.
+    this.installScenarioActionHandler();
+  }
+
+  private observeDecision(kind: string, actionId: string | null, scenarioId: string, signal: WalletTradeSignal,
+    side: 'BUY'|'SELL', reason: string, extra: Record<string,unknown> = {}): void {
+    if (!this.tickRecorder || !actionId) return;
+    try { this.tickRecorder.decision({kind,actionId,scenarioId,mint:signal.mint,side,reason,
+      positionId:extra.positionId ?? null,originFrame:null,observedAt:Date.now(),...extra}); } catch {}
+  }
+
+  private installScenarioActionHandler(): void {
+    // Preserve both AP and generic execution branches; evidence never gates them.
     this.multiDryRunEngine.onTradeAction = (action, scenarioId, signal, details) => {
+      const actionId=this.tickRecorder ? randomUUID() : null;
+      this.observeDecision('scenario_action',actionId,scenarioId,signal,action,details.reason,
+        {positionId:details.quoteTicket?.positionId ?? null});
       if (isAp(scenarioId) && details.quoteTicket) {
         // Paper quantities never consult the real wallet; real control execution stays separate.
-        const paper=this.executeApPaperAction(action,scenarioId,signal,details);
+        const paper=this.executeApPaperAction(action,scenarioId,signal,details,actionId);
+        if (actionId) void paper.then(
+          ()=>this.observeDecision('paper_simulation',actionId,scenarioId,signal,action,details.reason,{positionId:details.quoteTicket?.positionId}),
+          ()=>this.observeDecision('paper_simulation',actionId,scenarioId,signal,action,details.reason,{positionId:details.quoteTicket?.positionId,ok:false}));
         if (this.isScenarioAllowedForRealOrder(scenarioId,readFollowerLiveConfig(this.dataDir))) {
           void paper.then(()=>this.enqueueGmgnApiProbe({side:action,scenarioId,signal,
-            stakeUsd:details.stakeUsd||5,tokens:details.tokens,priceUsd:details.priceUsd,reason:details.reason}));
+            stakeUsd:details.stakeUsd||5,tokens:details.tokens,priceUsd:details.priceUsd,reason:details.reason,actionId}));
         }
         return paper;
       }
@@ -250,6 +268,7 @@ export class WalletFollowerRunner {
         reason: details.reason,
         isReEntryCycle: details.isReEntryCycle,
         cycleIndex: details.cycleIndex,
+        actionId,
       });
     };
   }
@@ -323,6 +342,9 @@ export class WalletFollowerRunner {
       this.browser = null;
     }
     this.captureLifecycle('capture_stopped');
+    if (this.pendingRentCallbacks>0) {
+      try { this.tickRecorder?.coverageGap('pending_rent_result_on_shutdown',{pending:this.pendingRentCallbacks}); } catch {}
+    }
     await this.tickRecorder?.close();
     console.log(`[FOLLOWER] Stopped.`);
   }
@@ -1601,22 +1623,40 @@ export class WalletFollowerRunner {
    * Antrekan hit API GMGN (Swap Route & Submit Order Probe) per skenario.
    * Diproses secara sekuensial (FIFO queue) agar tidak membanjiri browser page.
    */
-  private apDependencies(): ApPaperDependencies {
-    return this.apPaperDependencies || {
+  private apDependencies(actionId?: string | null,scenarioId?:string,signal?:WalletTradeSignal,
+    side?:'BUY'|'SELL',reason?:string): ApPaperDependencies {
+    const base = this.apPaperDependencies || {
       buy:request=>getBrowserBuySwapRoute(this.page!,request.mint,DEFAULT_SWAP_WALLET,request.stakeUsd,
         request.solUsd,15,1,request.pairAddress,0),
       sell:request=>apBrowserSellQuote(this.page,request),
       sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms)),
       audit:event=>appendFileSync(path.join(this.dataDir,'ap-paper-quotes.jsonl'),JSON.stringify(event)+'\n','utf8'),
     };
+    if (!actionId || !scenarioId || !signal || !side) return base;
+    let probeIndex=0;
+    return {
+      ...base,
+      buy:request=>{this.observeDecision('amm_quote_request',actionId,scenarioId,signal,'BUY',reason || '',{probeIndex:++probeIndex});return base.buy(request);},
+      sell:request=>{this.observeDecision('amm_quote_request',actionId,scenarioId,signal,'SELL',reason || '',{probeIndex:++probeIndex});return base.sell(request);},
+      audit:event=>{
+        if (event?.type==='AP_PAPER_QUOTE') {
+          const q=event.quote;
+          this.observeDecision('amm_quote_result',actionId,scenarioId,signal,side,reason || '',
+            {probeIndex:event.probe,positionId:event.ticket?.positionId,ok:!!q && !event.error,
+              inAmountBaseUnits:q?.inAmount,outAmountBaseUnits:q?.outAmount,
+              inDecimals:q?.inDecimals,outDecimals:q?.outDecimals,exchange:q?.exchange});
+        }
+        base.audit(event);
+      },
+    };
   }
 
   public async executeApPaperAction(action:'BUY'|'SELL',scenarioId:string,signal:WalletTradeSignal,
-    details:{stakeUsd?:number;reason:string;quoteTicket?:ApQuoteTicket}):Promise<void> {
+    details:{stakeUsd?:number;reason:string;quoteTicket?:ApQuoteTicket},actionId?:string|null):Promise<void> {
     if(!isAp(scenarioId) || !details.quoteTicket) return;
     if(action==='SELL') { await this.pollApExitQuotes();return; }
     await executeApPaperQuote(this.multiDryRunEngine,details.quoteTicket,details.stakeUsd||0,
-      details.reason,this.solPriceUsd,this.apDependencies());
+      details.reason,this.solPriceUsd,this.apDependencies(actionId,scenarioId,signal,action,details.reason));
   }
 
   public async pollApExitQuotes():Promise<void> {
@@ -1634,6 +1674,7 @@ export class WalletFollowerRunner {
     reason: string;
     isReEntryCycle?: boolean;
     cycleIndex?: number;
+    actionId?: string | null;
   }): void {
     // Jika skenario ini adalah target Real Auto-Buy aktif (misal S4) atau S8 (Genesis),
     // eksekusi LANGSUNG secara paralel tanpa antre di belakang simulasi skenario lain!
@@ -1648,7 +1689,8 @@ export class WalletFollowerRunner {
         item.reason,
         item.tokens,
         item.isReEntryCycle,
-        item.cycleIndex
+        item.cycleIndex,
+        item.actionId
       ).catch(err => console.warn(`[IMMEDIATE PROBE ERR: ${item.scenarioId}] ${err?.message}`));
       return;
     }
@@ -1672,7 +1714,8 @@ export class WalletFollowerRunner {
           item.reason,
           item.tokens,
           item.isReEntryCycle,
-          item.cycleIndex
+          item.cycleIndex,
+          item.actionId
         );
       } catch (err: any) {
         console.warn(`[PROBE EXEC ERR] ${err?.message}`);
@@ -1696,6 +1739,28 @@ export class WalletFollowerRunner {
    * Helper: Eksekusi Hit API Nyata ke GMGN (Swap Route & Submit Order Probe)
    * Mengikuti trigger BUY dan SELL dari masing-masing 6 skenario.
    */
+  private async captureAmmQuote<T>(actionId:string|null,scenarioId:string,signal:WalletTradeSignal,
+    side:'BUY'|'SELL',reason:string,probeIndex:number,call:()=>Promise<T>):Promise<T> {
+    this.observeDecision('amm_quote_request',actionId,scenarioId,signal,side,reason,{probeIndex});
+    try {
+      const result=await call();
+      const route=result as any;
+      this.observeDecision('amm_quote_result',actionId,scenarioId,signal,side,reason,
+        {ok:route.ok===true,status:route.status,priceUsd:route.impliedPriceUsd,probeIndex,
+          exchange:route.quote?.exchange ?? route.routeData?.exchange,
+          inAmountBaseUnits:route.quote?.inAmount ?? route.routeData?.quote?.inAmount,
+          outAmountBaseUnits:route.quote?.outAmount ?? route.routeData?.quote?.outAmount,
+          inDecimals:route.quote?.inDecimals ?? route.routeData?.quote?.inDecimals,
+          outDecimals:route.quote?.outDecimals ?? route.routeData?.quote?.outDecimals,
+          amountInUsd:route.quote?.amountInUsd,amountOutUsd:route.quote?.amountOutUsd,
+          priceImpactPct:route.quote?.priceImpactPct == null ? null : Number(route.quote.priceImpactPct)});
+      return result;
+    } catch(error) {
+      this.observeDecision('amm_quote_result',actionId,scenarioId,signal,side,reason,{ok:false,probeIndex});
+      throw error;
+    }
+  }
+
   private async executeGmgnApiProbe(
     side: 'BUY' | 'SELL',
     scenarioId: string,
@@ -1704,7 +1769,8 @@ export class WalletFollowerRunner {
     reason: string = '',
     tokens?: number,
     isReEntryCycle?: boolean,
-    cycleIndex?: number
+    cycleIndex?: number,
+    actionId?: string | null
   ): Promise<void> {
     if (!this.page || this.page.isClosed()) {
       return;
@@ -1745,7 +1811,7 @@ export class WalletFollowerRunner {
         const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
         const abortCheck = isFrontRun ? (() => this.multiDryRunEngine.isTargetEntered(signal.mint)) : undefined;
 
-        route = await getBrowserBuySwapRoute(
+        route = await this.captureAmmQuote(actionId ?? null,scenarioId,signal,side,reason,1,()=>getBrowserBuySwapRoute(
           this.page,
           signal.mint,
           wallet,
@@ -1757,7 +1823,7 @@ export class WalletFollowerRunner {
           retryDelayMs,
           abortCheck,
           maxFloorPriceUsd
-        );
+        ));
       } else {
         // SELL: Pre-check saldo on-chain aktual agar akurat hingga desimal terkecil
         let units = tokens && tokens > 0 ? Math.floor(tokens * 1e6).toString() : '1000000';
@@ -1784,7 +1850,7 @@ export class WalletFollowerRunner {
           if (isS14Family && realTarget) throw err;
         }
 
-        route = await getBrowserSellSwapRoute(
+        route = await this.captureAmmQuote(actionId ?? null,scenarioId,signal,side,reason,1,()=>getBrowserSellSwapRoute(
           this.page,
           signal.mint,
           wallet,
@@ -1793,7 +1859,7 @@ export class WalletFollowerRunner {
           config.sellSlippagePercent || 20,
           5,
           signal.pairAddress
-        );
+        ));
 
         // Double-Catch Auto-Recovery jika terdeteksi selisih saldo di aggregator
         if (!route.ok && route.error && route.error.includes('token balance is less than available balance')) {
@@ -1809,7 +1875,7 @@ export class WalletFollowerRunner {
                 ownedPosition.remainingTokens = onChain.uiAmount;
               }
               units = retryUnits;
-              route = await getBrowserSellSwapRoute(
+              route = await this.captureAmmQuote(actionId ?? null,scenarioId,signal,side,reason,2,()=>getBrowserSellSwapRoute(
                 this.page,
                 signal.mint,
                 wallet,
@@ -1818,7 +1884,7 @@ export class WalletFollowerRunner {
                 config.sellSlippagePercent || 20,
                 5,
                 signal.pairAddress
-              );
+              ));
             }
           } catch (e: any) {
             console.warn(`[DOUBLE-CATCH-ERR] ${e?.message}`);
@@ -1843,6 +1909,8 @@ export class WalletFollowerRunner {
               const { burnAndCloseTokenAccount } = await import('./solana-rent-reclaimer.mjs');
               console.log(`[SAFETY-AUTO-RECLAIM] Rute sell tidak ada (${route.error}). Membakar sisa token & me-reclaim sewa rent SOL untuk ${signal.symbol || signal.mint}...`);
               const burnRes = await burnAndCloseTokenAccount(signal.mint);
+              this.observeDecision('burn_close_result',actionId ?? null,scenarioId,signal,side,reason,
+                {ok:burnRes.ok===true,hash:burnRes.tx,reclaimedSol:burnRes.reclaimedSol});
               if (burnRes.ok) {
                 console.log(`[SAFETY-AUTO-RECLAIM] ✅ Berhasil burn & reclaim rent SOL: +${burnRes.reclaimedSol} SOL! Tx: ${burnRes.tx}`);
               }
@@ -1939,6 +2007,7 @@ export class WalletFollowerRunner {
             const isGenesisOrEarly = isFrontRun && (reason.includes('ENTRY_1') || reason.includes('GENESIS') || reason.includes('DEV') || scenarioId.includes('8') || scenarioId.includes('9') || scenarioId.includes('10'));
             const maxFloorPriceUsd = isGenesisOrEarly ? 0.000020 : undefined;
             const abortCheck = isFrontRun ? (() => this.multiDryRunEngine.isTargetEntered(signal.mint)) : undefined;
+            this.observeDecision('amm_quote_request',actionId ?? null,scenarioId,signal,side,reason,{probeIndex:2});
             const route2 = await getBrowserBuySwapRoute(
               this.page,
               signal.mint,
@@ -1952,6 +2021,13 @@ export class WalletFollowerRunner {
               abortCheck,
               maxFloorPriceUsd
             );
+            this.observeDecision('amm_quote_result',actionId ?? null,scenarioId,signal,side,reason,
+              {probeIndex:2,ok:route2.ok===true,status:route2.status,priceUsd:route2.impliedPriceUsd,
+                exchange:route2.quote?.exchange ?? route2.routeData?.exchange,
+                inAmountBaseUnits:route2.quote?.inAmount ?? route2.routeData?.quote?.inAmount,
+                outAmountBaseUnits:route2.quote?.outAmount ?? route2.routeData?.quote?.outAmount,
+                inDecimals:route2.quote?.inDecimals,outDecimals:route2.quote?.outDecimals,
+                amountInUsd:route2.quote?.amountInUsd,amountOutUsd:route2.quote?.amountOutUsd});
             if (route2.ok && route2.routeData?.quote) {
               finalQuote = route2.routeData.quote;
               finalPriceUsd = route2.impliedPriceUsd || (stakeUsd / (Number(finalQuote.outAmount) / 1e6));
@@ -1980,6 +2056,8 @@ export class WalletFollowerRunner {
         }
 
         console.log(`[AUTO-BUY: SIMULASI ONLY (${scenarioId})] ⚪ Rute swap selesai dicek (${route.routeData?.exchange || '-'} | Latency ${route.latencyMs}ms).`);
+        this.observeDecision('paper_simulation',actionId ?? null,scenarioId,signal,side,reason,
+          {ok:true,priceUsd:side==='BUY' ? finalPriceUsd : route.impliedPriceUsd});
         console.log(`   Order nyata /mrtapi/v2/swap_batch_order & reclaim rent dilewati (Target aktif: ${autobuySc}).`);
         console.log(`=========================================================\n`);
         auditFollowerReal(this.dataDir, state, null, `SWAP_SIMULATION_${side}_${scenarioId}`, {
@@ -2015,6 +2093,7 @@ export class WalletFollowerRunner {
 
       // OFF during quote latency must win over the earlier routing decision.
       if (!this.isScenarioAllowedForRealOrder(scenarioId, readFollowerLiveConfig(this.dataDir))) return;
+      this.observeDecision('order_submit_attempt',actionId ?? null,scenarioId,signal,side,reason);
       const submitRes = await this.liveAdapter.submitSwapOrder(this.page, {
         side,
         mint: signal.mint,
@@ -2027,6 +2106,8 @@ export class WalletFollowerRunner {
       });
 
       console.log(`[GMGN SUBMIT ORDER RESPONSE: ${scenarioId}] Status: ${submitRes.status} | Ok: ${submitRes.ok} | Order ID: ${submitRes.orderId || '-'} | Hash: ${submitRes.hash || '-'} | Error/Msg: ${submitRes.error || 'SUCCESS'}`);
+      this.observeDecision('order_response',actionId ?? null,scenarioId,signal,side,reason,
+        {ok:submitRes.ok===true,status:submitRes.status,orderId:submitRes.orderId,hash:submitRes.hash});
       console.log(`=========================================================\n`);
 
       // Sinkronkan SELL nyata ke engine & update state posisi riil
@@ -2145,16 +2226,21 @@ export class WalletFollowerRunner {
 
       // Auto-reclaim rent SOL setelah SELL berhasil (hanya pada full exit, bukan partial Stage 1 TP)
       if (side === 'SELL' && submitRes.ok && (!reason || !reason.includes('STAGE_1_TP_50%'))) {
+        if (this.tickRecorder) this.pendingRentCallbacks++;
         setTimeout(async () => {
           try {
             const { reclaimRentForMint } = await import('./solana-rent-reclaimer.mjs');
             console.log(`[AUTO-RECLAIM-RENT] Memeriksa akun kosong untuk reclaim rent token ${signal.symbol || signal.mint}...`);
             const reclaimRes = await reclaimRentForMint(signal.mint);
+            this.observeDecision('rent_result',actionId ?? null,scenarioId,signal,side,reason,
+              {ok:reclaimRes.ok===true,reclaimedSol:reclaimRes.reclaimedSol,hash:reclaimRes.signatures?.[0]});
             if (reclaimRes.ok && reclaimRes.reclaimedSol > 0) {
               console.log(`[AUTO-RECLAIM-RENT] ✅ Berhasil me-reclaim +${reclaimRes.reclaimedSol.toFixed(6)} SOL untuk mint ${signal.symbol || signal.mint}! Tx: ${reclaimRes.signatures?.[0]}`);
             }
           } catch (err: any) {
             console.warn(`[AUTO-RECLAIM-RENT-WARN] ${err?.message}`);
+          } finally {
+            if (this.tickRecorder) this.pendingRentCallbacks=Math.max(0,this.pendingRentCallbacks-1);
           }
         }, 4000);
       }
@@ -2170,6 +2256,7 @@ export class WalletFollowerRunner {
         response: { swap: swapRouteResponse, order: submitRes }
       });
     } catch (err: any) {
+      this.observeDecision('probe_error',actionId ?? null,scenarioId,signal,side,reason,{ok:false});
       console.error(`[GMGN API HIT ERR: ${scenarioId}] ${err?.message}`);
     }
   }

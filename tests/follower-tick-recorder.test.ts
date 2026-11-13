@@ -39,6 +39,66 @@ test('manifest reflects live counters before graceful shutdown', async () => {
  } finally {await rm(dir,{recursive:true,force:true});}
 });
 
+test('decision evidence writes separately from market ticks with correlation IDs',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'follower-rec-'));
+ try {
+  const rec=new FollowerTickRecorder({outputDir:dir,sessionId:'s'});
+  rec.decision({kind:'scenario_action',actionId:'act-1',scenarioId:'S14',mint:'mint',side:'BUY',reason:'ENTRY',observedAt:1800000,positionId:null,originFrame:null});
+  await rec.close();
+  const chunk=(await readdir(join(dir,'s'))).find(x=>x!=='manifest.json')!;
+  const row=JSON.parse((await readFile(join(dir,'s',chunk,'decisions.jsonl'),'utf8')).trim());
+  assert.equal(row.actionId,'act-1');assert.equal(row.kind,'scenario_action');assert.equal(row.sessionId,'s');
+  assert.equal(row.originFrame,null);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('decision writer drops unapproved fields and redacts unsafe labels',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'follower-rec-'));
+ try {
+  const rec=new FollowerTickRecorder({outputDir:dir,sessionId:'s'});
+  rec.decision({kind:'order_response',actionId:'a',scenarioId:'S14',mint:'mint',side:'BUY',reason:'https://example.org/?api_key=SHOULD_NOT_APPEAR',observedAt:1800000,positionId:null,originFrame:null,secret:'SHOULD_NOT_APPEAR',ok:true});
+  await rec.close();
+  const chunk=(await readdir(join(dir,'s'))).find(x=>x!=='manifest.json')!;
+  const text=await readFile(join(dir,'s',chunk,'decisions.jsonl'),'utf8');
+  assert.equal(text.includes('SHOULD_NOT_APPEAR'),false);
+  assert.equal(JSON.parse(text).ok,true);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('decision reason retains partial-exit operators without admitting credential text',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'follower-rec-'));
+ try {
+  const rec=new FollowerTickRecorder({outputDir:dir,sessionId:'s'});
+  rec.decision({kind:'scenario_action',actionId:'a1',scenarioId:'S14',mint:'mint',side:'SELL',reason:'STAGE_1_TP_50% (Target sold >= 5% | bag > 0)',observedAt:1800000});
+  rec.decision({kind:'scenario_action',actionId:'a2',scenarioId:'S14',mint:'mint',side:'SELL',reason:'api_key=SHOULD_NOT_APPEAR',observedAt:1800001});
+  await rec.close();
+  const chunk=(await readdir(join(dir,'s'))).find(x=>x!=='manifest.json')!;
+  const text=await readFile(join(dir,'s',chunk,'decisions.jsonl'),'utf8');
+  const rows=text.trim().split('\n').map(line=>JSON.parse(line));
+  assert.equal(rows[0].reason,'STAGE_1_TP_50% (Target sold >= 5% | bag > 0)');
+  assert.equal(rows[1].reason,'[REDACTED]');
+  assert.equal(text.includes('SHOULD_NOT_APPEAR'),false);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('quote evidence retains real AMM amounts and units but strips quote payload secrets',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'follower-rec-'));
+ try {
+  const rec=new FollowerTickRecorder({outputDir:dir,sessionId:'s'});
+  rec.decision({kind:'amm_quote_result',actionId:'a1',scenarioId:'S14',mint:'mint',side:'SELL',reason:'EXIT',observedAt:1800000,
+   ok:true,inAmountBaseUnits:'2500000',outAmountBaseUnits:'123456789',inDecimals:6,outDecimals:9,
+   amountOutUsd:12.34,exchange:'Raydium',rawQuote:{cookie:'SHOULD_NOT_APPEAR'}});
+  await rec.close();
+  const chunk=(await readdir(join(dir,'s'))).find(x=>x!=='manifest.json')!;
+  const text=await readFile(join(dir,'s',chunk,'decisions.jsonl'),'utf8');
+  const row=JSON.parse(text);
+  assert.equal(text.includes('SHOULD_NOT_APPEAR'),false);
+  assert.equal(row.outAmountBaseUnits,'123456789');
+  assert.equal(row.outDecimals,9);
+  assert.equal(row.amountOutUsd,12.34);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
 test('subscription coverage gap forces manifest INCOMPLETE without adding market ticks',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'follower-rec-'));
  try {

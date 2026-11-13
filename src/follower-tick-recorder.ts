@@ -16,6 +16,7 @@ type QueueItem = { name: string; receivedAt: number; data: string; bytes: number
 const names: Record<string,string> = {
   token_activity:'token-activity.jsonl', token_stat:'token-stat.jsonl',
   wallet_activity_info:'wallet-activity.jsonl', lifecycle:'lifecycle.jsonl',
+  decisions:'decisions.jsonl',
 };
 export class FollowerTickRecorder {
   private readonly dir: string;
@@ -45,6 +46,30 @@ export class FollowerTickRecorder {
   }
   stats(): RecorderStats { return {...this.counters}; }
   record(value: TickEnvelope): boolean { return this.push(value.channel,value.receivedAt,value); }
+  decision(event: Record<string,unknown>): boolean {
+    const safe=(value: unknown): string | null => typeof value==='string' && value.length<=160 && /^[A-Za-z0-9_ .:+%$-]+$/.test(value) ? value : null;
+    const safeReason=(value: unknown): string | null => typeof value==='string' && value.length<=240 &&
+      /^[A-Za-z0-9_ .:+%$()><=|\-]+$/.test(value) &&
+      !/(?:api[_-]?key|password|secret|token|cookie|authorization|bearer)\s*[:=]/i.test(value) ? value : null;
+    const numeric=(value: unknown): number | null => typeof value==='number' && Number.isFinite(value) ? value : null;
+    const amount=(value: unknown): string | null => typeof value==='string' && /^\d{1,80}$/.test(value) ? value : null;
+    const decimals=(value: unknown): number | null => Number.isInteger(value) && (value as number)>=0 && (value as number)<=18 ? value as number : null;
+    const at=numeric(event.observedAt) ?? Date.now();
+    return this.push('decisions',at,{
+      schemaVersion:1,sessionId:this.opts.sessionId,source:'follower_decision',
+      kind:safe(event.kind),actionId:safe(event.actionId),scenarioId:safe(event.scenarioId),
+      mint:safe(event.mint),side:safe(event.side),reason:safeReason(event.reason) ?? '[REDACTED]',
+      positionId:safe(event.positionId),originFrame:null,observedAt:at,
+      ok:typeof event.ok==='boolean' ? event.ok : null,
+      status:numeric(event.status) ?? safe(event.status),priceUsd:numeric(event.priceUsd),
+      orderId:safe(event.orderId),hash:safe(event.hash),exchange:safe(event.exchange),
+      inAmountBaseUnits:amount(event.inAmountBaseUnits),outAmountBaseUnits:amount(event.outAmountBaseUnits),
+      inDecimals:decimals(event.inDecimals),outDecimals:decimals(event.outDecimals),
+      amountInUsd:numeric(event.amountInUsd),amountOutUsd:numeric(event.amountOutUsd),
+      priceImpactPct:numeric(event.priceImpactPct),reclaimedSol:numeric(event.reclaimedSol),
+      probeIndex:numeric(event.probeIndex),
+    });
+  }
   lifecycle(event: Record<string,unknown>): boolean {
     return this.push('lifecycle',Date.now(),{schemaVersion:1,source:'follower_capture_lifecycle',sessionId:this.opts.sessionId,...event});
   }
